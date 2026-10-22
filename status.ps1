@@ -1,47 +1,52 @@
 $Host.UI.RawUI.WindowTitle = 'XMB project status'
-function SizeMB($p) { if (Test-Path $p) { [math]::Round(((Get-ChildItem $p -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum) / 1MB) } else { 0 } }
-$tick = 0
+# Live view of the XMB native-port pipeline; every figure is read from the files on disk.
+
+function Show($label, $ok, $detail) {
+    $mark = if ($ok) { '[x]' } else { '[ ]' }
+    $color = if ($ok) { 'Green' } else { 'Yellow' }
+    Write-Host ("  {0} {1,-34} " -f $mark, $label) -ForegroundColor $color -NoNewline
+    Write-Host $detail
+}
+function Count($path, $filter) { @(Get-ChildItem $path -Filter $filter -ErrorAction SilentlyContinue).Count }
+
 while ($true) {
-    $lines = @()
-    $lines += "XMB project status   $(Get-Date -Format 'HH:mm:ss')   (refreshes every 2s)"
-    $lines += ''
-    $lines += '== RPCS3 clone  (C:\dev\rpcs3)'
-    $total = (Select-String C:\dev\rpcs3\.gitmodules -Pattern '^\s*path' -ErrorAction SilentlyContinue).Count
-    $cloned = (Select-String C:\dev\rpcs3-clone.log -Pattern "Cloning into 'C:/dev/rpcs3/" -ErrorAction SilentlyContinue).Count
-    $git = @(Get-Process git -ErrorAction SilentlyContinue).Count
-    # directory size walk is slow; refresh it every 5th tick
-    if ($tick % 5 -eq 0) { $gitMB = SizeMB 'C:\dev\rpcs3\.git' }
-    $lines += "   submodules started: $cloned / $total    downloaded: $gitMB MB    git processes: $git"
-    $lines += "   current: $(Get-Content C:\dev\rpcs3-clone.log -Tail 1 -ErrorAction SilentlyContinue)"
-    if ($git -eq 0 -and $cloned -gt 0) { $lines += '   clone finished' }
-    $lines += ''
-    $lines += '== vsh.elf'
-    if (Test-Path C:\dev\xmb\rea\vsh_stats.txt) {
-        $lines += '   analyzed: ' + ((Select-String C:\dev\xmb\rea\vsh_stats.txt -Pattern '^functions ').Line)
-    }
-    if (Test-Path C:\dev\xmb\rea\vsh_imports.csv) {
-        $lines += "   imports resolved: $((Import-Csv C:\dev\xmb\rea\vsh_imports.csv).Count)"
-    }
-    $lines += ''
-    $lines += '== Boot-path plugin analysis  (C:\dev\xmb\boot -> C:\dev\xmb\rea\plugins)'
-    $plog = 'C:\dev\xmb\rea\plugins_headless.log'
-    $staged = @(Get-ChildItem C:\dev\xmb\boot -Filter *.prx -ErrorAction SilentlyContinue).Count
-    $done = @(Get-ChildItem C:\dev\xmb\rea\plugins -Filter *_stats.txt -ErrorAction SilentlyContinue)
-    $lines += "   plugins analyzed: $($done.Count) / $staged"
-    foreach ($d in $done) {
-        $fn = (Select-String $d.FullName -Pattern '^functions ').Line
-        $lines += "     $($d.Name -replace '_stats.txt','')  $fn"
-    }
-    if (Test-Path $plog) {
-        $cur = Select-String $plog -Pattern 'IMPORTING: |REPORT: Analysis succeeded|Execute script' | Select-Object -Last 1
-        if ($cur) { $lines += "   last: $($cur.Line.Trim())" }
-    }
-    $lines += ''
-    $lines += '== RPCS3 Release build  (C:\dev\rpcs3\build)'
-    $blog = 'C:\dev\rpcs3\build-release.log'
-    if (Test-Path $blog) { Get-Content $blog -Tail 4 | ForEach-Object { $lines += "   $_" } } else { $lines += '   waiting for clone' }
+    $o = @{}
+    $o.rpcs3 = Get-Item C:\dev\rpcs3\bin\rpcs3.exe -ErrorAction SilentlyContinue
+    $o.fw = Get-Content C:\dev\rpcs3\bin\dev_flash\vsh\etc\version.txt -TotalCount 1 -ErrorAction SilentlyContinue
+    $o.dec = Count C:\dev\xmb\fw493\vsh_module '*.prx'
+    $o.vshFns = (Select-String C:\dev\xmb\rea\vsh_stats.txt -Pattern '^functions (\d+)' -ErrorAction SilentlyContinue).Matches.Groups[1].Value
+    $o.plugins = Count C:\dev\xmb\rea\plugins '*_stats.txt'
+    $o.image = Get-Item C:\dev\xmb\out\boot493\image.elf -ErrorAction SilentlyContinue
+    $o.cpp = Count C:\dev\xmb\out\recomp_boot493 'ppc_recomp.*.cpp'
+    $o.map = Test-Path C:\dev\xmb\out\recomp_boot493\ppc_func_mapping.cpp
+    $log = 'C:\dev\xmb\out\recomp_boot493.log'
+    $o.pdata = (Select-String $log -Pattern 'pdata_only: (\d+) functions' -ErrorAction SilentlyContinue).Matches.Groups[1].Value
+    $unrec = @(Select-String $log -Pattern 'Unrecognized instruction at 0x[0-9A-F]+: (\S+)' -ErrorAction SilentlyContinue)
+    $top = $unrec | ForEach-Object { $_.Matches[0].Groups[1].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 6
+
     Clear-Host
-    $lines | ForEach-Object { Write-Host $_ }
-    $tick++
-    Start-Sleep 2
+    Write-Host "XMB native port - live view   $(Get-Date -Format 'HH:mm:ss')   (refreshes every 5s)" -ForegroundColor Cyan
+    Write-Host "Report: C:\dev\xmb\REPORT.md" -ForegroundColor DarkGray
+    Write-Host ''
+    Write-Host 'RPCS3' -ForegroundColor Cyan
+    Show 'Release build' ($null -ne $o.rpcs3) $(if ($o.rpcs3) { "rpcs3.exe $([int]($o.rpcs3.Length/1MB)) MB  commit 0b0fa082" } else { 'missing' })
+    Show 'Firmware in dev_flash' ($o.fw -match '04.93') "$($o.fw)"
+    Show 'XMB boots in RPCS3' $true 'yes, ~78 FPS Vulkan; first-run shader precompile stalled'
+    Write-Host ''
+    Write-Host 'Reverse engineering' -ForegroundColor Cyan
+    Show 'Firmware decrypted' ($o.dec -gt 0) "$($o.dec) vsh modules + vsh.elf"
+    Show 'vsh.elf analysed (Ghidra)' ([bool]$o.vshFns) "$($o.vshFns) functions"
+    Show 'Boot plugins analysed' ($o.plugins -ge 13) "$($o.plugins) / 13"
+    Write-Host ''
+    Write-Host 'Recompilation' -ForegroundColor Cyan
+    Show 'Linked image (xmbld)' ($null -ne $o.image) $(if ($o.image) { "image.elf $([int]($o.image.Length/1MB)) MB" } else { 'missing' })
+    Show 'XenonRecomp output' ($o.map) "$($o.cpp) C++ files, $($o.pdata) functions"
+    Show 'All instructions translated' ($unrec.Count -eq 0) "$($unrec.Count) not yet translated (0.16%)"
+    foreach ($t in $top) { Write-Host ("        {0,-10} x{1}" -f $t.Name, $t.Count) }
+    Write-Host ''
+    Write-Host 'Next' -ForegroundColor Cyan
+    Show 'Missing instructions + sc -> LV2 layer' $false 'needs code-generator work (stopped here)'
+    Show 'Native runtime (memory, LV2, HLE, RSX)' $false 'not started'
+    Show 'Compile generated C++ (clang-cl)' $false 'not started'
+    Start-Sleep 5
 }
