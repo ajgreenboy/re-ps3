@@ -1,0 +1,24 @@
+# Sony firmware and anything derived from it never goes into git
+fw493/
+boot/
+ghidra_proj/
+ghidra_work/
+ghidra_home/
+rea/
+out/
+*.elf
+*.prx
+*.sprx
+*.self
+*.PUP
+*.img
+
+# build products
+build/
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.log
+*.err
+empty.txt
