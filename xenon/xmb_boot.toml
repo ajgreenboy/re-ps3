@@ -1,0 +1,8 @@
+# XenonRecomp config for the linked XMB boot set (vsh.elf + 13 boot plugins, fw 4.93).
+# image.elf is produced by: xmbld --functions <ghidra function csvs> out/boot493 <vsh.elf> <plugins...>
+# PS3 code saves registers inline, so the Xbox 360 __savegprlr/__restgprlr helper addresses are unset.
+[main]
+file_path = "../out/boot493/image.elf"
+out_directory_path = "../out/recomp_boot493"
+# function boundaries come from Ghidra via .pdata; see the pdata_only patch in our XenonRecomp checkout
+pdata_only = true

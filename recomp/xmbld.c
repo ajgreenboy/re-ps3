@@ -264,9 +264,231 @@ static FILE* open_out(const char* dir, const char* name)
     return f;
 }
 
+/* .pdata entries (IMAGE_CE_RUNTIME_FUNCTION) from Ghidra boundaries: entry + its contiguous range */
+typedef struct { uint32_t begin, insns; } pdata_t;
+static pdata_t* g_pdata;
+static int g_npdata, g_cap_pdata;
+
+static int cmp_pdata(const void* a, const void* b)
+{
+    uint32_t x = ((const pdata_t*)a)->begin, y = ((const pdata_t*)b)->begin;
+    return x < y ? -1 : x > y;
+}
+
+/* Every function body range (half-open), merged into runs: only these bytes are presented as code. */
+typedef struct { uint32_t start, end; } run_t;
+static run_t* g_code;
+static int g_ncode, g_cap_code;
+
+static int cmp_run(const void* a, const void* b)
+{
+    uint32_t x = ((const run_t*)a)->start, y = ((const run_t*)b)->start;
+    return x < y ? -1 : x > y;
+}
+
+static void add_code(uint32_t start, uint32_t end)
+{
+    if (g_ncode == g_cap_code) {
+        g_cap_code = g_cap_code ? g_cap_code * 2 : 65536;
+        g_code = (run_t*)realloc(g_code, sizeof(run_t) * (size_t)g_cap_code);
+    }
+    g_code[g_ncode++] = (run_t){start, end};
+}
+
+static void merge_code(void)
+{
+    qsort(g_code, (size_t)g_ncode, sizeof(run_t), cmp_run);
+    int n = 0;
+    for (int i = 0; i < g_ncode; i++) {
+        if (n && g_code[i].start <= g_code[n - 1].end) {
+            if (g_code[i].end > g_code[n - 1].end) g_code[n - 1].end = g_code[i].end;
+        } else {
+            g_code[n++] = g_code[i];
+        }
+    }
+    g_ncode = n;
+}
+
+static void add_pdata(uint32_t begin, uint32_t insns)
+{
+    if (g_npdata == g_cap_pdata) {
+        g_cap_pdata = g_cap_pdata ? g_cap_pdata * 2 : 65536;
+        g_pdata = (pdata_t*)realloc(g_pdata, sizeof(pdata_t) * (size_t)g_cap_pdata);
+    }
+    g_pdata[g_npdata++] = (pdata_t){begin, insns};
+}
+
+static void load_pdata(const char* functions_dir)
+{
+    static char line[1 << 16];
+    for (int mi = 0; mi < g_nmods; mi++) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s_functions.csv", functions_dir, g_mods[mi].name);
+        FILE* f = fopen(path, "r");
+        if (!f) { fprintf(stderr, "warning: no function list %s\n", path); continue; }
+        fgets(line, sizeof(line), f);
+        while (fgets(line, sizeof(line), f)) {
+            char* p = line;
+            uint32_t entry = (uint32_t)strtoul(p, &p, 16);
+            if (*p++ != ',') continue;
+            /*
+             * Every range is marked as code. The .pdata length spans from the entry to the end of the
+             * function's last range: XenonRecomp analyses unclaimed code as new functions, and starting
+             * mid-function it cannot follow branches back to before its start. Ranges below the entry
+             * get their own .pdata entry. Overlapping neighbours are just translated twice.
+             */
+            uint32_t base = g_mods[mi].base, max_end = entry;
+            while (*p && *p != ',') {
+                uint32_t s = (uint32_t)strtoul(p, &p, 16);
+                if (*p != '-') break;
+                uint32_t e = (uint32_t)strtoul(p + 1, &p, 16);
+                add_code(base + s, base + e + 1);
+                if (s < entry) add_pdata(base + s, (e + 1 - s) / 4);
+                else if (e + 1 > max_end) max_end = e + 1;
+                if (*p == ';') p++;
+            }
+            if (max_end > entry) add_pdata(base + entry, (max_end - entry) / 4);
+        }
+        fclose(f);
+    }
+    qsort(g_pdata, (size_t)g_npdata, sizeof(pdata_t), cmp_pdata);
+    merge_code();
+}
+
+/*
+ * image.elf: the linked image as a big-endian ELF32 with named sections, the input format
+ * XenonRecomp's ElfLoadImage() accepts. Inside executable segments only the merged Ghidra function
+ * ranges are flagged as code (XenonRecomp treats every unclaimed code byte as a new function, and
+ * these segments also hold read-only data); the gaps become data sections. The function
+ * boundaries are supplied as a synthetic .pdata (Xbox 360 runtime function table).
+ */
+#define PDATA_ADDR 0x0E000000u
+typedef struct { uint32_t addr, size; int exec; } osec_t;
+
+static void write_elf32(const char* out_dir, uint32_t entry)
+{
+    /* split segments into code runs and data gaps */
+    int cap = g_nsegs * 2 + g_ncode * 2 + 8, nos = 0;
+    osec_t* os = (osec_t*)malloc(sizeof(osec_t) * (size_t)cap);
+    for (int i = 0; i < g_nsegs; i++) {
+        uint32_t s = g_segs[i].addr, e = s + g_segs[i].size;
+        if (!(g_segs[i].flags & 1)) { os[nos++] = (osec_t){s, e - s, 0}; continue; }
+        uint32_t cur = s;
+        for (int r = 0; r < g_ncode; r++) {
+            uint32_t rs = g_code[r].start, re = g_code[r].end;
+            if (re <= cur || rs >= e) continue;
+            if (rs < cur) rs = cur;
+            if (re > e) re = e;
+            if (rs > cur) os[nos++] = (osec_t){cur, rs - cur, 0};
+            os[nos++] = (osec_t){rs, re - rs, 1};
+            cur = re;
+        }
+        if (cur < e) os[nos++] = (osec_t){cur, e - cur, 0};
+    }
+    if (nos + 3 > 0xFF00) { fprintf(stderr, "too many sections (%d)\n", nos); exit(1); }
+
+    int nsec = nos + 3; /* null, sections..., .pdata, .shstrtab */
+    size_t ncap = (size_t)nsec * 24 + 64, nlen = 1;
+    char* names = (char*)malloc(ncap);
+    names[0] = 0;
+    uint32_t* name_off = (uint32_t*)calloc((size_t)nsec, sizeof(uint32_t));
+    for (int i = 0; i < nos; i++) {
+        name_off[i + 1] = (uint32_t)nlen;
+        nlen += (size_t)sprintf(names + nlen, "%s.%08X", os[i].exec ? ".text" : ".data", os[i].addr) + 1;
+    }
+    name_off[nos + 1] = (uint32_t)nlen;
+    nlen += (size_t)sprintf(names + nlen, ".pdata") + 1;
+    name_off[nos + 2] = (uint32_t)nlen;
+    nlen += (size_t)sprintf(names + nlen, ".shstrtab") + 1;
+
+    uint32_t lo = 0xFFFFFFFFu, hi = 0, code_bytes = 0;
+    for (int i = 0; i < nos; i++) {
+        if (os[i].addr < lo) lo = os[i].addr;
+        if (os[i].addr + os[i].size > hi) hi = os[i].addr + os[i].size;
+        if (os[i].exec) code_bytes += os[i].size;
+    }
+
+    FILE* f = open_out(out_dir, "image.elf");
+    const uint32_t ehsize = 52, phsize = 32, shsize = 40;
+    uint32_t off = ehsize + phsize;
+    uint32_t* data_off = (uint32_t*)calloc((size_t)nsec, sizeof(uint32_t));
+    for (int i = 0; i < nos; i++) { data_off[i + 1] = off; off += (os[i].size + 3) & ~3u; }
+    data_off[nos + 1] = off; off += (uint32_t)g_npdata * 8;
+    data_off[nos + 2] = off; off += ((uint32_t)nlen + 3) & ~3u;
+    uint32_t shoff = off;
+
+    uint8_t eh[52] = {0x7f, 'E', 'L', 'F', 1, 2, 1};
+    put_be16(eh + 16, 2);    /* ET_EXEC */
+    put_be16(eh + 18, 20);   /* EM_PPC */
+    put_be32(eh + 20, 1);
+    put_be32(eh + 24, entry);
+    put_be32(eh + 28, ehsize);
+    put_be32(eh + 32, shoff);
+    put_be16(eh + 40, (uint16_t)ehsize);
+    put_be16(eh + 42, (uint16_t)phsize);
+    put_be16(eh + 44, 1);
+    put_be16(eh + 46, (uint16_t)shsize);
+    put_be16(eh + 48, (uint16_t)nsec);
+    put_be16(eh + 50, (uint16_t)(nsec - 1));
+    fwrite(eh, 1, sizeof(eh), f);
+
+    uint8_t ph[32] = {0};
+    put_be32(ph, 1); /* PT_LOAD: XenonRecomp takes the image base from the first one */
+    put_be32(ph + 8, lo);
+    put_be32(ph + 12, lo);
+    put_be32(ph + 20, hi - lo);
+    put_be32(ph + 24, 7);
+    fwrite(ph, 1, sizeof(ph), f);
+
+    static const uint8_t pad[4] = {0};
+    for (int i = 0; i < nos; i++) {
+        fwrite(g_mem + os[i].addr, 1, os[i].size, f);
+        fwrite(pad, 1, ((os[i].size + 3) & ~3u) - os[i].size, f);
+    }
+    for (int i = 0; i < g_npdata; i++) {
+        uint8_t r[8];
+        uint32_t len = g_pdata[i].insns > 0x3FFFFF ? 0x3FFFFF : g_pdata[i].insns;
+        put_be32(r, g_pdata[i].begin);
+        put_be32(r + 4, len << 8);
+        fwrite(r, 1, 8, f);
+    }
+    fwrite(names, 1, nlen, f);
+    fwrite(pad, 1, ((nlen + 3) & ~3u) - nlen, f);
+
+    for (int i = 0; i < nsec; i++) {
+        uint8_t sh[40] = {0};
+        if (i > 0) {
+            int last = i == nsec - 1, pd = i == nsec - 2;
+            put_be32(sh, name_off[i]);
+            put_be32(sh + 4, last ? 3 : 1);                    /* SHT_STRTAB / SHT_PROGBITS */
+            uint32_t flags = last ? 0 : 2;                     /* SHF_ALLOC */
+            if (!last && !pd && os[i - 1].exec) flags |= 4;    /* SHF_EXECINSTR */
+            put_be32(sh + 8, flags);
+            put_be32(sh + 12, last ? 0 : pd ? PDATA_ADDR : os[i - 1].addr);
+            put_be32(sh + 16, data_off[i]);
+            put_be32(sh + 20, last ? (uint32_t)nlen : pd ? (uint32_t)g_npdata * 8 : os[i - 1].size);
+            put_be32(sh + 32, 4);
+        }
+        fwrite(sh, 1, sizeof(sh), f);
+    }
+    fclose(f);
+    free(name_off);
+    free(data_off);
+    free(names);
+    free(os);
+    printf("image.elf: %d sections (%d code runs, %u code bytes), %d .pdata functions, base 0x%08X\n",
+        nsec, g_ncode, code_bytes, g_npdata, lo);
+}
+
 int main(int argc, char** argv)
 {
-    if (argc < 3) { fprintf(stderr, "usage: xmbld <out_dir> <vsh.elf> [plugin.prx ...]\n"); return 2; }
+    const char* functions_dir = NULL;
+    if (argc > 2 && strcmp(argv[1], "--functions") == 0) {
+        functions_dir = argv[2];
+        argv += 2;
+        argc -= 2;
+    }
+    if (argc < 3) { fprintf(stderr, "usage: xmbld [--functions <dir>] <out_dir> <vsh.elf> [plugin.prx ...]\n"); return 2; }
     const char* out_dir = argv[1];
     g_mem = (uint8_t*)calloc(1, GUEST_SIZE);
     if (!g_mem) { fprintf(stderr, "cannot allocate guest memory\n"); return 1; }
@@ -358,5 +580,10 @@ int main(int argc, char** argv)
 
     printf("modules=%d segments=%d exports=%d imports=%d bound_to_modules=%d bound_to_hle=%d (distinct hle functions=%d)\n",
         g_nmods, g_nsegs, g_nexports, total, total - hle, hle, g_nhle);
+
+    if (functions_dir) {
+        load_pdata(functions_dir);
+        write_elf32(out_dir, (uint32_t)be64(g_mods[0].elf.data + 0x18));
+    }
     return 0;
 }
