@@ -1,56 +1,178 @@
 # Handoff: XMB native port
 
-Current state, where everything is, and how to reproduce each step. Status summary: `C:\dev\xmb\REPORT.md`.
-Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status.ps1`
+**Goal:** run the PS3 XMB (firmware 4.93) natively on Windows as a statically recompiled program, usable as an
+HTPC launcher. The XMB's look and feel must be exact; everything around it (media, network, PSN, browser,
+Blu-ray, SPU work) may be swapped for native code or stubbed. RPCS3 main is the reference for every PS3
+semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status.ps1`.
 
-## Folders
+---
 
-| Path | What |
+## 1. Current state (2026-10-23)
+
+| Stage | State | Evidence |
+|---|---|---|
+| RPCS3 Release build | Done | `C:\dev\rpcs3\bin\rpcs3.exe`, commit `0b0fa082` |
+| Firmware 4.93 in RPCS3 | Done | `C:\dev\rpcs3\bin\dev_flash` (1,075 files) |
+| XMB boots in RPCS3 | Partly | ~78 FPS Vulkan; first-run shader precompile stalls at "0 of 6650" |
+| Firmware decrypted | Done | `C:\dev\xmb\fw493` (vsh.elf + 358 modules) |
+| Ghidra analysis | Done | vsh.elf 27,852 functions; 13 boot plugins ~29k |
+| Image linking (xmbld) | Done | `C:\dev\xmb\out\boot493\image.bin`, `image.elf`, CSV manifests |
+| Translation (XenonRecomp) | Done | 56,982 functions, 0 unrecognized instructions |
+| Compile generated C++ | Done | 224/224 objects, 63 MB, `C:\dev\xmb\out\recomp_obj` |
+| Record-form CR0 gaps | Open | `clrldi.` @0x257EBC, `sld.` @0x5F660C, @0x5F6EC8 |
+| Native runtime | Not started | spec in section 4 |
+| Link + first boot | Not started | spec in section 5 |
+
+## 2. Folder map
+
+| Path | Contents |
 |---|---|
-| `C:\dev\xmb` | Project repo (local git, no remote). Tooling, scripts, configs, REPORT.md, this file |
-| `C:\dev\xmb\recomp` | `xmbld` linker sources (`xmbld.c`, `elf_be.c/.h`), `build.bat`, `runtime\ppu.h` |
-| `C:\dev\xmb\ghidra_scripts` | Ghidra scripts: Ps3ResolveImports, Ps3Exports, Ps3Functions, Ps3Census, DumpStats |
-| `C:\dev\xmb\xenon` | XenonRecomp config `xmb_boot.toml`, `xenonrecomp-pdata-only.patch`, `unrecognized_boot493.csv` |
-| `C:\dev\xmb\fw493` | Decrypted fw 4.93 modules (`vsh_module\`, `sys_external\`). Not in git |
-| `C:\dev\xmb\boot` | Copies of the 13 boot-path plugin `.prx` files. Not in git |
-| `C:\dev\xmb\rea` | Ghidra outputs: `functions\*_functions.csv`, `plugins\`, `vsh_*.csv`, `link_boot_set.csv`. Not in git |
-| `C:\dev\xmb\ghidra_work` | Ghidra projects `vsh493w` and `boot493` (analysed, imports resolved). Not in git |
-| `C:\dev\xmb\ghidra_proj` | Original Ghidra project `vsh493` (the one opened in the GUI) |
-| `C:\dev\xmb\out\boot493` | xmbld output: `image.bin`, `image.elf`, `modules/imports/exports/hle.csv`. Not in git |
-| `C:\dev\xmb\out\recomp_boot493` | XenonRecomp output: 223 `ppc_recomp.*.cpp`, `ppc_func_mapping.cpp`, `ppc_recomp_shared.h`, `ppc_config.h`, `ppc_context.h` |
-| `C:\dev\rpcs3` | RPCS3 main, commit `0b0fa082ae552ab77a70de4fc1f70110d165116b`, built; `bin\rpcs3.exe`, `bin\dev_flash` (fw 4.93) |
-| `C:\dev\deps\XenonRecomp` | hedge-dev/XenonRecomp at `ddd128bc` plus the local pdata_only patch; built in `build-clang3\` |
-| `C:\dev\deps\clang` | clang / clang-cl / lld 22.1.8, built from `C:\dev\rpcs3\3rdparty\llvm\llvm` |
-| `C:\dev\deps\ghidra_12.1.4_PUBLIC` | Ghidra; `support\launch.properties` redirects settings/cache to `C:\dev\xmb\ghidra_home` |
-| `C:\Qt\6.12.0\msvc2022_64` | Qt used by the RPCS3 build (6.11.1 also present, unused) |
-| `C:\VulkanSDK\1.4.341.1` | Vulkan SDK |
+| `C:\dev\xmb` | Project repo (local git, no remote): tooling, scripts, REPORT.md, this file |
+| `C:\dev\xmb\recomp` | `xmbld.c`, `elf_be.c/.h`, `build.bat`, `runtime\ppu.h` (unused by the XenonRecomp path) |
+| `C:\dev\xmb\ghidra_scripts` | Ps3ResolveImports, Ps3Exports, Ps3Functions, Ps3Census, DumpStats |
+| `C:\dev\xmb\xenon` | `xmb_boot.toml`, `compile-recomp.ps1`, `xenonrecomp-pdata-only.patch` (14 lines), `xenonrecomp-xmb.patch` (full working tree, 450 lines), `unrecognized_boot493.csv` |
+| `C:\dev\xmb\fw493` | Decrypted modules (`vsh_module\`, `sys_external\`). Not in git |
+| `C:\dev\xmb\boot` | The 13 boot-path `.prx` files. Not in git |
+| `C:\dev\xmb\rea` | Ghidra outputs: `functions\*_functions.csv`, `plugins\`, `vsh_imports/exports.csv`, `link_boot_set.csv`. Not in git |
+| `C:\dev\xmb\ghidra_work` | Ghidra projects `vsh493w`, `boot493/boot`. Not in git |
+| `C:\dev\xmb\out\boot493` | `image.bin`, `image.elf`, `modules.csv`, `imports.csv`, `exports.csv`, `hle.csv` |
+| `C:\dev\xmb\out\recomp_boot493` | XenonRecomp output: `ppc_recomp.*.cpp`, `ppc_func_mapping.cpp`, `ppc_recomp_shared.h`, `ppc_config.h`, `ppc_context.h` |
+| `C:\dev\xmb\out\recomp_obj` | Compiled objects + `build.ninja` |
+| `C:\dev\rpcs3` | RPCS3 source and build (reference implementation for LV2, sysutil, RSX) |
+| `C:\dev\deps\XenonRecomp` | hedge-dev XenonRecomp @ `ddd128bc` + local changes (uncommitted; saved as `xenon\xenonrecomp-xmb.patch`); exe in `build-clang3\` |
+| `C:\dev\deps\clang` | clang / clang-cl / lld 22.1.8 |
+| `C:\dev\deps\ghidra_12.1.4_PUBLIC` | Ghidra (settings redirected to `C:\dev\xmb\ghidra_home`) |
+| `C:\Qt\6.12.0\msvc2022_64`, `C:\VulkanSDK\1.4.341.1` | RPCS3 build deps |
 | `C:\Users\Albert\Downloads\PS3UPDAT.PUP` | Firmware 4.93 (SHA-1 AE2A4F49EC6C09D124FED20F84231CE27D10C7B7) |
-| `C:\Users\Albert\Downloads\rpcs3-v0.0.41-19456-2ce45bd9_win64_msvc` | User's prebuilt RPCS3, untouched; used for `--decrypt` |
 
-## Reproduce
+## 3. Reproduce the existing pipeline
 
-1. RPCS3 build: `C:\dev\xmb\build-llvm.bat`, then `C:\dev\xmb\build-rpcs3.bat` (log `C:\dev\rpcs3\build-release.log`)
-2. Decrypt: `rpcs3.exe --decrypt <file.sprx|.self> ...`. The output lands next to the input, so copy the modules to `fw493` first.
-3. Ghidra headless (needs `JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-25.0.4.101-hotspot`; the language is `PowerPC:BE:64:A2ALT-32addr`):
-   `analyzeHeadless.bat C:\dev\xmb\ghidra_work boot493/boot -process -noanalysis -scriptPath C:\dev\xmb\ghidra_scripts -postScript Ps3Functions.java C:\dev\xmb\rea\functions`
-4. Link: `C:\dev\xmb\recomp\build.bat`, then
+1. `C:\dev\xmb\build-llvm.bat`, then `C:\dev\xmb\build-rpcs3.bat`
+2. Decrypt: `rpcs3.exe --decrypt <files>` (output lands next to input; work on copies)
+3. Ghidra headless, language `PowerPC:BE:64:A2ALT-32addr`, with the scripts in `ghidra_scripts`
+   (`JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-25.0.4.101-hotspot`)
+4. `C:\dev\xmb\recomp\build.bat`, then
    `C:\dev\xmb\build\xmbld.exe --functions C:\dev\xmb\rea\functions C:\dev\xmb\out\boot493 C:\dev\xmb\fw493\vsh_module\vsh.elf C:\dev\xmb\boot\*.prx`
-5. Recompile: `C:\dev\xmb\build-xenonrecomp.bat`, then (working dir `C:\dev\xmb\xenon`)
-   `XenonRecomp.exe C:\dev\xmb\xenon\xmb_boot.toml C:\dev\deps\XenonRecomp\XenonUtils\ppc_context.h`
+5. `C:\dev\xmb\build-xenonrecomp.bat`, then from `C:\dev\xmb\xenon`:
+   `C:\dev\deps\XenonRecomp\build-clang3\XenonRecomp\XenonRecomp.exe xmb_boot.toml C:\dev\deps\XenonRecomp\XenonUtils\ppc_context.h`
+6. `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\xenon\compile-recomp.ps1`
 
-## Gotchas
+### Guest address map (from xmbld)
 
-- REA (reverse-engineer-anything) rejects PPC64 ELFs, so drive Ghidra directly.
-- Processes launched from the Claude desktop app get AppData redirected (MSIX), which breaks Ghidra's OSGi cache; that's why `launch.properties` is edited.
-- Use forward slashes in CMake `-D` paths. XenonRecomp must be built with clang-cl; its build uses MSVC's lib/link.
-- RPCS3's prebuilt LLVM requires VS 2026's STL. With VS 2022, build LLVM from source.
-- The `--headless --installfw` run crashes on exit (0xC0000409) after the install completes.
+| Range | Contents |
+|---|---|
+| `0x00010000`–`0x006F0000` | vsh.elf (fixed addresses; two PT_LOAD segments) |
+| `0x01000000`–`0x018C7xxx` | 13 boot PRX, each 64 KB aligned (bases in `modules.csv`) |
+| `0x018D0000` | HLE function descriptors (8 bytes each; 432 used, room for 4,096) |
+| `0x018D8000` | HLE code addresses (4 bytes each; never executed, used as IDs) |
+| `0x018E0000` | `.pdata` (image.elf only; not guest data) |
+| after `0x0194F440` | XenonRecomp function lookup table (`PPC_IMAGE_BASE + PPC_IMAGE_SIZE`) |
+| to be allocated | stacks, heap (sys_memory), TLS, RSX local/IO memory |
 
-## Open work
+---
 
-1. Translate the remaining 4,161 instructions in XenonRecomp (list: `xenon\unrecognized_boot493.csv`), including routing `sc` (2,612) to a native LV2 layer.
-2. Native runtime: guest memory, LV2 syscalls, HLE for the 432 imports outside the boot set (`out\boot493\hle.csv`), RSX to Vulkan.
-3. Compile `out\recomp_boot493` with clang-cl.
-4. RPCS3 booting `vsh.self` stalls on the first-run "Precompiling shader interpreter variants 0 of 6650" screen; not investigated.
+## 4. Remaining work: specification
 
-Firmware and anything derived from it stays out of git (see `.gitignore`).
+### 4.0 Fix the three record-form gaps (small)
+
+- `clrldi.` (rldicl with Rc=1) at 0x257EBC, `sld.` at 0x5F660C and 0x5F6EC8: XenonRecomp warns "RC bit enabled but
+  no comparison was generated". Emit the CR0 update (signed 64-bit compare of the result with 0, SO from XER),
+  as in the `rldic.` case.
+- **Done when:** the regenerate log has no "RC bit enabled" lines.
+
+### 4.1 Runtime skeleton (`C:\dev\xmb\runtime`, new; clang-cl, C++20, CMake + Ninja)
+
+- **Guest memory:** reserve 4 GB with `VirtualAlloc(MEM_RESERVE)` as XenonRecomp's `base`, commit on demand.
+  Load each segment of `image.bin` (format: `XMBIMG01`, count, then `{be32 addr, be32 size, be32 flags, bytes}`).
+- **Function table:** populate XenonRecomp's lookup table from `PPCFuncMappings` (in `ppc_func_mapping.cpp`) so
+  indirect calls (`bctrl` through OPDs) resolve. HLE code addresses (`0x018D8000 + 4*i`) map to native thunks.
+- **Threads:** one host thread per PPU thread, each with its own `PPCContext`, guest stack (allocated in guest
+  memory, 16-byte aligned, back-chain zeroed), r1 = stack top, r2 = module TOC, r13 = TLS pointer.
+- **Entry:** read the OPD at vsh.elf's `e_entry` (code + TOC), set r2, call the mapped function. Before that, run
+  each PRX's `module_start` (OPD in `modules.csv`) in load order, as `sys_prx` would.
+- **Faults:** vectored exception handler that reports the faulting guest address and the last guest function
+  (keep a per-thread "current function" breadcrumb in debug builds).
+- **Done when:** the binary links with all 224 objects, loads the image, enters vsh's entry point, and the first
+  unimplemented syscall/HLE call is reported by name instead of crashing.
+
+### 4.2 LV2 syscall layer (`ctx.syscall`, number in r11, args r3–r10, result r3)
+
+- Implement on demand: log every unimplemented syscall number once (name it from RPCS3's
+  `rpcs3/Emu/Cell/lv2/lv2.cpp` table) and return `CELL_ENOSYS`.
+- **Expected first wave** (verify against the log): `sys_process_*` (getpid, get_sdk_version, exit),
+  `sys_ppu_thread_*` (create, exit, join, yield, get_id), `sys_mutex_*`, `sys_cond_*`, `sys_lwmutex_*`,
+  `sys_lwcond_*`, `sys_semaphore_*`, `sys_event_queue/port/flag_*`, `sys_timer_*`, `sys_time_*` (tick, timebase),
+  `sys_memory_*` and `sys_mmapper_*` (allocations in guest space), `sys_prx_*` (load/start of already-linked
+  modules returns their IDs), `sys_fs_*` (open/read/stat/opendir mapped to host folders, see 4.4), `sys_tty_write`.
+- Map sync objects onto Win32 primitives; keep IDs in per-type handle tables like RPCS3's `idm`.
+- **Reference:** `C:\dev\rpcs3\rpcs3\Emu\Cell\lv2\*.cpp` for argument layouts, error codes and edge cases.
+- **Done when:** vsh runs past process init and plugin start without unimplemented-syscall stops.
+
+### 4.3 HLE for out-of-set imports (432 functions, `out\boot493\hle.csv`)
+
+- Group by library: media (cellPamf, cellDmux, cellAdec, cellVdec, libvideoSubsystem, avc_util, msmw*, mms*),
+  cellSpurs, ime/osk, network/NP (np_*, sceNpOauth, cellHttp leftovers), others (vmclib, faust_widget, raf).
+- **Policy:** stub everything to return success/"not available" first, logging calls. Then implement only what the
+  boot path really uses. Media goes to ffmpeg (already in `C:\dev\rpcs3\3rdparty\ffmpeg`), network/PSN stays stubbed.
+- **Names:** use RPCS3's NID tables (Ps3ResolveImports logic) so logs show function names.
+- **Done when:** the XMB reaches its main loop with only "stubbed" log lines from non-essential libraries.
+
+### 4.4 Filesystem (VFS)
+
+- `/dev_flash` maps to `C:\dev\rpcs3\bin\dev_flash` (read-only), and `/dev_hdd0` to a project folder (e.g.
+  `C:\dev\xmb\vfs\dev_hdd0`, seeded from RPCS3's). `/dev_usb000` and `/app_home` map to configurable folders.
+- Preserve PS3 semantics: case sensitivity, `CELL_FS_*` error codes, stat layout (RPCS3 `sys_fs.cpp`).
+- **Done when:** vsh loads its resources (rco/qrc, fonts, sounds, xml) from dev_flash without errors.
+
+### 4.5 sysutil and system services the XMB needs
+
+- Video out (`cellVideoOut*`: fixed 1080p/720p config), audio out (`cellAudioOut*`, `_cellAudio` via XAudio2/WASAPI),
+  pad input (`cellPad`, mapped from XInput/SDL3 gamepads + keyboard), system parameters (language, date format,
+  nickname from a config file), `cellSysutil` callbacks (exit game, system menu), time zone, user profiles (dev_hdd0/home).
+- **Reference:** `C:\dev\rpcs3\rpcs3\Emu\Cell\Modules\cellSysutil.cpp`, `cellVideoOut.cpp`, `cellPad.cpp`, `cellAudio.cpp`.
+
+### 4.6 Graphics (RSX to Vulkan), the critical path for "exact feel"
+
+- The XMB draws through gcm (`cellGcmSys`) command buffers. Two options:
+  - **(a) Recommended first:** embed RPCS3's RSX backend. Build `rpcs3_emu`'s RSX + Vulkan pieces as a library,
+    feed it the gcm command buffer and RSX memory regions from guest memory, and present to a native window.
+  - **(b) Later:** a slimmer gcm-to-Vulkan translator covering only the commands/shaders the XMB uses
+    (capture them with RPCS3's RSX capture while it runs the XMB).
+- Must cover the fragment/vertex programs used by PAF (the wave background, icon effects, text), and texture formats.
+- **Done when:** the XMB frame renders pixel-comparable to RPCS3's output (screenshot diff against
+  `capture-rpcs3.ps1` captures).
+
+### 4.7 SPU usage on the boot path
+
+- vsh.elf embeds one SPU program, and cellSpurs is imported. Identify what the XMB uses SPU for at boot
+  (likely audio mixing or decode). Replace it with native code (per the "swap anything" rule); do not translate SPU ISA.
+
+### 4.8 Launcher integration (HTPC goal)
+
+- Game column: hook the game-boot path (`game_ext_plugin` / sysutil exit-to-game) to launch
+  `C:\dev\rpcs3\bin\rpcs3.exe --no-gui <game>` or any native executable from a configurable list.
+- Startup: fullscreen borderless window, gamepad-only operation, start with Windows (optional).
+
+## 5. Milestones and acceptance
+
+| # | Milestone | Acceptance |
+|---|---|---|
+| M1 | Runtime links and enters vsh | Process starts, the first unimplemented syscall/HLE is named in the log |
+| M2 | Boot path without stops | All module_start calls return; vsh main loop runs |
+| M3 | First frame | The XMB background renders through Vulkan |
+| M4 | Exact feel | Side-by-side with RPCS3: same layout, animations, sounds, input timing |
+| M5 | Launcher | Selecting a game launches it (RPCS3 or a native exe) and returns to the XMB |
+
+## 6. Known issues and gotchas
+
+- REA (reverse-engineer-anything) rejects PPC64 ELFs, so drive Ghidra headless directly.
+- Child processes of the Claude desktop app get AppData redirected (MSIX), which breaks Ghidra's OSGi cache. That's
+  why `launch.properties` is edited.
+- Use forward slashes in CMake `-D` paths. Ninja paths need `$:` for drive letters.
+- RPCS3's prebuilt LLVM needs VS 2026's STL. With VS 2022, build LLVM from source (`build-llvm.bat`).
+- `rpcs3.exe --headless --installfw` crashes on exit (0xC0000409) after a completed install.
+- XenonRecomp: ~9,000 "Unable to decode" lines are jump-table data inside function spans (harmless). Its
+  analysis needs `pdata_only = true` with this input; without it, it loops forever on split functions.
+- In this environment Claude Code's auto-mode permission check blocked some long-running tool runs; add a
+  PowerShell permission rule if an agent should run the pipeline unattended.
+- Firmware and anything derived from it stays out of git (`.gitignore`).
