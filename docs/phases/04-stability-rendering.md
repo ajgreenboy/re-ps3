@@ -10,6 +10,24 @@ are incomplete; a surviving window alone does not establish an active guest.
 
 ## Work next
 
+Current rebuild: `work/branch-span-refresh-build.log`. A later run of the previous
+binary failed at JPEG target `01A323B0` (LR `01A31DFC`, thread `01000142`). The direct
+branch scanner now matches the contiguous `.pdata` spans built by `xmbld`, rather
+than only scanning Ghidra's disjoint body ranges. Discovery converged in six
+passes and generated mapping now includes the JPEG target. Full build completed:
+503 generated objects and23 runtime objects. That specific JPEG branch has not
+yet been observed executing in the rebuilt boot.
+
+The renderer sampling follow-up uses a sampler object per texture unit and shader
+channel-remap uniforms. Uploaded images and cached render targets share this path;
+binding an image on another unit no longer rewrites its image swizzle/filter/wrap.
+Diagnostic `20261023-171608-926` boot1 reached Game -> Video, clock22:17 ->22:18,
+with no observed shader compile/link error or missing dispatch before F12.
+The [new captures](../SCREENSHOTS.md) still show incorrect background/icons.
+Normal boot `20261023-171447-817` went black after plugin teardown (5755 draws,
+245 flips, FIFO GET=PUT); preserve both results. Next inspect wide-texel float
+deswizzling against RPCS3 GLTexture.cpp, which swizzles in32-bit blocks.
+
 Latest renderer change: float textures 9A/9B/9C/9F now use native floating-point
 OpenGL storage with guest-endian word conversion and reference remaps. The updated
 renderer compiled and linked; session `20261023-163845-853` observed first uploads

@@ -65,6 +65,8 @@ namespace
     X(PFNGLATTACHSHADERPROC, glAttachShader) X(PFNGLLINKPROGRAMPROC, glLinkProgram) X(PFNGLGETPROGRAMIVPROC, glGetProgramiv) \
     X(PFNGLGETPROGRAMINFOLOGPROC, glGetProgramInfoLog) X(PFNGLUSEPROGRAMPROC, glUseProgram) \
     X(PFNGLGETUNIFORMLOCATIONPROC, glGetUniformLocation) X(PFNGLUNIFORM1IPROC, glUniform1i) X(PFNGLUNIFORM4FVPROC, glUniform4fv) \
+    X(PFNGLUNIFORM4IVPROC, glUniform4iv) X(PFNGLGENSAMPLERSPROC, glGenSamplers) \
+    X(PFNGLBINDSAMPLERPROC, glBindSampler) X(PFNGLSAMPLERPARAMETERIPROC, glSamplerParameteri) \
     X(PFNGLGENBUFFERSPROC, glGenBuffers) X(PFNGLBINDBUFFERPROC, glBindBuffer) X(PFNGLBUFFERDATAPROC, glBufferData) \
     X(PFNGLVERTEXATTRIBPOINTERPROC, glVertexAttribPointer) X(PFNGLENABLEVERTEXATTRIBARRAYPROC, glEnableVertexAttribArray) \
     X(PFNGLDISABLEVERTEXATTRIBARRAYPROC, glDisableVertexAttribArray) X(PFNGLVERTEXATTRIB4FVPROC, glVertexAttrib4fv) \
@@ -120,7 +122,7 @@ namespace
         }
     }
 
-    GLuint g_vbo, g_ibo;
+    GLuint g_vbo, g_ibo, g_samplers[16];
 
     // Runs on the FIFO thread, which owns the context from then on.
     bool ensure_gl()
@@ -141,6 +143,7 @@ namespace
 #undef LOAD
         glGenBuffers(1, &g_vbo);
         glGenBuffers(1, &g_ibo);
+        glGenSamplers(16, g_samplers);
         log_line("rsx: OpenGL %s on %s", (const char*)glGetString(GL_VERSION), (const char*)glGetString(GL_RENDERER));
         return true;
     }
@@ -583,6 +586,7 @@ namespace
                 else if (kind == "bias") v = "texture(" + s + ", " + c + ".xy * " + sc + ".xy, " + c + ".w)";
                 else if (kind == "grad") v = "textureGrad(" + s + ", " + c + ".xy * " + sc + ".xy, " + src(s1w, 1) + ".xy, " + src(s2w, 2) + ".xy)";
                 else v = "texture(" + s + ", " + c + ".xy * " + sc + ".xy)";
+                v = "remap_(" + v + ", texremap[" + std::to_string(tex) + "])";
                 if ((dst >> 21) & 1) v = "(" + v + " * 2. - 1.)"; // _bx2
                 set_dst(v);
             };
@@ -672,7 +676,9 @@ namespace
         std::string& g = t.glsl;
         g = "#version 430 compatibility\n"
             "in vec4 v_col0, v_col1, v_fog;\nin vec4 v_tc[10];\n"
-            "uniform vec4 texscale[16];\n";
+            "uniform vec4 texscale[16];\nuniform ivec4 texremap[16];\n"
+            "vec4 remap_(vec4 v, ivec4 m) { float c[6] = float[6](v.r,v.g,v.b,v.a,0.,1.);"
+            " return vec4(c[m.x],c[m.y],c[m.z],c[m.w]); }\n";
         if (!t.constant_slots.empty()) g += "uniform vec4 fc[" + std::to_string(t.constant_slots.size()) + "];\n";
         for (uint32_t i = 0; i < 16; i++)
             if (t.textures & (1u << i))
@@ -695,6 +701,7 @@ namespace
     {
         GLuint id = 0;
         GLint vc = -1, so_scale = -1, so_offset = -1, fc = -1, texscale = -1;
+        GLint texremap = -1;
         GLint tex[16];
         uint32_t inputs = 0, textures = 0;
         std::vector<uint32_t> constant_slots;
@@ -782,6 +789,7 @@ namespace
         p.so_offset = glGetUniformLocation(p.id, "so_offset");
         p.fc = glGetUniformLocation(p.id, "fc");
         p.texscale = glGetUniformLocation(p.id, "texscale");
+        p.texremap = glGetUniformLocation(p.id, "texremap");
         for (uint32_t i = 0; i < 16; i++)
         {
             const std::string n = "tex" + std::to_string(i) + (((tex_cube >> i) & 1) ? "c" : "");
@@ -829,13 +837,13 @@ namespace
         case 2: return GL_MIRRORED_REPEAT;
         case 3: return GL_CLAMP_TO_EDGE;
         case 4: return GL_CLAMP_TO_BORDER;
-        case 5: return GL_CLAMP;
+        case 5: return GL_CLAMP_TO_EDGE; // RPCS3 sampler.cpp: RSX clamp
         default: return GL_CLAMP_TO_EDGE;
         }
     }
 
     // Binds fragment texture unit i; returns its coordinate scale (1/size for unnormalized textures).
-    void bind_texture(uint32_t i, float* scale)
+    void bind_texture(uint32_t i, float* scale, GLint* component_map)
     {
         const uint32_t b = TEXTURE_OFFSET + i * 0x20;
         const uint32_t offset = reg(b), format = reg(b + 4), address = reg(b + 8), filter = reg(b + 0x14), rect = reg(b + 0x18);
@@ -843,17 +851,50 @@ namespace
         const uint32_t w = rect >> 16, h = rect & 0xFFFF;
         const uint32_t fmt = (format >> 8) & 0xFF, base_fmt = fmt & ~0x60u;
         const bool linear = fmt & 0x20, unnormalized = fmt & 0x40;
+        const bool floating = base_fmt == 0x9A || base_fmt == 0x9B || base_fmt == 0x9C || base_fmt == 0x9F;
+        // Channel remapping belongs to the texture unit, not the shared image:
+        // two units may sample one image using different remap registers.
+        static const GLint from[4] = { 3, 0, 1, 2 }; // ARGB -> physical RGBA
+        static const GLint scalar_from[4] = { 0, 0, 0, 0 };
+        static const GLint pair_from[4] = { 0, 1, 0, 1 };
+        const GLint* sources = base_fmt == 0x9C ? scalar_from : base_fmt == 0x9F ? pair_from : from;
+        const uint32_t selectors = base_fmt == 0x9F ? ((remap >> 16) ? 0x56 : 0x66) : 0xE4;
+        const uint32_t rm = floating ? (remap & 0xFF00) | selectors : remap;
+        GLint argb[4];
+        for (uint32_t c = 0; c < 4; ++c)
+        {
+            const uint32_t ctl = (rm >> (8 + c * 2)) & 3;
+            argb[c] = ctl == 0 ? 4 : ctl == 1 ? 5 : sources[(rm >> (c * 2)) & 3];
+        }
+        component_map[0] = argb[1]; component_map[1] = argb[2];
+        component_map[2] = argb[3]; component_map[3] = argb[0];
         scale[0] = unnormalized && w ? 1.f / w : 1.f;
         scale[1] = unnormalized && h ? 1.f / h : 1.f;
         scale[2] = scale[3] = 1.f;
         glActiveTexture(GL_TEXTURE0 + i);
+        // A sampler per unit also applies wrap/filter state to render targets,
+        // without changing another unit that happens to bind the same texture.
+        const uint32_t minf = (filter >> 16) & 7, magf = (filter >> 24) & 7;
+        glBindSampler(i, g_samplers[i]);
+        glSamplerParameteri(g_samplers[i], GL_TEXTURE_MIN_FILTER, (minf == 1 || minf == 3 || minf == 5) ? GL_NEAREST : GL_LINEAR);
+        glSamplerParameteri(g_samplers[i], GL_TEXTURE_MAG_FILTER, magf == 1 ? GL_NEAREST : GL_LINEAR);
+        glSamplerParameteri(g_samplers[i], GL_TEXTURE_WRAP_S, wrap_mode(address & 0xF));
+        glSamplerParameteri(g_samplers[i], GL_TEXTURE_WRAP_T, wrap_mode((address >> 8) & 0xF));
         const uint32_t location = (format & 3) - 1;
 
         // Render-to-texture: sample the GL surface directly
         if (location == 0)
             if (auto it = g_surfaces.find(offset); it != g_surfaces.end())
             {
+                if (!it->second.complete) { glBindTexture(GL_TEXTURE_2D, 0); return; }
                 glBindTexture(GL_TEXTURE_2D, it->second.tex);
+                static uint32_t samples_logged = 0;
+                if (samples_logged < 8)
+                {
+                    ++samples_logged;
+                    log_line("rsx: render-target sample unit=%u offset=%08X texture=%02X surface=%u remap=%08X filter=%08X address=%08X",
+                        i, offset, base_fmt, it->second.color_format, remap, filter, address);
+                }
                 if (!unnormalized && it->second.width && it->second.height)
                 {
                     scale[0] = float(w) / it->second.width;
@@ -875,7 +916,6 @@ namespace
         }
         uint32_t bpp = 4;
         bool compressed = false;
-        const bool floating = base_fmt == 0x9A || base_fmt == 0x9B || base_fmt == 0x9C || base_fmt == 0x9F;
         switch (base_fmt)
         {
         case 0x81: bpp = 1; break;                       // B8
@@ -891,7 +931,7 @@ namespace
         const uint32_t size = compressed ? pitch * ((h + 3) / 4) : (linear ? pitch * h : w * h * bpp);
         const uint64_t key = (uint64_t(addr) << 32) ^ (uint64_t(format) << 8) ^ rect;
         Texture& t = g_textures[key];
-        const uint64_t hash = fnv(g_base + addr, size, remap);
+        const uint64_t hash = fnv(g_base + addr, size, pitch);
         if (!t.id) glGenTextures(1, &t.id);
         glBindTexture(GL_TEXTURE_2D, t.id);
         if (t.hash != hash)
@@ -976,28 +1016,8 @@ namespace
                     }
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
             }
-            static const GLint from[4] = { GL_ALPHA, GL_RED, GL_GREEN, GL_BLUE }; // remap source order A, R, G, B
-            // Match RPCS3's float format component maps and fixed channel selectors.
-            static const GLint scalar_from[4] = { GL_RED, GL_RED, GL_RED, GL_RED };
-            static const GLint pair_from[4] = { GL_RED, GL_GREEN, GL_RED, GL_GREEN };
-            const GLint* sources = base_fmt == 0x9C ? scalar_from : base_fmt == 0x9F ? pair_from : from;
-            const uint32_t selectors = base_fmt == 0x9F ? ((remap >> 16) ? 0x56 : 0x66) : 0xE4;
-            const uint32_t rm = floating ? (remap & 0xFF00) | selectors : remap;
-            GLint out_argb[4];
-            for (int c = 0; c < 4; c++)
-            {
-                const uint32_t ctl = (rm >> (8 + c * 2)) & 3;
-                out_argb[c] = ctl == 0 ? GL_ZERO : ctl == 1 ? GL_ONE : sources[(rm >> (c * 2)) & 3];
-            }
-            const GLint swz[4] = { out_argb[1], out_argb[2], out_argb[3], out_argb[0] };
-            glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, swz);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
         }
-        const uint32_t minf = (filter >> 16) & 7, magf = (filter >> 24) & 7;
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (minf == 1 || minf == 3 || minf == 5) ? GL_NEAREST : GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magf == 1 ? GL_NEAREST : GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_mode(address & 0xF));
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_mode((address >> 8) & 0xF));
     }
 
     // ---- draws ----
@@ -1226,14 +1246,16 @@ namespace
             glUniform4fv(p->fc, GLsizei(p->constant_slots.size()), reinterpret_cast<const float*>(fc.data()));
         }
         float texscale[16][4];
+        GLint texremap[16][4]{};
         for (uint32_t i = 0; i < 16; i++)
         {
             texscale[i][0] = texscale[i][1] = texscale[i][2] = texscale[i][3] = 1.f;
             if (!(p->textures & (1u << i))) continue;
-            bind_texture(i, texscale[i]);
+            bind_texture(i, texscale[i], texremap[i]);
             glUniform1i(p->tex[i], i);
         }
         glUniform4fv(p->texscale, 16, &texscale[0][0]);
+        glUniform4iv(p->texremap, 16, &texremap[0][0]);
 
         apply_state(s);
         if (restart)

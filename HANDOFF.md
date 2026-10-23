@@ -82,6 +82,42 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 
 ## 3a. Next session: start here (2026-10-23)
 
+### Current continuation: JPEG coverage and texture-unit sampling
+
+Previous boot `20261023-165609-569` boot1 later failed at `01A323B0`, LR `01A31DFC`,
+thread `01000142`, in libjpgdec. This is a generated conditional branch from a gap
+between Ghidra body ranges. `xmbld` emits a contiguous `.pdata` function span,
+but the direct-branch scanner had inspected only the disjoint ranges. The scanner
+now uses matching spans, found21 missing targets initially and converged after six
+passes. The refreshed mapping includes `01A323B0` and generated sources have no
+remaining unresolved call to that address. Build evidence:
+`work/branch-span-refresh-build.log`; completed503 generated +23 runtime objects.
+Refreshed mapping has128473 entries. Normal boot `20261023-171447-817` went black
+after UI plugin teardown: F12 recorded117457 calls,5755 draws,245 flips and FIFO
+GET=PUT=000103D8. No shader compile/link error or missing-function failure was
+logged. Saved screenshot08. Two runtime instances briefly overlapped during the
+diagnostic restart; the older stalled process was then closed. Diagnostic boot0
+is therefore not an isolated timing comparison.
+
+Renderer follow-up: per-unit GL sampler objects apply filter/wrap even for cached
+render targets. Shader remap uniforms replace texture-object swizzle mutations so
+different units can sample one image with independent remaps. Float selectors
+retain the reference rules. Texture content hashes include pitch; remap changes
+do not trigger image reuploads. Runtime logs confirm cached float-target sampling
+and initial GL error0. Diagnostic `20261023-171608-926` requested reboot8201; boot1
+reached Game and accepted Left to Video. Clock22:17 ->22:18. No shader compile/link
+error, missing dispatch or semaphore timeout appeared before F12:318347 calls,
+9939 draws,185 flips; FIFO pending (GET1154C, PUT102EC). Screenshots09/10 record
+Game/Video. Background/category icons remain wrong. The specific recovered JPEG
+branch has not yet been observed executing. Runtime remains open on Video in
+tool session77812. No long-run or normal-mode stability claim.
+
+Next rendering lead: RPCS3 GLTexture.cpp treats swizzled texels wider than32 bits
+as multiple32-bit texels (width multiplied by block_size/4); our float upload still
+swizzles whole8/16-byte texels. Confirm the active texture's linear/swizzled flags,
+then correct its address calculation. Translation still emits unrecognized
+instruction diagnostics; branch convergence does not establish instruction coverage.
+
 ### Latest continuation: private GitHub source snapshot and float render targets
 
 Source/history uploaded to the private `ajgreenboy/re-ps3` repository, branch main.

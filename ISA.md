@@ -87,6 +87,8 @@ runtime evidence.
 - [x] ISC-40: Original screenshots document observed startup stages and Game/Video/Music navigation.
 - [ ] ISC-41: Floating render targets preserve the guest surface format and correct visible output.
 - [x] ISC-42: The project source history, tooling, docs and screenshots exist in the requested private GitHub repository.
+- [x] ISC-43: Direct-branch recovery scans the same function spans emitted into .pdata and includes the JPEG failure target.
+- [ ] ISC-44: Texture-unit remap and sampling state applies to uploaded images and cached render targets without cross-unit mutation.
 
 ## Test Strategy
 
@@ -146,6 +148,15 @@ evidence. No new automated test suite is authorized by this artifact.
   Criterion now: complete bodies plus switch recovery precede additional entry patches.
 
 ## Verification
+
+- ISC-43: `work/branch-span-refresh-build.log` converged after six discovery passes;
+  generated mapping includes01A323B0 and no generated unresolved call to that
+  address remains.503 generated and23 native objects compiled/linked. This is
+  static coverage evidence; execution of that JPEG branch remains unobserved.
+- ISC-44: Per-unit samplers and shader remap uniforms are implemented. Diagnostic
+  boot `20261023-171608-926` boot1 rendered Game -> Video without a recorded shader
+  compile/link error. A simultaneous shared-image/different-remap case has not
+  been separately observed, so this criterion remains pending.
 
 - ISC-33: Diagnostic boot `20261023-162424-995`, trace65129–65131 and122915–122917:
   sys984 requested16 bytes and returned0. Service log confirms successful Windows CNG.
