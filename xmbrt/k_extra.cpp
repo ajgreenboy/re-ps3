@@ -3,6 +3,8 @@
 // phase 5), system manager / secure services extras, storage reads, IO buffers, USB and Bluetooth stubs.
 #include "kernel.h"
 
+#include "k_event.h"
+
 #include <cstring>
 
 namespace
@@ -163,6 +165,29 @@ namespace
 
     // ---- storage / io buffers / usb / bluetooth ----
     // sys_storage_read(fd, mode, start_sector, num_sectors, bounce_buf*, sectors_read*, flags): zeros
+    // Async storage completion queue (RPCS3 sys_storage.cpp: one queue per process, set by configure)
+    uint32_t g_storage_async_queue = 0;
+
+    // sys_storage_async_configure(fd, io_buf, equeue_id, unk*)
+    int64_t sys_storage_async_configure(PPCContext& ctx)
+    {
+        KLock lock(g_kernel);
+        if (!find_event_queue(ctx.r5.u32)) return CELL_ESRCH;
+        g_storage_async_queue = ctx.r5.u32;
+        return CELL_OK;
+    }
+
+    // sys_storage_async_send_device_command(dev, cmd, in, inlen, out, outlen, unk): completes at once,
+    // posting (0, unk, unk, unk) to the configured queue as RPCS3 does
+    int64_t sys_storage_async_send_device_command(PPCContext& ctx)
+    {
+        const uint64_t unk = ctx.r9.u64;
+        KLock lock(g_kernel);
+        if (g_storage_async_queue)
+            if (const auto q = find_event_queue(g_storage_async_queue)) event_queue_send(*q, 0, unk, unk, unk);
+        return CELL_OK;
+    }
+
     int64_t sys_storage_read(PPCContext& ctx)
     {
         const uint32_t n = ctx.r6.u32, buf = ctx.r7.u32;
@@ -250,8 +275,8 @@ void register_extra_syscalls()
     register_syscall(591, sys_ok);
     register_syscall(602, sys_storage_read);
     register_syscall(603, sys_ok); // storage_write
-    register_syscall(605, sys_ok); // storage_async_configure
-    register_syscall(619, sys_ok); // storage_async_send_device_command
+    register_syscall(605, sys_storage_async_configure);
+    register_syscall(619, sys_storage_async_send_device_command);
     register_syscall(624, sys_io_buffer_create);
     register_syscall(625, sys_io_buffer_destroy);
     register_syscall(626, sys_io_buffer_allocate);

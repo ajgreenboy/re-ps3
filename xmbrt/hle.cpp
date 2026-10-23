@@ -33,7 +33,28 @@ namespace
     const std::unordered_map<std::string, HleFn> kLibraryHandlers = {
         { "cellSpurs", hle_ok },
         { "cellAdec", hle_ok },
+        { "fs_utility_init", hle_ok }, // RPCS3 HLEs libfs_utility_init.sprx; every function but 6B5896B0 returns OK
     };
+
+    // fs_utility_init_6B5896B0(u64* dest): writes the HDD partition count (RPCS3 Modules/libfs_utility_init.cpp)
+    int64_t fs_utility_init_6B5896B0(PPCContext& ctx)
+    {
+        if (!ctx.r3.u32) return int32_t(0x8001000D); // CELL_EFAULT
+        guest_store_u64(ctx.r3.u32, 2);
+        return 0;
+    }
+
+    // Functions that need more than their library's handler, by (library, nid)
+    const std::unordered_map<uint64_t, HleFn> kFunctionHandlers = {
+        { 0x6B5896B0, fs_utility_init_6B5896B0 },
+    };
+
+    HleFn find_handler(const HleImport& imp)
+    {
+        if (const auto f = kFunctionHandlers.find(imp.nid); f != kFunctionHandlers.end() && imp.library == "fs_utility_init") return f->second;
+        const auto l = kLibraryHandlers.find(imp.library);
+        return l != kLibraryHandlers.end() ? l->second : nullptr;
+    }
 
     void hle_dispatch(PPCContext& ctx, size_t index)
     {
@@ -41,13 +62,13 @@ namespace
         const uint64_t seq = next_call_seq();
         const uint32_t lr = uint32_t(ctx.lr);
         const uint64_t r3 = ctx.r3.u64, r4 = ctx.r4.u64, r5 = ctx.r5.u64, r6 = ctx.r6.u64;
-        const auto handler = kLibraryHandlers.find(imp.library);
-        const int64_t result = handler != kLibraryHandlers.end() ? handler->second(ctx) : CELL_ENOSYS;
+        const HleFn fn = find_handler(imp);
+        const int64_t result = fn ? fn(ctx) : CELL_ENOSYS;
         ctx.r3.s64 = result;
         log_line("%llu T%08X hle %s 0x%08X lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX -> %s%llX",
             (unsigned long long)seq, current_thread_id(), imp.library.c_str(), imp.nid, lr,
             (unsigned long long)r3, (unsigned long long)r4, (unsigned long long)r5, (unsigned long long)r6,
-            handler != kLibraryHandlers.end() ? "" : "ENOSYS ", (unsigned long long)uint64_t(result));
+            fn ? "" : "ENOSYS ", (unsigned long long)uint64_t(result));
     }
 
     template <size_t N>

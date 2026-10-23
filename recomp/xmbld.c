@@ -269,8 +269,15 @@ static int bind_imports(module_t* m, FILE* out, int* hle_count)
             for (uint32_t i = 0; i < num_var; i++) {
                 const export_t* e = find_export(lib, rd32(vnids + 4 * i), 1);
                 g_var_imports++;
-                if (!e) { g_var_unbound++; fprintf(stderr, "%s: unbound variable import %s 0x%08X\n", m->name, lib, rd32(vnids + 4 * i)); }
-                patch_refs(rd32(vstubs + 4 * i), e ? e->opd : 0);
+                /* Variables of libraries outside the image get a zeroed 1 KB stand-in in the tail of the HLE
+                   descriptor area (entries 3072-4095 are never used), so reads see 0 instead of faulting */
+                uint32_t target = e ? e->opd : 0;
+                if (!e) {
+                    if (g_var_unbound < 8) target = HLE_OPD_BASE + 0x6000 + (uint32_t)g_var_unbound * 0x400;
+                    g_var_unbound++;
+                    fprintf(stderr, "%s: unbound variable import %s 0x%08X -> 0x%08X\n", m->name, lib, rd32(vnids + 4 * i), target);
+                }
+                patch_refs(rd32(vstubs + 4 * i), target);
             }
         }
         a += size ? size : 0x2c;
