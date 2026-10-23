@@ -21,7 +21,7 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 | Compile generated C++ | Done | 224/224 objects, 63 MB, `C:\dev\xmb\out\recomp_obj` |
 | Record-form CR0 gaps | Done | CR0 set for `clrldi.`/`rldicl.`/`rldicr.`/`rotldi.`/`sld.`/`srd.`; 0 "RC bit enabled" lines |
 | Phase 3 milestone | Done | 60 s run: 62,800 calls, 46 guest threads, RSX context + first command buffer submit, 1920x1080 display buffers; main thread matches RPCS3 for 961 calls (then a timing race); log `out\xmbrt\xmbrt_phase3.log` |
-| Native runtime | Phase 4 next | `C:\dev\xmb\xmbrt`: LV2 kernel (threads, sync, events, memory, fs overlay, prx, sys_config, AV vuart, null RSX); see "Phase 3 as built" |
+| Native runtime | Phase 4 in progress | `C:\dev\xmb\xmbrt`: LV2 kernel (threads, sync, events, memory, fs overlay, prx, sys_config, AV vuart) plus the GL renderer `rsx_gl.cpp`; all 39 modules load and frames present, no draws yet; see "Phase 4 as built" |
 | Wider image | Done | 39 modules (13 boot plugins + 25 vsh/sys modules vsh loads at boot), 71,328 functions, 857 PS3 jump tables, 280 objects |
 | Link + first boot | Done | `out\xmbrt\xmbrt.exe` enters vsh at 0x10230; first call `sys_mutex_create` from vsh's TLS init |
 | Reference trace (phase 2) | Done | `out\trace\rpcs3_trace.txt` (200,000 calls with args and returns), normalised `out\trace\rpcs3.norm`; RPCS3 patch `rpcs3-xmb-trace.patch` |
@@ -167,6 +167,32 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 - **Loop:** `xmbrt\build-xmbrt.ps1`, then `xmbrt\run-xmbrt.ps1` (runs, normalises, diffs against
   `out\trace\rpcs3.norm` on the main thread).
 
+### Phase 4 as built (in progress): function coverage and the GL renderer
+
+- **Function coverage.** The vsh/sys modules loaded after boot needed far more entries than Ghidra found:
+  - `xenon\find-import-stubs.ts` lists every import stub (`li r12,0; oris; lwz; std r2,40(r1)`).
+  - `xenon\scan-branch-targets.ts` lists `bl`/out-of-function `b`/`bc` targets that start no function, straight
+    from the image. Iterate it with `gen-opd-functions.ts <boot493> <functions> <targets file>` until it
+    reports 0. The first pass found 6,887 entries in 7 rounds, with no translation round trips.
+  - `gen-opd-functions.ts` (OPD mode): the last module's bound was wrong (it skipped x3_mdimp9). OPDs that land
+    inside a merged Ghidra body are now accepted when the target begins with `stdu r1`/`mflr r0`.
+  - `iterate-errors.sh` (XenonRecomp `// ERROR` targets, one translation per round) is the slow fallback.
+  - `rebuild.sh` does relink, switch-table iteration, translate, compile and runtime build in one step.
+- **PRX variable imports.** xmbld now binds `num_var` imports (vnids/vstubs) and attribute-0x2000 function
+  refs with RPCS3's `ppu_patch_refs` rules. Before this, code like `lis r6,0; lwz r0,28(r6)` read address 0x1C.
+  222/228 bind; the 6 unbound ones come from vmclib, libvideoSubsystem and mintx_client (not in the image).
+- **Renderer (`xmbrt\rsx_gl.cpp`).** OpenGL 4.6 compatibility context on the FIFO thread, Win32 window
+  (1280x720, close = exit). Flips from PPU threads are handed to the FIFO thread (`rsx_gl_poll`).
+  - Colour surfaces are GL textures keyed by local offset, with depth/stencil renderbuffers. Flip blits the
+    surface at the display buffer offset.
+  - CLEAR_SURFACE, vertex programs (TRANSFORM_PROGRAM/CONSTANT), and fragment programs from memory
+    (half-word swapped, inline constants read each draw into `fc[]`) are translated to GLSL. The translation
+    follows RPCS3's decompilers, without VP branches and without fp16/fp32 register aliasing.
+  - Vertex arrays are converted to float4 on the CPU. Index arrays, inline arrays, immediate indices,
+    textures (swizzled/linear, DXT, remap via GL swizzle, render-to-texture lookup), blend, alpha, depth,
+    stencil, cull and scissor are handled.
+  - Not yet: MRT, NV3089/NV0039 blits, mipmaps, vertex textures, two-sided colour, fog.
+
 ### 4.2 LV2 syscall layer (`ctx.syscall`, number in r11, args r3–r10, result r3)
 
 - Implement on demand: log every unimplemented syscall number once (name it from RPCS3's
@@ -236,6 +262,10 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 | M5 | Launcher | Selecting a game launches it (RPCS3 or a native exe) and returns to the XMB |
 
 ## 6. Known issues and gotchas
+
+- Any xmbld change that alters image bytes (relocations, import binding, variable refs) needs a full
+  `rebuild.sh`. XenonRecomp bakes `lis`/`addi` immediates into the C++, so a relink alone leaves the
+  translated code pointing at the old addresses (a run showed `lis r9,0; lwz r4,0(r9)` after the image was fixed).
 
 - REA (reverse-engineer-anything) rejects PPC64 ELFs, so drive Ghidra headless directly.
 - Child processes of the Claude desktop app get AppData redirected (MSIX), which breaks Ghidra's OSGi cache. That's
