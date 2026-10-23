@@ -4,12 +4,18 @@
 // lies in the module's executable segments marks a function entry. New entries span to the next known
 // function start (xmbld translates overlaps twice, so over-long spans are harmless).
 //
-// usage: bun gen-opd-functions.ts <boot493 dir> <functions dir (patched in place)>
+// With an extra file of hex addresses (one per line), those become function entries too: XenonRecomp
+// marks `bl`/`b` targets that have no function as "// ERROR <addr>" in its output, and each is one.
+//
+// usage: bun gen-opd-functions.ts <boot493 dir> <functions dir (patched in place)> [<extra entries file>]
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-const [imageDir, functionsDir] = process.argv.slice(2);
-if (!functionsDir) throw new Error("usage: bun gen-opd-functions.ts <boot493 dir> <functions dir>");
+const [imageDir, functionsDir, extraFile] = process.argv.slice(2);
+if (!functionsDir) throw new Error("usage: bun gen-opd-functions.ts <boot493 dir> <functions dir> [<extra entries>]");
+const extra = extraFile
+  ? (await Bun.file(extraFile).text()).split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16))
+  : [];
 
 const img = new Uint8Array(await Bun.file(join(imageDir, "image.bin")).arrayBuffer());
 const dv = new DataView(img.buffer);
@@ -60,7 +66,10 @@ for (const m of modules) {
   const execSegs = segs.filter((s) => s.exec && s.addr >= m.base && s.addr < m.end);
   const inCode = (a: number) => execSegs.some((s) => a >= s.addr && a < s.addr + s.size);
   const found = new Set<number>();
-  for (const s of segs.filter((s) => s.addr >= m.base && s.addr < m.end)) {
+  for (const a of extra) if (a >= m.base && a < m.end && inCode(a) && !starts.has(a)) found.add(a);
+  if (extra.length) {
+    // in extra-entries mode, only add those
+  } else for (const s of segs.filter((s) => s.addr >= m.base && s.addr < m.end)) {
     for (let a = s.addr; a + 8 <= s.addr + s.size; a += 4) {
       if (dv.getUint32(s.off + (a - s.addr) + 4) !== m.toc) continue;
       const code = dv.getUint32(s.off + (a - s.addr));

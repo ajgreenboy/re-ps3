@@ -182,6 +182,16 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS* info)
     {
         log_line("exception %08lX at host rip exe+%llX", code, (unsigned long long)(rip - uint64_t(exe)));
     }
+    if (PpuThread* t = self(); t && t->ctx)
+    {
+        const PPCContext& c = *t->ctx;
+        log_line("  thread %08X '%s' lr=%08X ctr=%08X", t->id, t->name.c_str(), uint32_t(c.lr), c.ctr.u32);
+        const PPCRegister* gpr[] = { &c.r0, &c.r1, &c.r2, &c.r3, &c.r4, &c.r5, &c.r6, &c.r7, &c.r8, &c.r9, &c.r10, &c.r11, &c.r12, &c.r13, &c.r14, &c.r15,
+            &c.r16, &c.r17, &c.r18, &c.r19, &c.r20, &c.r21, &c.r22, &c.r23, &c.r24, &c.r25, &c.r26, &c.r27, &c.r28, &c.r29, &c.r30, &c.r31 };
+        for (int i = 0; i < 32; i += 8)
+            log_line("  r%-2d %08X %08X %08X %08X %08X %08X %08X %08X", i, gpr[i]->u32, gpr[i + 1]->u32, gpr[i + 2]->u32, gpr[i + 3]->u32,
+                gpr[i + 4]->u32, gpr[i + 5]->u32, gpr[i + 6]->u32, gpr[i + 7]->u32);
+    }
     fatal_exit(1);
 }
 
