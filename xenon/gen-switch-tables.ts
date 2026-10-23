@@ -205,6 +205,7 @@ console.log(`bctr in functions: ${found}, jump tables: ${matched}, unmatched: ${
 if (patchDir) {
   try { mkdirSync(patchDir, { recursive: true }); } catch {} // Bun throws EEXIST here on Windows
   for (const [fn, end] of extensions) {
+    if (process.env.SWITCH_DEBUG) console.log(`extend ${fn.file} ${fn.start.toString(16)}-${fn.end.toString(16)} -> ${end.toString(16)}`);
     const lines = csvRows.get(fn.file)!;
     const hex = (x: number) => (x >>> 0).toString(16).toUpperCase().padStart(8, "0");
     const [entry, ranges, ...rest] = lines[fn.row].split(",");

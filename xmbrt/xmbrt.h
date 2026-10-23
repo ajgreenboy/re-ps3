@@ -30,7 +30,7 @@ inline void guest_store_u64(uint32_t addr, uint64_t v) { *(uint64_t*)(g_base + a
 
 inline PPCFunc*& func_slot(uint32_t guest_addr)
 {
-    return *(PPCFunc**)(g_base + kImageEnd + (uint64_t(guest_addr) - PPC_CODE_BASE) * 2);
+    return PPC_LOOKUP_FUNC(g_base, guest_addr);
 }
 
 // Call log: one line per syscall / HLE call, in order, for diffing against RPCS3 traces.

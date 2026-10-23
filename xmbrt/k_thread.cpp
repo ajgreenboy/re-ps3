@@ -36,6 +36,7 @@ namespace
     {
         PpuThread* t = static_cast<PpuThread*>(param);
         t_self = t;
+        DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &t->host_thread, 0, FALSE, DUPLICATE_SAME_ACCESS);
         PPCContext& ctx = *t->ctx;
         ctx.r1.u64 = t->stack_addr + t->stack_size - 0x70;
         ctx.r3.u64 = t->arg0;
@@ -149,7 +150,7 @@ namespace
         const uint32_t id_ptr = ctx.r3.u32, param = ctx.r4.u32;
         if (!param || !guest_load_u32(param)) return CELL_EFAULT;
         const int32_t prio = int32_t(ctx.r7.u32);
-        if (prio < 0 || prio > 3071) return CELL_EINVAL;
+        if (prio < -512 || prio > 3071) return CELL_EINVAL; // vsh is root: RPCS3 allows down to -512
         const uint32_t stack_size = uint32_t((ctx.r8.u64 ? ctx.r8.u64 : 4096) + 0xFFF) & ~0xFFFu;
         auto* t = new PpuThread;
         t->entry_opd = guest_load_u32(param);
@@ -241,8 +242,30 @@ void kernel_init_main_thread(PPCContext* ctx, uint32_t stack_addr, uint32_t stac
     t->started = true;
     t->joinable = false;
     t_self = t;
+    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &t->host_thread, 0, FALSE, DUPLICATE_SAME_ACCESS);
     KLock lock(g_kernel);
     g_threads[t->id] = t;
+}
+
+void dump_threads()
+{
+    // Not under the kernel lock: a stuck thread may hold it
+    const uint64_t exe = uint64_t(GetModuleHandleW(nullptr));
+    for (const auto& [id, t] : g_threads)
+    {
+        if (t->exited || !t->host_thread) continue;
+        CONTEXT hc{};
+        hc.ContextFlags = CONTEXT_CONTROL;
+        uint64_t rip = 0;
+        if (SuspendThread(HANDLE(t->host_thread)) != DWORD(-1))
+        {
+            if (GetThreadContext(HANDLE(t->host_thread), &hc)) rip = hc.Rip;
+            ResumeThread(HANDLE(t->host_thread));
+        }
+        const PPCContext& c = *t->ctx;
+        log_line("  thread %08X '%s' host rip exe+%llX lr=%08X r1=%08X r3=%08X r4=%08X ctr=%08X", id, t->name.c_str(),
+            (unsigned long long)(rip ? rip - exe : 0), uint32_t(c.lr), c.r1.u32, c.r3.u32, c.r4.u32, c.ctr.u32);
+    }
 }
 
 void register_thread_syscalls()

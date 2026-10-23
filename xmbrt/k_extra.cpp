@@ -209,6 +209,13 @@ namespace
     // sys_usbd_get_device_list(handle, device_list*, max): no USB devices
     int64_t sys_usbd_get_device_list(PPCContext&) { return 0; }
 
+    // sys_usbd_receive_event(handle, arg1*, arg2*, arg3*): blocks until a USB event; there are none
+    int64_t sys_usbd_receive_event(PPCContext&)
+    {
+        KLock lock(g_kernel);
+        for (;;) sleep_thread(lock, 0);
+    }
+
     // sys_bluetooth_aud_serial_get_event_579(arg, out1*, out2*, out3*, out4*): no event
     int64_t sys_bluetooth_579(PPCContext& ctx)
     {
@@ -237,7 +244,7 @@ void register_extra_syscalls()
     register_syscall(530, sys_usbd_initialize);
     register_syscall(532, sys_usbd_get_device_list);
     register_syscall(535, sys_ok); // usbd_register_ldd
-    register_syscall(540, sys_ok); // usbd_receive_event (no events)
+    register_syscall(540, sys_usbd_receive_event);
     register_syscall(579, sys_bluetooth_579);
     register_syscall(584, sys_ok);
     register_syscall(591, sys_ok);
