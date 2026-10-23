@@ -278,7 +278,8 @@ void dump_threads()
             c = *t.ctx;
             ResumeThread(HANDLE(t.handle));
         }
-        log_line("  thread %08X '%s' host rip exe+%llX lr=%08X r1=%08X r3=%08X r4=%08X ctr=%08X", t.id, t.name.c_str(),
+        log_line("  thread %08X '%s' host_tid=%lu host rip exe+%llX lr=%08X r1=%08X r3=%08X r4=%08X ctr=%08X", t.id, t.name.c_str(),
+            (unsigned long)GetThreadId(HANDLE(t.handle)),
             (unsigned long long)(rip ? rip - exe : 0), uint32_t(c.lr), c.r1.u32, c.r3.u32, c.r4.u32, c.ctr.u32);
     }
 }

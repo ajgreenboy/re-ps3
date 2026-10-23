@@ -646,6 +646,15 @@ void register_fs_syscalls()
     for (const Mount& m : kMounts) g_mounted.insert(m.guest);
     log_line("fs: read layer %s, write layer %s", to_utf8(g_lower).c_str(), to_utf8(g_upper).c_str());
 
+    // VSH creates /dev_hdd0/tmp/turnoff at boot and deletes it on a clean power-off. The runtime is
+    // normally closed or killed rather than powered off by the guest, so the marker survives and every
+    // following boot takes the "not turned off properly" path: UI teardown, recovery offer, reboot,
+    // database rebuild. Clearing it here makes each launch a normal boot. XMBRT_KEEP_TURNOFF=1 keeps
+    // it (to exercise the firmware's recovery path on purpose).
+    if (!getenv("XMBRT_KEEP_TURNOFF"))
+        if (remove_path("/dev_hdd0/tmp/turnoff", false) == CELL_OK)
+            log_line("fs: cleared stale shutdown marker /dev_hdd0/tmp/turnoff (previous run did not power off cleanly)");
+
     register_syscall(801, sys_fs_open);
     register_syscall(802, sys_fs_read);
     register_syscall(803, sys_fs_write);

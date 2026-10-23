@@ -15,7 +15,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
+#include <deque>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -29,7 +31,8 @@ namespace
     enum : uint32_t
     {
         SURFACE_CLIP_HORIZONTAL = 0x200, SURFACE_CLIP_VERTICAL = 0x204, SURFACE_FORMAT = 0x208, SURFACE_PITCH_A = 0x20C,
-        SURFACE_COLOR_AOFFSET = 0x210, SURFACE_ZETA_OFFSET = 0x214, SURFACE_COLOR_TARGET = 0x220,
+        SURFACE_COLOR_AOFFSET = 0x210, SURFACE_ZETA_OFFSET = 0x214, SURFACE_COLOR_BOFFSET = 0x218, SURFACE_COLOR_TARGET = 0x220,
+        SURFACE_COLOR_COFFSET = 0x288, SURFACE_COLOR_DOFFSET = 0x28C,
         ALPHA_TEST_ENABLE = 0x304, ALPHA_FUNC = 0x308, ALPHA_REF = 0x30C, BLEND_ENABLE = 0x310,
         BLEND_FUNC_SFACTOR = 0x314, BLEND_FUNC_DFACTOR = 0x318, BLEND_COLOR = 0x31C, BLEND_EQUATION = 0x320,
         COLOR_MASK = 0x324, STENCIL_TEST_ENABLE = 0x328, STENCIL_MASK = 0x32C, STENCIL_FUNC = 0x330,
@@ -45,6 +48,7 @@ namespace
         VERTEX_DATA2F_M = 0x1880, VERTEX_DATA4UB_M = 0x1940, TEXTURE_OFFSET = 0x1A00, VERTEX_DATA4F_M = 0x1C00,
         SHADER_CONTROL = 0x1D60, ZSTENCIL_CLEAR_VALUE = 0x1D8C, COLOR_CLEAR_VALUE = 0x1D90, CLEAR_SURFACE = 0x1D94,
         RESTART_INDEX_ENABLE = 0x1DAC, RESTART_INDEX = 0x1DB0, VERTEX_DATA1F_M = 0x1E40,
+        POINT_SIZE = 0x1EE0, POINT_SPRITE_CONTROL = 0x1EE8, VERTEX_ATTRIB_OUTPUT_MASK = 0x1FF4,
         TRANSFORM_PROGRAM_LOAD = 0x1E9C, TRANSFORM_PROGRAM_START = 0x1EA0, TRANSFORM_CONSTANT_LOAD = 0x1EFC,
         TRANSFORM_CONSTANT = 0x1F00, VERTEX_ATTRIB_INPUT_MASK = 0x1FF0,
     };
@@ -53,11 +57,38 @@ namespace
     uint32_t reg(uint32_t method) { return g_regs[method >> 2]; }
     float regf(uint32_t method) { float f; memcpy(&f, &g_regs[method >> 2], 4); return f; }
 
+    using PerfClock = std::chrono::steady_clock;
+    struct RenderMetrics
+    {
+        PerfClock::time_point since = PerfClock::now();
+        uint64_t draws = 0, frames = 0, hash_bytes = 0, uploads = 0, barriers = 0;
+        double draw_ms = 0, program_ms = 0, texture_ms = 0, compile_ms = 0, present_ms = 0, barrier_ms = 0;
+    } g_perf;
+    struct PerfScope
+    {
+        double& total;
+        PerfClock::time_point start = PerfClock::now();
+        explicit PerfScope(double& value) : total(value) {}
+        ~PerfScope() { total += std::chrono::duration<double, std::milli>(PerfClock::now() - start).count(); }
+    };
+    void report_performance()
+    {
+        const double seconds = std::chrono::duration<double>(PerfClock::now() - g_perf.since).count();
+        if (seconds < 5) return;
+        log_line("rsx perf: %.1f fps %.0f draws/s draw=%.0fms program=%.0fms texture=%.0fms compile=%.0fms present=%.0fms sync=%.0fms barriers=%llu hash=%.1fMiB uploads=%llu interval=%.1fs",
+            g_perf.frames/seconds,g_perf.draws/seconds,g_perf.draw_ms,g_perf.program_ms,g_perf.texture_ms,
+            g_perf.compile_ms,g_perf.present_ms,g_perf.barrier_ms,(unsigned long long)g_perf.barriers,
+            g_perf.hash_bytes/1048576.,(unsigned long long)g_perf.uploads,seconds);
+        g_perf = RenderMetrics{};
+    }
+
     // ---- GL entry points (beyond 1.1) ----
 #define GL_FUNCS(X) \
     X(PFNGLGENFRAMEBUFFERSPROC, glGenFramebuffers) X(PFNGLBINDFRAMEBUFFERPROC, glBindFramebuffer) \
     X(PFNGLFRAMEBUFFERTEXTURE2DPROC, glFramebufferTexture2D) X(PFNGLBLITFRAMEBUFFERPROC, glBlitFramebuffer) \
     X(PFNGLCHECKFRAMEBUFFERSTATUSPROC, glCheckFramebufferStatus) \
+    X(PFNGLDRAWBUFFERSPROC, glDrawBuffers) \
+    X(PFNGLFENCESYNCPROC, glFenceSync) X(PFNGLCLIENTWAITSYNCPROC, glClientWaitSync) X(PFNGLDELETESYNCPROC, glDeleteSync) \
     X(PFNGLGENRENDERBUFFERSPROC, glGenRenderbuffers) X(PFNGLBINDRENDERBUFFERPROC, glBindRenderbuffer) \
     X(PFNGLRENDERBUFFERSTORAGEPROC, glRenderbufferStorage) X(PFNGLFRAMEBUFFERRENDERBUFFERPROC, glFramebufferRenderbuffer) \
     X(PFNGLCREATESHADERPROC, glCreateShader) X(PFNGLSHADERSOURCEPROC, glShaderSource) X(PFNGLCOMPILESHADERPROC, glCompileShader) \
@@ -84,6 +115,34 @@ namespace
     DWORD g_gl_thread;
     std::atomic<bool> g_window_ready{ false }, g_gl_failed{ false };
     std::atomic<uint64_t> g_pending_flip{ 0 }; // offset | width << 32 | height << 48, presented by the GL thread
+    struct PendingCompletion { GLsync fence; uint32_t address, value; };
+    std::deque<PendingCompletion> g_completions; // FIFO/GL thread only, in submission order
+
+    void publish_completion(uint32_t address, uint32_t value)
+    {
+        std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(g_base + address))
+            .store(__builtin_bswap32(value), std::memory_order_release);
+    }
+
+    void poll_completions()
+    {
+        if (g_completions.empty()) return;
+        PerfScope measure(g_perf.barrier_ms);
+        while (!g_completions.empty())
+        {
+            const auto completion = g_completions.front();
+            const GLenum status = glClientWaitSync(completion.fence, 0, 0);
+            if (status == GL_TIMEOUT_EXPIRED) break;
+            if (status == GL_WAIT_FAILED)
+            {
+                log_line("rsx: GPU completion fence wait failed; draining earlier GL work");
+                glFinish(); // Correctness fallback, not the normal release path.
+            }
+            publish_completion(completion.address, completion.value);
+            glDeleteSync(completion.fence);
+            g_completions.pop_front();
+        }
+    }
 
     LRESULT CALLBACK wnd_proc(HWND h, UINT msg, WPARAM w, LPARAM l)
     {
@@ -122,7 +181,7 @@ namespace
         }
     }
 
-    GLuint g_vbo, g_ibo, g_samplers[16];
+    GLuint g_vbo, g_ibo, g_samplers[16], g_draw_fbo;
 
     // Runs on the FIFO thread, which owns the context from then on.
     bool ensure_gl()
@@ -144,6 +203,7 @@ namespace
         glGenBuffers(1, &g_vbo);
         glGenBuffers(1, &g_ibo);
         glGenSamplers(16, g_samplers);
+        glGenFramebuffers(1, &g_draw_fbo);
         log_line("rsx: OpenGL %s on %s", (const char*)glGetString(GL_VERSION), (const char*)glGetString(GL_RENDERER));
         return true;
     }
@@ -218,12 +278,37 @@ namespace
 
     Surface* bind_surface()
     {
-        if ((reg(SURFACE_COLOR_TARGET) & 0xF) == 0) return nullptr; // CELL_GCM_SURFACE_TARGET_NONE
+        const uint32_t target = reg(SURFACE_COLOR_TARGET) & 0x1F;
+        if (!target) return nullptr;
         const uint32_t w = clip_w(), h = clip_h();
         if (!w || !h) return nullptr;
-        Surface* s = &surface(reg(SURFACE_COLOR_AOFFSET), w, h, reg(SURFACE_FORMAT) & 0x1F);
-        if (!s->complete) return nullptr;
-        glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
+        // RSX target 2 selects B alone. MRT targets 13/17/1F select A..B/C/D.
+        // Fragment output 0 maps to the first selected buffer, including B-only.
+        const uint32_t count = target == 0x13 ? 2 : target == 0x17 ? 3 : target == 0x1F ? 4 : 1;
+        const uint32_t offsets[4] = { reg(target == 2 ? SURFACE_COLOR_BOFFSET : SURFACE_COLOR_AOFFSET),
+            reg(SURFACE_COLOR_BOFFSET), reg(SURFACE_COLOR_COFFSET), reg(SURFACE_COLOR_DOFFSET) };
+        Surface* targets[4]{};
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            targets[i] = &surface(offsets[i], w, h, reg(SURFACE_FORMAT) & 0x1F);
+            if (!targets[i]->complete) return nullptr;
+        }
+        Surface* s = targets[0];
+        glBindFramebuffer(GL_FRAMEBUFFER, g_draw_fbo);
+        const GLenum buffers[4] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3 };
+        for (uint32_t i = 0; i < 4; ++i)
+            glFramebufferTexture2D(GL_FRAMEBUFFER, buffers[i], GL_TEXTURE_2D, i < count ? targets[i]->tex : 0, 0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s->depth);
+        glDrawBuffers(count, buffers);
+        const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        static uint32_t target_modes_seen = 0;
+        if (!(target_modes_seen & (1u << target)) || status != GL_FRAMEBUFFER_COMPLETE)
+        {
+            target_modes_seen |= 1u << target;
+            log_line("rsx: draw target=%02X count=%u offsets=%08X/%08X/%08X/%08X FBO=%04X GL error=%04X",
+                target,count,offsets[0],offsets[1],offsets[2],offsets[3],unsigned(status),unsigned(glGetError()));
+        }
+        if (status != GL_FRAMEBUFFER_COMPLETE) return nullptr;
         glViewport(0, 0, w, h);
         return s;
     }
@@ -313,6 +398,7 @@ namespace
     {
         std::string glsl;
         uint32_t inputs = 0; // attribute mask read by the program
+        bool writes_point_size = false;
     };
 
     VpTranslation translate_vp(uint32_t start)
@@ -369,6 +455,7 @@ namespace
                 if (is_result && dst_out != 0x1F && dst_out < 16)
                 {
                     emit_assign(body, "o[" + std::to_string(dst_out) + "]", mask, value, cnd);
+                    if (dst_out == 6 && mask.find('x') != std::string::npos) t.writes_point_size = true;
                     wrote = true;
                 }
                 if (tmp != 0x3F)
@@ -409,7 +496,9 @@ namespace
             case 0x14: set_dst(false, "vec4(notEqual(" + s0 + ", " + s1 + "))"); break;
             case 0x15: set_dst(false, "vec4(1.)"); break;
             case 0x16: set_dst(false, "sign(" + s0 + ")"); break;
-            default: body += "  // vec op " + std::to_string(vec_op) + "\n"; break;
+            default:
+                log_line("rsx: unsupported vertex vector opcode=%02X start=%u instruction=%u",vec_op,start,i);
+                body += "  // vec op " + std::to_string(vec_op) + "\n"; break;
             }
             switch (sca_op)
             {
@@ -439,7 +528,7 @@ namespace
         std::string& g = t.glsl;
         g = "#version 430 compatibility\n"
             "uniform vec4 vc[468];\n"
-            "uniform vec4 so_scale, so_offset;\n";
+            "uniform vec4 so_scale, so_offset, raster;\n";
         for (uint32_t i = 0; i < 16; i++)
             if (t.inputs & (1u << i)) g += "layout(location=" + std::to_string(i) + ") in vec4 in_" + std::to_string(i) + ";\n";
         g += "out vec4 v_col0, v_col1, v_fog;\nout vec4 v_tc[10];\n"
@@ -452,6 +541,7 @@ namespace
              "  p.xyz = p.xyz * so_scale.xyz + p.w * so_offset.xyz;\n"
              "  p.z = (p.z + p.z) - p.w;\n"
              "  gl_Position = p;\n"
+             "  gl_PointSize = max(1., raster.y != 0. ? o[6].x : raster.x);\n"
              "  v_col0 = o[1]; v_col1 = o[2]; v_fog = o[5];\n"
              "  for (int i = 0; i < 8; i++) v_tc[i] = o[7 + i];\n"
              "  v_tc[8] = o[15]; v_tc[9] = o[6];\n}\n";
@@ -523,6 +613,8 @@ namespace
                     default:
                         r = id < 14 ? "v_tc[" + std::to_string(id - 4) + "]" : "vec4(0.)";
                         if (id >= 4 && id < 14 && ((s2w >> 31) & 1)) r = "(" + r + " * gl_FragCoord.w)";
+                        if (id >= 4 && id < 14)
+                            r = "((point_coord_mask & " + std::to_string(1u << (id - 4)) + ") != 0 ? vec4(gl_PointCoord, 1., 0.) : " + r + ")";
                         break;
                     }
                     break;
@@ -666,7 +758,12 @@ namespace
                 break;
             }
             case 0x45: body += "  if (" + any_cnd + ") { emit_(); return; }\n"; break;
-            default: body += "  // fp op " + std::to_string(opcode) + "\n"; break;
+            default:
+            {
+                static bool seen[128]{};
+                if (!seen[opcode]) { seen[opcode] = true; log_line("rsx: unsupported fragment opcode=%02X address=%08X instruction=%u",opcode,addr,pc); }
+                body += "  // fp op " + std::to_string(opcode) + "\n"; break;
+            }
             }
             if (has_const && !flow) pc++;
             if (end) break;
@@ -676,7 +773,7 @@ namespace
         std::string& g = t.glsl;
         g = "#version 430 compatibility\n"
             "in vec4 v_col0, v_col1, v_fog;\nin vec4 v_tc[10];\n"
-            "uniform vec4 texscale[16];\nuniform ivec4 texremap[16];\n"
+            "uniform vec4 texscale[16];\nuniform ivec4 texremap[16];\nuniform int point_coord_mask;\n"
             "vec4 remap_(vec4 v, ivec4 m) { float c[6] = float[6](v.r,v.g,v.b,v.a,0.,1.);"
             " return vec4(c[m.x],c[m.y],c[m.z],c[m.w]); }\n";
         if (!t.constant_slots.empty()) g += "uniform vec4 fc[" + std::to_string(t.constant_slots.size()) + "];\n";
@@ -687,7 +784,10 @@ namespace
              "vec4 lit_(vec4 v) { vec4 c = v; c.x = max(v.x, 0.); c.y = max(v.y, 0.);"
              " return vec4(1., c.x, c.x > 0. ? exp(c.w * log(max(c.y, 1e-10))) : 0., 1.); }\n";
         const bool exports32 = ctrl & 0x40; // RSX_SHADER_CONTROL_32_BITS_EXPORTS
-        g += std::string("void emit_() {\n  gl_FragColor = ") + (exports32 ? "r[0]" : "h[0]") + ";\n";
+        g += std::string("void emit_() {\n  gl_FragData[0] = ") + (exports32 ? "r[0]" : "h[0]") + ";\n";
+        g += std::string("  gl_FragData[1] = ") + (exports32 ? "r[2]" : "h[4]") + ";\n";
+        g += std::string("  gl_FragData[2] = ") + (exports32 ? "r[3]" : "h[6]") + ";\n";
+        g += std::string("  gl_FragData[3] = ") + (exports32 ? "r[4]" : "h[8]") + ";\n";
         if (ctrl & 0xE) g += std::string("  gl_FragDepth = ") + (exports32 ? "r[1].z" : "h[2].z") + ";\n";
         g += "}\nvoid main() {\n  for (int i = 0; i < 48; i++) r[i] = vec4(0.);\n  for (int i = 0; i < 96; i++) h[i] = vec4(0.);\n"
              "  cc[0] = vec4(0.); cc[1] = vec4(0.);\n";
@@ -702,6 +802,8 @@ namespace
         GLuint id = 0;
         GLint vc = -1, so_scale = -1, so_offset = -1, fc = -1, texscale = -1;
         GLint texremap = -1;
+        GLint raster = -1, point_coord_mask = -1;
+        bool writes_point_size = false;
         GLint tex[16];
         uint32_t inputs = 0, textures = 0;
         std::vector<uint32_t> constant_slots;
@@ -713,6 +815,7 @@ namespace
 
     GLuint compile(GLenum type, const std::string& src)
     {
+        PerfScope measure(g_perf.compile_ms);
         const GLuint s = glCreateShader(type);
         const char* p = src.c_str();
         glShaderSource(s, 1, &p, nullptr);
@@ -731,6 +834,7 @@ namespace
 
     Program* get_program()
     {
+        PerfScope measure(g_perf.program_ms);
         // Vertex program: instructions from the start slot up to the end bit
         const uint32_t start = reg(TRANSFORM_PROGRAM_START) & 511;
         uint32_t vp_end = start;
@@ -790,6 +894,9 @@ namespace
         p.fc = glGetUniformLocation(p.id, "fc");
         p.texscale = glGetUniformLocation(p.id, "texscale");
         p.texremap = glGetUniformLocation(p.id, "texremap");
+        p.raster = glGetUniformLocation(p.id, "raster");
+        p.point_coord_mask = glGetUniformLocation(p.id, "point_coord_mask");
+        p.writes_point_size = vi->second.writes_point_size;
         for (uint32_t i = 0; i < 16; i++)
         {
             const std::string n = "tex" + std::to_string(i) + (((tex_cube >> i) & 1) ? "c" : "");
@@ -845,6 +952,7 @@ namespace
     // Binds fragment texture unit i; returns its coordinate scale (1/size for unnormalized textures).
     void bind_texture(uint32_t i, float* scale, GLint* component_map)
     {
+        PerfScope measure(g_perf.texture_ms);
         const uint32_t b = TEXTURE_OFFSET + i * 0x20;
         const uint32_t offset = reg(b), format = reg(b + 4), address = reg(b + 8), filter = reg(b + 0x14), rect = reg(b + 0x18);
         const uint32_t remap = reg(b + 0x10), pitch_reg = reg(TEXTURE_CONTROL3 + i * 4) & 0xFFFFF;
@@ -914,6 +1022,12 @@ namespace
             glBindTexture(GL_TEXTURE_2D, 0);
             return;
         }
+        static bool upload_formats_seen[256]{};
+        if (!upload_formats_seen[base_fmt])
+        {
+            upload_formats_seen[base_fmt] = true;
+            log_line("rsx: texture format=%02X raw=%08X remap=%08X %ux%u address=%08X",base_fmt,format,remap,w,h,addr);
+        }
         uint32_t bpp = 4;
         bool compressed = false;
         switch (base_fmt)
@@ -932,10 +1046,12 @@ namespace
         const uint64_t key = (uint64_t(addr) << 32) ^ (uint64_t(format) << 8) ^ rect;
         Texture& t = g_textures[key];
         const uint64_t hash = fnv(g_base + addr, size, pitch);
+        g_perf.hash_bytes += size;
         if (!t.id) glGenTextures(1, &t.id);
         glBindTexture(GL_TEXTURE_2D, t.id);
         if (t.hash != hash)
         {
+            ++g_perf.uploads;
             t.hash = hash;
             if (compressed)
             {
@@ -952,16 +1068,21 @@ namespace
                 const GLenum channels = components == 1 ? GL_RED : components == 2 ? GL_RG : GL_RGBA;
                 const GLint storage = base_fmt == 0x9A ? GL_RGBA16F : base_fmt == 0x9B ? GL_RGBA32F :
                     base_fmt == 0x9C ? GL_R32F : GL_RG16F;
-                const uint32_t lw = log2u(w), lh = log2u(h);
+                // RSX swizzles wide texels in 32-bit blocks, not whole RGBA
+                // texels (RPCS3 GLTexture.cpp do_deswizzle_transformation).
+                const uint32_t lw = log2u(w * (bpp / 4)), lh = log2u(h);
+                const auto component_offset = [&](uint32_t x, uint32_t y, uint32_t byte) {
+                    if (linear) return y * pitch + x * bpp + byte;
+                    return swizzle_offset(x * (bpp / 4) + byte / 4, y, lw, lh) * 4 + byte % 4;
+                };
                 if (half)
                 {
                     std::vector<uint16_t> words(size_t(w) * h * components);
                     for (uint32_t y = 0; y < h; ++y)
                         for (uint32_t x = 0; x < w; ++x)
                         {
-                            const uint32_t texel = linear ? y * pitch + x * bpp : swizzle_offset(x,y,lw,lh) * bpp;
                             for (uint32_t c = 0; c < components; ++c)
-                                words[(size_t(y) * w + x) * components + c] = guest_load_u16(addr + texel + c * 2);
+                                words[(size_t(y) * w + x) * components + c] = guest_load_u16(addr + component_offset(x, y, c * 2));
                         }
                     glTexImage2D(GL_TEXTURE_2D,0,storage,w,h,0,channels,GL_HALF_FLOAT,words.data());
                 }
@@ -971,9 +1092,8 @@ namespace
                     for (uint32_t y = 0; y < h; ++y)
                         for (uint32_t x = 0; x < w; ++x)
                         {
-                            const uint32_t texel = linear ? y * pitch + x * bpp : swizzle_offset(x,y,lw,lh) * bpp;
                             for (uint32_t c = 0; c < components; ++c)
-                                words[(size_t(y) * w + x) * components + c] = guest_load_u32(addr + texel + c * 4);
+                                words[(size_t(y) * w + x) * components + c] = guest_load_u32(addr + component_offset(x, y, c * 4));
                         }
                     glTexImage2D(GL_TEXTURE_2D,0,storage,w,h,0,channels,GL_FLOAT,words.data());
                 }
@@ -982,8 +1102,8 @@ namespace
                 if (!(formats_seen & bit))
                 {
                     formats_seen |= bit;
-                    log_line("rsx: float texture upload format=%02X %ux%u address=%08X GL error=%04X",
-                        base_fmt,w,h,addr,unsigned(glGetError()));
+                    log_line("rsx: float texture upload format=%02X raw=%08X linear=%u pitch=%u %ux%u address=%08X GL error=%04X",
+                        base_fmt,format,unsigned(linear),pitch,w,h,addr,unsigned(glGetError()));
                 }
             }
             else
@@ -1001,7 +1121,7 @@ namespace
                         const uint32_t v16 = bpp == 2 ? (s[0] << 8) | s[1] : 0;
                         switch (base_fmt)
                         {
-                        case 0x81: a = r = g = bl = s[0]; break;
+                        case 0x81: r = g = bl = s[0]; break; // B8 has implicit alpha one
                         case 0x82: a = (v16 >> 15) * 255; r = ((v16 >> 10) & 31) * 255 / 31; g = ((v16 >> 5) & 31) * 255 / 31; bl = (v16 & 31) * 255 / 31; break;
                         case 0x9D: r = ((v16 >> 10) & 31) * 255 / 31; g = ((v16 >> 5) & 31) * 255 / 31; bl = (v16 & 31) * 255 / 31; break;
                         case 0x97: r = (v16 >> 11) * 255 / 31; g = ((v16 >> 6) & 31) * 255 / 31; bl = ((v16 >> 1) & 31) * 255 / 31; a = (v16 & 1) * 255; break;
@@ -1133,6 +1253,7 @@ namespace
 
     void draw()
     {
+        PerfScope measure(g_perf.draw_ms);
         if (!ensure_gl() || (g_ranges.empty() && g_inline_data.empty() && g_immediate_indices.empty())) return;
         Surface* s = bind_surface();
         if (!s) return;
@@ -1256,6 +1377,21 @@ namespace
         }
         glUniform4fv(p->texscale, 16, &texscale[0][0]);
         glUniform4iv(p->texremap, 16, &texremap[0][0]);
+        const bool points = g_primitive == 1;
+        const uint32_t sprite = reg(POINT_SPRITE_CONTROL);
+        const uint32_t coord_mask = points && (sprite & 1) ? (sprite >> 8) & 0x3FF : 0;
+        glUniform1i(p->point_coord_mask, coord_mask);
+        const float raster[4] = { std::max(1.f,regf(POINT_SIZE)),
+            p->writes_point_size && (reg(VERTEX_ATTRIB_OUTPUT_MASK) & 0x20) ? 1.f : 0.f,0,0 };
+        glUniform4fv(p->raster,1,raster);
+        glEnable(GL_PROGRAM_POINT_SIZE);
+        if (points && (sprite & 1)) glEnable(GL_POINT_SPRITE); else glDisable(GL_POINT_SPRITE);
+        static bool logged_points = false;
+        if (points && !logged_points)
+        {
+            logged_points = true;
+            log_line("rsx: point draw size=%g shader_size=%u sprite=%08X coords=%03X",raster[0],unsigned(raster[1] != 0),sprite,coord_mask);
+        }
 
         apply_state(s);
         if (restart)
@@ -1279,6 +1415,7 @@ namespace
             log_line("rsx draw state: surface=%08X %ux%u scissor=%08X/%08X mask=%08X inputs=%04X GL error=%04X",
                 reg(SURFACE_COLOR_AOFFSET), s->width, s->height, reg(SCISSOR_HORIZONTAL), reg(SCISSOR_VERTICAL),
                 reg(COLOR_MASK), p->inputs, unsigned(glGetError()));
+        ++g_perf.draws;
         for (uint32_t a = 0; a < 16; a++) glDisableVertexAttribArray(a);
     }
 
@@ -1302,7 +1439,9 @@ namespace
             glBindFramebuffer(GL_READ_FRAMEBUFFER, it->second.fbo);
             glBlitFramebuffer(0, 0, width, height, 0, rc.bottom, rc.right, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
         }
-        SwapBuffers(g_hdc);
+        { PerfScope measure(g_perf.present_ms); SwapBuffers(g_hdc); }
+        ++g_perf.frames;
+        report_performance();
         static uint32_t frames;
         if (++frames % 600 == 1) log_line("rsx: presented frame %u (%llu draws so far)", frames, (unsigned long long)g_draw_count);
     }
@@ -1388,15 +1527,48 @@ void rsx_gl_flip(uint32_t offset, uint32_t width, uint32_t height)
 // Called by the FIFO thread between commands.
 void rsx_gl_poll()
 {
+    poll_completions();
     if (const uint64_t f = g_pending_flip.exchange(0); f && ensure_gl())
         present(uint32_t(f), uint32_t(f >> 32) & 0xFFFF, uint32_t(f >> 48));
 }
 
-// FIFO synchronization methods publish completion to guest memory. Complete earlier
-// GL work before that publication so a PPU/SPU cannot observe a premature release.
-void rsx_gl_barrier()
+// A guest completion becomes visible only when its preceding GPU work finishes.
+// Keep the FIFO submitting independent work instead of glFinish-ing every label.
+void rsx_gl_release(uint32_t address, uint32_t value)
 {
-    if (g_glrc && GetCurrentThreadId() == g_gl_thread) glFinish();
+    if (!g_glrc)
+    {
+        publish_completion(address,value); // No GL work has been submitted yet.
+        return;
+    }
+    PerfScope measure(g_perf.barrier_ms);
+    ++g_perf.barriers;
+    // XMBRT_GL_RELEASE=finish: the previous blocking path (drain GL, then publish), for A/B timing.
+    static const bool finish_mode = [] { const char* v = getenv("XMBRT_GL_RELEASE"); return v && !strcmp(v, "finish"); }();
+    if (finish_mode)
+    {
+        glFinish();
+        poll_completions();
+        publish_completion(address,value);
+        return;
+    }
+    const GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE,0);
+    if (!fence)
+    {
+        log_line("rsx: GPU completion fence allocation failed; draining earlier GL work");
+        glFinish();
+        poll_completions();
+        publish_completion(address,value);
+        return;
+    }
+    g_completions.push_back({fence,address,value});
+    glFlush();
+    poll_completions();
+    if (g_completions.size() > 4096)
+    {
+        glFinish(); // Bound queued completion storage if the GPU falls behind.
+        poll_completions();
+    }
 }
 
 void rsx_gl_init()
