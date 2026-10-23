@@ -41,10 +41,7 @@ namespace
     // ---- time ----
     int64_t sys_time_get_timebase_frequency(PPCContext&) { return 80000000; }
 
-    int64_t sys_time_get_system_time(PPCContext&)
-    {
-        return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - g_start).count();
-    }
+    int64_t sys_time_get_system_time(PPCContext&) { return int64_t(system_time_us()); }
 
     // sys_time_get_current_time(sec*, nsec*)
     int64_t sys_time_get_current_time(PPCContext& ctx)
@@ -344,10 +341,6 @@ namespace
     }
 
     int64_t sys_ok(PPCContext&) { return CELL_OK; }
-
-    // ---- vuart (AV manager); requests are accepted, no replies yet ----
-    int64_t sys_uart_send(PPCContext& ctx) { return int64_t(ctx.r4.u64); }
-    int64_t sys_uart_receive(PPCContext&) { return 0; }
 }
 
 void misc_set_sdk_version(uint32_t version) { g_sdk_version = version; }
@@ -372,9 +365,6 @@ void register_misc_syscalls()
     register_syscall(147, sys_time_get_timebase_frequency);
     register_syscall(149, sys_time_get_system_time);
     register_syscall(169, sys_ok); // spu_initialize
-    register_syscall(367, sys_ok); // uart_initialize
-    register_syscall(368, sys_uart_receive);
-    register_syscall(369, sys_uart_send);
     register_syscall(372, sys_ok); // game watchdog start
     register_syscall(373, sys_ok);
     register_syscall(374, sys_ok);
