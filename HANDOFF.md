@@ -13,15 +13,15 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 |---|---|---|
 | RPCS3 Release build | Done | `C:\dev\rpcs3\bin\rpcs3.exe`, commit `0b0fa082` |
 | Firmware 4.93 in RPCS3 | Done | `C:\dev\rpcs3\bin\dev_flash` (1,075 files) |
-| XMB boots in RPCS3 | Partly | ~78 FPS Vulkan; first-run shader precompile stalls at "0 of 6650" |
+| XMB boots in RPCS3 | Done | Cold start reaches the XMB at 60 FPS with Shader Mode "Async Recompiler (multi-threaded)" (the interpreter modes stall in precompile); DualSense bound as Player 1 in `bin\config\input_configs\global\Default.yml` |
 | Firmware decrypted | Done | `C:\dev\xmb\fw493` (vsh.elf + 358 modules) |
 | Ghidra analysis | Done | vsh.elf 27,852 functions; 13 boot plugins ~29k |
 | Image linking (xmbld) | Done | `C:\dev\xmb\out\boot493\image.bin`, `image.elf`, CSV manifests |
 | Translation (XenonRecomp) | Done | 56,982 functions, 0 unrecognized instructions |
 | Compile generated C++ | Done | 224/224 objects, 63 MB, `C:\dev\xmb\out\recomp_obj` |
-| Record-form CR0 gaps | Open | `clrldi.` @0x257EBC, `sld.` @0x5F660C, @0x5F6EC8 |
-| Native runtime | Not started | spec in section 4 |
-| Link + first boot | Not started | spec in section 5 |
+| Record-form CR0 gaps | Done | CR0 set for `clrldi.`/`rldicl.`/`rldicr.`/`rotldi.`/`sld.`/`srd.`; 0 "RC bit enabled" lines |
+| Native runtime | Phase 1 | `C:\dev\xmb\xmbrt`: memory, image, function table, HLE thunks, logging syscalls; every call returns CELL_ENOSYS |
+| Link + first boot | Done | `out\xmbrt\xmbrt.exe` enters vsh at 0x10230; first call `sys_mutex_create` from vsh's TLS init |
 
 ## 2. Folder map
 
@@ -88,8 +88,16 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
   indirect calls (`bctrl` through OPDs) resolve. HLE code addresses (`0x018D8000 + 4*i`) map to native thunks.
 - **Threads:** one host thread per PPU thread, each with its own `PPCContext`, guest stack (allocated in guest
   memory, 16-byte aligned, back-chain zeroed), r1 = stack top, r2 = module TOC, r13 = TLS pointer.
-- **Entry:** read the OPD at vsh.elf's `e_entry` (code + TOC), set r2, call the mapped function. Before that, run
-  each PRX's `module_start` (OPD in `modules.csv`) in load order, as `sys_prx` would.
+- **Entry:** read the OPD at vsh.elf's `e_entry` (code + TOC), set r2, call the mapped function. Registers and the
+  argv/envp block follow `ppu_load_exec` (r3 argc, r4 argv, r5 envp, r6 envc, r7 thread id, r8–r10 TLS, r11
+  e_entry, r12 malloc_pagesize). RPCS3 does not run the boot plugins' `module_start` before vsh: vsh loads them
+  itself through `sys_prx_*`, so those syscalls must hand back the prelinked modules and call their start OPDs.
+- **As built (phase 1):** `xmbrt\build-xmbrt.ps1` compiles the runtime against the generated `ppc_context.h` and
+  links with lld-link. Run `out\xmbrt\xmbrt.exe out\boot493 fw493\vsh_module\vsh.elf`. The call log
+  (`XMBRT_LOG`, default `xmbrt.log`) has one line per syscall/HLE call; the run stops after `XMBRT_MAX_CALLS`
+  (10000) calls or `XMBRT_IDLE_SECONDS` (15) without one. The lookup table covers the whole image span, because
+  the HLE stubs sit past `PPC_CODE_BASE + PPC_CODE_SIZE`. Stacks are at 0xD0000000 and user memory at 0x30000000,
+  as in RPCS3, so addresses in the two traces line up.
 - **Faults:** vectored exception handler that reports the faulting guest address and the last guest function
   (keep a per-thread "current function" breadcrumb in debug builds).
 - **Done when:** the binary links with all 224 objects, loads the image, enters vsh's entry point, and the first
@@ -171,7 +179,9 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 - Use forward slashes in CMake `-D` paths. Ninja paths need `$:` for drive letters.
 - RPCS3's prebuilt LLVM needs VS 2026's STL. With VS 2022, build LLVM from source (`build-llvm.bat`).
 - `rpcs3.exe --headless --installfw` crashes on exit (0xC0000409) after a completed install.
-- XenonRecomp: ~9,000 "Unable to decode" lines are jump-table data inside function spans (harmless). Its
+- XenonRecomp named functions without a symbol `sub_<decimal>` while the mapping uses hex, which left 15
+  functions unresolved at link time. Fixed in the patch (`recompiler.cpp`, fallback name now `sub_{:X}`).
+- XenonRecomp: ~12,000 "Unable to decode" lines are jump-table data inside function spans (harmless). Its
   analysis needs `pdata_only = true` with this input; without it, it loops forever on split functions.
 - In this environment Claude Code's auto-mode permission check blocked some long-running tool runs; add a
   PowerShell permission rule if an agent should run the pipeline unattended.

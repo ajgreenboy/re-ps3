@@ -1,5 +1,5 @@
 diff --git a/XenonRecomp/recompiler.cpp b/XenonRecomp/recompiler.cpp
-index fa91527..5c4ddbf 100644
+index fa91527..61ef4b8 100644
 --- a/XenonRecomp/recompiler.cpp
 +++ b/XenonRecomp/recompiler.cpp
 @@ -240,6 +240,14 @@ void Recompiler::Analyse()
@@ -439,6 +439,15 @@ index fa91527..5c4ddbf 100644
      case PPC_INST_VSUBSWS:
          // TODO: vectorize
          for (size_t i = 0; i < 4; i++)
+@@ -2378,7 +2622,7 @@ bool Recompiler::Recompile(const Function& fn)
+     }
+     else
+     {
+-        name = fmt::format("sub_{}", fn.base);
++        name = fmt::format("sub_{:X}", fn.base);
+     }
+ 
+ #ifdef XENON_RECOMP_USE_ALIAS
 diff --git a/XenonRecomp/recompiler.h b/XenonRecomp/recompiler.h
 index 8242db5..ab59823 100644
 --- a/XenonRecomp/recompiler.h
