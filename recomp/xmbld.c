@@ -17,8 +17,9 @@
 
 #define GUEST_SIZE 0x20000000u /* 512 MB is far more than the boot set needs */
 #define PRX_BASE 0x01000000u
-#define HLE_OPD_BASE 0x0F000000u
-#define HLE_CODE_BASE 0x0F800000u
+/* HLE descriptors (and image.elf's .pdata) follow the last module, keeping the guest span compact */
+#define HLE_MAX 4096
+static uint32_t HLE_OPD_BASE, HLE_CODE_BASE, PDATA_ADDR;
 #define MAX_MODULES 256
 #define MAX_SEGS 1024
 
@@ -151,6 +152,7 @@ static uint32_t hle_opd(const char* lib, uint32_t nid)
 {
     for (int i = 0; i < g_nhle; i++)
         if (g_hle[i].nid == nid && strcmp(g_hle[i].lib, lib) == 0) return HLE_OPD_BASE + (uint32_t)i * 8;
+    if (g_nhle == HLE_MAX) { fprintf(stderr, "more than %d HLE imports\n", HLE_MAX); exit(1); }
     if (g_nhle == g_cap_hle) {
         g_cap_hle = g_cap_hle ? g_cap_hle * 2 : 1024;
         g_hle = (hle_t*)realloc(g_hle, sizeof(hle_t) * (size_t)g_cap_hle);
@@ -362,7 +364,6 @@ static void load_pdata(const char* functions_dir)
  * these segments also hold read-only data); the gaps become data sections. The function
  * boundaries are supplied as a synthetic .pdata (Xbox 360 runtime function table).
  */
-#define PDATA_ADDR 0x0E000000u
 typedef struct { uint32_t addr, size; int exec; } osec_t;
 
 static void write_elf32(const char* out_dir, uint32_t entry)
@@ -471,6 +472,10 @@ static void write_elf32(const char* out_dir, uint32_t entry)
         }
         fwrite(sh, 1, sizeof(sh), f);
     }
+    /* XenonRecomp emits PPC_IMAGE_SIZE from the file length and places its function lookup table
+       after base + size, so the file must cover the whole guest span including HLE and .pdata. */
+    uint32_t span = PDATA_ADDR + (uint32_t)g_npdata * 8 - lo;
+    for (long pos = ftell(f); pos < (long)span; pos++) fputc(0, f);
     fclose(f);
     free(name_off);
     free(data_off);
@@ -513,6 +518,9 @@ int main(int argc, char** argv)
             return 1;
         }
     }
+    HLE_OPD_BASE = next_base;
+    HLE_CODE_BASE = HLE_OPD_BASE + HLE_MAX * 8;
+    PDATA_ADDR = (HLE_CODE_BASE + HLE_MAX * 4 + 0xFFFFu) & ~0xFFFFu;
 
     for (int i = 0; i < g_nmods; i++) {
         module_t* m = &g_mods[i];
