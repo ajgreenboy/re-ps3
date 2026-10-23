@@ -1,5 +1,5 @@
 diff --git a/XenonRecomp/recompiler.cpp b/XenonRecomp/recompiler.cpp
-index fa91527..64b72f1 100644
+index fa91527..566da08 100644
 --- a/XenonRecomp/recompiler.cpp
 +++ b/XenonRecomp/recompiler.cpp
 @@ -1,6 +1,7 @@
@@ -635,11 +635,12 @@ index fa91527..64b72f1 100644
      }
  
 -#if 0
-+    // A function span that ends without a b/bctr/blr runs on into the next code in the guest (spans can be
-+    // cut by other entries): continue there as a tail call, so the rest (epilogue included) still runs.
-     if (insn.opcode == nullptr || (insn.opcode->id != PPC_INST_B && insn.opcode->id != PPC_INST_BCTR && insn.opcode->id != PPC_INST_BLR))
+-    if (insn.opcode == nullptr || (insn.opcode->id != PPC_INST_B && insn.opcode->id != PPC_INST_BCTR && insn.opcode->id != PPC_INST_BLR))
 -        fmt::println("Function at {:X} ends prematurely with instruction {} at {:X}", fn.base, insn.opcode != nullptr ? insn.opcode->name : "INVALID", base - 4);
 -#endif
++    // A function span that ends without a b/bctr/blr runs on into the next code in the guest (spans can be
++    // cut by other entries): continue there as a tail call, so the rest (epilogue included) still runs.
++    if (base != fn.base && (insn.opcode == nullptr || (insn.opcode->id != PPC_INST_B && insn.opcode->id != PPC_INST_BCTR && insn.opcode->id != PPC_INST_BLR)))
 +    {
 +        println("\t// fallthrough to 0x{:X}", base);
 +        println("\tPPC_CALL_UNRESOLVED(0x{:X});", base);

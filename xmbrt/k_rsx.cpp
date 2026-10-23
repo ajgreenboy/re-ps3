@@ -46,6 +46,20 @@ namespace
 
     uint64_t timebase_now() { return ppc_mftb(); }
 
+}
+
+// rsx_gl.cpp
+void rsx_gl_init();
+void rsx_gl_method(uint32_t reg, uint32_t arg);
+void rsx_gl_flip(uint32_t offset, uint32_t width, uint32_t height);
+void rsx_gl_poll();
+
+namespace
+{
+
+    std::atomic<uint32_t> g_method_count[0x10000 / 4];
+    std::atomic<uint64_t> g_draws{ 0 }, g_flips{ 0 };
+
     uint32_t head(uint32_t index, uint32_t field) { return g_rsx.driver_info + DI_HEAD + index * DI_HEAD_SIZE + field; }
 
     // Sends an RSX interrupt event if the guest registered a handler for it. Caller holds g_kernel.
@@ -59,6 +73,12 @@ namespace
     // Completes a flip the way RPCS3's renderer does once the frame is presented (package 0xFEC).
     void complete_flip(uint32_t buffer)
     {
+        g_flips++;
+        if (buffer < g_rsx.display_count)
+        {
+            const DisplayBuffer& d = g_rsx.display[buffer];
+            rsx_gl_flip(d.offset, d.width, d.height);
+        }
         const uint32_t ff = head(1, HEAD_FLIP_FLAGS);
         guest_store_u32(ff, guest_load_u32(ff) | 0x80000000);
         guest_store_u64(head(1, HEAD_LAST_FLIP_TIME), timebase_now());
@@ -97,6 +117,7 @@ namespace
         {
             const uint32_t put = guest_load_u32(ctrl + 0x40);
             uint32_t get = guest_load_u32(ctrl + 0x44);
+            rsx_gl_poll();
             if (get == put)
             {
                 std::this_thread::sleep_for(std::chrono::microseconds(200));
@@ -139,6 +160,8 @@ namespace
             {
                 const uint32_t reg = non_inc ? method : method + i * 4;
                 const uint32_t arg = guest_load_u32(addr + 4 + i * 4);
+                g_method_count[(reg & 0xFFFF) >> 2]++;
+                if (reg == 0x1808 && arg) g_draws++; // NV4097_SET_BEGIN_END (begin)
                 switch (reg)
                 {
                 case 0x0050: // NV406E_SET_REFERENCE
@@ -179,6 +202,7 @@ namespace
                     break;
                 }
                 default:
+                    if (reg < 0xE000) rsx_gl_method(reg, arg);
                     if (reg >= 0xE940 && reg <= 0xE95C) // GCM_DRIVER_QUEUE (package 0x103)
                     {
                         KLock lock(g_kernel);
@@ -297,6 +321,7 @@ namespace
         guest_store_u32(ctx.r3.u32, kContextId);
         if (!g_rsx.started.exchange(true))
         {
+            rsx_gl_init();
             std::thread(fifo_thread).detach();
             std::thread(vblank_thread).detach();
         }
@@ -397,6 +422,34 @@ namespace
             return CELL_EINVAL;
         }
         return CELL_OK;
+    }
+}
+
+// For the renderer: location 0 = local memory, 1 = main memory through the IO map.
+uint32_t rsx_guest_address(uint32_t offset, uint32_t location)
+{
+    return rsx_address(offset, location);
+}
+
+// Logs which RSX methods vsh has issued (most used first), with draw and flip counts.
+void rsx_dump_stats()
+{
+    std::vector<std::pair<uint32_t, uint32_t>> used;
+    for (uint32_t i = 0; i < 0x4000; i++)
+        if (const uint32_t n = g_method_count[i]) used.push_back({ n, i * 4 });
+    std::sort(used.rbegin(), used.rend());
+    log_line("rsx: %llu draws, %llu flips, %zu distinct methods", (unsigned long long)g_draws.load(), (unsigned long long)g_flips.load(), used.size());
+    std::string line;
+    for (size_t i = 0; i < used.size(); i++)
+    {
+        char item[32];
+        snprintf(item, sizeof(item), " %04X:%u", used[i].second, used[i].first);
+        line += item;
+        if ((i + 1) % 12 == 0 || i + 1 == used.size())
+        {
+            log_line("rsx methods:%s", line.c_str());
+            line.clear();
+        }
     }
 }
 

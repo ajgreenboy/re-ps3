@@ -41,7 +41,7 @@ const read32 = (a: number) => {
   return s ? dv.getUint32(s.off + (a - s.addr)) : undefined;
 };
 modules[0].toc = read32(elf.getUint32(0x18) + 4) ?? 0;
-for (let i = 0; i < modules.length; i++) modules[i].end = i + 1 < modules.length ? modules[i + 1].base : 0x18d0000;
+for (let i = 0; i < modules.length; i++) modules[i].end = i + 1 < modules.length ? modules[i + 1].base : 0x10000000;
 
 let added = 0;
 for (const m of modules) {
@@ -73,7 +73,10 @@ for (const m of modules) {
     for (let a = s.addr; a + 8 <= s.addr + s.size; a += 4) {
       if (dv.getUint32(s.off + (a - s.addr) + 4) !== m.toc) continue;
       const code = dv.getUint32(s.off + (a - s.addr));
-      if (code & 3 || !inCode(code) || starts.has(code) || insideKnown(code)) continue;
+      if (code & 3 || !inCode(code) || starts.has(code)) continue;
+      // Inside a mapped body it is only trusted when it lands on a prologue (Ghidra merges some functions)
+      const first = read32(code);
+      if (insideKnown(code) && (first === undefined || ((first >>> 16) !== 0xf821 && first !== 0x7c0802a6))) continue;
       found.add(code);
     }
   }

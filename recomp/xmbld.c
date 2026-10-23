@@ -43,7 +43,7 @@ typedef struct {
 static module_t g_mods[MAX_MODULES];
 static int g_nmods;
 
-typedef struct { char lib[32]; uint32_t nid, opd; int module; } export_t;
+typedef struct { char lib[32]; uint32_t nid, opd; int module, var; } export_t; /* var: opd is the variable's address */
 static export_t* g_exports;
 static int g_nexports, g_cap_exports;
 
@@ -128,7 +128,7 @@ static int apply_relocs(module_t* m)
     return n;
 }
 
-static void add_export(const char* lib, uint32_t nid, uint32_t opd, int module)
+static void add_export(const char* lib, uint32_t nid, uint32_t opd, int module, int var)
 {
     if (g_nexports == g_cap_exports) {
         g_cap_exports = g_cap_exports ? g_cap_exports * 2 : 4096;
@@ -139,12 +139,13 @@ static void add_export(const char* lib, uint32_t nid, uint32_t opd, int module)
     e->nid = nid;
     e->opd = opd;
     e->module = module;
+    e->var = var;
 }
 
-static const export_t* find_export(const char* lib, uint32_t nid)
+static const export_t* find_export(const char* lib, uint32_t nid, int var)
 {
     for (int i = 0; i < g_nexports; i++)
-        if (g_exports[i].nid == nid && strcmp(g_exports[i].lib, lib) == 0) return &g_exports[i];
+        if (g_exports[i].nid == nid && g_exports[i].var == var && strcmp(g_exports[i].lib, lib) == 0) return &g_exports[i];
     return NULL;
 }
 
@@ -179,8 +180,10 @@ static int read_exports(module_t* m, uint32_t start, uint32_t end)
         if (attr & 1) {
             char lib[32];
             cstr(name, lib, sizeof(lib));
-            for (uint32_t i = 0; i < num_func; i++) add_export(lib, rd32(nids + 4 * i), rd32(addrs + 4 * i), mi);
-            n += num_func;
+            for (uint32_t i = 0; i < num_func; i++) add_export(lib, rd32(nids + 4 * i), rd32(addrs + 4 * i), mi, 0);
+            /* variable exports follow the functions in the same nid/addr arrays */
+            for (uint32_t i = num_func; i < num_func + num_var; i++) add_export(lib, rd32(nids + 4 * i), rd32(addrs + 4 * i), mi, 1);
+            n += num_func + num_var;
         } else {
             for (uint32_t i = 0; i < num_func; i++) {
                 uint32_t nid = rd32(nids + 4 * i), opd = rd32(addrs + 4 * i);
@@ -188,7 +191,6 @@ static int read_exports(module_t* m, uint32_t start, uint32_t end)
                 if (nid == NID_MODULE_STOP) m->stop_opd = opd;
             }
         }
-        (void)num_var;
         a += size ? size : 0x1c;
     }
     return n;
@@ -208,9 +210,9 @@ static void scan_tables(module_t* m)
     for (uint32_t a = lo; a + 0x2c <= hi; a += 4) {
         uint8_t size = g_mem[a];
         if ((size != 0x1c && size != 0x2c) || g_mem[a + 1] != 0) continue;
-        uint16_t num_func = be16(g_mem + a + 6);
+        uint16_t num_func = be16(g_mem + a + 6), num_var = be16(g_mem + a + 8);
         uint32_t name = rd32(a + 0x10), nids = rd32(a + 0x14), addrs = rd32(a + 0x18);
-        if (!num_func || num_func > 8192 || !mapped(name) || !mapped(nids) || !mapped(addrs)) continue;
+        if (!(num_func || num_var) || num_func > 8192 || num_var > 8192 || !mapped(name) || !mapped(nids) || !mapped(addrs)) continue;
         char lib[32];
         cstr(name, lib, sizeof(lib));
         if (!ident(lib)) continue;
@@ -224,24 +226,51 @@ static void scan_tables(module_t* m)
     }
 }
 
+/* Reference lists ({be32 type, addr, addend}, type 0 ends) patched with an import's address, as RPCS3
+   (0b0fa08) ppu_patch_refs does for imported variables and for functions whose library sets attribute 0x2000. */
+static void patch_refs(uint32_t ref, uint32_t target)
+{
+    for (; ref && mapped(ref) && rd32(ref); ref += 12) {
+        uint32_t type = rd32(ref), addr = rd32(ref + 4), data = target + rd32(ref + 8);
+        uint8_t* p = g_mem + addr;
+        switch (type) {
+        case 1: put_be32(p, data); break;
+        case 4: put_be16(p, (uint16_t)data); break;
+        case 6: put_be16(p, (uint16_t)((data >> 16) + ((data & 0x8000) ? 1 : 0))); break;
+        case 57: put_be16(p, (uint16_t)((be16(p) & 3) | ((uint16_t)data & 0xFFFC))); break;
+        default: fprintf(stderr, "unknown ref type %u at 0x%x\n", type, addr); break;
+        }
+    }
+}
+
+static int g_var_imports, g_var_unbound;
+
 static int bind_imports(module_t* m, FILE* out, int* hle_count)
 {
     int n = 0;
     for (uint32_t a = m->imports_start; a && a < m->imports_end;) {
         uint8_t size = g_mem[a];
-        uint16_t num_func = be16(g_mem + a + 6);
+        uint16_t attr = be16(g_mem + a + 4), num_func = be16(g_mem + a + 6), num_var = be16(g_mem + a + 8);
         uint32_t name = rd32(a + 0x10), nids = rd32(a + 0x14), addrs = rd32(a + 0x18);
+        uint32_t vnids = rd32(a + 0x1c), vstubs = rd32(a + 0x20);
         char lib[32];
         cstr(name, lib, sizeof(lib));
         if (size == 0x2c && ident(lib)) {
             for (uint32_t i = 0; i < num_func; i++) {
                 uint32_t nid = rd32(nids + 4 * i), slot = addrs + 4 * i;
-                const export_t* e = find_export(lib, nid);
+                const export_t* e = find_export(lib, nid, 0);
                 uint32_t target = e ? e->opd : hle_opd(lib, nid);
                 if (!e) (*hle_count)++;
                 put_be32(g_mem + slot, target);
+                if (attr & 0x2000) patch_refs(rd32(nids + 4 * (i + num_func)), target);
                 fprintf(out, "%s,%s,0x%08X,0x%08X,0x%08X,%s\n", m->name, lib, nid, slot, target, e ? g_mods[e->module].name : "HLE");
                 n++;
+            }
+            for (uint32_t i = 0; i < num_var; i++) {
+                const export_t* e = find_export(lib, rd32(vnids + 4 * i), 1);
+                g_var_imports++;
+                if (!e) { g_var_unbound++; fprintf(stderr, "%s: unbound variable import %s 0x%08X\n", m->name, lib, rd32(vnids + 4 * i)); }
+                patch_refs(rd32(vstubs + 4 * i), e ? e->opd : 0);
             }
         }
         a += size ? size : 0x2c;
@@ -365,6 +394,13 @@ static void load_pdata(const char* functions_dir)
         }
     }
     g_npdata = n;
+    /* Ghidra reports some entries (export thunks) as a 1-byte range: give them code up to the next function */
+    for (int i = 0; i < g_npdata; i++) {
+        if (g_pdata[i].insns) continue;
+        const uint32_t next = i + 1 < g_npdata ? g_pdata[i + 1].begin : g_pdata[i].begin + 4;
+        g_pdata[i].insns = (next - g_pdata[i].begin) / 4;
+        add_code(g_pdata[i].begin, next);
+    }
     merge_code();
 }
 
@@ -597,6 +633,7 @@ int main(int argc, char** argv)
     }
     fclose(fo);
 
+    printf("variable imports=%d unbound=%d\n", g_var_imports, g_var_unbound);
     printf("modules=%d segments=%d exports=%d imports=%d bound_to_modules=%d bound_to_hle=%d (distinct hle functions=%d)\n",
         g_nmods, g_nsegs, g_nexports, total, total - hle, hle, g_nhle);
 
