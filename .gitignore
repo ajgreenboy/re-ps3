@@ -22,3 +22,6 @@ build/
 *.log
 *.err
 empty.txt
+
+boot_extra/
+xenon/xmb_switch_tables.toml
