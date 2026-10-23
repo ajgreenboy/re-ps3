@@ -22,6 +22,8 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 | Record-form CR0 gaps | Done | CR0 set for `clrldi.`/`rldicl.`/`rldicr.`/`rotldi.`/`sld.`/`srd.`; 0 "RC bit enabled" lines |
 | Native runtime | Phase 1 | `C:\dev\xmb\xmbrt`: memory, image, function table, HLE thunks, logging syscalls; every call returns CELL_ENOSYS |
 | Link + first boot | Done | `out\xmbrt\xmbrt.exe` enters vsh at 0x10230; first call `sys_mutex_create` from vsh's TLS init |
+| Reference trace (phase 2) | Done | `out\trace\rpcs3_trace.txt` (200,000 calls with args and returns), normalised `out\trace\rpcs3.norm`; RPCS3 patch `rpcs3-xmb-trace.patch` |
+| Module inventory | Done | `out\trace\modules_loaded.txt`: 46 modules load before the XMB is up, most of them outside the 13-plugin set |
 
 ## 2. Folder map
 
@@ -102,6 +104,24 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
   (keep a per-thread "current function" breadcrumb in debug builds).
 - **Done when:** the binary links with all 224 objects, loads the image, enters vsh's entry point, and the first
   unimplemented syscall/HLE call is reported by name instead of crashing.
+
+### Phase 2 as built: reference traces
+
+- RPCS3 carries a local tracer (`rpcs3-xmb-trace.patch`: `PPUModule.cpp`, `PPUInterpreter.cpp`, `lv2.cpp`). It logs
+  syscalls whose `cia` is in vsh or a boot plugin, and import calls (a taken `bcctr` leaving those modules, with
+  the return matched at `bclr`). Addresses are translated to xmbld's layout; every module load/unload is logged.
+- Capture: set PPU Decoder to "Interpreter (static)" (the tracer needs it), then run RPCS3 with
+  `XMB_TRACE=out\trace\rpcs3_trace.txt`, `XMB_TRACE_MODULES=out\boot493\modules.csv`, `XMB_TRACE_MAX=200000`.
+  The XMB still reaches the menu at 60 FPS under the interpreter. Switch the decoder back to LLVM afterwards.
+- Tooling, `xmbrt\xmbtrace.ts` (bun): `names` builds `out\nid_names.csv` (6,519 NIDs from RPCS3's REG_FUNC
+  registrations, hashed like `ppu_generate_id`); `rpcs3` / `xmbrt` normalise either log to one line format with
+  repeats collapsed; `diff` prints the first divergence on a thread.
+- **Scope finding:** vsh statically links liblv2, so most of its work is direct syscalls. It also loads ~33 modules
+  outside the boot set (libfs_utility2, sys_audio, libsre, qglbase, mms*, custom_render_plugin, paf_web, raf,
+  x3_*, ...), and calls into them through import stubs and function pointers. These are Sony framework code, not
+  APIs to reimplement, so they have to join the recompiled image (as RPCS3 runs them LLE). Decoders on the
+  ffmpeg list (libac3dec, libat3dec, libavcdec, libatrac3plus, libjpgdec, libgifdec, libtiffdec, libsmvd4) can
+  stay HLE per the swap rule.
 
 ### 4.2 LV2 syscall layer (`ctx.syscall`, number in r11, args r3–r10, result r3)
 
