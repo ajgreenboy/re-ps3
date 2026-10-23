@@ -20,6 +20,11 @@ extern "C" uint64_t ppc_mftb()
     return uint64_t(ns) * 2 / 25;
 }
 
+uint64_t system_time_us()
+{
+    return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - g_timebase_start).count());
+}
+
 std::string guest_string(uint32_t addr, size_t max)
 {
     std::string s;

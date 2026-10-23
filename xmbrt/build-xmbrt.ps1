@@ -27,7 +27,7 @@ foreach ($f in Get-ChildItem $src -Filter *.cpp) {
 
 # Response file: 224 object paths are too long for one command line.
 $rsp = "$Out\link.rsp"
-$lines = @('/nologo', '/subsystem:console', '/stack:0x4000000', "/out:$Out\xmbrt.exe", "/pdb:$Out\xmbrt.pdb", '/debug', 'kernel32.lib')
+$lines = @('/nologo', '/subsystem:console', '/stack:0x4000000', "/out:$Out\xmbrt.exe", "/pdb:$Out\xmbrt.pdb", '/debug', 'kernel32.lib', 'setupapi.lib', 'hid.lib', 'xinput.lib')
 $lines += $runtime | ForEach-Object { "`"$_`"" }
 $lines += $recomp | ForEach-Object { "`"$($_.FullName)`"" }
 Set-Content $rsp $lines -Encoding ascii

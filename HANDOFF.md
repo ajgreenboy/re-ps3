@@ -20,7 +20,8 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 | Translation (XenonRecomp) | Done | 56,982 functions, 0 unrecognized instructions |
 | Compile generated C++ | Done | 224/224 objects, 63 MB, `C:\dev\xmb\out\recomp_obj` |
 | Record-form CR0 gaps | Done | CR0 set for `clrldi.`/`rldicl.`/`rldicr.`/`rotldi.`/`sld.`/`srd.`; 0 "RC bit enabled" lines |
-| Native runtime | Phase 1 | `C:\dev\xmb\xmbrt`: memory, image, function table, HLE thunks, logging syscalls; every call returns CELL_ENOSYS |
+| Native runtime | Phase 3 in progress | `C:\dev\xmb\xmbrt`: LV2 kernel (threads, sync, events, memory, fs overlay, prx, sys_config, AV vuart, null RSX); see "Phase 3 as built" |
+| Wider image | Done | 39 modules (13 boot plugins + 25 vsh/sys modules vsh loads at boot), 71,328 functions, 857 PS3 jump tables, 280 objects |
 | Link + first boot | Done | `out\xmbrt\xmbrt.exe` enters vsh at 0x10230; first call `sys_mutex_create` from vsh's TLS init |
 | Reference trace (phase 2) | Done | `out\trace\rpcs3_trace.txt` (200,000 calls with args and returns), normalised `out\trace\rpcs3.norm`; RPCS3 patch `rpcs3-xmb-trace.patch` |
 | Module inventory | Done | `out\trace\modules_loaded.txt`: 46 modules load before the XMB is up, most of them outside the 13-plugin set |
@@ -122,6 +123,39 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
   APIs to reimplement, so they have to join the recompiled image (as RPCS3 runs them LLE). Decoders on the
   ffmpeg list (libac3dec, libat3dec, libavcdec, libatrac3plus, libjpgdec, libgifdec, libtiffdec, libsmvd4) can
   stay HLE per the swap rule.
+
+### Phase 3 as built: wider image and LV2 kernel
+
+- **Image:** `boot_extra\` holds the 25 extra modules (decrypted copies; 3 from `/dev_flash/sys/internal` via
+  `rpcs3.exe --decrypt`). Ghidra function lists for them are in `rea\functions`; `rea\functions_patched` adds
+  ranges for jump-table cases Ghidra missed. Relink with
+  `build\xmbld.exe --functions rea\functions_patched out\boot493 fw493\vsh_module\vsh.elf boot\*.prx boot_extra\*.prx`.
+  Kept out (swap rule): decoders (ac3/at3/avc/atrac3plus/jpg/gif/tiff/smvd4), libsre (cellSpurs), sacd, libmtp,
+  mintx_client, libasfparser2.
+- **Jump tables:** `xenon\gen-switch-tables.ts <boot493> <functions dir> xenon\xmb_switch_tables.toml [<patched dir>]`
+  finds GCC PIC tables (`lis/addi` or TOC-loaded base, `lwzx/extsw/add/mtctr/bctr`), extends functions whose
+  cases lie past Ghidra's end, and writes XenonRecomp `[[switch]]` entries. Iterate patch + relink until it
+  reports 0 functions to extend. Known gaps: 2 tables whose base register is set far earlier (0x2B05C,
+  0x132206C) and 4 switches whose cases sit in a range below the function entry (0x1BC3F30, 0x1C40DC,
+  0x1D53674, 0x1EFB08) still fall back to an indirect call / `return`.
+- **XenonRecomp patch additions:** CR0 for 64-bit record forms and `mulld.`, `vandc`/`vrlw`/`vaddsws`/`lvebx`,
+  conditional `tw` as a no-op, hex fallback function names, and `mftb` as `PPC_MFTB()` → runtime `ppc_mftb()`
+  (80 MHz, matching `sys_time_get_timebase_frequency`; XenonRecomp's default `__rdtsc()` runs ~40x fast).
+- **Kernel (`xmbrt\k_*.cpp`):** one big kernel lock with per-thread sleep/wake like RPCS3's lv2_obj; IDs shaped like
+  RPCS3's (type byte << 24 | n << 8). Threads are host threads with a 16 MB reserved host stack;
+  `sys_ppu_thread_exit` unwinds with a C++ exception. Memory areas follow what RPCS3 gave vsh (64 KB pages at
+  0x10000000, 1 MB at 0x20000000, mmapper from 0x30000000, RSX context 0x40000000, local memory 0xC0000000,
+  stacks 0xD0001000). PRX "loading" maps names to prelinked modules, and restores pristine data on reload.
+- **Filesystem overlay:** reads from `C:\dev\rpcs3\bin\<mount>`, writes to `out\xmbrt\vfs\<mount>` (copy on
+  first write); `/dev_flash` read-only. RPCS3's install is never modified.
+- **sys_uart (`k_uart.cpp`):** the AV manager: PS3AV replies as RPCS3 sends them, HDMI plug/HDCP event sequencing.
+- **Null RSX (`k_rsx.cpp`):** sys_rsx context/driver info/reports as in RPCS3, a 59.94 Hz vblank thread posting
+  0xFED-style vblank events, and a FIFO walker handling jumps/calls, reference, semaphores and GCM
+  flip/queue/user-command methods. Drawing methods are skipped until phase 4. Logs "rsx: first command
+  buffer submit" when vsh first advances `put`.
+- **HLE:** cellSpurs and cellAdec succeed without doing work (swap rule); everything else is ENOSYS.
+- **Loop:** `xmbrt\build-xmbrt.ps1`, then `xmbrt\run-xmbrt.ps1` (runs, normalises, diffs against
+  `out\trace\rpcs3.norm` on the main thread).
 
 ### 4.2 LV2 syscall layer (`ctx.syscall`, number in r11, args r3–r10, result r3)
 

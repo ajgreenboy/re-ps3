@@ -25,6 +25,9 @@ void register_syscall(uint32_t number, SyscallFn fn)
 
 void register_config_syscalls();
 void register_rsx_syscalls();
+void register_uart_syscalls();
+void register_timer_syscalls();
+void register_extra_syscalls();
 
 void lv2_init()
 {
@@ -37,6 +40,10 @@ void lv2_init()
     register_misc_syscalls();
     register_config_syscalls();
     register_rsx_syscalls();
+    register_uart_syscalls(); // after misc: replaces its placeholders
+    register_timer_syscalls();
+    register_extra_syscalls(); // after misc: real hid/sm handlers replace its OK stubs
+    pad_init();
     size_t n = 0;
     for (auto fn : g_table) n += fn != nullptr;
     log_line("lv2: %zu syscalls implemented", n);

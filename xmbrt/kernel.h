@@ -131,5 +131,13 @@ void register_fs_syscalls();
 void register_prx_syscalls();
 void register_misc_syscalls();
 
+// Guest time: microseconds since process start (sys_time_get_system_time, timers); mftb is the 80 MHz form.
+uint64_t system_time_us();
+extern "C" uint64_t ppc_mftb();
+
+// Controller (k_pad.cpp)
+void pad_init();
+uint32_t pad_read(uint32_t guest_buf, uint64_t max_u16);
+
 // Memory areas (k_memory.cpp), for other subsystems that need guest allocations.
 uint32_t user_alloc(uint32_t size, uint32_t align);
