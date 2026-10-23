@@ -346,7 +346,8 @@ static void load_pdata(const char* functions_dir)
                 uint32_t e = (uint32_t)strtoul(p + 1, &p, 16);
                 add_code(base + s, base + e + 1);
                 if (s < entry) add_pdata(base + s, (e + 1 - s) / 4);
-                else if (e + 1 > max_end) max_end = e + 1;
+                /* a range that starts below the entry but runs past it still belongs to the entry's span */
+                if (e + 1 > max_end) max_end = e + 1;
                 if (*p == ';') p++;
             }
             if (max_end > entry) add_pdata(base + entry, (max_end - entry) / 4);
