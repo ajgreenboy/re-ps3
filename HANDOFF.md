@@ -20,7 +20,8 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 | Translation (XenonRecomp) | Done | 56,982 functions, 0 unrecognized instructions |
 | Compile generated C++ | Done | 224/224 objects, 63 MB, `C:\dev\xmb\out\recomp_obj` |
 | Record-form CR0 gaps | Done | CR0 set for `clrldi.`/`rldicl.`/`rldicr.`/`rotldi.`/`sld.`/`srd.`; 0 "RC bit enabled" lines |
-| Native runtime | Phase 3 in progress | `C:\dev\xmb\xmbrt`: LV2 kernel (threads, sync, events, memory, fs overlay, prx, sys_config, AV vuart, null RSX); see "Phase 3 as built" |
+| Phase 3 milestone | Done | 60 s run: 62,800 calls, 46 guest threads, RSX context + first command buffer submit, 1920x1080 display buffers; main thread matches RPCS3 for 961 calls (then a timing race); log `out\xmbrt\xmbrt_phase3.log` |
+| Native runtime | Phase 4 next | `C:\dev\xmb\xmbrt`: LV2 kernel (threads, sync, events, memory, fs overlay, prx, sys_config, AV vuart, null RSX); see "Phase 3 as built" |
 | Wider image | Done | 39 modules (13 boot plugins + 25 vsh/sys modules vsh loads at boot), 71,328 functions, 857 PS3 jump tables, 280 objects |
 | Link + first boot | Done | `out\xmbrt\xmbrt.exe` enters vsh at 0x10230; first call `sys_mutex_create` from vsh's TLS init |
 | Reference trace (phase 2) | Done | `out\trace\rpcs3_trace.txt` (200,000 calls with args and returns), normalised `out\trace\rpcs3.norm`; RPCS3 patch `rpcs3-xmb-trace.patch` |
@@ -138,6 +139,15 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
   reports 0 functions to extend. Known gaps: 2 tables whose base register is set far earlier (0x2B05C,
   0x132206C) and 4 switches whose cases sit in a range below the function entry (0x1BC3F30, 0x1C40DC,
   0x1D53674, 0x1EFB08) still fall back to an indirect call / `return`.
+- **PS3-vs-Xbox translation fixes (all in the patch; each was a real boot blocker):** `mfocrf` honours its
+  field mask (was hard-coded to cr6, so every PS3 `lwarx/stwcx.` loop spun); jump tables dispatch on `ctr`
+  (the computed target) instead of an index register vsh often reuses, with an indirect fallback instead of
+  `__builtin_unreachable`; `dcbz` clears 128 bytes (Cell line size); out-of-function conditional/ctr branches
+  and function spans that fall off their end continue as tail calls (`PPC_CALL_UNRESOLVED`, resolved by the
+  runtime); the function-table address comes from the runtime (`PPC_FUNC_TABLE_FROM_RUNTIME`), so relinks
+  don't need a full rebuild. Function discovery adds OPD-only targets (`xenon\gen-opd-functions.ts`, ~25k
+  C++ methods) and every `bl`/`b` target XenonRecomp flags (`// ERROR`), iterated to a fixed point; xmbld
+  dedupes `.pdata` starts. `compile-recomp.ps1` removes stale `ppc_recomp.N.cpp` and tracks header deps.
 - **XenonRecomp patch additions:** CR0 for 64-bit record forms and `mulld.`, `vandc`/`vrlw`/`vaddsws`/`lvebx`,
   conditional `tw` as a no-op, hex fallback function names, and `mftb` as `PPC_MFTB()` → runtime `ppc_mftb()`
   (80 MHz, matching `sys_time_get_timebase_frequency`; XenonRecomp's default `__rdtsc()` runs ~40x fast).

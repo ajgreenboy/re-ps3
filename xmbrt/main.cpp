@@ -206,6 +206,18 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS* info)
         for (int i = 0; i < 32; i += 8)
             log_line("  r%-2d %08X %08X %08X %08X %08X %08X %08X %08X", i, gpr[i]->u32, gpr[i + 1]->u32, gpr[i + 2]->u32, gpr[i + 3]->u32,
                 gpr[i + 4]->u32, gpr[i + 5]->u32, gpr[i + 6]->u32, gpr[i + 7]->u32);
+        // Guest call chain: PPC64 ABI back chain at 0(r1), the caller's saved LR at 16(back chain)
+        char chain[512];
+        int len = snprintf(chain, sizeof(chain), "  call chain:");
+        uint32_t sp = c.r1.u32;
+        for (int depth = 0; depth < 16 && sp >= kStackBase && sp < 0xE0000000; depth++)
+        {
+            const uint32_t back = uint32_t(guest_load_u64(sp));
+            if (back <= sp || back >= 0xE0000000) break;
+            len += snprintf(chain + len, sizeof(chain) - len, " %08X", uint32_t(guest_load_u64(back + 16)));
+            sp = back;
+        }
+        log_line("%s", chain);
     }
     fatal_exit(1);
 }
