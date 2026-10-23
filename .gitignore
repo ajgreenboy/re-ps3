@@ -25,3 +25,23 @@ empty.txt
 
 boot_extra/
 xenon/xmb_switch_tables.toml
+
+# Local investigation outputs; retain source tooling used by the handoff.
+/work/*
+!/work/*.ts
+!/work/*.ps1
+*.bin
+*.idb
+*.i64
+*.dmp
+*.bak
+*.stderr.txt
+
+# Local credentials and emulated-console identities
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+console-psid*
+idps*

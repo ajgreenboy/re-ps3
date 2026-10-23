@@ -3,12 +3,15 @@
 #include "kernel.h"
 
 #include <iterator>
+#include <atomic>
 
 #include "syscall_names.inc"
 
 namespace
 {
     SyscallFn g_table[1024];
+    std::atomic_bool g_reported_unsupported[1024]{};
+    std::atomic_bool g_reported_out_of_range{};
 }
 
 static const char* syscall_name(uint64_t number)
@@ -30,7 +33,9 @@ void register_rsx_syscalls();
 void register_uart_syscalls();
 void register_timer_syscalls();
 void register_rsxaudio_syscalls();
+void register_spu_syscalls();
 void register_extra_syscalls();
+void register_net_syscalls();
 
 void lv2_init()
 {
@@ -46,11 +51,14 @@ void lv2_init()
     register_uart_syscalls(); // after misc: replaces its placeholders
     register_timer_syscalls();
     register_rsxaudio_syscalls(); // after misc: replaces its OK stubs
+    register_spu_syscalls();
     register_extra_syscalls(); // after misc: real hid/sm handlers replace its OK stubs
+    register_security_syscalls();
+    register_net_syscalls();
     pad_init();
     size_t n = 0;
     for (auto fn : g_table) n += fn != nullptr;
-    log_line("lv2: %zu syscalls implemented", n);
+    log_line("lv2: %zu syscalls registered (includes compatibility handlers)", n);
 }
 
 void lv2_syscall(PPCContext& ctx, uint64_t number)
@@ -63,6 +71,15 @@ void lv2_syscall(PPCContext& ctx, uint64_t number)
     const bool null_ok = !fn && number < std::size(kSyscallNullOk) && kSyscallNullOk[number];
     const int64_t result = fn ? fn(ctx) : null_ok ? CELL_OK : CELL_ENOSYS;
     ctx.r3.s64 = result;
+    if (result == CELL_ENOSYS)
+    {
+        auto& reported = number < 1024 ? g_reported_unsupported[number] : g_reported_out_of_range;
+        if (!reported.exchange(true))
+            log_line("unsupported service: sys %llu %s lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX (%s)",
+                (unsigned long long)number, syscall_name(number), lr,
+                (unsigned long long)r3, (unsigned long long)r4, (unsigned long long)r5, (unsigned long long)r6,
+                fn ? "registered handler returned ENOSYS" : "no registered handler");
+    }
     log_line("%llu T%08X sys %llu %s lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX -> %s%llX",
         (unsigned long long)seq, current_thread_id(), (unsigned long long)number, syscall_name(number), lr,
         (unsigned long long)r3, (unsigned long long)r4, (unsigned long long)r5, (unsigned long long)r6,

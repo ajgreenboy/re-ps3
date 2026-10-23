@@ -6,6 +6,7 @@
 #include "k_event.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -53,12 +54,43 @@ void rsx_gl_init();
 void rsx_gl_method(uint32_t reg, uint32_t arg);
 void rsx_gl_flip(uint32_t offset, uint32_t width, uint32_t height);
 void rsx_gl_poll();
+void rsx_gl_barrier();
 
 namespace
 {
 
     std::atomic<uint32_t> g_method_count[0x10000 / 4];
     std::atomic<uint64_t> g_draws{ 0 }, g_flips{ 0 };
+    std::atomic<uint32_t> g_fifo_method{ 0 }, g_fifo_argument{ 0 };
+    struct LabelCommand { uint32_t get, method, context, offset, address, value; };
+    std::array<LabelCommand, 64> g_label_history{}; // FIFO thread only
+    uint64_t g_label_sequence = 0;
+
+    uint32_t load_label(uint32_t address)
+    {
+        return __builtin_bswap32(std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(g_base + address)).load());
+    }
+
+    void store_label(uint32_t address, uint32_t value)
+    {
+        std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(g_base + address)).store(__builtin_bswap32(value));
+    }
+
+    void remember_label(uint32_t get, uint32_t method, uint32_t context, uint32_t offset, uint32_t address, uint32_t value)
+    {
+        g_label_history[g_label_sequence++ % g_label_history.size()] = {get,method,context,offset,address,value};
+    }
+
+    void dump_label_history()
+    {
+        const uint64_t begin = g_label_sequence > 16 ? g_label_sequence - 16 : 0;
+        for (uint64_t i = begin; i < g_label_sequence; ++i)
+        {
+            const auto& h = g_label_history[i % g_label_history.size()];
+            log_line("rsx label history: seq=%llu get=%08X method=%04X context=%08X offset=%08X address=%08X value=%08X",
+                (unsigned long long)i, h.get, h.method, h.context, h.offset, h.address, h.value);
+        }
+    }
 
     uint32_t head(uint32_t index, uint32_t field) { return g_rsx.driver_info + DI_HEAD + index * DI_HEAD_SIZE + field; }
 
@@ -96,13 +128,18 @@ namespace
             return offset < g_rsx.local_mem_size ? kLocalMemBase + offset : 0;
         case 1: case 0xFEED0001: // main memory through the IO map
         {
+            if (offset >= 0x10000000) return 0;
             const uint32_t ea = g_rsx.iomap_ea[(offset >> 20) & 511];
             return ea == ~0u ? 0 : ea + (offset & 0xFFFFF);
         }
         case 0x66606660: case 0x66616661: // semaphores
-            return g_rsx.reports + offset;
+            return offset < 0x1000 ? g_rsx.reports + offset : 0;
         case 0x66626660: // reports (local)
-            return g_rsx.reports + 0x1400 + offset;
+            return offset < 0x8000 ? g_rsx.reports + 0x1400 + offset : 0;
+        case 0xBAD68000: // reports (main memory through the IO map)
+            return offset < 0x1000000 ? rsx_address(0x0E000000 + offset, 1) : 0;
+        case 0x56616660: case 0x56616661: // device synchronization area
+            return offset < 0x100000 ? g_rsx.device_addr + offset : 0;
         default:
             return 0;
         }
@@ -160,11 +197,14 @@ namespace
             {
                 const uint32_t reg = non_inc ? method : method + i * 4;
                 const uint32_t arg = guest_load_u32(addr + 4 + i * 4);
+                g_fifo_method = reg;
+                g_fifo_argument = arg;
                 g_method_count[(reg & 0xFFFF) >> 2]++;
                 if (reg == 0x1808 && arg) g_draws++; // NV4097_SET_BEGIN_END (begin)
                 switch (reg)
                 {
                 case 0x0050: // NV406E_SET_REFERENCE
+                    rsx_gl_barrier();
                     guest_store_u32(ctrl + 0x48, arg);
                     break;
                 case 0x0060: sem_ctx_406e = arg; break;
@@ -172,21 +212,52 @@ namespace
                 case 0x0068: // NV406E_SEMAPHORE_ACQUIRE: wait for the value (bounded, so a missing release can't hang us)
                 {
                     const uint32_t a = rsx_address(sem_off_406e, sem_ctx_406e);
-                    for (int spin = 0; a && guest_load_u32(a) != arg && spin < 5000; spin++)
+                    remember_label(get,reg,sem_ctx_406e,sem_off_406e,a,arg);
+                    if (a & 3) { log_line("rsx: unaligned semaphore acquire %08X",a); break; }
+                    for (int spin = 0; a && load_label(a) != arg && spin < 5000; spin++)
+                    {
+                        rsx_gl_poll();
                         std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    }
+                    static uint32_t timeouts = 0;
+                    if (a && load_label(a) != arg && timeouts++ < 8)
+                    {
+                        log_line("rsx: semaphore timeout at %08X (value=%08X expected=%08X context=%08X offset=%08X get=%08X)",
+                            a,load_label(a),arg,sem_ctx_406e,sem_off_406e,get);
+                        dump_label_history();
+                    }
                     break;
                 }
                 case 0x006C: // NV406E_SEMAPHORE_RELEASE
-                    if (const uint32_t a = rsx_address(sem_off_406e, sem_ctx_406e)) guest_store_u32(a, arg);
+                    if (const uint32_t a = rsx_address(sem_off_406e, sem_ctx_406e); a && !(a & 3))
+                    {
+                        // RPCS3 nv406e.cpp: the device flip-sync register latches 1 on a zero write.
+                        const uint32_t value = a == g_rsx.device_addr + 0x30 && !arg ? 1 : arg;
+                        remember_label(get,reg,sem_ctx_406e,sem_off_406e,a,value);
+                        rsx_gl_barrier();
+                        store_label(a,value);
+                    }
                     break;
                 case 0x01A4: sem_ctx_4097 = arg; break;
                 case 0x1D6C: sem_off_4097 = arg; break;
                 case 0x1D70: // NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE (byte-swizzled value)
                     if (const uint32_t a = rsx_address(sem_off_4097, sem_ctx_4097))
-                        guest_store_u32(a, (arg & 0xFF00FF00) | ((arg & 0xFF) << 16) | ((arg >> 16) & 0xFF));
+                    {
+                        if (sem_off_4097 & 15) { log_line("rsx: unaligned backend semaphore release %08X",a); break; }
+                        const uint32_t value = (arg & 0xFF00FF00) | ((arg & 0xFF) << 16) | ((arg >> 16) & 0xFF);
+                        remember_label(get,reg,sem_ctx_4097,sem_off_4097,a,value);
+                        rsx_gl_barrier();
+                        store_label(a,value);
+                    }
                     break;
                 case 0x1D74: // NV4097_TEXTURE_READ_SEMAPHORE_RELEASE
-                    if (const uint32_t a = rsx_address(sem_off_4097, sem_ctx_4097)) guest_store_u32(a, arg);
+                    if (const uint32_t a = rsx_address(sem_off_4097, sem_ctx_4097))
+                    {
+                        if (sem_off_4097 & 15) { log_line("rsx: unaligned texture semaphore release %08X",a); break; }
+                        remember_label(get,reg,sem_ctx_4097,sem_off_4097,a,arg);
+                        rsx_gl_barrier();
+                        store_label(a,arg);
+                    }
                     break;
                 case 0xE920: case 0xE924: // GCM_FLIP_HEAD: display flip (package 0x102)
                 {
@@ -439,6 +510,16 @@ void rsx_dump_stats()
         if (const uint32_t n = g_method_count[i]) used.push_back({ n, i * 4 });
     std::sort(used.rbegin(), used.rend());
     log_line("rsx: %llu draws, %llu flips, %zu distinct methods", (unsigned long long)g_draws.load(), (unsigned long long)g_flips.load(), used.size());
+    if (g_rsx.dma_address)
+    {
+        const uint32_t get = guest_load_u32(g_rsx.dma_address + 0x44);
+        log_line("rsx FIFO: get=%08X put=%08X reference=%08X last method=%04X argument=%08X",
+            get, guest_load_u32(g_rsx.dma_address + 0x40),
+            guest_load_u32(g_rsx.dma_address + 0x48), g_fifo_method.load(), g_fifo_argument.load());
+        if (const uint32_t a = rsx_address(get, 1))
+            log_line("rsx FIFO words: ea=%08X %08X %08X %08X %08X", a, guest_load_u32(a),
+                guest_load_u32(a + 4), guest_load_u32(a + 8), guest_load_u32(a + 12));
+    }
     std::string line;
     for (size_t i = 0; i < used.size(); i++)
     {

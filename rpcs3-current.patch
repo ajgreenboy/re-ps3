@@ -1,0 +1,335 @@
+diff --git a/rpcs3/Emu/Cell/PPUInterpreter.cpp b/rpcs3/Emu/Cell/PPUInterpreter.cpp
+index 58c0f5587..4aed434d6 100644
+--- a/rpcs3/Emu/Cell/PPUInterpreter.cpp
++++ b/rpcs3/Emu/Cell/PPUInterpreter.cpp
+@@ -595,6 +595,9 @@ extern u64 ppu_ldarx(ppu_thread& ppu, u32 addr);
+ extern bool ppu_stwcx(ppu_thread& ppu, u32 addr, u32 reg_value);
+ extern bool ppu_stdcx(ppu_thread& ppu, u32 addr, u64 reg_value);
+ extern void ppu_trap(ppu_thread& ppu, u64 addr);
++extern bool g_xmb_trace;
++extern void xmb_trace_bcctr(ppu_thread& ppu, u32 source, u32 target);
++extern void xmb_trace_bclr(ppu_thread& ppu, u32 target);
+ 
+ // NaNs production precedence: NaN from Va, Vb, Vc
+ // and lastly the result of the operation in case none of the operands is a NaN
+@@ -3345,6 +3348,7 @@ auto BCLR()
+ 
+ 	if (ctr_ok && cond_ok)
+ 	{
++		if (g_xmb_trace) [[unlikely]] xmb_trace_bclr(ppu, target);
+ 		ppu_record_call<Flags...>(ppu, target, op, true);
+ 		ppu.cia = target;
+ 	}
+@@ -3484,6 +3488,7 @@ auto BCCTR()
+ 	if (op.bo & 0x10 || ppu.cr[op.bi] == ((op.bo & 0x8) != 0))
+ 	{
+ 		const u32 target = static_cast<u32>(ppu.ctr) & ~3;
++		if (g_xmb_trace) [[unlikely]] xmb_trace_bcctr(ppu, vm::get_addr(this_op), target);
+ 		ppu_record_call<Flags...>(ppu, target, op, true);
+ 		ppu.cia = target;
+ 	}
+diff --git a/rpcs3/Emu/Cell/PPUModule.cpp b/rpcs3/Emu/Cell/PPUModule.cpp
+index 22e8ff9b8..4a8351c39 100644
+--- a/rpcs3/Emu/Cell/PPUModule.cpp
++++ b/rpcs3/Emu/Cell/PPUModule.cpp
+@@ -41,6 +41,224 @@ extern void ppu_register_function_at(u32 addr, u32 size, ppu_intrp_func_t ptr);
+ 
+ extern void sys_initialize_tls(ppu_thread&, u64, u32, u32, u32);
+ 
++// XMB reference tracer (C:\dev\xmb, xmbrt phase 2; local change, not upstream).
++// Logs syscalls and import calls made by vsh and the 13 XMB boot plugins, with addresses translated to
++// xmbld's image layout, so the trace can be diffed against xmbrt's call log.
++// XMB_TRACE=<out file> enables it; XMB_TRACE_MODULES=<xmbld modules.csv>; XMB_TRACE_MAX (default 10000).
++// Import calls are seen at bcctr/bclr, so it needs the PPU interpreter.
++extern std::string ppu_get_syscall_name(u64 code);
++
++namespace xmb_trace
++{
++	struct seg_map
++	{
++		u32 addr, size, xmb;
++	};
++
++	constexpr u32 max_segs = 256;
++	seg_map g_segs[max_segs]{};
++	atomic_t<u32> g_seg_count = 0;
++	std::mutex g_mutex;
++	FILE* g_file = nullptr;
++	atomic_t<u64> g_seq = 0;
++	u64 g_max = 10000;
++	std::map<std::string, u32> g_bases; // module file stem -> xmbld base
++
++	struct pending
++	{
++		u32 ret;
++		u64 r1;
++		u64 seq;
++	};
++
++	thread_local std::vector<pending> t_calls;
++	thread_local u64 t_syscall_seq = 0;
++
++	bool init()
++	{
++		const char* out = std::getenv("XMB_TRACE");
++		if (!out || !*out) return false;
++		g_file = std::fopen(out, "w");
++		if (!g_file) return false;
++		if (const char* max = std::getenv("XMB_TRACE_MAX"); max && *max) g_max = std::strtoull(max, nullptr, 0);
++		if (const char* csv = std::getenv("XMB_TRACE_MODULES"); csv && *csv)
++		{
++			if (FILE* f = std::fopen(csv, "r"))
++			{
++				char line[512];
++				while (std::fgets(line, sizeof(line), f))
++				{
++					char name[128];
++					u32 base;
++					if (std::sscanf(line, "%127[^,],%*[^,],0x%x", name, &base) == 2)
++					{
++						std::string stem = name;
++						stem = stem.substr(0, stem.find_last_of('.'));
++						g_bases[stem] = base;
++					}
++				}
++				std::fclose(f);
++			}
++		}
++		std::fprintf(g_file, "# xmb trace: max %llu calls, %zu module bases\n", static_cast<unsigned long long>(g_max), g_bases.size());
++		std::fflush(g_file);
++		return true;
++	}
++
++	void register_seg(u32 addr, u32 size, u32 xmb)
++	{
++		std::lock_guard lock(g_mutex);
++		if (!size) return;
++		const u32 n = g_seg_count;
++		u32 slot = 0;
++		while (slot < n && g_segs[slot].size) slot++; // reuse a slot freed by an unload
++		if (slot == max_segs) return;
++		g_segs[slot].addr = addr;
++		g_segs[slot].xmb = xmb;
++		atomic_storage<u32>::release(g_segs[slot].size, size);
++		if (slot == n) g_seg_count.release(n + 1);
++		std::fprintf(g_file, "# seg %08X+%X -> %08X\n", addr, size, xmb);
++		std::fflush(g_file);
++	}
++
++	// Modules are unloaded and reloaded elsewhere; a stale mapping would mislabel whatever reuses the range.
++	void unregister_seg(u32 addr)
++	{
++		std::lock_guard lock(g_mutex);
++		for (u32 i = 0, n = g_seg_count; i < n; i++)
++		{
++			if (g_segs[i].size && g_segs[i].addr == addr)
++			{
++				atomic_storage<u32>::release(g_segs[i].size, 0);
++				std::fprintf(g_file, "# unseg %08X\n", addr);
++				std::fflush(g_file);
++			}
++		}
++	}
++
++	// Translates an RPCS3 address inside vsh or a boot plugin to its xmbld address.
++	bool to_xmb(u32 addr, u32& out)
++	{
++		const u32 n = g_seg_count;
++		for (u32 i = 0; i < n; i++)
++		{
++			if (addr - g_segs[i].addr < g_segs[i].size)
++			{
++				out = g_segs[i].xmb + (addr - g_segs[i].addr);
++				return true;
++			}
++		}
++		return false;
++	}
++
++	u32 xmb_or_raw(u32 addr)
++	{
++		u32 x;
++		return to_xmb(addr, x) ? x : addr;
++	}
++
++	// Counts a call; false once the limit is reached.
++	bool next_seq(u64& seq)
++	{
++		seq = ++g_seq;
++		if (seq > g_max)
++		{
++			if (seq == g_max + 1)
++			{
++				std::lock_guard lock(g_mutex);
++				std::fprintf(g_file, "# reached XMB_TRACE_MAX\n");
++				std::fflush(g_file);
++			}
++			return false;
++		}
++		return true;
++	}
++
++	void write(const char* fmt, ...)
++	{
++		char buf[512];
++		va_list ap;
++		va_start(ap, fmt);
++		std::vsnprintf(buf, sizeof(buf), fmt, ap);
++		va_end(ap);
++		std::lock_guard lock(g_mutex);
++		std::fputs(buf, g_file);
++		std::fputc('\n', g_file);
++		std::fflush(g_file);
++	}
++
++	// Import stubs load the slot with `oris r12,r12,hi` / `lwz r12,lo(r12)` before the bctrl.
++	u32 decode_stub_slot(u32 bctr_addr)
++	{
++		for (u32 k = 1; k <= 12; k++)
++		{
++			const u32 insn = vm::read32(bctr_addr - 4 * k);
++			if ((insn >> 26) == 32 && ((insn >> 21) & 31) == 12 && ((insn >> 16) & 31) == 12)
++			{
++				for (u32 j = k + 1; j <= 12; j++)
++				{
++					const u32 prev = vm::read32(bctr_addr - 4 * j);
++					if ((prev >> 26) == 25 && ((prev >> 21) & 31) == 12 && ((prev >> 16) & 31) == 12)
++						return ((prev & 0xffff) << 16) + static_cast<u32>(static_cast<s32>(static_cast<s16>(insn & 0xffff)));
++				}
++				return 0;
++			}
++		}
++		return 0;
++	}
++}
++
++bool g_xmb_trace = xmb_trace::init();
++
++void xmb_trace_register_seg(u32 addr, u32 size, u32 xmb)
++{
++	if (g_xmb_trace) xmb_trace::register_seg(addr, size, xmb);
++}
++
++// Taken bcctr: a branch from vsh/plugin code to an address outside them is an import call.
++void xmb_trace_bcctr(ppu_thread& ppu, u32 source, u32 target)
++{
++	using namespace xmb_trace;
++	u32 src, tgt;
++	if (!to_xmb(source, src) || to_xmb(target, tgt)) return;
++	u64 seq;
++	if (!next_seq(seq)) return;
++	const u32 slot = decode_stub_slot(source);
++	write("%llu T%08X imp slot=%08X lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX depth=%zu src=%08X tgt=%08X",
++		static_cast<unsigned long long>(seq), ppu.id, slot ? xmb_or_raw(slot) : 0, xmb_or_raw(static_cast<u32>(ppu.lr)),
++		ppu.gpr[3], ppu.gpr[4], ppu.gpr[5], ppu.gpr[6], t_calls.size(), src, target);
++	t_calls.push_back({static_cast<u32>(ppu.lr), ppu.gpr[1], seq});
++}
++
++// Taken bclr: matches the return of the innermost traced import call.
++void xmb_trace_bclr(ppu_thread& ppu, u32 target)
++{
++	using namespace xmb_trace;
++	if (t_calls.empty() || t_calls.back().ret != target || t_calls.back().r1 != ppu.gpr[1]) return;
++	write("%llu T%08X ret r3=%llX", static_cast<unsigned long long>(t_calls.back().seq), ppu.id, ppu.gpr[3]);
++	t_calls.pop_back();
++}
++
++void xmb_trace_syscall(ppu_thread& ppu, u64 code, bool after)
++{
++	using namespace xmb_trace;
++	if (after)
++	{
++		if (t_syscall_seq)
++			write("%llu T%08X ret r3=%llX", static_cast<unsigned long long>(std::exchange(t_syscall_seq, 0)), ppu.id, ppu.gpr[3]);
++		return;
++	}
++	u32 cia;
++	t_syscall_seq = 0;
++	if (!to_xmb(ppu.cia, cia)) return;
++	u64 seq;
++	if (!next_seq(seq)) return;
++	t_syscall_seq = seq;
++	write("%llu T%08X sys %llu %s cia=%08X lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX",
++		static_cast<unsigned long long>(seq), ppu.id, code, ppu_get_syscall_name(code).c_str(), cia,
++		xmb_or_raw(static_cast<u32>(ppu.lr)), ppu.gpr[3], ppu.gpr[4], ppu.gpr[5], ppu.gpr[6]);
++}
++
+ std::unordered_map<std::string, ppu_static_module*>& ppu_module_manager::get()
+ {
+ 	// In C++ the order of static initialization is undefined if it happens in
+@@ -1704,6 +1922,26 @@ shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, bool virtual_load, c
+ 		}
+ 	}
+ 
++	if (g_xmb_trace && !virtual_load && !ar)
++	{
++		std::string stem = path.substr(path.find_last_of("/\\") + 1);
++		stem = stem.substr(0, stem.find_last_of('.'));
++		// Inventory of every module loaded on the way to the XMB, traced or not
++		std::string segs;
++		for (usz i = 0; i < prx->segs.size(); i++)
++		{
++			char seg[64];
++			std::snprintf(seg, sizeof(seg), " %08X+%X/v%X", prx->segs[i].addr, prx->segs[i].size, static_cast<u32>(elf.progs[i].p_vaddr));
++			segs += seg;
++		}
++		xmb_trace::write("# prx %s seq=%llu%s", path.c_str(), static_cast<unsigned long long>(xmb_trace::g_seq.load()), segs.c_str());
++		if (const auto base = xmb_trace::g_bases.find(stem); base != xmb_trace::g_bases.end())
++		{
++			for (usz i = 0; i < prx->segs.size(); i++)
++				xmb_trace_register_seg(prx->segs[i].addr, prx->segs[i].size, base->second + static_cast<u32>(elf.progs[i].p_vaddr));
++		}
++	}
++
+ 	for (const auto& s : elf.shdrs)
+ 	{
+ 		ppu_loader.notice("** Section: sh_type=0x%x, addr=0x%llx, size=0x%llx, flags=0x%x", std::bit_cast<u32>(s.sh_type), s.sh_addr, s.sh_size, s._sh_flags);
+@@ -2049,6 +2287,13 @@ void ppu_unload_prx(const lv2_prx& prx)
+ 		return;
+ 	}
+ 
++	if (g_xmb_trace)
++	{
++		xmb_trace::write("# unload %s seq=%llu", prx.path.c_str(), static_cast<unsigned long long>(xmb_trace::g_seq.load()));
++		for (const auto& seg : prx.segs)
++			xmb_trace::unregister_seg(seg.addr);
++	}
++
+ 	std::unique_lock lock(g_fxo->get<ppu_linkage_info>().mutex, std::defer_lock);
+ 
+ 	// Clean linkage info
+@@ -2401,6 +2646,10 @@ bool ppu_load_exec(const ppu_exec_object& elf, bool virtual_load, const std::str
+ 			_main.segs.emplace_back(_seg);
+ 			_main.addr_to_seg_index.emplace(addr, ::size32(_main.segs) - 1);
+ 
++			// vsh is an executable at fixed addresses, the same in xmbld's image
++			if (!virtual_load && !ar && elf_path.ends_with("vsh.self"))
++				xmb_trace_register_seg(addr, size, addr);
++
+ 			// Copy segment data, hash it
+ 			if (!already_loaded)
+ 			{
+diff --git a/rpcs3/Emu/Cell/lv2/lv2.cpp b/rpcs3/Emu/Cell/lv2/lv2.cpp
+index 0308fb5d1..da0ea4269 100644
+--- a/rpcs3/Emu/Cell/lv2/lv2.cpp
++++ b/rpcs3/Emu/Cell/lv2/lv2.cpp
+@@ -1307,6 +1307,9 @@ public:
+ 	static constexpr auto thread_name = "PPU Syscall Usage Thread"sv;
+ };
+ 
++extern bool g_xmb_trace;
++extern void xmb_trace_syscall(ppu_thread& ppu, u64 code, bool after);
++
+ extern void ppu_execute_syscall(ppu_thread& ppu, u64 code)
+ {
+ 	if (g_cfg.core.ppu_decoder == ppu_decoder_type::llvm)
+@@ -1320,7 +1323,9 @@ extern void ppu_execute_syscall(ppu_thread& ppu, u64 code)
+ 
+ 		if (const auto func = g_ppu_syscall_table[code].first)
+ 		{
++			if (g_xmb_trace) [[unlikely]] xmb_trace_syscall(ppu, code, false);
+ 			func(ppu, {}, vm::_ptr<u32>(ppu.cia), nullptr);
++			if (g_xmb_trace) [[unlikely]] xmb_trace_syscall(ppu, code, true);
+ 			ppu_log.trace("Syscall '%s' (%llu) finished, r3=0x%llx", ppu_syscall_code(code), code, ppu.gpr[3]);
+ 			return;
+ 		}

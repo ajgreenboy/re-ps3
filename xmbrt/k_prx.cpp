@@ -24,6 +24,7 @@ namespace
         std::string lib_name;
         uint32_t base = 0, end = 0, toc = 0, start_opd = 0, stop_opd = 0;
         bool dirty = false; // ran once; restore pristine data before the next load
+        uint32_t loaded_instances = 0;
     };
 
     struct KPrx : KObject
@@ -57,12 +58,20 @@ namespace
         auto prx = std::make_shared<KPrx>();
         prx->path = path;
         prx->image = find_module(path);
-        if (prx->image && prx->image->dirty)
+        // Metadata plugins supply interfaces from module_start. A successful empty
+        // stand-in leaves the caller with a null interface and causes a later fault.
+        if (!prx->image && stem_of(path).starts_with("x3_mdimp"))
+        {
+            log_line("prx: missing metadata plugin %s", path.c_str());
+            return CELL_ENOENT;
+        }
+        if (prx->image && !prx->image->loaded_instances && prx->image->dirty)
         {
             // Reloading after an unload: put back the module's pristine data
             memcpy(g_base + prx->image->base, g_pristine.data() + (prx->image->base - PPC_IMAGE_BASE), prx->image->end - prx->image->base);
             prx->image->dirty = false;
         }
+        if (prx->image) ++prx->image->loaded_instances;
         id_out = kobj_add(0x23, prx);
         log_line("prx: load %s -> %08X%s", path.c_str(), id_out, prx->image ? "" : " (not in image; stand-in)");
         return id_out;
@@ -82,6 +91,19 @@ namespace
         return load_module(guest_string(ctx.r3.u32), id);
     }
 
+    void rollback_module_list(uint32_t ids, int32_t loaded, int32_t count)
+    {
+        std::lock_guard lock(g_prx_mutex);
+        for(int32_t i=loaded-1;i>=0;--i)
+        {
+            const uint32_t id=guest_load_u32(ids+uint32_t(i)*4);
+            auto module=kobj<KPrx>(id);
+            if(module && module->image) --module->image->loaded_instances;
+            kobj_remove(id);
+        }
+        for(int32_t i=0;i<count;++i) guest_store_u32(ids+uint32_t(i)*4,0xffffffff);
+    }
+
     // _sys_prx_load_module_list(count, path_list**, flags, pOpt*, id_list*)
     int64_t sys_prx_load_module_list(PPCContext& ctx)
     {
@@ -90,7 +112,8 @@ namespace
         for (int32_t i = 0; i < count; i++)
         {
             uint32_t id;
-            load_module(guest_string(guest_load_u32(paths + i * 4)), id);
+            const int64_t result=load_module(guest_string(guest_load_u32(paths + i * 4)), id);
+            if(result<0){rollback_module_list(ids,i,count);return result;}
             guest_store_u32(ids + i * 4, id);
         }
         return CELL_OK;
@@ -104,7 +127,8 @@ namespace
         for (int32_t i = 0; i < count; i++)
         {
             uint32_t id;
-            load_module(guest_string(guest_load_u32(paths + i * 4)), id);
+            const int64_t result=load_module(guest_string(guest_load_u32(paths + i * 4)), id);
+            if(result<0){rollback_module_list(ids,i,count);return result;}
             guest_store_u32(ids + i * 4, id);
         }
         return CELL_OK;
@@ -145,6 +169,7 @@ namespace
             {
                 log_line("prx: %s start returned %llX (no resident); unloading", prx->path.c_str(), (unsigned long long)res);
                 prx->state = State::Stopped;
+                if(prx->image) --prx->image->loaded_instances;
                 kobj_remove(ctx.r3.u32);
                 return int64_t(int32_t(res));
             }
@@ -195,6 +220,7 @@ namespace
         auto prx = kobj<KPrx>(ctx.r3.u32);
         if (!prx) return CELL_ESRCH;
         log_line("prx: unload %s", prx->path.c_str());
+        if(prx->image) --prx->image->loaded_instances;
         kobj_remove(ctx.r3.u32);
         return CELL_OK;
     }

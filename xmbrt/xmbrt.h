@@ -21,6 +21,7 @@ constexpr uint32_t kMainThreadId = 0x01000000;   // RPCS3's id for main_thread
 constexpr int32_t CELL_ENOSYS = int32_t(0x80010003);
 
 extern uint8_t* g_base;
+void request_runtime_dump(); // F12: request a diagnostic snapshot without stopping XMB.
 
 // Guest memory is big-endian; every runtime access goes through these.
 inline uint32_t guest_load_u32(uint32_t addr) { return __builtin_bswap32(*(uint32_t*)(g_base + addr)); }

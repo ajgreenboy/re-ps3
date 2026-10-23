@@ -38,6 +38,36 @@ namespace
         fatal_exit(int(ctx.r3.u32));
     }
 
+    int64_t sys_sm_shutdown(PPCContext& ctx)
+    {
+        const uint16_t operation=uint16_t(ctx.r3.u32);
+        switch(operation)
+        {
+        case 0x100: case 0x1100:
+            log_line("system manager: guest shutdown requested (op=%04X)",operation);
+            fatal_exit(0);
+        case 0x200: case 0x1200: case 0x8201:
+            // A fresh process restores all guest memory, threads and devices. The
+            // launcher handles this exit status; it never restarts Windows.
+            log_line("system manager: guest reboot requested (op=%04X, exit=75)",operation);
+            if(operation==0x8201 && ctx.r5.u64)
+            {
+                if(!ctx.r4.u32 || ctx.r5.u64>0x10000 || uint64_t(ctx.r4.u32)+ctx.r5.u64>PPC_MEMORY_SIZE)return CELL_EINVAL;
+                // Preserve the firmware's LPAR boot packet for subsequent loader
+                // work. Its startup-mode fields are not yet consumed by main.cpp.
+                if(FILE* packet=fopen("lpar1-boot-parameters.bin","wb"))
+                {
+                    fwrite(g_base+ctx.r4.u32,1,size_t(ctx.r5.u64),packet);
+                    fclose(packet);
+                }
+                log_line("system manager: preserved LPAR1 boot parameters (%llu bytes); startup-mode decoding remains incomplete",(unsigned long long)ctx.r5.u64);
+            }
+            fatal_exit(75);
+        case 0x8202: case 0x8204: return CELL_ENOTSUP;
+        default: return CELL_EINVAL;
+        }
+    }
+
     // ---- time ----
     int64_t sys_time_get_timebase_frequency(PPCContext&) { return 80000000; }
 
@@ -166,8 +196,7 @@ namespace
             break;
         }
         case 0x19005: // open psid
-            memset(g_base + buf, 0, 16);
-            break;
+            return ss_copy_open_psid(buf);
         default:
             break;
         }
@@ -356,6 +385,9 @@ void register_misc_syscalls()
     register_syscall(22, sys_process_exit);
     register_syscall(25, sys_process_get_sdk_version);
     register_syscall(26, sys_process_exit);
+    // No child address space/entry thread is created yet. Reporting success here
+    // makes MSMW wait forever for a nonexistent media-service IPC handshake.
+    register_syscall(27, [](PPCContext&)->int64_t { return CELL_ENOSYS; });
     register_syscall(30, sys_process_get_paramsfo);
     register_syscall(119, sys_time_get_rtc);
     register_syscall(141, sys_timer_usleep);
@@ -367,6 +399,7 @@ void register_misc_syscalls()
     register_syscall(147, sys_time_get_timebase_frequency);
     register_syscall(149, sys_time_get_system_time);
     register_syscall(169, sys_ok); // spu_initialize
+    register_syscall(379, sys_sm_shutdown);
     register_syscall(372, sys_ok); // game watchdog start
     register_syscall(373, sys_ok);
     register_syscall(374, sys_ok);

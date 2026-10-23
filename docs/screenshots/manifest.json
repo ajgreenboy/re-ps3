@@ -1,0 +1,38 @@
+[
+  {
+    "file": "01-startup-notice.jpg",
+    "caption": "Dirty-shutdown startup notice before acknowledging with Enter.",
+    "capturedAt": "2026-10-23T21:42:53.112Z",
+    "bootSession": "20261023-163845-853"
+  },
+  {
+    "file": "02-filesystem-recovery-prompt.jpg",
+    "caption": "Filesystem check/recovery prompt. Captured before selecting Back; no repair was initiated.",
+    "capturedAt": "2026-10-23T21:43:13.187Z",
+    "bootSession": "20261023-163845-853"
+  },
+  {
+    "file": "03-photosensitivity-notice.jpg",
+    "caption": "Photosensitivity notice displayed after backing out of filesystem recovery.",
+    "capturedAt": "2026-10-23T21:43:25.922Z",
+    "bootSession": "20261023-163845-853"
+  },
+  {
+    "file": "04-game-menu.jpg",
+    "caption": "Game category reached after cancelling recovery. Corrupted Data is selected; background and category-icon rendering remain incomplete.",
+    "capturedAt": "2026-10-23T21:43:47.957Z",
+    "bootSession": "20261023-163845-853"
+  },
+  {
+    "file": "05-video-menu.jpg",
+    "caption": "Left from Game selected Video; Video Editor & Uploader label is visible. No playback or editor action was launched.",
+    "capturedAt": "2026-10-23T21:44:07.202Z",
+    "bootSession": "20261023-163845-853"
+  },
+  {
+    "file": "06-music-menu.jpg",
+    "caption": "Left from Video selected Music, with Search for Media Servers selected. No scan or playback was initiated.",
+    "capturedAt": "2026-10-23T21:44:27.202Z",
+    "bootSession": "20261023-163845-853"
+  }
+]

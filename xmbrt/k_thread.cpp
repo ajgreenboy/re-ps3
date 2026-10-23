@@ -252,21 +252,33 @@ void rsx_dump_stats();
 void dump_threads()
 {
     rsx_dump_stats();
-    // Not under the kernel lock: a stuck thread may hold it
-    const uint64_t exe = uint64_t(GetModuleHandleW(nullptr));
-    for (const auto& [id, t] : g_threads)
+    spu_dump_stats();
+    // Copy registry metadata under a nonblocking lock. Iterating the live unordered
+    // map while other guest threads start/exit can invalidate its iterators.
+    struct Snapshot { uint32_t id; std::string name; void* handle; PPCContext* ctx; };
+    std::vector<Snapshot> threads;
     {
-        if (t->exited || !t->host_thread) continue;
+        KLock lock(g_kernel,std::try_to_lock);
+        if (!lock.owns_lock()) { log_line("ppu: kernel busy while collecting thread registry"); return; }
+        for (const auto& [id,t] : g_threads)
+            if (!t->exited && t->host_thread && t->ctx)
+                threads.push_back({id,t->name,t->host_thread,t->ctx});
+    }
+    // Do not hold the kernel lock while suspending guest threads.
+    const uint64_t exe = uint64_t(GetModuleHandleW(nullptr));
+    for (const auto& t : threads)
+    {
         CONTEXT hc{};
         hc.ContextFlags = CONTEXT_CONTROL;
         uint64_t rip = 0;
-        if (SuspendThread(HANDLE(t->host_thread)) != DWORD(-1))
+        PPCContext c{};
+        if (SuspendThread(HANDLE(t.handle)) != DWORD(-1))
         {
-            if (GetThreadContext(HANDLE(t->host_thread), &hc)) rip = hc.Rip;
-            ResumeThread(HANDLE(t->host_thread));
+            if (GetThreadContext(HANDLE(t.handle), &hc)) rip = hc.Rip;
+            c = *t.ctx;
+            ResumeThread(HANDLE(t.handle));
         }
-        const PPCContext& c = *t->ctx;
-        log_line("  thread %08X '%s' host rip exe+%llX lr=%08X r1=%08X r3=%08X r4=%08X ctr=%08X", id, t->name.c_str(),
+        log_line("  thread %08X '%s' host rip exe+%llX lr=%08X r1=%08X r3=%08X r4=%08X ctr=%08X", t.id, t.name.c_str(),
             (unsigned long long)(rip ? rip - exe : 0), uint32_t(c.lr), c.r1.u32, c.r3.u32, c.r4.u32, c.ctr.u32);
     }
 }

@@ -58,6 +58,100 @@ namespace
     // mmapper address ranges, 256 MB granularity from 0x30000000 up to video memory
     std::map<uint32_t, uint32_t> g_mmap_ranges; // addr -> size
     std::map<uint32_t, uint32_t> g_mmap_maps;   // mapped addr -> shm id
+    struct VmBlock { uint32_t size,physical;std::shared_ptr<KContainer> container; };
+    std::map<uint32_t,VmBlock> g_vm_blocks;
+
+    int64_t sys_vm_memory_map(PPCContext& c)
+    {
+        const uint64_t size=c.r3.u64,physical=c.r4.u64,flags=c.r6.u64;
+        if(!c.r8.u32)return CELL_EFAULT;
+        if(!size||size%0x2000000||size>0x10000000||!physical||physical%0x10000||
+            physical>0xffffffffull||c.r7.u64!=1||(c.r11.u32==300&&physical<0x100000)||
+            (flags&0xf4)||((flags&0xf00)!=0&&(flags&0xf00)!=0x200&&(flags&0xf00)!=0x400))return CELL_EINVAL;
+        auto container=c.r5.u32==0xffffffff?nullptr:kobj<KContainer>(c.r5.u32);
+        if(c.r5.u32!=0xffffffff&&!container)return CELL_ESRCH;
+        std::lock_guard lock(g_mem_mutex);
+        uint64_t virtual_total=0,physical_total=0;
+        for(const auto& [addr,block]:g_vm_blocks){virtual_total+=block.size;physical_total+=block.physical;}
+        if(virtual_total+size>0x1e000000)return CELL_EBUSY;
+        if(container){if(uint64_t(container->used)+physical>container->size)return CELL_ENOMEM;}
+        else
+        {
+            for(const auto& [addr,used]:g_user64k.used)physical_total+=used;
+            for(const auto& [addr,used]:g_user1m.used)physical_total+=used;
+            if(physical_total+physical>0x0d500000)return CELL_ENOMEM;
+        }
+        for(uint64_t address=0x30000000;address<0xc0000000;address+=0x10000000)
+        {
+            bool available=true;
+            for(const auto& [start,length]:g_mmap_ranges)
+                if(address<uint64_t(start)+length&&start<address+0x10000000)available=false;
+            if(!available)continue;
+            if(!guest_commit(uint32_t(address),size))return CELL_ENOMEM;
+            memset(g_base+address,0,size);
+            g_mmap_ranges[uint32_t(address)]=0x10000000;
+            g_vm_blocks.emplace(uint32_t(address),VmBlock{uint32_t(size),uint32_t(physical),container});
+            if(container)container->used+=uint32_t(physical);
+            guest_store_u32(c.r8.u32,uint32_t(address));
+            return CELL_OK;
+        }
+        return CELL_ENOMEM;
+    }
+    int64_t sys_vm_unmap(PPCContext& c)
+    {
+        std::lock_guard lock(g_mem_mutex);
+        auto it=g_vm_blocks.find(c.r3.u32);if(it==g_vm_blocks.end())return CELL_EINVAL;
+        if(it->second.container)it->second.container->used-=it->second.physical;
+        g_mmap_ranges.erase(it->first);g_vm_blocks.erase(it);return CELL_OK;
+    }
+    int64_t sys_vm_resize(PPCContext& c,bool append)
+    {
+        const uint64_t size=c.r4.u64;if(!size||size%0x100000||size>0xffffffffull)return CELL_EINVAL;
+        std::lock_guard lock(g_mem_mutex);
+        auto it=g_vm_blocks.find(c.r3.u32);if(it==g_vm_blocks.end())return CELL_EINVAL;
+        auto& block=it->second;
+        if(!append)
+        {
+            if(block.physical<=size||block.physical-size<0x100000)return CELL_EBUSY;
+            block.physical-=uint32_t(size);if(block.container)block.container->used-=uint32_t(size);
+        }
+        else
+        {
+            uint64_t used=0;
+            if(block.container){used=block.container->used;if(used+size>block.container->size)return CELL_ENOMEM;}
+            else
+            {
+                for(const auto& [addr,other]:g_vm_blocks)if(!other.container)used+=other.physical;
+                for(const auto& [addr,length]:g_user64k.used)used+=length;
+                for(const auto& [addr,length]:g_user1m.used)used+=length;
+                if(used+size>0x0d500000)return CELL_ENOMEM;
+            }
+            block.physical+=uint32_t(size);if(block.container)block.container->used+=uint32_t(size);
+        }
+        return CELL_OK;
+    }
+    int64_t sys_vm_range(PPCContext& c,bool test=false)
+    {
+        std::lock_guard lock(g_mem_mutex);
+        const uint32_t address=c.r3.u32,size=c.r4.u32;
+        auto it=g_vm_blocks.upper_bound(address);
+        if(it==g_vm_blocks.begin())return CELL_EINVAL;
+        --it;
+        if((!test&&!size)||uint64_t(address)+size>uint64_t(it->first)+it->second.size)return CELL_EINVAL;
+        if(test){if(!c.r5.u32)return CELL_EFAULT;guest_store_u64(c.r5.u32,2);}
+        // All mapped guest pages reside in host RAM; flush/store/sync require no
+        // swap-file transfers. Retain the reference's range/error semantics.
+        return CELL_OK;
+    }
+    int64_t sys_vm_statistics(PPCContext& c)
+    {
+        std::lock_guard lock(g_mem_mutex);
+        auto it=g_vm_blocks.find(c.r3.u32);if(it==g_vm_blocks.end())return CELL_EINVAL;
+        if(!c.r4.u32)return CELL_EFAULT;
+        memset(g_base+c.r4.u32,0,48);
+        guest_store_u32(c.r4.u32+32,it->second.physical);
+        guest_store_u64(c.r4.u32+40,ppc_mftb());return CELL_OK;
+    }
 
     // sys_memory_allocate(size, flags, alloc_addr*)
     int64_t sys_memory_allocate(PPCContext& ctx)
@@ -111,6 +205,7 @@ namespace
         uint64_t used = 0;
         for (const auto& [a, s] : g_user64k.used) used += s;
         for (const auto& [a, s] : g_user1m.used) used += s;
+        for (const auto& [a, block] : g_vm_blocks) if(!block.container)used+=block.physical;
         const uint32_t total = 0x0D500000; // RPCS3's default user memory size
         guest_store_u32(ctx.r3.u32, total);
         guest_store_u32(ctx.r3.u32 + 4, uint32_t(total > used ? total - used : 0));
@@ -128,6 +223,10 @@ namespace
 
     int64_t sys_memory_container_destroy(PPCContext& ctx)
     {
+        std::lock_guard lock(g_mem_mutex);
+        auto container=kobj<KContainer>(ctx.r3.u32);
+        if(!container)return CELL_ESRCH;
+        if(container->used)return CELL_EBUSY;
         return kobj_remove(ctx.r3.u32) ? CELL_OK : CELL_ESRCH;
     }
 
@@ -167,6 +266,11 @@ namespace
     int64_t sys_mmapper_free_address(PPCContext& ctx)
     {
         std::lock_guard lock(g_mem_mutex);
+        if(g_vm_blocks.contains(ctx.r3.u32))return CELL_EINVAL;
+        const auto range=g_mmap_ranges.find(ctx.r3.u32);
+        if(range!=g_mmap_ranges.end())
+            for(const auto& [address,id]:g_mmap_maps)
+                if(address>=range->first&&uint64_t(address)<uint64_t(range->first)+range->second)return CELL_EBUSY;
         return g_mmap_ranges.erase(ctx.r3.u32) ? CELL_OK : CELL_EINVAL;
     }
 
@@ -235,6 +339,23 @@ namespace
     {
         if (!kobj<KContainer>(ctx.r5.u32)) return CELL_ESRCH;
         return create_shm(ctx.r3.u64, ctx.r4.u64, ctx.r6.u64, shm_mode(ctx.r6.u64), ctx.r7.u32);
+    }
+
+    // Extended container allocation uses flags before cid and a 24-byte permission-entry array.
+    int64_t sys_mmapper_allocate_shared_memory_from_container_ext(PPCContext& ctx)
+    {
+        const int32_t count=ctx.r8.s32;
+        if(ctx.r5.u64 & ~0xF00ull) return CELL_EINVAL;
+        if(count<=0 || count>16) return CELL_EINVAL;
+        if(!ctx.r7.u32 || !ctx.r9.u32) return CELL_EFAULT;
+        for(int32_t i=0;i<count;++i)
+        {
+            const uint64_t type=guest_load_u64(ctx.r7.u32+uint32_t(i)*24+16);
+            if(type!=0 && type!=1 && type!=3 && type!=5) return CELL_EPERM;
+            if(type==5 && ctx.r5.u64!=0x200) return CELL_EPERM;
+        }
+        if(!kobj<KContainer>(ctx.r6.u32)) return CELL_ESRCH;
+        return create_shm(ctx.r3.u64,ctx.r4.u64,ctx.r5.u64,CreateMode::NewlyCreated,ctx.r9.u32);
     }
 
     int64_t sys_mmapper_free_shared_memory(PPCContext& ctx)
@@ -307,8 +428,16 @@ uint32_t user_alloc(uint32_t size, uint32_t align)
 
 void register_memory_syscalls()
 {
+    register_syscall(300,sys_vm_memory_map);register_syscall(313,sys_vm_memory_map);
+    register_syscall(301,sys_vm_unmap);
+    register_syscall(302,[](PPCContext& c){return sys_vm_resize(c,true);});
+    register_syscall(303,[](PPCContext& c){return sys_vm_resize(c,false);});
+    for(uint32_t number=304;number<=310;++number)register_syscall(number,[](PPCContext& c){return sys_vm_range(c);});
+    register_syscall(311,[](PPCContext& c){return sys_vm_range(c,true);});
+    register_syscall(312,sys_vm_statistics);
     register_syscall(324, sys_memory_container_create);
     register_syscall(325, sys_memory_container_destroy);
+    register_syscall(328, sys_mmapper_allocate_shared_memory_from_container_ext);
     register_syscall(329, sys_mmapper_free_shared_memory);
     register_syscall(330, sys_mmapper_allocate_address);
     register_syscall(331, sys_mmapper_free_address);
@@ -320,6 +449,10 @@ void register_memory_syscalls()
     register_syscall(341, sys_memory_container_create);
     register_syscall(342, sys_memory_container_destroy);
     register_syscall(343, sys_memory_container_get_size);
+    register_syscall(345, [](PPCContext& c)->int64_t {
+        if(c.r4.u32) return CELL_EINVAL;
+        return sys_memory_container_destroy(c);
+    });
     register_syscall(348, sys_memory_allocate);
     register_syscall(349, sys_memory_free);
     register_syscall(350, sys_memory_allocate_from_container);
