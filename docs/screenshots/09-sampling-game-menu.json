@@ -1,0 +1,8 @@
+{
+  "file": "09-sampling-game-menu.jpg",
+  "capturedAt": "2026-10-23T22:17:52.001Z",
+  "bootSession": "20261023-171608-926",
+  "boot": 1,
+  "mode": "TraceCalls",
+  "caption": "Rebuilt branch coverage and per-unit sampler/remap build reached Game after guest-requested reboot. Background/category icons remain incorrect."
+}

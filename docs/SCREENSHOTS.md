@@ -45,6 +45,25 @@ Another Left press selected Music. This demonstrates category navigation only.
 
 ## Limits and next capture
 
+### Branch coverage and per-unit sampling follow-up
+
+Normal session `20261023-171447-817` became black after plugin teardown. F12 recorded
+5,755 draws,245 flips and a drained FIFO. This is a failed boot, not a menu capture.
+
+![Normal boot after teardown](screenshots/08-sampling-black-boot.jpg)
+
+Diagnostic session `20261023-171608-926`, boot1, reached Game and accepted Left to
+Video. The clock advanced22:17 ->22:18. Shader compilation/linking logged no error
+before the snapshot. Background and category icons remain wrong. These captures
+do not establish normal-mode stability or execution of the recovered JPEG branch.
+
+![Rebuilt Game menu](screenshots/09-sampling-game-menu.jpg)
+
+![Rebuilt Video menu](screenshots/10-sampling-video-menu.jpg)
+
+Per-capture metadata: [08](screenshots/08-sampling-black-boot.json),
+[09](screenshots/09-sampling-game-menu.json), [10](screenshots/10-sampling-video-menu.json).
+
 ### Floating render-target follow-up
 
 Boot1 of session `20261023-165609-569` reached Game after a guest-requested reboot.

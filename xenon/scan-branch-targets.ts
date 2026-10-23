@@ -1,7 +1,8 @@
 // Lists direct branch targets that no function starts at (one hex address per line), straight from the image,
 // so gen-opd-functions.ts can add them without a XenonRecomp round trip. A target is reported when a `bl`
 // inside a function lands anywhere but a function start, or a `b`/conditional branch leaves its function's
-// ranges for an address that is not a function start. Only targets in executable segments are kept.
+// translated .pdata spans for an address that is not a function start. The spans match xmbld,
+// including gaps between Ghidra body ranges. Only targets in executable segments are kept.
 // usage: bun scan-branch-targets.ts <boot493 dir> <functions dir> <out file>
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -40,10 +41,21 @@ for (const f of readdirSync(functionsDir).filter((f) => f.endsWith("_functions.c
     if (!entry) continue;
     starts.add(base + parseInt(entry, 16));
     const ranges: [number, number][] = [];
+    const entryAddress = base + parseInt(entry, 16);
+    let maxEnd = entryAddress;
     for (const r of (rs ?? "").split(";")) {
       const [s, e] = r.split("-").map((x) => parseInt(x, 16));
-      if (!isNaN(s) && !isNaN(e)) ranges.push([base + s, base + e + 1]);
+      if (!isNaN(s) && !isNaN(e)) {
+        const start = base + s, end = base + e + 1;
+        maxEnd = Math.max(maxEnd, end);
+        // Match xmbld.load_pdata: ranges below the entry get their own span.
+        if (start < entryAddress) ranges.push([start, end]);
+      }
     }
+    // xmbld's .pdata spans entry..last-range-end, including holes in Ghidra's
+    // disjoint body. XenonRecomp emits instructions in those holes too. Scan
+    // that same span or its branches can escape without a translated entry.
+    if (maxEnd > entryAddress) ranges.push([entryAddress, maxEnd]);
     funcs.push({ ranges });
   }
 }

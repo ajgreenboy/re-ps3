@@ -1,0 +1,7 @@
+{
+  "file": "08-sampling-black-boot.jpg",
+  "capturedAt": "2026-10-23T22:16:04.759Z",
+  "bootSession": "20261023-171447-817",
+  "boot": 0,
+  "caption": "Normal boot black after UI plugin teardown; F12 recorded 117457 calls,5755 draws,245 flips, FIFO GET=PUT=000103D8. Not a completed menu."
+}
