@@ -4,10 +4,51 @@
 #include "kernel.h"
 
 #include <algorithm>
+#include <map>
 
 namespace
 {
     constexpr uint32_t SYS_SYNC_RECURSIVE = 0x10;
+
+    // lv2_obj::create: process-shared objects are found by IPC key; every success yields a new id.
+    constexpr uint32_t SYS_SYNC_PROCESS_SHARED = 0x100, SYS_SYNC_NOT_PROCESS_SHARED = 0x200;
+    constexpr int32_t SYS_SYNC_NEWLY_CREATED = 1, SYS_SYNC_NOT_CREATE = 2, SYS_SYNC_NOT_CARE = 3;
+    std::map<std::pair<uint8_t, uint64_t>, std::shared_ptr<KObject>> g_ipc_objects;
+    std::mutex g_ipc_mutex;
+
+    template <typename Make>
+    int64_t ipc_create(uint8_t type, uint32_t pshared, uint64_t key, int32_t flags, Make&& make, uint32_t id_ptr)
+    {
+        std::shared_ptr<KObject> obj;
+        if (pshared == SYS_SYNC_PROCESS_SHARED)
+        {
+            if (!key) return CELL_EINVAL;
+            if (flags != SYS_SYNC_NEWLY_CREATED && flags != SYS_SYNC_NOT_CREATE && flags != SYS_SYNC_NOT_CARE) return CELL_EINVAL;
+            std::lock_guard lock(g_ipc_mutex);
+            const auto it = g_ipc_objects.find({ type, key });
+            if (it != g_ipc_objects.end())
+            {
+                if (flags == SYS_SYNC_NEWLY_CREATED) return CELL_EEXIST;
+                obj = it->second;
+            }
+            else
+            {
+                if (flags == SYS_SYNC_NOT_CREATE) return CELL_ESRCH;
+                obj = make();
+                g_ipc_objects[{ type, key }] = obj;
+            }
+        }
+        else if (pshared == SYS_SYNC_NOT_PROCESS_SHARED)
+        {
+            obj = make();
+        }
+        else
+        {
+            return CELL_EINVAL;
+        }
+        guest_store_u32(id_ptr, kobj_add(type, obj));
+        return CELL_OK;
+    }
 
     // Sleeps on q with a timeout; on timeout removes the caller and returns ETIMEDOUT,
     // otherwise returns the result the waker passed.
@@ -50,10 +91,16 @@ namespace
     {
         const uint32_t id_ptr = ctx.r3.u32, attr = ctx.r4.u32;
         if (!id_ptr || !attr) return CELL_EFAULT;
-        auto m = std::make_shared<KMutex>();
-        m->recursive = guest_load_u32(attr + 4) == SYS_SYNC_RECURSIVE;
-        guest_store_u32(id_ptr, kobj_add(0x85, m));
-        return CELL_OK;
+        // sys_mutex_attribute_t: protocol, recursive, pshared, adaptive, u64 ipc_key, s32 flags
+        const uint32_t protocol = guest_load_u32(attr), recursive = guest_load_u32(attr + 4), pshared = guest_load_u32(attr + 8);
+        if (protocol < 1 || protocol > 3) return CELL_EINVAL;
+        if (recursive != SYS_SYNC_RECURSIVE && recursive != 0x20) return CELL_EINVAL;
+        const uint64_t key = pshared == SYS_SYNC_PROCESS_SHARED ? guest_load_u64(attr + 16) : 0;
+        return ipc_create(0x85, pshared, key, int32_t(guest_load_u32(attr + 24)), [&] {
+            auto m = std::make_shared<KMutex>();
+            m->recursive = recursive == SYS_SYNC_RECURSIVE;
+            return m;
+        }, id_ptr);
     }
 
     int64_t sys_mutex_destroy(PPCContext& ctx)
@@ -129,11 +176,15 @@ namespace
         KLock lock(g_kernel);
         auto m = kobj<KMutex>(ctx.r4.u32);
         if (!m) return CELL_ESRCH;
-        auto c = std::make_shared<KCond>();
-        c->mutex = m;
-        m->cond_count++;
-        guest_store_u32(ctx.r3.u32, kobj_add(0x86, c));
-        return CELL_OK;
+        // sys_cond_attribute_t: pshared, s32 flags, u64 ipc_key
+        const uint32_t attr = ctx.r5.u32, pshared = guest_load_u32(attr);
+        const uint64_t key = pshared == SYS_SYNC_PROCESS_SHARED ? guest_load_u64(attr + 8) : 0;
+        return ipc_create(0x86, pshared, key, int32_t(guest_load_u32(attr + 4)), [&] {
+            auto c = std::make_shared<KCond>();
+            c->mutex = m;
+            m->cond_count++;
+            return c;
+        }, ctx.r3.u32);
     }
 
     int64_t sys_cond_destroy(PPCContext& ctx)
@@ -423,11 +474,15 @@ namespace
     {
         const int32_t initial = int32_t(ctx.r5.u32), max = int32_t(ctx.r6.u32);
         if (max <= 0 || initial < 0 || initial > max) return CELL_EINVAL;
-        auto s = std::make_shared<KSema>();
-        s->val = initial;
-        s->max = max;
-        guest_store_u32(ctx.r3.u32, kobj_add(0x96, s));
-        return CELL_OK;
+        // sys_semaphore_attribute_t: protocol, pshared, u64 ipc_key, s32 flags
+        const uint32_t attr = ctx.r4.u32, pshared = guest_load_u32(attr + 4);
+        const uint64_t key = pshared == SYS_SYNC_PROCESS_SHARED ? guest_load_u64(attr + 8) : 0;
+        return ipc_create(0x96, pshared, key, int32_t(guest_load_u32(attr + 16)), [&] {
+            auto s = std::make_shared<KSema>();
+            s->val = initial;
+            s->max = max;
+            return s;
+        }, ctx.r3.u32);
     }
 
     int64_t sys_semaphore_destroy(PPCContext& ctx)
@@ -496,10 +551,12 @@ namespace
         std::deque<PpuThread*> rq, wq;
     };
 
+    // sys_rwlock_create(rw_lock_id*, attr*): attr = protocol, pshared, u64 ipc_key, s32 flags
     int64_t sys_rwlock_create(PPCContext& ctx)
     {
-        guest_store_u32(ctx.r3.u32, kobj_add(0x88, std::make_shared<KRwlock>()));
-        return CELL_OK;
+        const uint32_t attr = ctx.r4.u32, pshared = guest_load_u32(attr + 4);
+        const uint64_t key = pshared == SYS_SYNC_PROCESS_SHARED ? guest_load_u64(attr + 8) : 0;
+        return ipc_create(0x88, pshared, key, int32_t(guest_load_u32(attr + 16)), [] { return std::make_shared<KRwlock>(); }, ctx.r3.u32);
     }
 
     int64_t sys_rwlock_destroy(PPCContext& ctx)
@@ -623,10 +680,14 @@ namespace
     // sys_event_flag_create(id*, attr*, init)
     int64_t sys_event_flag_create(PPCContext& ctx)
     {
-        auto f = std::make_shared<KEventFlag>();
-        f->pattern = ctx.r5.u64;
-        guest_store_u32(ctx.r3.u32, kobj_add(0x98, f));
-        return CELL_OK;
+        // sys_event_flag_attribute_t: protocol, pshared, u64 ipc_key, s32 flags, s32 type
+        const uint32_t attr = ctx.r4.u32, pshared = guest_load_u32(attr + 4);
+        const uint64_t key = pshared == SYS_SYNC_PROCESS_SHARED ? guest_load_u64(attr + 8) : 0;
+        return ipc_create(0x98, pshared, key, int32_t(guest_load_u32(attr + 16)), [&] {
+            auto f = std::make_shared<KEventFlag>();
+            f->pattern = ctx.r5.u64;
+            return f;
+        }, ctx.r3.u32);
     }
 
     int64_t sys_event_flag_destroy(PPCContext& ctx)

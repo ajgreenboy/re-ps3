@@ -355,6 +355,16 @@ static void load_pdata(const char* functions_dir)
         fclose(f);
     }
     qsort(g_pdata, (size_t)g_npdata, sizeof(pdata_t), cmp_pdata);
+    /* one function per start address (a range below one entry can start at another function's entry): keep the longest */
+    int n = 0;
+    for (int i = 0; i < g_npdata; i++) {
+        if (n && g_pdata[n - 1].begin == g_pdata[i].begin) {
+            if (g_pdata[i].insns > g_pdata[n - 1].insns) g_pdata[n - 1].insns = g_pdata[i].insns;
+        } else {
+            g_pdata[n++] = g_pdata[i];
+        }
+    }
+    g_npdata = n;
     merge_code();
 }
 

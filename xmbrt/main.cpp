@@ -20,6 +20,7 @@
 #include <vector>
 
 uint8_t* g_base;
+extern "C" uint8_t* ppc_func_table = nullptr; // read by every translated indirect call (PPC_LOOKUP_FUNC)
 
 static FILE* g_log;
 static std::mutex g_log_mutex;
@@ -150,10 +151,24 @@ static void bad_indirect_call(PPCContext& __restrict__ ctx, uint8_t*)
     fatal_exit(2);
 }
 
+// Direct branches XenonRecomp couldn't bind: use the function if the table has one, else report the target
+extern "C" void ppc_unresolved_call(PPCContext& ctx, uint8_t* base, uint32_t target)
+{
+    PPCFunc* f = target >= PPC_CODE_BASE && target < kImageEnd ? func_slot(target) : &bad_indirect_call;
+    if (f != &bad_indirect_call)
+    {
+        f(ctx, base);
+        return;
+    }
+    log_line("branch to an address with no function: %08X lr=%08X T%08X", target, uint32_t(ctx.lr), current_thread_id());
+    fatal_exit(2);
+}
+
 static void build_func_table()
 {
     const uint64_t slots = kFuncTableBytes / 8;
-    PPCFunc** table = (PPCFunc**)(g_base + kImageEnd);
+    ppc_func_table = g_base + kImageEnd;
+    PPCFunc** table = (PPCFunc**)ppc_func_table;
     std::fill(table, table + slots, &bad_indirect_call);
     size_t n = 0;
     for (const PPCFuncMapping* m = PPCFuncMappings; m->host; m++, n++)
@@ -260,15 +275,23 @@ static uint32_t primary_stack_size(uint32_t sz)
 static void idle_watchdog(uint32_t idle_seconds)
 {
     uint64_t last = 0;
-    for (uint32_t idle = 0;; )
+    const uint64_t dump_at = env_u64("XMBRT_DUMP_AT", 0); // seconds: dump all threads then stop
+    for (uint32_t idle = 0, elapsed = 0;; elapsed++)
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (dump_at && elapsed + 1 == dump_at)
+        {
+            log_line("XMBRT_DUMP_AT: %llu s, %llu calls", (unsigned long long)dump_at, (unsigned long long)g_call_seq.load());
+            dump_threads();
+            fatal_exit(5);
+        }
         const uint64_t now = g_call_seq.load();
         idle = now == last ? idle + 1 : 0;
         last = now;
         if (idle >= idle_seconds)
         {
             log_line("stopping: no syscall or HLE call for %u s (last call %llu)", idle_seconds, (unsigned long long)now);
+            dump_threads();
             fatal_exit(4);
         }
     }

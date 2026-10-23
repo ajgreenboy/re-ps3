@@ -170,24 +170,71 @@ namespace
         return g_mmap_ranges.erase(ctx.r3.u32) ? CELL_OK : CELL_EINVAL;
     }
 
+    // IPC-keyed shared memory (lv2_obj::create): each successful call gets a new id for the shared object
+    constexpr uint64_t SYS_MMAPPER_NO_SHM_KEY = 0xFFFF000000000000ull;
+    std::unordered_map<uint64_t, std::shared_ptr<KShm>> g_shm_keys;
+
+    enum class CreateMode { NewlyCreated, NotCare, NotCreate };
+
+    int64_t create_shm(uint64_t key, uint64_t size, uint64_t flags, CreateMode mode, uint32_t mem_id_ptr)
+    {
+        if (!size) return CELL_EALIGN;
+        switch (flags & 0xF00) // SYS_MEMORY_GRANULARITY_MASK
+        {
+        case 0: case 0x400: if (size % 0x100000) return CELL_EALIGN; break;
+        case 0x200: if (size % 0x10000) return CELL_EALIGN; break;
+        default: return CELL_EINVAL;
+        }
+        std::lock_guard lock(g_mem_mutex);
+        std::shared_ptr<KShm> m;
+        if (key != SYS_MMAPPER_NO_SHM_KEY)
+        {
+            const auto it = g_shm_keys.find(key);
+            if (it != g_shm_keys.end())
+            {
+                if (mode == CreateMode::NewlyCreated) return CELL_EEXIST;
+                m = it->second;
+            }
+            else if (mode == CreateMode::NotCreate)
+            {
+                return CELL_ESRCH;
+            }
+        }
+        if (!m)
+        {
+            m = std::make_shared<KShm>();
+            m->size = uint32_t(size);
+            m->flags = uint32_t(flags);
+            if (key != SYS_MMAPPER_NO_SHM_KEY) g_shm_keys[key] = m;
+        }
+        guest_store_u32(mem_id_ptr, kobj_add(0x08, m));
+        return CELL_OK;
+    }
+
+    CreateMode shm_mode(uint64_t flags)
+    {
+        return (flags & 0xC000) == 0xC000 ? CreateMode::NewlyCreated : (flags & 0x8000) ? CreateMode::NotCare : CreateMode::NotCreate;
+    }
+
     // sys_mmapper_allocate_shared_memory(ipc_key, size, flags, mem_id*)
     int64_t sys_mmapper_allocate_shared_memory(PPCContext& ctx)
     {
-        auto m = std::make_shared<KShm>();
-        m->size = ctx.r4.u32;
-        m->flags = ctx.r5.u32;
-        guest_store_u32(ctx.r6.u32, kobj_add(0x08, m));
-        return CELL_OK;
+        return create_shm(ctx.r3.u64, ctx.r4.u64, ctx.r5.u64, shm_mode(ctx.r5.u64), ctx.r6.u32);
+    }
+
+    // sys_mmapper_allocate_shared_memory_ext(ipc_key, size, flags, entries*, entry_count, mem_id*): always exclusive
+    int64_t sys_mmapper_allocate_shared_memory_ext(PPCContext& ctx)
+    {
+        const int32_t count = int32_t(ctx.r7.u32);
+        if (count <= 0 || count > 0x10) return CELL_EINVAL;
+        return create_shm(ctx.r3.u64, ctx.r4.u64, ctx.r5.u32, CreateMode::NewlyCreated, ctx.r8.u32);
     }
 
     // sys_mmapper_allocate_shared_memory_from_container(ipc_key, size, cid, flags, mem_id*)
     int64_t sys_mmapper_allocate_shared_memory_from_container(PPCContext& ctx)
     {
-        auto m = std::make_shared<KShm>();
-        m->size = ctx.r4.u32;
-        m->flags = ctx.r6.u32;
-        guest_store_u32(ctx.r7.u32, kobj_add(0x08, m));
-        return CELL_OK;
+        if (!kobj<KContainer>(ctx.r5.u32)) return CELL_ESRCH;
+        return create_shm(ctx.r3.u64, ctx.r4.u64, ctx.r6.u64, shm_mode(ctx.r6.u64), ctx.r7.u32);
     }
 
     int64_t sys_mmapper_free_shared_memory(PPCContext& ctx)
@@ -269,6 +316,7 @@ void register_memory_syscalls()
     register_syscall(334, sys_mmapper_map_shared_memory);
     register_syscall(335, sys_mmapper_unmap_shared_memory);
     register_syscall(337, sys_mmapper_search_and_map);
+    register_syscall(339, sys_mmapper_allocate_shared_memory_ext);
     register_syscall(341, sys_memory_container_create);
     register_syscall(342, sys_memory_container_destroy);
     register_syscall(343, sys_memory_container_get_size);

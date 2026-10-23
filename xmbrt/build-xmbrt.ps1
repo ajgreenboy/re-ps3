@@ -15,7 +15,7 @@ $recomp = @(Get-ChildItem $RecompObj -Filter *.obj)
 $genCpp = @(Get-ChildItem $Gen -Filter *.cpp)
 if ($recomp.Count -ne $genCpp.Count) { throw "recomp objects: $($recomp.Count) of $($genCpp.Count); run compile-recomp.ps1 first" }
 
-$flags = "/nologo /c /std:c++20 /O2 /arch:AVX /EHsc /W3 -Wno-unused-function /D_CRT_SECURE_NO_WARNINGS /I $Gen /I C:\dev\deps\XenonRecomp\XenonUtils /I C:\dev\deps\XenonRecomp\thirdparty\simde"
+$flags = "/nologo /c /std:c++20 /O2 /arch:AVX /EHsc /W3 -Wno-unused-function /D_CRT_SECURE_NO_WARNINGS /DPPC_FUNC_TABLE_FROM_RUNTIME /I $Gen /I C:\dev\deps\XenonRecomp\XenonUtils /I C:\dev\deps\XenonRecomp\thirdparty\simde"
 $vcvars = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
 $runtime = @()
 foreach ($f in Get-ChildItem $src -Filter *.cpp) {

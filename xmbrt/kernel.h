@@ -72,6 +72,7 @@ struct PpuThread
     bool exited = false;
     uint64_t exit_status = 0;
     PpuThread* joiner = nullptr;
+    void* host_thread = nullptr; // HANDLE, for sampling a stuck thread
 
     // Sleep state, guarded by the kernel lock.
     std::condition_variable cv;
@@ -98,6 +99,8 @@ struct ThreadExit
 };
 
 void kernel_init_main_thread(PPCContext* ctx, uint32_t stack_addr, uint32_t stack_size);
+// Logs where every live guest thread is (host rip, guest lr/r1/r3); used when the run goes idle.
+void dump_threads();
 uint32_t alloc_stack(uint32_t size);
 // Runs a guest function (OPD) on the calling host thread's context.
 void call_guest_opd(PPCContext& ctx, uint32_t opd);
