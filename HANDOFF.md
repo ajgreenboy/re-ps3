@@ -82,6 +82,24 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 
 ## 3a. Next session: start here (2026-10-23)
 
+### Latest continuation: private GitHub source snapshot and float render targets
+
+Source/history uploaded to the private `ajgreenboy/re-ps3` repository, branch main.
+Initial upload commit `ad98c0a` contains101 tracked files, docs/screenshots, source
+tooling and full dependency patches pinned in `docs/DEPENDENCIES.md`. Firmware,
+generated firmware outputs, databases, identities and local binaries remain local.
+
+`rsx_gl.cpp` now decodes surface colour format bits0..4 and uses RGBA16F/RGBA32F/
+R32F for formats11/12/13. Cache reuse includes the colour format. Framebuffer
+completeness is checked before drawing; format13 uses replicated red sampling.
+Compiled and linked successfully. Boot `20261023-165609-569` observed formats11
+and12 with FBO8CD5 (complete), GL error0. Format13 has not yet been observed.
+The boot displayed a recovery prompt, subsequently requested reboot8201 and the
+launcher started boot1. Do not infer successful filesystem recovery from that
+restart; startup-mode decoding remains incomplete. Boot1 visibly reached Game at
+21:57; the background remains black and category icons remain incorrect. Capture:
+`docs/screenshots/07-float-surfaces-game.jpg`. Runtime left open at Game.
+
 ### Latest continuation: PoC docs, screenshots and floating texture uploads
 
 Short run/build instructions and future phase handoffs are now in `docs/README.md`.
