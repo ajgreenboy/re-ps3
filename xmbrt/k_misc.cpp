@@ -48,7 +48,9 @@ namespace
     {
         const auto now = std::chrono::system_clock::now().time_since_epoch();
         const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+        if (!ctx.r3.u32) return CELL_EFAULT;
         guest_store_u64(ctx.r3.u32, uint64_t(ns / 1000000000));
+        if (!ctx.r4.u32) return CELL_EFAULT; // RPCS3 writes sec first (hidportassign passes nsec = 0)
         guest_store_u64(ctx.r4.u32, uint64_t(ns % 1000000000));
         return CELL_OK;
     }

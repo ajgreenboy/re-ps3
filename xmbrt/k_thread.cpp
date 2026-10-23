@@ -247,8 +247,11 @@ void kernel_init_main_thread(PPCContext* ctx, uint32_t stack_addr, uint32_t stac
     g_threads[t->id] = t;
 }
 
+void rsx_dump_stats();
+
 void dump_threads()
 {
+    rsx_dump_stats();
     // Not under the kernel lock: a stuck thread may hold it
     const uint64_t exe = uint64_t(GetModuleHandleW(nullptr));
     for (const auto& [id, t] : g_threads)
