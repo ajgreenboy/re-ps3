@@ -1,8 +1,16 @@
 diff --git a/XenonRecomp/recompiler.cpp b/XenonRecomp/recompiler.cpp
-index fa91527..6cdc2e1 100644
+index fa91527..64b72f1 100644
 --- a/XenonRecomp/recompiler.cpp
 +++ b/XenonRecomp/recompiler.cpp
-@@ -240,6 +240,14 @@ void Recompiler::Analyse()
+@@ -1,6 +1,7 @@
+ #include "pch.h"
+ #include "recompiler.h"
+ #include <xex_patcher.h>
++#include <set>
+ 
+ static uint64_t ComputeMask(uint32_t mstart, uint32_t mstop)
+ {
+@@ -240,6 +241,14 @@ void Recompiler::Analyse()
                  base += fnSymbol->size;
                  data += fnSymbol->size;
              }
@@ -17,7 +25,7 @@ index fa91527..6cdc2e1 100644
              else
              {
                  auto& fn = functions.emplace_back(Function::Analyze(data, dataEnd - data, base));
-@@ -252,6 +260,9 @@ void Recompiler::Analyse()
+@@ -252,6 +261,9 @@ void Recompiler::Analyse()
      }
  
      std::sort(functions.begin(), functions.end(), [](auto& lhs, auto& rhs) { return lhs.base < rhs.base; });
@@ -27,7 +35,7 @@ index fa91527..6cdc2e1 100644
  }
  
  bool Recompiler::Recompile(
-@@ -309,6 +320,12 @@ bool Recompiler::Recompile(
+@@ -309,6 +321,12 @@ bool Recompiler::Recompile(
              return fmt::format("ctx.cr{}", index);
          };
  
@@ -40,7 +48,7 @@ index fa91527..6cdc2e1 100644
      auto ctr = [&]()
          {
              if (config.ctrAsLocalVariable)
-@@ -399,11 +416,30 @@ bool Recompiler::Recompile(
+@@ -399,11 +417,30 @@ bool Recompiler::Recompile(
                  }
                  else
                  {
@@ -71,21 +79,37 @@ index fa91527..6cdc2e1 100644
      auto printConditionalBranch = [&](bool not_, const std::string_view& cond)
          {
              if (insn.operands[1] < fn.base || insn.operands[1] >= fn.base + fn.size)
-@@ -609,7 +645,8 @@ bool Recompiler::Recompile(
+@@ -609,16 +646,23 @@ bool Recompiler::Recompile(
      case PPC_INST_BCTR:
          if (switchTable != config.switchTables.end())
          {
 -            println("\tswitch ({}.u64) {{", r(switchTable->second.r));
-+            // PS3 code bounds jump-table indices with 32-bit compares; the upper half may be anything
-+            println("\tswitch ({}.u32) {{", r(switchTable->second.r));
++            // Dispatch on the computed target itself: at a bctr, ctr holds the address the table produced. This
++            // doesn't depend on which register held the index (PS3 code often reuses it for the table entry).
++            println("\tswitch ({}.u32) {{", ctr());
  
++            std::set<uint32_t> seen;
              for (size_t i = 0; i < switchTable->second.labels.size(); i++)
              {
-@@ -627,8 +664,10 @@ bool Recompiler::Recompile(
+-                println("\tcase {}:", i);
+                 auto label = switchTable->second.labels[i];
++                if (!seen.insert(label).second)
++                    continue;
++                println("\tcase 0x{:X}:", label);
+                 if (label < fn.base || label >= fn.base + fn.size)
+                 {
++                    // Outside this function's span: continue there as a tail call
+                     println("\t\t// ERROR: 0x{:X}", label);
+                     fmt::println("ERROR: Switch case at {:X} is trying to jump outside function: {:X}", base, label);
++                    println("\t\tPPC_CALL_UNRESOLVED(0x{:X});", label);
+                     println("\t\treturn;");
+                 }
+                 else
+@@ -627,8 +671,10 @@ bool Recompiler::Recompile(
                  }
              }
  
-+            // An index the table doesn't cover: take the real computed jump (reported by the runtime if bad)
++            // A target the table doesn't list: take the real computed jump (reported by the runtime if bad)
              println("\tdefault:");
 -            println("\t\t__builtin_unreachable();");
 +            println("\t\tPPC_CALL_INDIRECT_FUNC({}.u32);", ctr());
@@ -93,7 +117,7 @@ index fa91527..6cdc2e1 100644
              println("\t}}");
  
              switchTable = config.switchTables.end();
-@@ -649,7 +688,7 @@ bool Recompiler::Recompile(
+@@ -649,7 +695,7 @@ bool Recompiler::Recompile(
  
      case PPC_INST_BDZ:
          println("\t--{}.u64;", ctr());
@@ -102,7 +126,7 @@ index fa91527..6cdc2e1 100644
          break;
  
      case PPC_INST_BDZLR:
-@@ -659,13 +698,13 @@ bool Recompiler::Recompile(
+@@ -659,13 +705,13 @@ bool Recompiler::Recompile(
  
      case PPC_INST_BDNZ:
          println("\t--{}.u64;", ctr());
@@ -118,7 +142,7 @@ index fa91527..6cdc2e1 100644
          break;
  
      case PPC_INST_BEQ:
-@@ -748,6 +787,8 @@ bool Recompiler::Recompile(
+@@ -748,6 +794,8 @@ bool Recompiler::Recompile(
  
      case PPC_INST_CLRLDI:
          println("\t{}.u64 = {}.u64 & 0x{:X};", r(insn.operands[0]), r(insn.operands[1]), (1ull << (64 - insn.operands[2])) - 1);
@@ -127,7 +151,20 @@ index fa91527..6cdc2e1 100644
          break;
  
      case PPC_INST_CLRLWI:
-@@ -1088,6 +1129,14 @@ bool Recompiler::Recompile(
+@@ -813,10 +861,11 @@ bool Recompiler::Recompile(
+         break;
+ 
+     case PPC_INST_DCBZ:
++        // The Cell PPU's cache line is 128 bytes (Xenon's dcbz clears 32)
+         print("\tmemset(base + ((");
+         if (insn.operands[0] != 0)
+             print("{}.u32 + ", r(insn.operands[0]));
+-        println("{}.u32) & ~31), 0, 32);", r(insn.operands[1]));
++        println("{}.u32) & ~127), 0, 128);", r(insn.operands[1]));
+         break;
+ 
+     case PPC_INST_DCBZL:
+@@ -1088,6 +1137,14 @@ bool Recompiler::Recompile(
          println("\t{}.f64 = double({}.f32);", f(insn.operands[0]), temp());
          break;
  
@@ -142,7 +179,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_LFSX:
          printSetFlushMode(false);
          print("\t{}.u32 = PPC_LOAD_U32(", temp());
-@@ -1118,6 +1167,12 @@ bool Recompiler::Recompile(
+@@ -1118,6 +1175,12 @@ bool Recompiler::Recompile(
          println("{});", int32_t(insn.operands[1]));
          break;
  
@@ -155,7 +192,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_LHZX:
          print("\t{}.u64 = PPC_LOAD_U16(", r(insn.operands[0]));
          if (insn.operands[1] != 0)
-@@ -1125,6 +1180,13 @@ bool Recompiler::Recompile(
+@@ -1125,6 +1188,13 @@ bool Recompiler::Recompile(
          println("{}.u32);", r(insn.operands[2]));
          break;
  
@@ -169,7 +206,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_LI:
          println("\t{}.s64 = {};", r(insn.operands[0]), int32_t(insn.operands[1]));
          break;
-@@ -1145,6 +1207,29 @@ bool Recompiler::Recompile(
+@@ -1145,6 +1215,29 @@ bool Recompiler::Recompile(
          println("{}.u32) & ~0xF))), simde_mm_load_si128((simde__m128i*)VectorMaskL)));", r(insn.operands[2]));
          break;
  
@@ -199,7 +236,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_LVLX:
      case PPC_INST_LVLX128:
          print("\t{}.u32 = ", temp());
-@@ -1255,12 +1340,40 @@ bool Recompiler::Recompile(
+@@ -1255,12 +1348,40 @@ bool Recompiler::Recompile(
          break;
  
      case PPC_INST_MFOCRF:
@@ -243,7 +280,7 @@ index fa91527..6cdc2e1 100644
          break;
  
      case PPC_INST_MR:
-@@ -1281,6 +1394,10 @@ bool Recompiler::Recompile(
+@@ -1281,6 +1402,10 @@ bool Recompiler::Recompile(
          println("\t{}.u64 = {}.u64;", ctr(), r(insn.operands[0]));
          break;
  
@@ -254,7 +291,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_MTFSF:
          println("\tctx.fpscr.storeFromGuest({}.u32);", f(insn.operands[1]));
          break;
-@@ -1311,8 +1428,18 @@ bool Recompiler::Recompile(
+@@ -1311,8 +1436,18 @@ bool Recompiler::Recompile(
              println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
          break;
  
@@ -273,7 +310,7 @@ index fa91527..6cdc2e1 100644
          break;
  
      case PPC_INST_MULLI:
-@@ -1359,6 +1486,37 @@ bool Recompiler::Recompile(
+@@ -1359,6 +1494,37 @@ bool Recompiler::Recompile(
          println("\t{}.u64 = {}.u64 | ~{}.u64;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
          break;
  
@@ -311,7 +348,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_ORI:
          println("\t{}.u64 = {}.u64 | {};", r(insn.operands[0]), r(insn.operands[1]), insn.operands[2]);
          break;
-@@ -1369,10 +1527,20 @@ bool Recompiler::Recompile(
+@@ -1369,10 +1535,20 @@ bool Recompiler::Recompile(
  
      case PPC_INST_RLDICL:
          println("\t{}.u64 = __builtin_rotateleft64({}.u64, {}) & 0x{:X};", r(insn.operands[0]), r(insn.operands[1]), insn.operands[2], ComputeMask(insn.operands[3], 63));
@@ -332,7 +369,7 @@ index fa91527..6cdc2e1 100644
          break;
  
      case PPC_INST_RLDIMI:
-@@ -1397,6 +1565,8 @@ bool Recompiler::Recompile(
+@@ -1397,6 +1573,8 @@ bool Recompiler::Recompile(
  
      case PPC_INST_ROTLDI:
          println("\t{}.u64 = __builtin_rotateleft64({}.u64, {});", r(insn.operands[0]), r(insn.operands[1]), insn.operands[2]);
@@ -341,7 +378,7 @@ index fa91527..6cdc2e1 100644
          break;
  
      case PPC_INST_ROTLW:
-@@ -1411,6 +1581,8 @@ bool Recompiler::Recompile(
+@@ -1411,6 +1589,8 @@ bool Recompiler::Recompile(
  
      case PPC_INST_SLD:
          println("\t{}.u64 = {}.u8 & 0x40 ? 0 : ({}.u64 << ({}.u8 & 0x7F));", r(insn.operands[0]), r(insn.operands[2]), r(insn.operands[1]), r(insn.operands[2]));
@@ -350,7 +387,7 @@ index fa91527..6cdc2e1 100644
          break;
  
      case PPC_INST_SLW:
-@@ -1465,6 +1637,8 @@ bool Recompiler::Recompile(
+@@ -1465,6 +1645,8 @@ bool Recompiler::Recompile(
  
      case PPC_INST_SRD:
          println("\t{}.u64 = {}.u8 & 0x40 ? 0 : ({}.u64 >> ({}.u8 & 0x7F));", r(insn.operands[0]), r(insn.operands[2]), r(insn.operands[1]), r(insn.operands[2]));
@@ -359,7 +396,7 @@ index fa91527..6cdc2e1 100644
          break;
  
      case PPC_INST_SRW:
-@@ -1516,6 +1690,12 @@ bool Recompiler::Recompile(
+@@ -1516,6 +1698,12 @@ bool Recompiler::Recompile(
          println("\t{}.u32 = {};", r(insn.operands[2]), ea());
          break;
  
@@ -372,7 +409,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_STDX:
          print("{}", mmioStore() ? "\tPPC_MM_STORE_U64(" : "\tPPC_STORE_U64(");
          if (insn.operands[1] != 0)
-@@ -1556,6 +1736,14 @@ bool Recompiler::Recompile(
+@@ -1556,6 +1744,14 @@ bool Recompiler::Recompile(
          println("{}, {}.u32);", int32_t(insn.operands[1]), temp());
          break;
  
@@ -387,7 +424,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_STFSX:
          printSetFlushMode(false);
          println("\t{}.f32 = float({}.f64);", temp(), f(insn.operands[0]));
-@@ -1572,6 +1760,12 @@ bool Recompiler::Recompile(
+@@ -1572,6 +1768,12 @@ bool Recompiler::Recompile(
          println("{}, {}.u16);", int32_t(insn.operands[1]), r(insn.operands[0]));
          break;
  
@@ -400,7 +437,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_STHBRX:
          print("{}", mmioStore() ? "\tPPC_MM_STORE_U16(" : "\tPPC_STORE_U16(");
          if (insn.operands[1] != 0)
-@@ -1641,6 +1835,13 @@ bool Recompiler::Recompile(
+@@ -1641,6 +1843,13 @@ bool Recompiler::Recompile(
          println("{}.u32) & ~0xF)), simde_mm_shuffle_epi8(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*)VectorMaskL)));", r(insn.operands[2]), v(insn.operands[0]));
          break;
  
@@ -414,7 +451,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_STW:
          print("{}", mmioStore() ? "\tPPC_MM_STORE_U32(" : "\tPPC_STORE_U32(");
          if (insn.operands[2] != 0)
-@@ -1714,6 +1915,10 @@ bool Recompiler::Recompile(
+@@ -1714,6 +1923,10 @@ bool Recompiler::Recompile(
          // no op
          break;
  
@@ -425,7 +462,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_TDLGEI:
          // no op
          break;
-@@ -1722,6 +1927,7 @@ bool Recompiler::Recompile(
+@@ -1722,6 +1935,7 @@ bool Recompiler::Recompile(
          // no op
          break;
  
@@ -433,7 +470,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_TWI:
          // no op
          break;
-@@ -1740,6 +1946,17 @@ bool Recompiler::Recompile(
+@@ -1740,6 +1954,17 @@ bool Recompiler::Recompile(
          println("\tsimde_mm_store_ps({}.f32, simde_mm_add_ps(simde_mm_load_ps({}.f32), simde_mm_load_ps({}.f32)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
          break;
  
@@ -451,7 +488,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_VADDSHS:
          println("\tsimde_mm_store_si128((simde__m128i*){}.s16, simde_mm_adds_epi16(simde_mm_load_si128((simde__m128i*){}.s16), simde_mm_load_si128((simde__m128i*){}.s16)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
          break;
-@@ -1769,6 +1986,7 @@ bool Recompiler::Recompile(
+@@ -1769,6 +1994,7 @@ bool Recompiler::Recompile(
          println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_and_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
          break;
  
@@ -459,7 +496,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_VANDC128:
          println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_andnot_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8)));", v(insn.operands[0]), v(insn.operands[2]), v(insn.operands[1]));
          break;
-@@ -1829,6 +2047,14 @@ bool Recompiler::Recompile(
+@@ -1829,6 +2055,14 @@ bool Recompiler::Recompile(
          break;
      }
  
@@ -474,7 +511,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_VCMPBFP:
      case PPC_INST_VCMPBFP128:
          println("\t__builtin_debugtrap();");
-@@ -1848,6 +2074,27 @@ bool Recompiler::Recompile(
+@@ -1848,6 +2082,27 @@ bool Recompiler::Recompile(
              println("\t{}.setFromMask(simde_mm_load_si128((simde__m128i*){}.u8), 0xFFFF);", cr(6), v(insn.operands[0]));
          break;
  
@@ -502,7 +539,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_VCMPEQUW:
      case PPC_INST_VCMPEQUW128:
          println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_cmpeq_epi32(simde_mm_load_si128((simde__m128i*){}.u32), simde_mm_load_si128((simde__m128i*){}.u32)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
-@@ -1879,6 +2126,16 @@ bool Recompiler::Recompile(
+@@ -1879,6 +2134,16 @@ bool Recompiler::Recompile(
          println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_cmpgt_epu16(simde_mm_load_si128((simde__m128i*){}.u16), simde_mm_load_si128((simde__m128i*){}.u16)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
          break;
  
@@ -519,7 +556,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_VEXPTEFP:
      case PPC_INST_VEXPTEFP128:
          // TODO: vectorize
-@@ -2130,6 +2387,10 @@ bool Recompiler::Recompile(
+@@ -2130,6 +2395,10 @@ bool Recompiler::Recompile(
          println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_set1_epi8(char(0x{:X})));", v(insn.operands[0]), insn.operands[1]);
          break;
  
@@ -530,7 +567,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_VSPLTISW:
      case PPC_INST_VSPLTISW128:
          println("\tsimde_mm_store_si128((simde__m128i*){}.u32, simde_mm_set1_epi32(int(0x{:X})));", v(insn.operands[0]), insn.operands[1]);
-@@ -2156,6 +2417,16 @@ bool Recompiler::Recompile(
+@@ -2156,6 +2425,16 @@ bool Recompiler::Recompile(
              println("\t{}.s32[{}] = {}.s32[{}] >> ({}.u8[{}] & 0x1F);", v(insn.operands[0]), i, v(insn.operands[1]), i, v(insn.operands[2]), i * 4);
          break;
  
@@ -547,7 +584,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_VSRW:
      case PPC_INST_VSRW128:
          // TODO: vectorize, ensure endianness is correct
-@@ -2169,6 +2440,36 @@ bool Recompiler::Recompile(
+@@ -2169,6 +2448,36 @@ bool Recompiler::Recompile(
          println("\tsimde_mm_store_ps({}.f32, simde_mm_sub_ps(simde_mm_load_ps({}.f32), simde_mm_load_ps({}.f32)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
          break;
  
@@ -584,7 +621,7 @@ index fa91527..6cdc2e1 100644
      case PPC_INST_VSUBSWS:
          // TODO: vectorize
          for (size_t i = 0; i < 4; i++)
-@@ -2378,7 +2679,7 @@ bool Recompiler::Recompile(const Function& fn)
+@@ -2378,7 +2687,7 @@ bool Recompiler::Recompile(const Function& fn)
      }
      else
      {
@@ -593,6 +630,23 @@ index fa91527..6cdc2e1 100644
      }
  
  #ifdef XENON_RECOMP_USE_ALIAS
+@@ -2438,10 +2747,13 @@ bool Recompiler::Recompile(const Function& fn)
+         ++data;
+     }
+ 
+-#if 0
++    // A function span that ends without a b/bctr/blr runs on into the next code in the guest (spans can be
++    // cut by other entries): continue there as a tail call, so the rest (epilogue included) still runs.
+     if (insn.opcode == nullptr || (insn.opcode->id != PPC_INST_B && insn.opcode->id != PPC_INST_BCTR && insn.opcode->id != PPC_INST_BLR))
+-        fmt::println("Function at {:X} ends prematurely with instruction {} at {:X}", fn.base, insn.opcode != nullptr ? insn.opcode->name : "INVALID", base - 4);
+-#endif
++    {
++        println("\t// fallthrough to 0x{:X}", base);
++        println("\tPPC_CALL_UNRESOLVED(0x{:X});", base);
++    }
+ 
+     println("}}\n");
+ 
 diff --git a/XenonRecomp/recompiler.h b/XenonRecomp/recompiler.h
 index 8242db5..ab59823 100644
 --- a/XenonRecomp/recompiler.h
