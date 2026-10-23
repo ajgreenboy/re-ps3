@@ -9,6 +9,9 @@ import java.io.*;
 public class Ps3Functions extends GhidraScript {
     @Override
     public void run() throws Exception {
+        // Earlier post-scripts can introduce export functions after initial analysis.
+        // Finish their queued analysis before serializing ranges for recompilation.
+        analyzeChanges(currentProgram);
         String outPath = getScriptArgs()[0];
         if (new File(outPath).isDirectory()) outPath = new File(outPath, currentProgram.getName() + "_functions.csv").getPath();
         int n = 0;

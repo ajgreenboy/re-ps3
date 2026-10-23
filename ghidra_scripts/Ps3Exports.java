@@ -58,7 +58,12 @@ public class Ps3Exports extends GhidraScript {
                         String name = "";
                         if (mapped(code)) {
                             Function f = fm.getFunctionAt(addr(code));
-                            if (f == null) f = createFunction(addr(code), null);
+                            if (f == null) {
+                                // Export discovery runs after initial auto-analysis. Seed instructions
+                                // before creating a function so its body is not a one-byte placeholder.
+                                disassemble(addr(code));
+                                f = createFunction(addr(code), null);
+                            }
                             if (f != null) {
                                 if (f.getName().startsWith("FUN_")) f.setName(String.format("%s_%08X", module, nid), SourceType.IMPORTED);
                                 name = f.getName();

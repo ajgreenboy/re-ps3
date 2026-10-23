@@ -74,9 +74,9 @@ for (const m of modules) {
       if (dv.getUint32(s.off + (a - s.addr) + 4) !== m.toc) continue;
       const code = dv.getUint32(s.off + (a - s.addr));
       if (code & 3 || !inCode(code) || starts.has(code)) continue;
-      // Inside a mapped body it is only trusted when it lands on a prologue (Ghidra merges some functions)
-      const first = read32(code);
-      if (insideKnown(code) && (first === undefined || ((first >>> 16) !== 0xf821 && first !== 0x7c0802a6))) continue;
+      // A valid {code, module TOC} pair is a function descriptor even when Ghidra
+      // absorbs its callback entry into a larger function range.
+      // Keep it so indirect callback dispatch has an explicit translated entry.
       found.add(code);
     }
   }
@@ -97,3 +97,4 @@ for (const m of modules) {
   console.log(`${m.file}: ${found.size} OPD-only functions`);
 }
 console.log(`added ${added} functions`);
+

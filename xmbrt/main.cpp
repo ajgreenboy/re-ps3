@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdarg>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -26,6 +27,11 @@ static FILE* g_log;
 static std::mutex g_log_mutex;
 static std::atomic<uint64_t> g_call_seq;
 static uint64_t g_max_calls = 10000;
+static bool g_buffered_trace = false;
+static bool g_trace_calls = true;
+static std::atomic_bool g_dump_requested{};
+
+void request_runtime_dump() { g_dump_requested = true; }
 
 void lv2_init();
 bool prx_init(const std::string& dir);
@@ -38,21 +44,24 @@ void log_line(const char* fmt, ...)
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
+    const bool call=buf[0]>='0' && buf[0]<='9' &&
+        (strstr(buf," sys ")||strstr(buf," hle "));
+    if(call&&!g_trace_calls)return;
     std::lock_guard lock(g_log_mutex);
+    const bool buffered=g_buffered_trace && g_log && call;
     if (g_log)
     {
         fputs(buf, g_log);
         fputc('\n', g_log);
-        fflush(g_log);
+        if(!buffered)fflush(g_log);
     }
-    fputs(buf, stderr);
-    fputc('\n', stderr);
+    if(!buffered){fputs(buf, stderr);fputc('\n', stderr);}
 }
 
 uint64_t next_call_seq()
 {
     const uint64_t seq = ++g_call_seq;
-    if (seq > g_max_calls)
+    if (g_max_calls && seq > g_max_calls)
     {
         log_line("stopping: reached XMBRT_MAX_CALLS=%llu", (unsigned long long)g_max_calls);
         fatal_exit(0);
@@ -134,8 +143,37 @@ static bool load_image(const std::string& path)
 }
 
 // Default for every table slot that isn't a translated function or an HLE stub.
-static void bad_indirect_call(PPCContext& __restrict__ ctx, uint8_t*)
+static void bad_indirect_call(PPCContext& __restrict__ ctx, uint8_t* base)
 {
+	// Ghidra sometimes leaves tiny PRX import trampolines out of the function list.
+	// Recognize the common `li r4,-1; li r3,N; clrldi r4,r4,48; b HLE` shape
+	// and dispatch through its translated HLE target instead of treating the
+	// trampoline as an unknown function.
+	const uint32_t stub = ctx.ctr.u32;
+	if (stub >= PPC_IMAGE_BASE && uint64_t(stub) + 16 <= kImageEnd && !(stub & 3))
+	{
+		const uint32_t li_r4 = PPC_LOAD_U32(stub + 0);
+		const uint32_t li_r3 = PPC_LOAD_U32(stub + 4);
+		const uint32_t clrldi = PPC_LOAD_U32(stub + 8);
+		const uint32_t branch = PPC_LOAD_U32(stub + 12);
+		if ((li_r4 & 0xFFFF0000) == 0x38800000 &&
+			(li_r3 & 0xFFFF0000) == 0x38600000 && clrldi == 0x78840420 &&
+			(branch & 0xFC000003) == 0x48000000)
+		{
+			const int32_t displacement = int32_t(branch << 6) >> 6;
+			const uint32_t target = stub + 12 + displacement;
+			PPCFunc* f = target >= PPC_CODE_BASE && target < kImageEnd ? func_slot(target) : &bad_indirect_call;
+			if (f != &bad_indirect_call)
+			{
+				ctx.r4.u64 = uint16_t(li_r4);
+				ctx.r3.s64 = int16_t(li_r3);
+				ctx.ctr.u64 = target;
+				f(ctx, base);
+				return;
+			}
+		}
+	}
+
     // Name the nearest translated function below the target, to tell a mid-function target from data
     uint32_t below = 0;
     for (uint32_t a = ctx.ctr.u32 & ~3u; a >= PPC_CODE_BASE && a + 0x10000 > ctx.ctr.u32; a -= 4)
@@ -291,6 +329,12 @@ static void idle_watchdog(uint32_t idle_seconds)
     for (uint32_t idle = 0, elapsed = 0;; elapsed++)
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
+        { std::lock_guard lock(g_log_mutex);if(g_log)fflush(g_log); }
+        if (g_dump_requested.exchange(false))
+        {
+            log_line("runtime snapshot requested: %llu calls", (unsigned long long)g_call_seq.load());
+            dump_threads();
+        }
         if (dump_at && elapsed + 1 == dump_at)
         {
             log_line("XMBRT_DUMP_AT: %llu s, %llu calls", (unsigned long long)dump_at, (unsigned long long)g_call_seq.load());
@@ -300,7 +344,7 @@ static void idle_watchdog(uint32_t idle_seconds)
         const uint64_t now = g_call_seq.load();
         idle = now == last ? idle + 1 : 0;
         last = now;
-        if (idle >= idle_seconds)
+        if (idle_seconds && idle >= idle_seconds)
         {
             log_line("stopping: no syscall or HLE call for %u s (last call %llu)", idle_seconds, (unsigned long long)now);
             dump_threads();
@@ -319,6 +363,8 @@ int main(int argc, char** argv)
     const std::string dir = argv[1];
     const char* log_path = getenv("XMBRT_LOG");
     g_log = fopen(log_path && *log_path ? log_path : "xmbrt.log", "w");
+    g_buffered_trace=getenv("XMBRT_BUFFERED_TRACE")!=nullptr;
+    g_trace_calls=getenv("XMBRT_NO_CALL_TRACE")==nullptr;
     g_max_calls = env_u64("XMBRT_MAX_CALLS", 10000);
 
     g_base = (uint8_t*)VirtualAlloc(nullptr, PPC_MEMORY_SIZE, MEM_RESERVE, PAGE_NOACCESS);

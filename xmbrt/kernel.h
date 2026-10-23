@@ -133,6 +133,13 @@ void register_memory_syscalls();
 void register_fs_syscalls();
 void register_prx_syscalls();
 void register_misc_syscalls();
+void register_security_syscalls();
+int64_t ss_copy_open_psid(uint32_t address);
+void register_spu_syscalls();
+int64_t spurs_create_task(PPCContext& ctx);
+int64_t spurs_send_signal(PPCContext& ctx);
+void spurs_connect_task_event_queue(uint32_t taskset, uint32_t port, uint32_t queue);
+void spu_dump_stats();
 
 // Guest time: microseconds since process start (sys_time_get_system_time, timers); mftb is the 80 MHz form.
 uint64_t system_time_us();
@@ -140,7 +147,12 @@ extern "C" uint64_t ppc_mftb();
 
 // Controller (k_pad.cpp)
 void pad_init();
+bool pad_key(uint32_t key, bool down);
 uint32_t pad_read(uint32_t guest_buf, uint64_t max_u16);
+void rsxaudio_configure_port(uint32_t port,uint32_t sample_rate,uint32_t sample_bytes,bool use_serial_buffer);
+void rsxaudio_set_port_active(uint32_t port,bool active);
+void rsxaudio_set_port_muted(uint32_t port,bool muted);
+void rsxaudio_reset_hardware();
 
 // Memory areas (k_memory.cpp), for other subsystems that need guest allocations.
 uint32_t user_alloc(uint32_t size, uint32_t align);

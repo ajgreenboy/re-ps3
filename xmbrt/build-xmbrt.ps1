@@ -17,11 +17,19 @@ if ($recomp.Count -ne $genCpp.Count) { throw "recomp objects: $($recomp.Count) o
 
 $flags = "/nologo /c /std:c++20 /O2 /arch:AVX /EHsc /W3 -Wno-unused-function /D_CRT_SECURE_NO_WARNINGS /DPPC_FUNC_TABLE_FROM_RUNTIME /I $Gen /I C:\dev\deps\XenonRecomp\XenonUtils /I C:\dev\deps\XenonRecomp\thirdparty\simde /I C:\dev\rpcs3\3rdparty /I C:\dev\rpcs3\3rdparty\GL"
 $vcvars = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+$exportsFile=Join-Path (Split-Path -Parent $Gen) 'boot493\exports.csv'
+$signalExport=Import-Csv -LiteralPath $exportsFile | Where-Object {$_.library -eq 'cellSpurs' -and $_.nid -eq '0xE0A6DBE4'} | Select-Object -First 1
+$signalFlags=''
+if($signalExport){
+    $entrySuffix=([uint32]$signalExport.code).ToString('X')
+    $signalFlags=" /DXMBRT_SPURS_SIGNAL_ENTRY=sub_$entrySuffix /DXMBRT_SPURS_SIGNAL_IMPL=__imp__sub_$entrySuffix"
+}
 $runtime = @()
 foreach ($f in Get-ChildItem $src -Filter *.cpp) {
     $obj = "$Out\$($f.BaseName).obj"
     $runtime += $obj
-    cmd /c "call `"$vcvars`" >nul && `"$clang\clang-cl.exe`" $flags `"$($f.FullName)`" /Fo:`"$obj`""
+    $fileFlags=if($f.BaseName -eq 'spurs_trace'){$flags+$signalFlags}else{$flags}
+    cmd /c "call `"$vcvars`" >nul && `"$clang\clang-cl.exe`" $fileFlags `"$($f.FullName)`" /Fo:`"$obj`""
     if ($LASTEXITCODE) { throw "compile failed: $($f.Name)" }
 }
 

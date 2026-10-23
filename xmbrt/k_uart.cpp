@@ -5,6 +5,7 @@
 #include "kernel.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -93,6 +94,24 @@ namespace
         bool hdmi_res_set = false, hdcp_first_auth = true, head_b_initialized = false;
         HdmiEventHandler hdmi;
     } g_vuart;
+    std::array<uint32_t,5> g_audio_routes{3,3,3,3,3}; // HDMI0/1, analog, SPDIF0/1
+
+    bool configure_audio(const uint8_t* p,uint16_t size)
+    {
+        if(size<68)return false;
+        const uint32_t av=p[8],source=be32(p+32),freq=be32(p+20);
+        if(freq>7)return false;
+        uint32_t index,port;
+        if(av<=1){index=av;port=source==1?2:0;}
+        else if(av==0x10){index=2;port=0;}
+        else if(av==0x20||av==0x21){index=av-0x20+3;port=index-2;}
+        else return false;
+        constexpr uint32_t rates[8]={48000,48000,44100,48000,88200,96000,176400,192000};
+        const uint32_t bytes=(be32(p+24)==1||(port!=0&&be32(p+28)!=1))?2:4;
+        rsxaudio_configure_port(port,rates[freq],bytes,av>=0x20&&source==0);
+        g_audio_routes[index]=(av>=0x20&&source==0)?0:port;
+        return true;
+    }
 
     void write_resp(uint32_t cid, uint32_t status, const void* data = nullptr, uint16_t size = 0, bool syscon = false)
     {
@@ -337,14 +356,45 @@ namespace
             write_resp(cid, ST_SUCCESS, reply, 4);
             break;
         }
+        case 0x02000001: // AUDIO_INIT
+            rsxaudio_reset_hardware();g_audio_routes.fill(3);write_resp(cid,ST_SUCCESS);break;
+        case 0x02000002: // AUDIO_MODE
+            write_resp(cid,configure_audio(p,pkt_size)?ST_SUCCESS:0x11);break;
+        case 0x02000003: // AUDIO_MUTE
+            if(pkt_size>=13)
+            {
+                const uint32_t av=p[8];
+                if(av<=1||av==0x10||av==0x11)rsxaudio_set_port_muted(0,p[12]!=0);
+                else if(av==0x20||av==0x21)rsxaudio_set_port_muted(av-0x20+1,p[12]!=0);
+            }
+            write_resp(cid,ST_SUCCESS);break;
+        case 0x02000004: // AUDIO_ACTIVE
+        {
+            constexpr uint32_t masks[5]={1,2,1u<<10,1u<<20,1u<<21};
+            const uint32_t mask=pkt_size>=12?be32(p+8):0;
+            for(unsigned i=0;i<5;++i)if((mask&masks[i])&&g_audio_routes[i]<3)rsxaudio_set_port_active(g_audio_routes[i],true);
+            rsxaudio_set_port_muted(0,false);rsxaudio_set_port_muted(2,false);
+            write_resp(cid,ST_SUCCESS);break;
+        }
+        case 0x02000005: // AUDIO_INACTIVE
+            if(pkt_size>=12&&!(be32(p+8)&0x80000000))g_audio_routes.fill(3);
+            for(uint32_t port=0;port<3;++port)rsxaudio_set_port_active(port,false);
+            rsxaudio_set_port_muted(0,true);rsxaudio_set_port_muted(2,true);
+            write_resp(cid,ST_SUCCESS);break;
         case 0x04000001: // AVB_PARAM: video packets, then AV video and AV audio packets
         {
-            const uint16_t n_video = be16(p + 8), n_av_video = be16(p + 12), n_av_audio = be16(p + 14);
+            const uint16_t n_video = be16(p + 8), n_audio=be16(p+10), n_av_video = be16(p + 12), n_av_audio = be16(p + 14);
             const uint8_t* q = p + 16;
             for (uint16_t i = 0; i < n_video; i++)
             {
                 if (be16(q + 8) == 1) g_vuart.head_b_initialized = true; // video_head == HEAD_B_ANALOG
                 q += be16(q + 2) + 4;
+            }
+            for(uint16_t i=0;i<n_audio;++i)
+            {
+                const uint16_t size=be16(q+2)+4;
+                if(q+size>p+pkt_size||!configure_audio(q,size)){write_resp(cid,0x11);return;}
+                q+=size;
             }
             if (!n_av_video && !n_av_audio)
             {
@@ -370,8 +420,7 @@ namespace
         }
         case 0x00000009: case 0x0000000A: case 0x0000000B: case 0x00010002: case 0x00030001: case 0x00030002:
         case 0x00030003: case 0x00030004: case 0x000A0001: case 0x01000001: case 0x01000002: case 0x01000004:
-        case 0x01000005: case 0x01000008: case 0x01000009: case 0x02000001: case 0x02000002: case 0x02000003:
-        case 0x02000004: case 0x02000005: case 0x02000006: case 0x02000007:
+        case 0x01000005: case 0x01000008: case 0x01000009: case 0x02000006: case 0x02000007:
             write_resp(cid, ST_SUCCESS);
             break;
         default:

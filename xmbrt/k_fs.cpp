@@ -22,25 +22,65 @@ namespace
     {
         const char* guest;
         bool writable;
+        const char* filesystem;
+        const char* device;
+        uint64_t sector_size;
+        uint64_t block_size;
     };
     const Mount kMounts[] = {
-        { "/dev_flash", false }, { "/dev_flash2", true }, { "/dev_flash3", true }, { "/dev_hdd0", true },
-        { "/dev_hdd1", true }, { "/dev_usb000", true }, { "/dev_bdvd", false },
+        { "/dev_flash", false, "CELL_FS_FAT", "CELL_FS_IOS:BUILTIN_FLSH1", 512, 8192 },
+        { "/dev_flash2", true, "CELL_FS_FAT", "CELL_FS_IOS:BUILTIN_FLSH2", 512, 8192 },
+        { "/dev_flash3", true, "CELL_FS_FAT", "CELL_FS_IOS:BUILTIN_FLSH3", 512, 8192 },
+        { "/dev_hdd0", true, "CELL_FS_UFS", "CELL_FS_UTILITY:HDD0", 512, 4096 },
+        { "/dev_hdd1", true, "CELL_FS_FAT", "CELL_FS_UTILITY:HDD1", 512, 32768 },
+        { "/dev_usb000", true, "CELL_FS_FAT", "CELL_FS_IOS:USB_MASS_STORAGE000", 512, 4096 },
+        { "/dev_bdvd", false, "CELL_FS_ISO9660", "CELL_FS_IOS:PATA0_BDVD_DRIVE", 2048, 2048 },
     };
 
     fs::path g_lower, g_upper;
     std::mutex g_fs_mutex;
     std::set<std::string> g_mounted;
 
+    // An upper-layer tombstone hides the corresponding lower entry, including
+    // descendants of a removed directory. Markers live outside the guest tree.
+    // Keep the marker when a file is recreated: the new upper file must not
+    // resurrect an older lower copy if it is subsequently removed again.
+    bool lower_hidden(const fs::path& upper)
+    {
+        const fs::path relative = upper.lexically_relative(g_upper);
+        fs::path marker = g_upper / ".xmbrt-whiteouts";
+        std::error_code ec;
+        for (const auto& part : relative)
+        {
+            marker /= part;
+            if (fs::is_regular_file(marker / ".deleted", ec)) return true;
+        }
+        return false;
+    }
+
+    bool hide_lower(const fs::path& upper)
+    {
+        const fs::path marker = g_upper / ".xmbrt-whiteouts" / upper.lexically_relative(g_upper);
+        std::error_code ec;
+        fs::create_directories(marker, ec);
+        if (ec) return false;
+        const fs::path file = marker / ".deleted";
+        HANDLE h = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return false;
+        CloseHandle(h);
+        return true;
+    }
+
     struct Resolved
     {
         fs::path lower, upper;
         bool writable = false;
         bool ok = false;
+        const Mount* mount = nullptr;
         fs::path read_path() const
         {
             std::error_code ec;
-            return fs::exists(upper, ec) ? upper : lower;
+            return fs::exists(upper, ec) || lower_hidden(upper) ? upper : lower;
         }
     };
 
@@ -78,6 +118,7 @@ namespace
             r.lower = g_lower / utf8_path(parts[0]) / rest;
             r.upper = g_upper / utf8_path(parts[0]) / rest;
             r.writable = m.writable;
+            r.mount = &m;
             r.ok = true;
         }
         return r;
@@ -89,6 +130,8 @@ namespace
         std::error_code ec;
         if (fs::exists(r.upper, ec)) return true;
         fs::create_directories(r.upper.parent_path(), ec);
+        if (ec) return false;
+        if (lower_hidden(r.upper)) return true;
         if (fs::is_directory(r.lower, ec)) return fs::create_directories(r.upper, ec) || fs::exists(r.upper, ec);
         if (fs::exists(r.lower, ec)) return fs::copy_file(r.lower, r.upper, ec);
         return true;
@@ -98,6 +141,7 @@ namespace
     {
         HANDLE h = INVALID_HANDLE_VALUE;
         bool append = false;
+        uint32_t flags = 0;
         bool dir = false;
         std::vector<std::pair<std::string, bool>> entries; // name, is_dir
         size_t next = 0;
@@ -166,14 +210,25 @@ namespace
         const Resolved r = resolve(path);
         if (!r.ok) return CELL_ENOENT;
         const uint32_t acc = flags & CELL_FS_O_ACCMODE;
+        if (acc == CELL_FS_O_ACCMODE) return CELL_EINVAL;
         const bool write = acc == CELL_FS_O_WRONLY || acc == CELL_FS_O_RDWR || (flags & (CELL_FS_O_CREAT | CELL_FS_O_TRUNC | CELL_FS_O_APPEND));
         std::error_code ec;
+        const fs::path visible = r.read_path();
+        const bool exists = fs::exists(visible, ec);
+        if (fs::is_directory(visible, ec)) return CELL_EISDIR;
+        // Check exclusivity before copy-up, which itself creates an upper file.
+        if ((flags & CELL_FS_O_CREAT) && (flags & CELL_FS_O_EXCL) && exists) return CELL_EEXIST;
+        if (!(flags & CELL_FS_O_CREAT) && !exists) return CELL_ENOENT;
         fs::path host;
         if (write)
         {
             if (!r.writable) return CELL_EROFS;
+            const fs::path parent_upper = r.upper.parent_path(), parent_lower = r.lower.parent_path();
+            if (!fs::is_directory(parent_upper, ec) &&
+                (lower_hidden(parent_upper) || !fs::is_directory(parent_lower, ec))) return CELL_ENOENT;
             if (!(flags & CELL_FS_O_TRUNC) && !copy_up(r)) return CELL_EIO;
             fs::create_directories(r.upper.parent_path(), ec);
+            if (ec) return CELL_EIO;
             host = r.upper;
         }
         else
@@ -182,17 +237,16 @@ namespace
         }
         if (fs::is_directory(host, ec)) return CELL_EISDIR;
         if (!write && !fs::exists(host, ec)) return CELL_ENOENT;
-        if (write && !(flags & CELL_FS_O_CREAT) && !fs::exists(host, ec) && !fs::exists(r.lower, ec)) return CELL_ENOENT;
-        if ((flags & CELL_FS_O_CREAT) && (flags & CELL_FS_O_EXCL) && (fs::exists(r.upper, ec) || fs::exists(r.lower, ec))) return CELL_EEXIST;
         DWORD access = acc == CELL_FS_O_WRONLY ? GENERIC_WRITE : acc == CELL_FS_O_RDWR ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
         if (write) access |= GENERIC_WRITE;
-        const DWORD disp = (flags & CELL_FS_O_CREAT) ? ((flags & CELL_FS_O_TRUNC) ? CREATE_ALWAYS : OPEN_ALWAYS)
-            : (flags & CELL_FS_O_TRUNC) ? TRUNCATE_EXISTING : OPEN_EXISTING;
+        const DWORD disp = (flags & CELL_FS_O_CREAT) ? ((flags & CELL_FS_O_EXCL) ? CREATE_NEW : (flags & CELL_FS_O_TRUNC) ? CREATE_ALWAYS : OPEN_ALWAYS)
+            : (flags & CELL_FS_O_TRUNC) ? CREATE_ALWAYS : OPEN_EXISTING;
         HANDLE h = CreateFileW(host.c_str(), access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, disp, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_NOT_FOUND ? CELL_ENOENT : CELL_EIO;
         auto f = std::make_unique<FsFile>();
         f->h = h;
         f->append = (flags & CELL_FS_O_APPEND) != 0;
+        f->flags = flags;
         f->guest_path = path;
         guest_store_u32(fd_ptr, add_file(std::move(f)));
         return CELL_OK;
@@ -297,7 +351,7 @@ namespace
         const Resolved r = resolve(path);
         if (!r.ok) return CELL_ENOENT;
         std::error_code ec;
-        const bool in_lower = fs::is_directory(r.lower, ec), in_upper = fs::is_directory(r.upper, ec);
+        const bool in_lower = !lower_hidden(r.upper) && fs::is_directory(r.lower, ec), in_upper = fs::is_directory(r.upper, ec);
         if (!in_lower && !in_upper) return fs::exists(r.read_path(), ec) ? CELL_ENOTDIR : CELL_ENOENT;
         auto f = std::make_unique<FsFile>();
         f->dir = true;
@@ -306,10 +360,12 @@ namespace
         std::set<std::string> seen;
         for (const fs::path& layer : { r.upper, r.lower })
         {
+            if (layer == r.lower && !in_lower) continue;
             if (!fs::is_directory(layer, ec)) continue;
             for (const auto& e : fs::directory_iterator(layer, ec))
             {
                 const std::string name = to_utf8(e.path().filename());
+                if (layer == r.lower && lower_hidden(r.upper / e.path().filename())) continue;
                 if (seen.insert(name).second) f->entries.push_back({ name, e.is_directory(ec) });
             }
         }
@@ -355,29 +411,30 @@ namespace
         const Resolved r = resolve(path);
         if (!r.ok) return CELL_ENOENT;
         std::error_code ec;
-        if (fs::exists(r.upper, ec) || fs::exists(r.lower, ec)) return CELL_EEXIST;
+        if (fs::exists(r.read_path(), ec)) return CELL_EEXIST;
         if (!r.writable) return CELL_EROFS;
         const Resolved parent = resolve(path + "/..");
-        if (parent.ok && !fs::is_directory(parent.upper, ec) && !fs::is_directory(parent.lower, ec)) return CELL_ENOENT;
+        if (!parent.ok || !fs::is_directory(parent.read_path(), ec)) return CELL_ENOENT;
         fs::create_directories(r.upper, ec);
         return ec ? CELL_EIO : CELL_OK;
     }
 
-    // Removes from the writable layer; a file that also exists in the read-only layer comes back (logged).
+    // Never remove lower-layer data. A persistent marker gives guest unlink/rmdir
+    // normal semantics even when the file originally came from the RPCS3 tree.
     int64_t remove_path(const std::string& path, bool dir)
     {
         std::lock_guard lock(g_fs_mutex);
         const Resolved r = resolve(path);
         if (!r.ok) return CELL_ENOENT;
         std::error_code ec;
-        const bool in_upper = fs::exists(r.upper, ec), in_lower = fs::exists(r.lower, ec);
+        const bool in_upper = fs::exists(r.upper, ec), in_lower = !lower_hidden(r.upper) && fs::exists(r.lower, ec);
         if (!in_upper && !in_lower) return CELL_ENOENT;
         if (!r.writable) return CELL_EROFS;
         const fs::path p = in_upper ? r.upper : r.lower;
         if (dir != fs::is_directory(p, ec)) return dir ? CELL_ENOTDIR : CELL_EISDIR;
         if (dir && !fs::is_empty(p, ec)) return CELL_ENOTEMPTY;
-        if (in_upper) fs::remove(r.upper, ec);
-        if (in_lower) log_line("fs: %s also exists in the read-only layer; it stays visible", path.c_str());
+        if (in_lower && !hide_lower(r.upper)) return CELL_EIO;
+        if (in_upper && !fs::remove(r.upper, ec)) return CELL_EIO;
         return CELL_OK;
     }
 
@@ -392,10 +449,11 @@ namespace
         if (!a.ok || !b.ok) return CELL_ENOENT;
         if (!a.writable || !b.writable) return CELL_EROFS;
         std::error_code ec;
-        if (!fs::exists(a.upper, ec) && !fs::exists(a.lower, ec)) return CELL_ENOENT;
+        if (!fs::exists(a.read_path(), ec)) return CELL_ENOENT;
         if (!copy_up(a)) return CELL_EIO;
         fs::create_directories(b.upper.parent_path(), ec);
         fs::rename(a.upper, b.upper, ec);
+        if (!ec && fs::exists(a.lower, ec) && !hide_lower(a.upper)) return CELL_EIO;
         return ec ? CELL_EIO : CELL_OK;
     }
 
@@ -407,7 +465,7 @@ namespace
         if (!r.ok) return CELL_ENOENT;
         if (!r.writable) return CELL_EROFS;
         std::error_code ec;
-        if (!fs::exists(r.upper, ec) && !fs::exists(r.lower, ec)) return CELL_ENOENT;
+        if (!fs::exists(r.read_path(), ec)) return CELL_ENOENT;
         if (!copy_up(r)) return CELL_EIO;
         fs::resize_file(r.upper, ctx.r4.u64, ec);
         return ec ? CELL_EIO : CELL_OK;
@@ -425,6 +483,14 @@ namespace
 
     int64_t sys_fs_ok(PPCContext&) { return CELL_OK; }
 
+    int64_t sys_fs_fsync(PPCContext& ctx)
+    {
+        std::lock_guard lock(g_fs_mutex);
+        const FsFile* f = get_file(ctx.r3.u32);
+        if (!f || f->dir || !(f->flags & CELL_FS_O_ACCMODE)) return CELL_EBADF;
+        return FlushFileBuffers(f->h) ? CELL_OK : CELL_EIO;
+    }
+
     // utime with a null times pointer fails like on RPCS3; otherwise accepted without effect
     int64_t sys_fs_utime(PPCContext& ctx) { return ctx.r4.u32 ? CELL_OK : CELL_EFAULT; }
 
@@ -432,8 +498,38 @@ namespace
     int64_t sys_fs_fcntl(PPCContext& ctx)
     {
         const uint32_t op = ctx.r4.u32, arg = ctx.r5.u32;
+        if (!arg) return CELL_EFAULT;
         switch (op)
         {
+        case 0x80000004: // RPCS3's scalar query: output is zero
+            if (ctx.r6.u32 > 4) return CELL_EINVAL;
+            guest_store_u32(arg, 0);
+            return CELL_OK;
+        case 0xC0000002: // cellFsGetFreeSize: lv2_file_c0000002 (0x28 bytes)
+        {
+            if (ctx.r6.u32 < 0x28) return CELL_EINVAL;
+            std::lock_guard lock(g_fs_mutex);
+            const Resolved r = resolve(guest_string(guest_load_u32(arg + 0x0C)));
+            if (!r.ok) return CELL_ENOTMOUNTED;
+            std::error_code ec;
+            const auto space = fs::space(g_upper, ec);
+            if (ec) return CELL_EIO;
+            guest_store_u32(arg + 0x18, uint32_t(CELL_OK));
+            guest_store_u32(arg + 0x1C, uint32_t(r.mount->block_size));
+            guest_store_u64(arg + 0x20, space.available / r.mount->block_size);
+            return CELL_OK;
+        }
+        case 0xE0000017: // cellFsAllocateFileAreaWithoutZeroFill
+        {
+            // The file-size field is eight-byte aligned, so it begins at +0x18.
+            if (ctx.r6.u32 < 0x28 || guest_load_u32(arg) != 0x28 ||
+                guest_load_u32(arg + 4) != 0x10 || guest_load_u32(arg + 8) != 0x20) return CELL_EINVAL;
+            PPCContext truncate_ctx{};
+            truncate_ctx.r3.u32 = guest_load_u32(arg + 0x10);
+            truncate_ctx.r4.u64 = guest_load_u64(arg + 0x18);
+            guest_store_u32(arg + 0x20, uint32_t(sys_fs_truncate(truncate_ctx)));
+            return CELL_OK;
+        }
         case 0xC0000006: // mount-point query; RPCS3 answers ENOTSUP in out_code
             if (guest_load_u32(arg) != 0x20 || guest_load_u32(arg + 4) != 0x10 || guest_load_u32(arg + 8) != 0x18) return CELL_OK;
             guest_store_u32(arg + 0x18, uint32_t(CELL_ENOTSUP));
@@ -494,8 +590,9 @@ namespace
             const uint32_t e = info + uint32_t(n) * 0x94;
             memset(g_base + e, 0, 0x94);
             strncpy((char*)g_base + e, m.guest, 0x1F);
-            strncpy((char*)g_base + e + 0x20, "CELL_FS_FAT", 0x1F);
-            strncpy((char*)g_base + e + 0x40, "CELL_FS_IOS:BUILTIN_FLASH", 0x3F);
+            strncpy((char*)g_base + e + 0x20, m.filesystem, 0x1F);
+            strncpy((char*)g_base + e + 0x40, m.device, 0x3F);
+            if (!m.writable) guest_store_u32(e + 0x90, 0x10000000);
             n++;
         }
         guest_store_u64(ctx.r5.u32, n);
@@ -505,9 +602,26 @@ namespace
     // sys_fs_get_block_size(path*, sector_size*, block_size*, arg4*)
     int64_t sys_fs_get_block_size(PPCContext& ctx)
     {
-        if (ctx.r4.u32) guest_store_u64(ctx.r4.u32, 512);
-        if (ctx.r5.u32) guest_store_u64(ctx.r5.u32, 4096);
-        if (ctx.r6.u32) guest_store_u64(ctx.r6.u32, 0);
+        std::lock_guard lock(g_fs_mutex);
+        const Resolved r = resolve(guest_string(ctx.r3.u32));
+        if (!r.ok) return CELL_ENOTMOUNTED;
+        if (ctx.r4.u32) guest_store_u64(ctx.r4.u32, r.mount->sector_size);
+        if (ctx.r5.u32) guest_store_u64(ctx.r5.u32, r.mount->block_size);
+        if (ctx.r6.u32) guest_store_u64(ctx.r6.u32, r.mount->sector_size);
+        return CELL_OK;
+    }
+
+    int64_t sys_fs_fget_block_size(PPCContext& ctx)
+    {
+        std::lock_guard lock(g_fs_mutex);
+        const FsFile* f = get_file(ctx.r3.u32);
+        if (!f || f->dir) return CELL_EBADF;
+        const Resolved r = resolve(f->guest_path);
+        if (!r.ok) return CELL_ENOTMOUNTED;
+        if (ctx.r4.u32) guest_store_u64(ctx.r4.u32, r.mount->sector_size);
+        if (ctx.r5.u32) guest_store_u64(ctx.r5.u32, r.mount->block_size);
+        if (ctx.r6.u32) guest_store_u64(ctx.r6.u32, r.mount->sector_size);
+        if (ctx.r7.u32) guest_store_u32(ctx.r7.u32, f->flags);
         return CELL_OK;
     }
 }
@@ -548,9 +662,9 @@ void register_fs_syscalls()
     register_syscall(815, sys_fs_utime);
     register_syscall(817, sys_fs_fcntl);
     register_syscall(818, sys_fs_lseek);
-    register_syscall(819, sys_fs_ok); // fdatasync
-    register_syscall(820, sys_fs_ok); // fsync
-    register_syscall(821, sys_fs_get_block_size); // fget_block_size(fd, ...)
+    register_syscall(819, sys_fs_fsync); // fdatasync
+    register_syscall(820, sys_fs_fsync);
+    register_syscall(821, sys_fs_fget_block_size);
     register_syscall(822, sys_fs_get_block_size);
     register_syscall(831, sys_fs_truncate);
     register_syscall(832, sys_fs_ftruncate);

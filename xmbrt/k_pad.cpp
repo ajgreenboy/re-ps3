@@ -27,6 +27,7 @@ namespace
     std::mutex g_pad_mutex;
     uint16_t g_state[LEN];
     std::atomic<bool> g_connected{ false };
+    std::atomic<uint32_t> g_keyboard_down{0}, g_keyboard_pressed{0};
 
     void neutral(uint16_t* s)
     {
@@ -193,11 +194,50 @@ void pad_init()
     std::thread(pad_thread).detach();
 }
 
+// Window-local keyboard controller: Home=PS, Enter=Cross, Escape=Circle,
+// arrows=D-pad, S=Square, T=Triangle, Space=Start, Tab=Select.
+bool pad_key(uint32_t key, bool down)
+{
+    if (!key) { g_keyboard_down=0;g_keyboard_pressed=0;return true; }
+    uint32_t bits=0;
+    switch (key)
+    {
+    case VK_HOME: bits=PS;break;
+    case VK_RETURN: bits=uint32_t(CROSS)<<16;break;
+    case VK_ESCAPE: bits=uint32_t(CIRCLE)<<16;break;
+    case VK_UP: bits=UP;break;
+    case VK_RIGHT: bits=RIGHT;break;
+    case VK_DOWN: bits=DOWN;break;
+    case VK_LEFT: bits=LEFT;break;
+    case 'S': bits=uint32_t(SQUARE)<<16;break;
+    case 'T': bits=uint32_t(TRIANGLE)<<16;break;
+    case VK_SPACE: bits=START;break;
+    case VK_TAB: bits=SELECT;break;
+    default:return false;
+    }
+    if (down)
+    {
+        g_keyboard_down.fetch_or(bits);
+        // Preserve a quick tap until at least one guest report observes it.
+        g_keyboard_pressed.fetch_or(bits);
+    }
+    else g_keyboard_down.fetch_and(~bits);
+    return true;
+}
+
 // Copies CellPadData.button (big-endian) for port 0; returns the number of u16 written.
 uint32_t pad_read(uint32_t guest_buf, uint64_t max_u16)
 {
     std::lock_guard lock(g_pad_mutex);
+    uint16_t state[LEN];
+    memcpy(state,g_state,sizeof(state));
+    const uint32_t keys=g_keyboard_down.load()|g_keyboard_pressed.exchange(0);
+    state[D1]|=uint16_t(keys);state[D2]|=uint16_t(keys>>16);
+    for (const auto& button : {std::pair{UP,P_UP}, {RIGHT,P_RIGHT}, {DOWN,P_DOWN}, {LEFT,P_LEFT}})
+        if(keys&button.first)state[button.second]=255;
+    for (const auto& button : {std::pair{CROSS,P_CROSS}, {CIRCLE,P_CIRCLE}, {SQUARE,P_SQUARE}, {TRIANGLE,P_TRIANGLE}})
+        if((keys>>16)&button.first)state[button.second]=255;
     const uint32_t n = uint32_t(std::min<uint64_t>(LEN, max_u16));
-    for (uint32_t i = 0; i < n; i++) guest_store_u16(guest_buf + i * 2, g_state[i]);
+    for (uint32_t i = 0; i < n; i++) guest_store_u16(guest_buf + i * 2, state[i]);
     return n;
 }

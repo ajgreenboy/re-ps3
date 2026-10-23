@@ -1,5 +1,10 @@
 # Handoff: XMB native port
 
+**Short PoC and phase handoffs:** start at [docs/README.md](docs/README.md).
+It links the current run/build instructions and Phase4/5/6 handoffs. This file keeps
+the detailed chronological investigation; its newest section3a takes precedence
+over historical counts/checkpoints elsewhere below.
+
 **Goal:** run the PS3 XMB (firmware 4.93) natively on Windows as a statically recompiled program, usable as an
 HTPC launcher. The XMB's look and feel must be exact; everything around it (media, network, PSN, browser,
 Blu-ray, SPU work) may be swapped for native code or stubbed. RPCS3 main is the reference for every PS3
@@ -21,7 +26,7 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 | Compile generated C++ | Done | 224/224 objects, 63 MB, `C:\dev\xmb\out\recomp_obj` |
 | Record-form CR0 gaps | Done | CR0 set for `clrldi.`/`rldicl.`/`rldicr.`/`rotldi.`/`sld.`/`srd.`; 0 "RC bit enabled" lines |
 | Phase 3 milestone | Done | 60 s run: 62,800 calls, 46 guest threads, RSX context + first command buffer submit, 1920x1080 display buffers; main thread matches RPCS3 for 961 calls (then a timing race); log `out\xmbrt\xmbrt_phase3.log` |
-| Native runtime | Phase 4 in progress | `C:\dev\xmb\xmbrt`: LV2 kernel (threads, sync, events, memory, fs overlay, prx, sys_config, AV vuart) plus the GL renderer `rsx_gl.cpp`; all 39 modules load and frames present, no draws yet; see "Phase 4 as built" |
+| Native runtime | Phase 4 in progress | 40-module firmware-SPURS build visibly renders PS3 startup dialog (14,969 draws in 45 s). Adding OS services and five firmware components in a 45-module rebuild. Full menu/navigation still pending. See §3a. |
 | Wider image | Done | 39 modules (13 boot plugins + 25 vsh/sys modules vsh loads at boot), 71,328 functions, 857 PS3 jump tables, 280 objects |
 | Link + first boot | Done | `out\xmbrt\xmbrt.exe` enters vsh at 0x10230; first call `sys_mutex_create` from vsh's TLS init |
 | Reference trace (phase 2) | Done | `out\trace\rpcs3_trace.txt` (200,000 calls with args and returns), normalised `out\trace\rpcs3.norm`; RPCS3 patch `rpcs3-xmb-trace.patch` |
@@ -77,10 +82,424 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 
 ## 3a. Next session: start here (2026-10-23)
 
-**State.** All 39 modules load, vsh's main loop runs at 60 Hz, and the GL window presents frames, but
-there are 0 draws. Last commits: `8c708fc`, `de737ba` (local only, never pushed).
+### Latest continuation: PoC docs, screenshots and floating texture uploads
 
-**Blocker: SPU execution.** vsh's boot stalls because SPU code never runs:
+Short run/build instructions and future phase handoffs are now in `docs/README.md`.
+`docs/SCREENSHOTS.md` records six original native-window captures: startup notice,
+filesystem-recovery prompt, photosensitivity warning, Game, Video and Music.
+Session `20261023-163845-853` used Return then Escape to bypass offered recovery,
+then Left twice for Game -> Video -> Music. No filesystem rebuild was executed.
+Window remains open on Music. Visible clock advanced from21:43 to21:44.
+
+Rebuilt `rsx_gl.cpp` and linked successfully. Float formats9A/9B/9C/9F now upload
+to RGBA16F/RGBA32F/R32F/RG16F with endian conversion and reference remaps. This
+boot observed9A,9B,9F uploads with GL error0;9C remains unobserved. Captures still
+show black background and incorrect category icons. Next rendering issue:
+`surface()` always allocates RGBA8, including floating surface formats; cached
+render targets bypass texture upload. Verify format decoding before patching it.
+No long-run stability or exact-rendering completion is claimed.
+
+### Continuation: native security services, wider function bodies, RSX synchronization
+
+**Latest checkpoint:** build succeeded **503 generated +23 runtime objects**. Normal
+launcher is now running in tool session61534, logs
+`out/xmbrt/sessions/20261023-162941-020`. Diagnostic boot immediately before it,
+`20261023-162424-995`, visibly navigated **Game -> Video -> Music**, with clock
+advancing21:25 ->21:29. Two F12 snapshots:408024calls/48382draws/696flips, then
+766382calls/105548draws/1488flips. No semaphore timeout, missing dispatch or SPURS
+SRCH was observed in that diagnostic session. This is a bounded positive result,
+not a long-run stability claim. Closed diagnostic window normally via Alt+F4.
+The final normal session rendered its startup notices, then the **Game menu at
+21:31** after Return/Escape. It is left open with numeric tracing disabled.
+
+Secure-service runtime evidence: sys865 package2(64 bytes), sys872(two queries),
+sys984(repeated16-byte requests) all returned0 in that trace. Previous boot
+`20261023-162149-565` created16-byte console-psid.bin at16:22:01; next boot logged
+loaded persistent identity, preserving file length and timestamp. No identity bytes
+were printed. Sys976(crypto-engine create),524(IO-error listener),27(process spawn)
+remain unsupported; do not equate RNG support with a complete crypto engine.
+
+**Important negative result:** first rebuilt normal boot `20261023-162149-565`
+became black after unloading UI modules. F12 showed11299draws/276flips, FIFO GET=PUT,
+main waiting in the VSH event dispatcher atLR0043376C. Later presentation continued
+without new draws. No unsupported SPU opcode, SRCH, semaphore timeout or shutdown
+request was logged. Cause still unknown; trace mode's different scheduling may be
+relevant but is not a proven explanation. The next traced boot reached the menu.
+
+`run-xmb.ps1 -TraceCalls` now enables full buffered numeric traces; ordinary launch
+keeps them disabled. Do not leave TraceCalls on for indefinite user sessions.
+Runtime reports310 registrations; static inventory292 literal registrations. Only
+two modules still have one-byte metadata candidates(explore_category_game,msmw2);
+the PAF/VSH utility export-body gaps were removed by this rebuild.
+
+- Merged all13 staged `work/functions-refresh` CSVs into `rea/functions_patched`
+  with `xenon/merge-function-bodies.ts`:23 added entries; PAF extension6 export bodies
+  expanded, VSH utility4 expanded. Full generated build completed503/503 objects,
+  zero unresolved direct/switch-tail scan targets. Runtime build completed23 objects;
+  log `work/component-body-refresh-build.log`.
+- New `xmbrt/k_security.cpp`: sys984 crypto RNG now fills guest output with Windows
+  CNG rather than ENOSYS; sys865 validates package2, the256MB bound and secure-service
+  error codes from RPCS3 sys_ss.h. Package1 matches the current privileged VSH/root
+  package behavior (24 zero bytes). Removed the old unbounded rand() implementation.
+  Checks writable committed guest spans before access; zero-size requests are no-ops.
+- Sys872 and appliance-info19005 now share one16-byte emulated PSID, persisted in
+  `console-psid.bin` next to the executable. Generates it with CNG on first request;
+  validates existing size, does not replace invalid identities. Optional
+  `XMBRT_CONSOLE_PSID`32hex override. No physical console ID is extracted or logged.
+  Crypto-engine create/destroy and process spawning remain unsupported.
+- RSX comparison against RPCS3 nv406e/nv4097/RSXThread found missing device DMA and
+  main-report DMA contexts. Added bounded mappings and the device+30 zero-write
+  flip-sync behavior from nv406e. Semaphore loads/stores now use atomic_ref, and GL
+  completion precedes label/reference publication. This is a conservative glFinish
+  barrier; performance and rendering impact require observation, not an exact GPU model.
+- Semaphore timeouts now include context, offset, FIFO GET and recent16 semaphore
+  commands. Acquisition waits also process pending host presentation. Existing
+  bounded timeout policy remains; no forced success write was added for arbitrary labels.
+- F12 requests an asynchronous **nonterminating** PPU/SPU/RSX diagnostic snapshot.
+  Thread registry metadata is now copied under try_lock before thread suspension,
+  avoiding live unordered_map iteration during guest thread creation/exit.
+- Prior boot `20261023-160129-611` still had a visible Video menu at host16:17, but
+  its displayed clock was stuck at21:04 and log had two40300810 waits for1 with0.
+  **This is not evidence of a stable16-minute session.** Existing executable PID25524
+  was stopped after exact-path verification to permit replacement. Needs new boot.
+
+### System-wide compatibility audit and VSH switch correction (latest)
+
+**Latest completed build/boot:** 503 generated +22 runtime objects linked successfully.
+Normal launcher is running in tool session29057, boot logs under
+`out/xmbrt/sessions/20261023-160129-611`. Native window rendered startup notices;
+Return acknowledged the first notice, Escape returned from the optional filesystem
+repair prompt. **Game menu rendered, then Left visibly selected Video with its list.**
+No missing-address failure or SPURS SRCH in the captured log as of this checkpoint.
+Window left open for user. This does not establish long-run stability or exact visuals.
+
+First-use diagnostics now expose missing sys621(gamepad ycon interface),699(BD
+emulation),27(process spawn),872(open PSID),976(crypto engine create),524(IO-error
+listener),984(random generation). Three fs_utility_init NIDs use the success fallback.
+Actual runtime reports **308 registered syscalls**; static scan counts290 literal
+registrations because loop registrations are intentionally outside that scan.
+Random-generation ABI in RPCS3 `lv2/sys_crypto_engine.cpp` is `(buffer, u64 size)`;
+RPCS3 itself only has a TODO success stub. Existing865 uses rand() and also needs
+proper host RNG semantics. No new RNG/PSID implementation was added in this pass.
+Latest user-facing output copies: `XMB-OS-inventory.md`, `XMB-host-imports.csv`,
+`XMB-observed-service-gaps.txt` in the chat outputs folder. Import inventory includes
+RPCS3 source symbol candidates for75/411 host NIDs; remaining internal names unknown.
+
+User wants wider OS reconstruction and a running native XMB. `ISA.md` now records
+the project goal, evidence requirements and unchecked runtime criteria.
+
+- Latest stopped normal boot: `out/xmbrt/sessions/20261023-154113-762` reached the Game
+  category, then missing dispatch **01880FE0**, LR01565188. Earlier 01881054 is in the
+  same routine. **These are switch case targets, not independent callbacks.**
+- Reanalyzed `vshmain_ext.prx` in existing Ghidra `components493`; 365 functions.
+  The exported F00 function had been serialized as one byte before queued analysis
+  completed. It now covers F00–F73 and F9C–11CF. Merged complete bodies into patched
+  CSV while preserving previous extra entries. Recovery now finds **1,185 switches**;
+  table at01880F74 contains FE0 and1054. Full generated rebuild completed successfully.
+- `Ps3Exports.java` now disassembles newly discovered exports before creating functions.
+  `Ps3Functions.java` now calls `analyzeChanges` before serializing bodies. Corrected
+  function exporter ran successfully on the existing VSH extension database.
+- Refreshed all13 original boot PRXs in Ghidra boot493, outputs staged under
+  `work/functions-refresh`. **These wider refreshed CSVs have not been merged into
+  the active image yet.** Preview under `work/functions-merge-preview`: PAF extension
+  has6 expanded export bodies, VSH utility4; total23 additional function entries
+  across boot modules. Merge with `bun xenon/merge-function-bodies.ts
+  work/functions-refresh rea/functions_patched`, then full component rebuild. Tool
+  retains recovered entries/ranges, normalizes overlapping ranges and keeps backups.
+- `bun xenon/inventory-os.ts` regenerates `out/os-inventory/inventory.json` and `.md`.
+  Current static inventory:46 linked modules,411 host import NIDs across53 libraries,
+  290 literal syscall registrations after overrides. Registration is not a semantic
+  correctness claim. Reference boot has8 modules absent from linked image:
+  libat3dec,libavcdec,libatrac3plus,libsmvd4,libasfparser2,sacd,libmtp,libtiffdec.
+  They require per-feature analysis before claiming media functionality.
+- Normal boot suppressed numeric syscall/HLE trace lines, including ENOSYS. LV2 and
+  HLE dispatch now emit bounded first-use **unsupported service** diagnostics outside
+  numeric trace suppression. HLE fallback `hle_ok` also emits **success placeholder**.
+  Startup log now says registered rather than implemented syscall count.
+
+Other changes since previous checkpoint:
+
+- `xmbrt/spurs_trace.cpp` optionally wraps genuine firmware cellSpursSendSignal.
+  Enable `XMBRT_TRACE_SPURS_TASK=1`: on80410905 it logs task masks before/after and
+  caller. Build resolves entry/implementation names from exports NIDE0A6DBE4.
+  Link map verifies the wrapper owns the public C++ weak-alias name and calls the
+  original generated C implementation. No failing mask capture yet; reservation
+  corruption remains a hypothesis, not a confirmed diagnosis.
+- Diagnostic black-screen teardown reached **sys379 op8201**, LR000D4E84, r5=600,
+  returnedENOTSUP then waited. This is a GameOS LPAR1 reboot request. Runtime now
+  validates/preserves its parameter packet and exits75 for normal launcher restart.
+  File `out/xmbrt/lpar1-boot-parameters.bin`; **startup-mode fields are not yet decoded
+  or applied**. Actual8201restart completion still needs observation.
+- USB event-thread shutdown completed in that trace, so that specific black wait
+  was beyond the earlier USB549 deadlock. Evidence `work/lpar1-restart-unsupported.*`.
+
+Do not claim complete OS semantics, stable navigation or exact rendering. Latest
+native screenshots show category selection and text, with substantial rendering
+gaps. AC3/SPURS SRCH remains open independently of the corrected VSH switch.
+
+### Active continuation: missing OS components (45-module rebuild)
+
+#### Black screen after filesystem/database recovery (latest continuation)
+
+User reports reaching recovery/rebuild and then a black screen. The completed 45-module build
+compiled **487 generated + 21 runtime objects**. A 90-second boot recorded **12,557 draws and 314 flips**,
+then firmware unloaded plugins and graphics services. Main waited to join `libusbd_callback_thread`:
+syscall **549 `sys_usbd_event_port_send`** was ENOSYS and syscall 540 slept forever. USB now has a
+queued three-u64 event service, blocked-receiver wakeups, and finalize. Syscall **345** now implements
+RPCS3's parent-container destruction behavior (reject nonzero r4, destroy parent).
+
+A subsequent boot visibly displayed **"The database on the system storage will be rebuilt."**
+It then faulted in MMS at `01BADF10` after loading absent **`x3_mdimp10.sprx`** as a successful stand-in:
+the expected plugin interface remained null. Evidence preserved in
+`work/mdimp10-null-interface.log` and `.stderr.txt`. The actual decrypted `x3_mdimp10.prx` is now
+analyzed in Ghidra `components493`, added to `boot_extra`, and undergoing a **46-module rebuild**.
+This is a separate concrete fault from the USB shutdown deadlock.
+
+Loader now returns ENOENT for unavailable `x3_mdimp*` interfaces and propagates failures from list
+loads. It tracks live module instances so loading an already live image does not restore pristine
+data over running state. Added syscall **328**, validating the extended container allocation's
+24-byte permission records and routing to the existing shared-memory allocator; full shared-memory
+container budget accounting remains incomplete.
+
+Added **379 `sys_sm_shutdown`** with guest shutdown and reboot operations, following RPCS3. Reboot
+requests exit **75**; `run-xmb.ps1` starts a fresh runtime, preserves separate logs per attempt, and
+limits repeated restarts to three. It disables diagnostic call/idle limits. This path still needs
+observed boot evidence; do not claim a successful recovery restart or usable menu yet.
+
+The initial 46-module rebuild succeeded with **502 generated + 21 runtime objects**. Enabling syscall
+328 then exposed an MSMW child-service handshake wait: syscall 27 falsely returned success although
+no child process was created. It now returns ENOSYS explicitly; the following boot rendered the
+database recovery prompt again. Evidence: `work/media-child-handshake-hang.log` and `.stderr.txt`.
+Supporting the actual child-process media service remains future work; do not describe it as running.
+
+That next boot reached `x3_mdimp10` but its start callback `020E01E4` had no translated entry.
+`work/rebuild-components.ps1` had only run OPD discovery in extra-target mode, skipping a full descriptor
+scan for the new module. It now scans descriptors on each linked image and includes that scan in its
+convergence condition. It discovered 68 additional entries overall; the pending build has **128,307
+entries**, **1,184 switch tables**, zero unresolved direct/switch targets, and **503** generated objects.
+`work/mdimp10-missing-start-entry.log` preserves the failure before this correction.
+
+The **503 generated + 21 runtime** build completed. Its next stop was a truncated import thunk at
+`020ECAC4`: Ghidra's range ended at `020ECADB`, halfway through the thunk. Extended that existing
+`x3_mdimp10` range through `020ECAFB` (next function begins CAFC); only generated file 474 recompiled.
+Evidence: `work/mdimp10-truncated-import-thunk.log`.
+
+**Recovery completion verified:** the following boot completed database rebuilding and called
+`sys_sm_shutdown(op=0200)`, exiting **75** as intended. Full trace and stderr are saved in
+`work/recovery-completed-reboot.log` and `.stderr.txt`. It did not remain stuck on the black screen.
+
+**First visible XMB menu verified:** `run-xmb.ps1` then reached the Game column, showing Saved Data
+Utility, PlayStation Store and "Corrupted Data" entries. Keyboard navigation changed selection.
+This is not full visual correctness: category icons/background are incomplete and corrupt-content
+entries require investigation. Session logs: `out/xmbrt/sessions/20261023-150825-552/` (stderr contains
+diagnostics; boot-0.log contains the same service diagnostics after process exit). A later menu action/initialization stopped at
+missing `vshmain_ext` entry **01881054** (LR01565188). Added that entry and its discovered branch targets;
+the next rebuild is pending. Do not describe navigation as stable until that boot is observed.
+
+#### External reference supplied by user: ps3RE
+
+Reviewed https://github.com/TheRouletteBoi/ps3RE using its public recursive tree and selected text files.
+Index saved at `work/ps3re-tree.json`; selected references under `work/ps3re-reference/`.
+
+- `RCO docs/rco's.txt`: maps RCO IDs to Sony widget classes (PhPlane, PhXmBar, PhXmList, PhScene,
+  PhXmItem); identifies DOM type/name queries. Useful for labeling the remaining visual issues.
+- `RCO docs/Rco objects dump/`: actual widget hierarchies from Game context menu, Friends, browser,
+  PSN sign-in and other screens. Read the Game-context dump; it includes default theme, cameras,
+  busy indicator, cursor and notification widgets. This establishes expected scene structure, not
+  the cause of a rendering defect.
+- `488/VSH/vsh_488_cex.self.idb`: about 96.6 MB, potentially useful for identifying analogous functions
+  near our 4.93 unnamed callbacks. Database contents have NOT been opened/exported. README requires
+  IDA Pro 6.8 or 7.5; do not claim symbol coverage based only on the filename.
+- `446/LV1/LV1 decompilation/sysmgr_ss.fself.elf.c`: read decompilation includes shutdown/reboot and
+  AV-set/TSMA notification paths. Other LV1/security-service decompilations are available. These are
+  old-firmware behavioral references, not direct implementations of our missing 4.93 LV2 services.
+- `085_010/dev_flash085/vsh/module/*symbols.txt`: readable old VSH/SDK symbols (many names truncated).
+  Useful naming clues; do not import their addresses into 4.93.
+
+No external code has been copied into runtime sources; downloaded references remain in ignored work/.
+
+**Deeper ps3RE work completed:** downloaded the 4.88 VSH IDB and verified its Git blob SHA-1
+`c95243025d8eff60f47d1671d598b11668f304bd` (SHA-256
+`af3a2022dac45d6fcb6d77c72e49ab86deb34061ed85a1cd75b525e7c0e8b185`).
+No IDA installation was found in standard tool locations. REA session inspection reports no configured
+IDA/Ghidra provider; its Windows Ghidra bridge does not admit our PPC target. No REA configuration was
+changed. Used a bounded, read-only TypeScript parser instead; no Python executed.
+
+- `work/idb-labels.ts`: IDA1 container v6 / B-tree 2.0 traversal. Verified all **1,713,250** records against
+  header count and strict key order. Exports **22,798** address labels, **31,231** address comments and
+  **28,359** function/chunk ranges with **zero undecoded function records**. Tail ownership and complete
+  discontiguous bodies/types remain undecoded. Raw exports: `work/ps3re-reference/vsh488-labels/`.
+- `work/match-vsh-labels.ts`: matches initialized source code to 4.93 executable ELF segments via unique,
+  byte-identical 64-byte windows, with full recorded-function byte comparison when ranges are available.
+  **4,713 named code matches**, including **714 PAF NID labels**. Function-inclusive pass found **20,594**
+  fully byte-identical recorded ranges. Do not infer full behavior equivalence from these matches.
+- `work/ps3re-reference/missing-verified-vsh-heads.json`: **51** identical function-range starts absent
+  from dispatch. **39** register helpers, **2** conversion routines, **10** anonymous entries. Candidates
+  only; small helpers can fall through/shared code. Not automatically added to the build.
+- User deliverables under the chat's `outputs/`: `ps3RE-findings.md`,
+  `ps3RE-vsh493-matched-labels.csv`, `ps3RE-vsh-entry-candidates.csv`. Metadata only, no firmware bytes.
+
+**Latest runtime after navigation-entry rebuild:** **128,311 entries**, **503 generated + 21 runtime**
+objects built successfully. Boot moved past `01881054` but aborted in AC3/SPURS at
+`queuePush.c:127`, code **80410905 (CELL_SPURS_TASK_ERROR_SRCH)**. Firmware dump shows task#0 waiting
+on a SPURS queue, and an inconsistent/corrupted backtrace. No unsupported SPU opcode preceded it.
+Reference `cellSpursSendSignal` returns SRCH when task masks are inconsistent or the task is disabled;
+inspect masks and reservation behavior before choosing a fix. Logs:
+`out/xmbrt/sessions/20261023-152428-029/boot-0.log` and `.stderr.txt`.
+This is still open; do not claim stable menu navigation. No runtime/build process is currently running.
+
+The 40-module firmware-SPURS build **visibly rendered the PS3 shutdown warning dialog**, verified in
+the native window with Computer Use. A no-input 45-second checkpoint submitted **14,969 draws, 278 flips,
+604 methods**, with FIFO GET=PUT. A later interactive run logged `RAF Error 80023f06`, CPU 212.86% over
+30 frames, tore down the graphics SPURS groups, then waited for `SceWaveMain` (sys_audio event queue).
+This is not evidence that every missing firmware module caused a crash; follow the concrete failures.
+
+User explicitly requested the supporting OS components required for a full XMB boot. Work now includes:
+
+- **Filesystem:** persistent overlay whiteouts fix guest unlink succeeding while the lower file remains
+  visible. This caused metadata DB delete/recreate to fail O_CREAT|O_EXCL with EEXIST/80030406. Added real
+  fsync, mount descriptions and block/free-space query outputs. Existing lower-layer data is preserved.
+  The HDD mount EEXIST log alone is expected for the already mounted filesystem.
+- **Audio hardware:** `k_rsxaudio.cpp` now sends firmware start events, consumes actual DMA ring entries,
+  updates indices/timestamps and sends period completions. Start/stop/close/finalize have state. A dynamic
+  WinMM sink plays guest serial stream-zero stereo samples. UART AUDIO_MODE/ACTIVE/INACTIVE/MUTE now
+  configure it, including audio modes embedded in AVB_PARAM. Multichannel/SPDIF output remains incomplete.
+- **Input:** Home=PS, Enter=Cross, Esc=Circle, arrows=D-pad, S=Square, T=Triangle, Space=Start, Tab=Select.
+  Keys apply to the native window, merge with controller input and clear on focus loss.
+- **Virtual memory:** sys_vm 300–313 now allocate/track VM blocks, validate ranges, resize physical budgets
+  and report residency/statistics. Mapped pages remain in host RAM; no swap-file service is modeled.
+  sys_process_spawns_a_self2 now returns ENOSYS: no child process is implemented.
+  The earlier success stand-in caused callers to wait forever for absent child IPC.
+- **Performance diagnostics:** `XMBRT_BUFFERED_TRACE=1` keeps full calls in xmbrt.log with periodic flushes
+  and omits their duplicate stderr copy. Other diagnostics still go to both. SPU instruction counts/PCs
+  publish every 1,024 instructions rather than using a locked increment for every instruction.
+- **Firmware:** added `mintx_client`, `libadec`, `libac3dec`, `libjpgdec`, `libgifdec` to `boot_extra`.
+  Ghidra project `components493` produced exports and complete function ranges after a second analysis.
+  `libadec_internal.prx` is byte-identical to libadec and was not linked a second time.
+
+Audio start notifications immediately exposed an unrecognized sys_audio switch at old address
+`01E95278`, targeting `01E952B8`. The switch scanner now recovers a TOC-loaded table cached in a stack
+slot. This is a generator coverage fix, not a runtime bypass.
+
+`work/rebuild-components.ps1` links the image, iterates direct-target and switch discovery to a fixed
+point, translates, compiles and builds the runtime. Current discovery converged in 10 rounds:
+Initial 45-module build compiled **486 generated + 20 runtime objects**, 87 MB. Its first audio-enabled
+boot exercised the hardware rings but hit the sys_audio switch described below. The current dispatch
+audit has **45 modules, 124,166 function entries, 1,185 switch tables, zero unresolved direct targets and
+zero unresolved switch tail targets**. Expected generated object count is now **487** (runtime **21** with
+`k_net.cpp`); check `out/compile.log` and `out/build-xmbrt.log` before claiming the latest rebuild succeeded.
+The pre-component image/runtime snapshot is `work/native-first-dialog/`; that executable includes the
+new audio worker and needs the newly recovered sys_audio switch, so it is not a frozen first-dialog binary.
+
+Next: finish the rebuild; boot with buffered trace and SPU capture; check metadata DB creation, real audio
+group execution, mintx daemon calls and decoder initialization. Reproduce the startup dialog, use Enter
+to dismiss it, and reach the menu. Do not claim the full XMB is working until it is visibly navigable.
+
+Latest boot evidence with the new services (before the final switch rebuild):
+
+- VM map syscall succeeds; metadata DB creation error no longer appears.
+- Audio opens Windows stereo PCM at 48 kHz, completes actual DMA and repeatedly starts/joins its firmware
+  SPU (`01000100`, normal exit `0102`, PC `008A8`). Normal stop logs are now limited to four per thread;
+  use `XMBRT_SPU_VERBOSE=1` for all stops.
+- `mintx_client` now executes firmware instead of HLE ENOSYS. It exposed a hot loop in missing network
+  select. `k_net.cpp` supplies Winsock IPv4 stream/datagram sockets, bind/connect/listen/accept, addresses,
+  options, send/receive, interruptible select/poll, abort and basic ioctls. DNS uses the host's configured
+  resolver. IPv6/P2P, ancillary message APIs and some interface controls remain incomplete.
+- After select support, boot passed 200,000 calls and compiled 20 GL programs. No metadata DB error,
+  decoder allocation error, unsupported SPU opcode or RAF performance error was seen before the next
+  stop. One daemon still logged `80130121`; do not describe networking as complete.
+- The next stop was VSH target `0007D138` from switch `0007D018`. Prefer original Ghidra function bodies
+  over generated fragments when finding a switch owner, and extend every fragment containing the same
+  bctr through its later cases. Static audit then found 76 switch tail targets without function entries.
+  `xenon/scan-switch-targets.ts` now detects these; the rebuild adds entries and repeats discovery before
+  compiling. This is wired into both `rebuild.sh` and `work/rebuild-components.ps1`.
+
+### Previous checkpoint: execute firmware SPURS (40 modules)
+
+`libsre.sprx` was present in the RPCS3 module trace but missing from our linked set. It is now decrypted
+at `boot_extra/libsre.prx`, analyzed, linked and recompiled. The full rebuild compiled **447 generated
+objects plus 20 runtime objects**. `out/boot493/hle.csv` contains no `cellSpurs` imports: they resolve to
+firmware libsre at `019C0000` (TOC `019F9AB0`). Later module addresses shifted, so old trace addresses
+require module-relative comparison. The current translation log contains many decode warnings from
+over-wide function metadata covering data; the build succeeds, but do not describe it as warning-free.
+
+The old 39-module HLE build and image are preserved at `work/spurs-hle-baseline/`. Its 36 draws below
+are historical evidence, not the draw count of the current firmware-SPURS build. The reason for using
+firmware libsre is that RPCS3's SPURS job-chain HLE is incomplete too; copying its TODO stubs cannot run
+RAF's submitted job chains.
+
+Current runtime progress:
+
+- Firmware creates the one-SPU Lines group `04000300` and two-SPU RAF group `04000400`.
+- USER image segment sources use offset +16, thread index supplies the high ID byte, and each group
+  start restores the LV2 loader, arguments and image segments.
+- Added CNTB, SUMB, XSWD, FSCRRD/FSCRWR and MPYA as the firmware reached them. FPSCR reads/writes retain
+  writable bits; floating-point arithmetic still uses the existing approximate host implementation.
+- Group join permits restart. Group exit requests every peer to stop and waits for all host threads.
+- Connect-all-threads assigns the chosen SPU event port to each thread. Write-LS consumes a scalar u64,
+  and set-argument updates the four 64-bit arguments used on the next start.
+- Added the remaining integer multiply variants and FCMEQ after MPYA. Group RUN events now use their
+  own queue; firmware connects EXCEPTION events separately, which must not receive RUN notifications.
+- This firmware-SPURS build now submits actual OpenGL draws and advances the main thread into input
+  polling. The next stop was indirect target `0039879C` (LR `003988DC`), a VSH switch case.
+- `gen-switch-tables.ts` incorrectly let a shorter, later function range hide an overlapping parent
+  range. Its interval lookup now falls back to earlier covering ranges. It recovers the switch at
+  `0039877C`, including target `0039879C`; 1,147 switch tables are emitted. Regeneration/compile follows.
+- Repeated halts at `01320` after an unsupported opcode are secondary failures from restarted incomplete
+  execution. Always inspect the first unsupported instruction, not only the end of the log.
+
+Diagnostics: `XMBRT_CAPTURE_SPU_STATE=1` captures the first unsupported instruction or firmware halt
+per SPU object as `out/xmbrt/spu-ID-ls.bin` and `spu-ID-regs.txt`. Files can be stale if a later run never
+stops; compare modification times. `work/spu-inspect.ts . ../rpcs3 <LS-file>` disassembles the capture
+against the local RPCS3 opcode table. Watchdog state rows include each raw SPU's PC and instruction count.
+Build only `xmbrt/k_spu.cpp` and relink `out/xmbrt/link.rsp` for these runtime edits; retranslation is unnecessary.
+
+### Historical 39-module HLE baseline
+
+**Continuation checkpoint (2026-10-23).** The complete pipeline rebuilt successfully with 440 generated
+objects and 20 runtime objects. Another 34 missing branch targets were added to the patched function CSVs
+to a fixed point; `0x018D31F8` now resolves. Changes remain uncommitted on top of `8c708fc`, `de737ba`.
+
+- `xmbrt/k_spu.cpp` now runs the embedded bootstrap SPU. Its firmware sends the actual port-33 replies;
+  the fabricated bootstrap completion was removed. USER image segment addresses are at offset 16 of the
+  24-byte segment record, and SPU thread IDs use the requested SPU number.
+- Fixed preferred-lane order, BI/BISL, four-register destinations/masks, IOHL, SF, branches, immediate
+  decoding, integer element operations, shifts, quadword controls, floating operations, MFC list transfers,
+  GETLLAR/PUTLLC opcodes/status and channel counts. `XMBRT_SPU_CHECKS=1` enables eight existing instruction checks.
+- `cellSpursCreateTask` now loads the task ELF and starts an interpreter thread with task arguments and
+  the SPURS local-store context. The `TK` marker at LS `0x1E8`, task allocation block count, task info and
+  module ID must be initialized; missing these caused `80410909` and early task exits.
+- Event flags now initialize guest data, attach queues, set/clear bits, wake SPU task waiters and block PPU
+  waiters. Both task ELFs (runtime addresses `2050B780` and `20461D00`, entry `0x3070`) now repeatedly wake,
+  perform DMA work and return to `WaitSignal`. Last complete 30-second checkpoint: 574,245 and 15,399,481
+  task instructions, both waiting for signals, no unsupported opcode or guest fault.
+- GL now logs an actual submitted draw, after calling OpenGL. Last complete checkpoint: **36 draws,
+  75 flips, 599 methods, 11 shader programs**. First draws target small offscreen surfaces; the native
+  window remains black. A timed checkpoint exits with code 5 intentionally.
+
+**Current blocker: RAF job chains.** The guard shim still synthesizes one completion event per notified
+batch without executing its jobs. The RSX FIFO reaches a self-jump waiting for that work to patch the
+command buffer: GET `0040A0A0`, guest address `2060A0A0`, word `2040A0A0`, reference `FFFFFFFF`.
+Do not skip this command artificially. Implement the submitted job work.
+
+Job-chain attributes and guest guard records are now initialized. `XMBRT_SPU_JOB_TRACE=1` logs the first
+two submitted command arrays and captures pointed-to 256-byte payloads as `out/xmbrt/spurs-job-*.bin`.
+Observed chain entry `200F4310`, descriptor size 256. Commands include guard-address-or-`0xF`, literals
+`2` and `5`, descriptor pointers ending in `0`, and another pointer tagged `6`. Decode these from runtime
+evidence before implementing execution. RPCS3's `spursJobChainEntry` in `cellSpursSpu.cpp` is itself TODO;
+its PPU-side chain/guard structures in `cellSpurs.h/.cpp` are still useful references.
+
+Useful diagnostics:
+
+- `XMBRT_SPU_TASK_TRACE=1`: first 16 DMA transfers, last 32 instructions when a task stops.
+- `XMBRT_CAPTURE_SPU_TASKS=1`: captures task ELF files under the runtime output directory.
+- Watchdog dumps include `spurs state` rows with PC, instruction count and wait state.
+- `work/spu-inspect.ts . ../rpcs3 [task.elf]` disassembles with the local RPCS3 opcode table. REA/Ghidra
+  rejected SPU ELF architecture, so these listings are ordinary local byte analysis, not REA analysis.
+
+The original bootstrap requirements below remain reference material for syscall completeness.
+
+**Original boot trace before SPU execution was implemented:**
 
 1. The main thread imports a small SPU program embedded in vsh (`_sys_spu_image_import`, src 0x6B9980, size
    0x8D4). It creates a 1-thread group, binds event queue A with `sys_spu_thread_bind_queue`, connects queue B

@@ -84,6 +84,9 @@ namespace
 
     LRESULT CALLBACK wnd_proc(HWND h, UINT msg, WPARAM w, LPARAM l)
     {
+        if (msg == WM_KEYDOWN && w == VK_F12) { request_runtime_dump(); return 0; }
+        if ((msg==WM_KEYDOWN||msg==WM_KEYUP) && pad_key(uint32_t(w),msg==WM_KEYDOWN)) return 0;
+        if (msg==WM_KILLFOCUS) pad_key(0,false);
         if (msg == WM_CLOSE)
         {
             log_line("rsx: window closed");
@@ -843,6 +846,7 @@ namespace
         }
         uint32_t bpp = 4;
         bool compressed = false;
+        const bool floating = base_fmt == 0x9A || base_fmt == 0x9B || base_fmt == 0x9C || base_fmt == 0x9F;
         switch (base_fmt)
         {
         case 0x81: bpp = 1; break;                       // B8
@@ -850,6 +854,7 @@ namespace
         case 0x86: case 0x87: case 0x88: compressed = true; break;
         case 0x9A: bpp = 8; break;                       // W16_Z16_Y16_X16_FLOAT
         case 0x9B: bpp = 16; break;                      // W32_Z32_Y32_X32_FLOAT
+        case 0x9C: case 0x9F: bpp = 4; break;            // X32_FLOAT / Y16_X16_FLOAT
         default: break;
         }
         const uint32_t block = base_fmt == 0x86 ? 8 : 16;
@@ -867,6 +872,50 @@ namespace
             {
                 const GLenum gl = base_fmt == 0x86 ? GL_COMPRESSED_RGBA_S3TC_DXT1_EXT : base_fmt == 0x87 ? GL_COMPRESSED_RGBA_S3TC_DXT3_EXT : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
                 glCompressedTexImage2D(GL_TEXTURE_2D, 0, gl, w, h, 0, size, g_base + addr);
+            }
+            else if (floating)
+            {
+                // RPCS3 GLTexture/TextureUtils: preserve float/half bits instead of
+                // interpreting their bytes as normalized A8R8G8B8. WZYX data is
+                // sequential RGBA in Cell memory; endian conversion is per word.
+                const bool half = base_fmt == 0x9A || base_fmt == 0x9F;
+                const uint32_t components = base_fmt == 0x9C ? 1 : base_fmt == 0x9F ? 2 : 4;
+                const GLenum channels = components == 1 ? GL_RED : components == 2 ? GL_RG : GL_RGBA;
+                const GLint storage = base_fmt == 0x9A ? GL_RGBA16F : base_fmt == 0x9B ? GL_RGBA32F :
+                    base_fmt == 0x9C ? GL_R32F : GL_RG16F;
+                const uint32_t lw = log2u(w), lh = log2u(h);
+                if (half)
+                {
+                    std::vector<uint16_t> words(size_t(w) * h * components);
+                    for (uint32_t y = 0; y < h; ++y)
+                        for (uint32_t x = 0; x < w; ++x)
+                        {
+                            const uint32_t texel = linear ? y * pitch + x * bpp : swizzle_offset(x,y,lw,lh) * bpp;
+                            for (uint32_t c = 0; c < components; ++c)
+                                words[(size_t(y) * w + x) * components + c] = guest_load_u16(addr + texel + c * 2);
+                        }
+                    glTexImage2D(GL_TEXTURE_2D,0,storage,w,h,0,channels,GL_HALF_FLOAT,words.data());
+                }
+                else
+                {
+                    std::vector<uint32_t> words(size_t(w) * h * components);
+                    for (uint32_t y = 0; y < h; ++y)
+                        for (uint32_t x = 0; x < w; ++x)
+                        {
+                            const uint32_t texel = linear ? y * pitch + x * bpp : swizzle_offset(x,y,lw,lh) * bpp;
+                            for (uint32_t c = 0; c < components; ++c)
+                                words[(size_t(y) * w + x) * components + c] = guest_load_u32(addr + texel + c * 4);
+                        }
+                    glTexImage2D(GL_TEXTURE_2D,0,storage,w,h,0,channels,GL_FLOAT,words.data());
+                }
+                static uint32_t formats_seen = 0;
+                const uint32_t bit = 1u << (base_fmt - 0x90);
+                if (!(formats_seen & bit))
+                {
+                    formats_seen |= bit;
+                    log_line("rsx: float texture upload format=%02X %ux%u address=%08X GL error=%04X",
+                        base_fmt,w,h,addr,unsigned(glGetError()));
+                }
             }
             else
             {
@@ -899,12 +948,17 @@ namespace
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
             }
             static const GLint from[4] = { GL_ALPHA, GL_RED, GL_GREEN, GL_BLUE }; // remap source order A, R, G, B
-            const uint32_t rm = (base_fmt == 0x9A || base_fmt == 0x9B || base_fmt == 0x9C) ? (remap & 0xFF00) | 0xE4 : remap;
+            // Match RPCS3's float format component maps and fixed channel selectors.
+            static const GLint scalar_from[4] = { GL_RED, GL_RED, GL_RED, GL_RED };
+            static const GLint pair_from[4] = { GL_RED, GL_GREEN, GL_RED, GL_GREEN };
+            const GLint* sources = base_fmt == 0x9C ? scalar_from : base_fmt == 0x9F ? pair_from : from;
+            const uint32_t selectors = base_fmt == 0x9F ? ((remap >> 16) ? 0x56 : 0x66) : 0xE4;
+            const uint32_t rm = floating ? (remap & 0xFF00) | selectors : remap;
             GLint out_argb[4];
             for (int c = 0; c < 4; c++)
             {
                 const uint32_t ctl = (rm >> (8 + c * 2)) & 3;
-                out_argb[c] = ctl == 0 ? GL_ZERO : ctl == 1 ? GL_ONE : from[(rm >> (c * 2)) & 3];
+                out_argb[c] = ctl == 0 ? GL_ZERO : ctl == 1 ? GL_ONE : sources[(rm >> (c * 2)) & 3];
             }
             const GLint swz[4] = { out_argb[1], out_argb[2], out_argb[3], out_argb[0] };
             glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, swz);
@@ -1035,7 +1089,6 @@ namespace
         if (!s) return;
         Program* p = get_program();
         if (!p) return;
-        g_draw_count++;
         glUseProgram(p->id);
 
         // Vertex index list for this draw (rebased onto a compact vertex buffer)
@@ -1169,6 +1222,12 @@ namespace
             glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * 4, indices.data(), GL_STREAM_DRAW);
             glDrawElements(mode, GLsizei(indices.size()), GL_UNSIGNED_INT, nullptr);
         }
+        if (++g_draw_count == 1)
+            log_line("rsx: first OpenGL draw submitted (%u vertices, program %u)", vertex_count, p->id);
+        if (g_draw_count <= 4)
+            log_line("rsx draw state: surface=%08X %ux%u scissor=%08X/%08X mask=%08X inputs=%04X GL error=%04X",
+                reg(SURFACE_COLOR_AOFFSET), s->width, s->height, reg(SCISSOR_HORIZONTAL), reg(SCISSOR_VERTICAL),
+                reg(COLOR_MASK), p->inputs, unsigned(glGetError()));
         for (uint32_t a = 0; a < 16; a++) glDisableVertexAttribArray(a);
     }
 
@@ -1280,6 +1339,13 @@ void rsx_gl_poll()
 {
     if (const uint64_t f = g_pending_flip.exchange(0); f && ensure_gl())
         present(uint32_t(f), uint32_t(f >> 32) & 0xFFFF, uint32_t(f >> 48));
+}
+
+// FIFO synchronization methods publish completion to guest memory. Complete earlier
+// GL work before that publication so a PPU/SPU cannot observe a premature release.
+void rsx_gl_barrier()
+{
+    if (g_glrc && GetCurrentThreadId() == g_gl_thread) glFinish();
 }
 
 void rsx_gl_init()

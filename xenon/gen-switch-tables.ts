@@ -47,7 +47,7 @@ for (const line of (await Bun.file(join(imageDir, "modules.csv")).text()).replac
 }
 tocs.sort((a, b) => a.base - b.base);
 const tocOf = (a: number) => tocs.findLast((t) => t.base <= a)?.toc ?? 0;
-type Fn = { start: number; end: number; file: string; row: number; base: number };
+type Fn = { start: number; end: number; file: string; row: number; base: number; generated: boolean };
 const fns: Fn[] = [];
 const csvRows = new Map<string, string[]>(); // file -> lines (header first)
 for (const f of readdirSync(functionsDir).filter((f) => f.endsWith("_functions.csv"))) {
@@ -58,7 +58,7 @@ for (const f of readdirSync(functionsDir).filter((f) => f.endsWith("_functions.c
   if (base === undefined) continue;
   lines.forEach((line, row) => {
     if (row === 0) return;
-    const [, ranges] = line.split(",");
+    const [, ranges, name] = line.split(",");
     if (!ranges) return;
     let lo = Infinity, hi = 0;
     for (const r of ranges.split(";")) {
@@ -66,17 +66,28 @@ for (const f of readdirSync(functionsDir).filter((f) => f.endsWith("_functions.c
       lo = Math.min(lo, a);
       hi = Math.max(hi, b);
     }
-    fns.push({ start: base + lo, end: base + hi + 1, file: f, row, base });
+    fns.push({ start: base + lo, end: base + hi + 1, file: f, row, base, generated: name?.startsWith("opd_") ?? false });
   });
 }
 fns.sort((a, b) => a.start - b.start);
-const fnOf = (a: number) => {
-  let lo = 0, hi = fns.length - 1, best: Fn | undefined;
+// Function fragments and OPD entry ranges overlap. A later, shorter range
+// must not hide an earlier function which still contains the queried address.
+const prefixEnd: number[] = [];
+for (let i = 0; i < fns.length; ++i) prefixEnd[i] = Math.max(fns[i].end, prefixEnd[i - 1] ?? 0);
+const coveringFunctions = (a: number): Fn[] => {
+  let lo = 0, hi = fns.length - 1, best = -1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (fns[mid].start <= a) { best = fns[mid]; lo = mid + 1; } else hi = mid - 1;
+    if (fns[mid].start <= a) { best = mid; lo = mid + 1; } else hi = mid - 1;
   }
-  return best && a < best.end ? best : undefined;
+  const result: Fn[] = [];
+  for (let i = best; i >= 0 && prefixEnd[i] > a; --i)
+    if (a < fns[i].end) result.push(fns[i]);
+  return result;
+};
+const fnOf = (a: number) => {
+  const candidates=coveringFunctions(a);
+  return candidates.find(fn=>!fn.generated) ?? candidates[0];
 };
 
 // ---- decoding helpers ----
@@ -93,6 +104,28 @@ const isExtsw = (i: number) => op(i) === 31 && xo(i) === 986;
 const isAddi = (i: number) => op(i) === 14;
 const isLis = (i: number) => op(i) === 15 && rA(i) === 0;
 const isLwzToc = (i: number) => op(i) === 32 && rA(i) === 2; // lwz rT,d(r2)
+// sys_audio caches TOC-loaded table pointers in its stack frame before its
+// event loop. Recover the store feeding an `ld rT,slot(r1)` at the switch.
+function stackTable(loadPc: number, load: number, owner: Fn): number | undefined {
+  if (op(load) !== 58 || rA(load) !== 1 || (load & 3) !== 0) return undefined;
+  const slot = load & 0xfffc;
+  for (let pc = loadPc - 4; pc >= Math.max(owner.start, loadPc - 0x4000); pc -= 4) {
+    const store = read32(pc) ?? 0;
+    if (op(store) !== 62 || rA(store) !== 1 || (store & 0xffff) !== slot) continue;
+    const source = rD(store);
+    for (let defPc = pc - 4; defPc >= Math.max(owner.start, pc - 0x400); defPc -= 4) {
+      const def = read32(defPc) ?? 0, code = op(def);
+      if (isLwzToc(def) && rD(def) === source) return read32((tocOf(loadPc) + simm(def)) >>> 0);
+      // Stop at an intervening definition, rather than accepting an older TOC
+      // load into a register whose value has since changed.
+      if (([14,15,32,33,34,35,40,41,42,43,58].includes(code) && rD(def) === source) ||
+          ([20,21,23,24,25,26,27,28,29,30].includes(code) && rA(def) === source) ||
+          (code === 31 && (rD(def) === source || rA(def) === source))) return undefined;
+    }
+    return undefined;
+  }
+  return undefined;
+}
 // shift-left-by-2 forms that feed lwzx: rlwinm rS,rI,2,0,29 / rldic rS,rI,2,x / rldicr rS,rI,2,61
 const shiftSource = (i: number): number | undefined => {
   if (op(i) === 21 && ((i >>> 11) & 31) === 2) return rD(i); // rlwinm: rS=rA field, source = rS(bits 21-25)
@@ -149,6 +182,7 @@ for (const s of segs) {
       // A blr or unconditional b above means this block is reached by a branch; stop there.
       if (i === 0x4e800020 || (op(i) === 18 && (i & 3) === 0)) break;
       if (lo === undefined && hi === undefined && tocTable === undefined && isLwzToc(i) && rD(i) === rT) tocTable = read32((tocOf(a) + simm(i)) >>> 0);
+      else if (lo === undefined && hi === undefined && tocTable === undefined && op(i) === 58 && rD(i) === rT) tocTable = stackTable(a - j * 4, i, fn);
       else if (lo === undefined && isAddi(i) && rD(i) === rT && rA(i) === rT) lo = simm(i);
       else if (hi === undefined && isLis(i) && rD(i) === rT) hi = simm(i);
       else if (rI === undefined && shiftSource(i) !== undefined && shiftDest(i) === rS) rI = shiftSource(i);
@@ -195,6 +229,15 @@ for (const s of segs) {
         extensions.set(fn, Math.max(extensions.get(fn) ?? 0, end));
         if (!patchDir) { unmatched.push(a.toString(16) + "(past end)"); continue; }
       }
+    }
+    // Every translated entry spanning this bctr uses the same table. Short
+    // generated fragments must include its later cases too, otherwise they
+    // tail-call an unregistered mid-function address.
+    for(const fragment of coveringFunctions(a))
+    {
+      let end=fragment.end;
+      for(const label of labels)if(label>=end)end=Math.max(end,blockEnd(label,fn));
+      if(end>fragment.end)extensions.set(fragment,Math.max(extensions.get(fragment)??0,end));
     }
     matched++;
     // If the index was shifted in place (rlwinm rI,rI,2,...), at the bctr rI holds index*4: switch on that,
