@@ -86,6 +86,7 @@ runtime evidence.
 - [x] ISC-39: Concise PoC and future-phase handoffs record entry state, next work and exit criteria.
 - [x] ISC-40: Original screenshots document observed startup stages and Game/Video/Music navigation.
 - [ ] ISC-41: Floating render targets preserve the guest surface format and correct visible output.
+- [x] ISC-42: The project source history, tooling, docs and screenshots exist in the requested private GitHub repository.
 
 ## Test Strategy
 

@@ -15,9 +15,14 @@ OpenGL storage with guest-endian word conversion and reference remaps. The updat
 renderer compiled and linked; session `20261023-163845-853` observed first uploads
 of 9A, 9B and 9F with GL error zero. 9C is not yet observed. The
 [screenshots](../SCREENSHOTS.md) still show incomplete background/category icons.
-Next graphics investigation: render-target allocation currently uses RGBA8 even
-for floating surface formats, and cached render targets bypass texture uploads.
-Confirm the surface-format decoding against RPCS3 before changing allocation.
+Follow-up: surface-format decoding is confirmed as bits0..4 in RPCS3's
+`rsx_decode.h`. Render targets now use RGBA16F/RGBA32F/R32F for guest formats11/12/13,
+and cached surfaces reallocate when their colour format changes. The renderer
+compiled and linked. Boot `20261023-165609-569` observed formats11 and12 with complete
+framebuffers (`8CD5`) and GL error zero. Format13 remains unobserved. Boot1 reached
+Game; its follow-up screenshot still shows incorrect background/category icons.
+Next inspect cached render-target sampling (which bypasses texture remap/filter
+setup), shader translation and surface contents across reuse.
 
 1. Reproduce the black-screen transition in normal mode. Capture F12 before/after.
 2. Compare draw/flip counters, FIFO GET/PUT and main-thread state. Distinguish guest

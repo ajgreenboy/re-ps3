@@ -57,6 +57,7 @@ namespace
 #define GL_FUNCS(X) \
     X(PFNGLGENFRAMEBUFFERSPROC, glGenFramebuffers) X(PFNGLBINDFRAMEBUFFERPROC, glBindFramebuffer) \
     X(PFNGLFRAMEBUFFERTEXTURE2DPROC, glFramebufferTexture2D) X(PFNGLBLITFRAMEBUFFERPROC, glBlitFramebuffer) \
+    X(PFNGLCHECKFRAMEBUFFERSTATUSPROC, glCheckFramebufferStatus) \
     X(PFNGLGENRENDERBUFFERSPROC, glGenRenderbuffers) X(PFNGLBINDRENDERBUFFERPROC, glBindRenderbuffer) \
     X(PFNGLRENDERBUFFERSTORAGEPROC, glRenderbufferStorage) X(PFNGLFRAMEBUFFERRENDERBUFFERPROC, glFramebufferRenderbuffer) \
     X(PFNGLCREATESHADERPROC, glCreateShader) X(PFNGLSHADERSOURCEPROC, glShaderSource) X(PFNGLCOMPILESHADERPROC, glCompileShader) \
@@ -149,13 +150,15 @@ namespace
     {
         GLuint tex = 0, fbo = 0, depth = 0;
         uint32_t width = 0, height = 0;
+        uint32_t color_format = 0;
+        bool complete = false;
     };
     std::unordered_map<uint32_t, Surface> g_surfaces; // by colour offset (local memory)
 
-    Surface& surface(uint32_t offset, uint32_t w, uint32_t h)
+    Surface& surface(uint32_t offset, uint32_t w, uint32_t h, uint32_t color_format)
     {
         Surface& s = g_surfaces[offset];
-        if (s.tex && s.width >= w && s.height >= h) return s;
+        if (s.tex && s.width >= w && s.height >= h && s.color_format == color_format) return s;
         if (!s.tex)
         {
             glGenTextures(1, &s.tex);
@@ -164,8 +167,22 @@ namespace
         }
         s.width = std::max(s.width, w);
         s.height = std::max(s.height, h);
+        s.color_format = color_format;
+        // RPCS3 GLRenderTargets: NV4097 surface colour format is bits 0..4.
+        // Keep HDR/intermediate results as floats instead of clamping to RGBA8.
+        GLint storage = GL_RGBA8;
+        GLenum channels = GL_RGBA, type = GL_UNSIGNED_BYTE;
+        switch (color_format)
+        {
+        case 11: storage = GL_RGBA16F; type = GL_HALF_FLOAT; break;
+        case 12: storage = GL_RGBA32F; type = GL_FLOAT; break;
+        case 13: storage = GL_R32F; channels = GL_RED; type = GL_FLOAT; break;
+        }
         glBindTexture(GL_TEXTURE_2D, s.tex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, s.width, s.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexImage2D(GL_TEXTURE_2D, 0, storage, s.width, s.height, 0, channels, type, nullptr);
+        const GLint swizzle[4] = { GL_RED, color_format == 13 ? GL_RED : GL_GREEN,
+            color_format == 13 ? GL_RED : GL_BLUE, color_format == 13 ? GL_RED : GL_ALPHA };
+        glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, swizzle);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
@@ -174,6 +191,17 @@ namespace
         glBindFramebuffer(GL_FRAMEBUFFER, s.fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s.tex, 0);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s.depth);
+        const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        s.complete = status == GL_FRAMEBUFFER_COMPLETE;
+        static uint32_t formats_seen = 0;
+        const uint32_t format_bit = 1u << color_format;
+        if (!s.complete || !(formats_seen & format_bit))
+        {
+            formats_seen |= format_bit;
+            log_line("rsx: surface format=%u storage=%04X %ux%u offset=%08X FBO=%04X GL error=%04X",
+                color_format, unsigned(storage), s.width, s.height, offset, unsigned(status), unsigned(glGetError()));
+        }
+        if (!s.complete) return s;
         // A new surface starts black (RSX memory contents are not mirrored)
         glClearColor(0, 0, 0, 0);
         glClearDepth(1);
@@ -190,7 +218,8 @@ namespace
         if ((reg(SURFACE_COLOR_TARGET) & 0xF) == 0) return nullptr; // CELL_GCM_SURFACE_TARGET_NONE
         const uint32_t w = clip_w(), h = clip_h();
         if (!w || !h) return nullptr;
-        Surface* s = &surface(reg(SURFACE_COLOR_AOFFSET), w, h);
+        Surface* s = &surface(reg(SURFACE_COLOR_AOFFSET), w, h, reg(SURFACE_FORMAT) & 0x1F);
+        if (!s->complete) return nullptr;
         glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
         glViewport(0, 0, w, h);
         return s;

@@ -45,6 +45,15 @@ Another Left press selected Music. This demonstrates category navigation only.
 
 ## Limits and next capture
 
+### Floating render-target follow-up
+
+Boot1 of session `20261023-165609-569` reached Game after a guest-requested reboot.
+The updated renderer observed complete RGBA16F and RGBA32F framebuffer allocations.
+The background and category icons remain incorrect; this is the result after that
+change, not a claim of visual improvement. [Capture metadata](screenshots/07-float-surfaces-game.json).
+
+![Game after floating surface change](screenshots/07-float-surfaces-game.jpg)
+
 The background is black and category icons are incorrect in this build. These
 screenshots do not establish exact rendering or long-run stability. Phase 5 media
 services and Phase 6 launcher work remain future work; their handoffs define the
