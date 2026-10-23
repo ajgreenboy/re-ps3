@@ -366,6 +366,13 @@ int main(int argc, char** argv)
     g_buffered_trace=getenv("XMBRT_BUFFERED_TRACE")!=nullptr;
     g_trace_calls=getenv("XMBRT_NO_CALL_TRACE")==nullptr;
     g_max_calls = env_u64("XMBRT_MAX_CALLS", 10000);
+    // The kernel, FIFO and SPU waits poll with sub-millisecond sleeps. At Windows' default 15.6 ms timer
+    // resolution each of those sleeps a whole tick, which starves frame production. XMBRT_TIMER_PERIOD=default
+    // keeps the system default (for comparison).
+    if (const char* tp = getenv("XMBRT_TIMER_PERIOD"); !(tp && !strcmp(tp, "default")))
+        if (HMODULE winmm = LoadLibraryW(L"winmm.dll"))
+            if (auto begin = reinterpret_cast<UINT(WINAPI*)(UINT)>(GetProcAddress(winmm, "timeBeginPeriod")); begin && begin(1) == 0)
+                log_line("timer: 1 ms resolution");
 
     g_base = (uint8_t*)VirtualAlloc(nullptr, PPC_MEMORY_SIZE, MEM_RESERVE, PAGE_NOACCESS);
     if (!g_base)

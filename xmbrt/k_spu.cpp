@@ -4,6 +4,7 @@
 #include "k_event.h"
 #include "spu_estimates.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -14,6 +15,8 @@
 #include <mutex>
 #include <thread>
 #include <immintrin.h>
+
+extern "C" __declspec(dllimport) unsigned long __stdcall GetCurrentThreadId();
 
 namespace
 {
@@ -52,7 +55,7 @@ namespace
         uint32_t mfc_lsa = 0, mfc_eah = 0, mfc_eal = 0, mfc_size = 0, mfc_tag = 0, mfc_tagmask = 0;
         uint32_t atomic_status = 0;
         uint32_t snr[2]{};
-        uint32_t reserved_line = 0;
+        uint32_t reserved_line = ~0u;
         std::array<uint8_t, 128> reserved{};
         std::deque<uint32_t> in_mbox, out_mbox;
         std::shared_ptr<KSpuImage> image;
@@ -170,11 +173,24 @@ namespace
         }
     }
 
+    // Lock-line reservation lost: another agent (PPU stwcx./stdcx., another SPU) changed the line
+    // reserved by GETLLAR. The SPURS kernel idles on this event in SPU_RdEventStat.
+    void check_reservation(KSpuThread& t)
+    {
+        if (t.reserved_line == ~0u || !(t.event_mask & kEventLockLost)) return;
+        std::lock_guard<std::mutex> guard(g_reservation_lock);
+        if (memcmp(g_base + t.reserved_line, t.reserved.data(), 128) != 0)
+        {
+            t.event_stat |= kEventLockLost;
+            t.reserved_line = ~0u;
+        }
+    }
+
     uint32_t channel_count(KSpuThread& t, uint32_t ch)
     {
         switch (ch)
         {
-        case 0: return (t.event_stat & t.event_mask) ? 1 : 0;
+        case 0: check_reservation(t); return (t.event_stat & t.event_mask) ? 1 : 0;
         case 3: return t.snr[0] ? 1 : 0;
         case 4: return t.snr[1] ? 1 : 0;
         case 8: return t.dec ? 1 : 0;
@@ -194,7 +210,21 @@ namespace
     {
         switch (ch)
         {
-        case 0: { const uint32_t v = t.event_stat & t.event_mask; t.event_stat &= ~v; return v; }
+        case 0: // SPU_RdEventStat blocks until an unmasked event is pending
+        {
+            for (uint32_t spins = 0; t.event_mask; spins++)
+            {
+                check_reservation(t);
+                if (t.event_stat & t.event_mask) break;
+                if (t.stop_requested.load(std::memory_order_relaxed)) return 0;
+                if (spins < 2000) _mm_pause();
+                else if (spins < 2100) std::this_thread::yield();
+                else std::this_thread::sleep_for(std::chrono::microseconds(50));
+            }
+            const uint32_t v = t.event_stat & t.event_mask;
+            t.event_stat &= ~v;
+            return v;
+        }
         case 3: case 4: { uint32_t& v = t.snr[ch - 3]; const uint32_t r = v; v = 0; return r; }
         case 8: return t.dec;
         case 11: return t.event_mask;
@@ -912,8 +942,16 @@ namespace
         log_line("spu: instruction checks passed (8 cases)");
     }
 
+    // XMBRT_LOG_HOST_TIDS=1: name each SPU host thread once so host CPU profiles map to guest objects.
+    void log_host_tid(const char* kind, uint32_t id, uint32_t sub)
+    {
+        static const bool on = getenv("XMBRT_LOG_HOST_TIDS") != nullptr;
+        if (on) log_line("host tid %lu: %s %08X/%u", GetCurrentThreadId(), kind, id, sub);
+    }
+
     void spu_main(std::shared_ptr<KSpuThread> t)
     {
+        log_host_tid("spu thread", t->id, t->spu_num);
         setup_spu_floats();
         uint32_t stop = 0x3fff;
         t->pc=t->entry;
@@ -1053,7 +1091,7 @@ namespace
                 write_thread_loader(*t);t->r={};t->fpscr={};t->in_mbox.clear();t->out_mbox.clear();
                 t->exited=false;t->group_exit=false;t->exit_status=0;
                 t->stop_requested=false;
-                t->event_mask=0;t->event_stat=0;t->mfc_tagmask=0;
+                t->event_mask=0;t->event_stat=0;t->reserved_line=~0u;t->mfc_tagmask=0;
                 for (const auto& segment:t->image->segments)
                 {
                     if(segment.type==kSegCopy)memcpy(t->ls.data()+segment.ls,g_base+segment.source,segment.size);
@@ -1241,6 +1279,7 @@ int64_t spurs_create_task(PPCContext& ctx)
     log_line("spurs: starting taskset=%08X task=%u entry=%05X", taskset, task->task_id, entry);
     std::thread([task]
     {
+        log_host_tid("spurs task", task->taskset, task->task_id);
         setup_spu_floats();
         task->pc = task->entry;
         uint32_t stop = 0x3fff;
@@ -1297,8 +1336,69 @@ void spu_dump_stats()
             (unsigned long long)thread->instructions.load(),unsigned(thread->exited));
 }
 
+// XMBRT_SPU_SAMPLE=<spu thread id, hex>: samples that SPU's PC every 2 ms from 20 s to 40 s and logs where
+// it executes versus where it is parked (instruction count unchanged), to explain slow SPU-paced frames.
+static void start_spu_sampler()
+{
+    const char* v = getenv("XMBRT_SPU_SAMPLE");
+    if (!v) return;
+    const uint32_t id = uint32_t(strtoul(v, nullptr, 16));
+    std::thread([id]
+    {
+        std::this_thread::sleep_for(std::chrono::seconds(20));
+        std::unordered_map<uint32_t, uint32_t> running, parked;
+        uint64_t last = 0, first = 0, samples = 0;
+        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (std::chrono::steady_clock::now() < end)
+        {
+            std::shared_ptr<KSpuThread> t;
+            {
+                KLock lock(g_kernel);
+                if (auto it = g_spu_threads.find(id); it != g_spu_threads.end()) t = it->second;
+            }
+            if (t)
+            {
+                const uint64_t n = t->instructions.load();
+                const uint32_t pc = t->observed_pc.load();
+                if (!samples) first = n;
+                (n != last ? running : parked)[pc & ~0xFu]++;
+                last = n;
+                samples++;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        auto top = [](const std::unordered_map<uint32_t, uint32_t>& m, const char* what)
+        {
+            std::vector<std::pair<uint32_t, uint32_t>> v(m.begin(), m.end());
+            std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.second > b.second; });
+            for (size_t i = 0; i < v.size() && i < 8; i++) log_line("spu sample:   %s pc=%05X samples=%u", what, v[i].first, v[i].second);
+        };
+        uint64_t r = 0, p = 0;
+        for (auto& [k, c] : running) r += c;
+        for (auto& [k, c] : parked) p += c;
+        log_line("spu sample: id=%08X %llu samples, running %llu, parked %llu, %.1f M instructions/s",
+            id, (unsigned long long)samples, (unsigned long long)r, (unsigned long long)p, (last - first) / 20e6);
+        top(running, "running");
+        top(parked, "parked");
+        std::shared_ptr<KSpuThread> t;
+        {
+            KLock lock(g_kernel);
+            if (auto it = g_spu_threads.find(id); it != g_spu_threads.end()) t = it->second;
+        }
+        char path[64];
+        snprintf(path, sizeof(path), "spu-sample-%08X-ls.bin", id);
+        if (FILE* file = t ? fopen(path, "wb") : nullptr)
+        {
+            fwrite(t->ls.data(), 1, t->ls.size(), file);
+            fclose(file);
+            log_line("spu sample: local store saved to %s", path);
+        }
+    }).detach();
+}
+
 void register_spu_syscalls()
 {
+    start_spu_sampler();
     if (getenv("XMBRT_SPU_CHECKS")) check_instruction_semantics();
     register_syscall(157,sys_spu_image_import); register_syscall(158,sys_spu_image_close);
     register_syscall(165,sys_spu_get_exit_status); register_syscall(170,sys_spu_group_create); register_syscall(171,sys_spu_group_destroy);

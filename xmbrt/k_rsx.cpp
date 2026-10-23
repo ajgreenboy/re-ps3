@@ -54,7 +54,7 @@ void rsx_gl_init();
 void rsx_gl_method(uint32_t reg, uint32_t arg);
 void rsx_gl_flip(uint32_t offset, uint32_t width, uint32_t height);
 void rsx_gl_poll();
-void rsx_gl_barrier();
+void rsx_gl_release(uint32_t address, uint32_t value);
 
 namespace
 {
@@ -74,6 +74,16 @@ namespace
     void store_label(uint32_t address, uint32_t value)
     {
         std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(g_base + address)).store(__builtin_bswap32(value));
+    }
+
+    void release_label(uint32_t address, uint32_t value)
+    {
+        // RPCS3 nv47_sync.hpp: display flip semaphores bypass GPU completion.
+        // Deferring these writes can overwrite a subsequent flip's zero reset.
+        if (address == g_rsx.reports + 0x10 || address == g_rsx.device_addr + 0x30)
+            store_label(address,value);
+        else
+            rsx_gl_release(address,value);
     }
 
     void remember_label(uint32_t get, uint32_t method, uint32_t context, uint32_t offset, uint32_t address, uint32_t value)
@@ -115,7 +125,7 @@ namespace
         guest_store_u32(ff, guest_load_u32(ff) | 0x80000000);
         guest_store_u64(head(1, HEAD_LAST_FLIP_TIME), timebase_now());
         guest_store_u32(head(1, HEAD_FLIP_BUFFER_ID), buffer);
-        memset(g_base + g_rsx.reports + 0x10, 0, 16);
+        for (uint32_t i = 0; i < 16; i += 4) store_label(g_rsx.reports + 0x10 + i,0);
         send_event(0, SYS_RSX_EVENT_FLIP_BASE << 1, 0);
     }
 
@@ -145,6 +155,25 @@ namespace
         }
     }
 
+    // Where the FIFO thread's time goes (logged every 5 s): idle means the guest had not advanced PUT,
+    // acquire means waiting on a semaphore the PPU/SPU must release. Everything else is command work.
+    struct FifoTime
+    {
+        std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+        double idle_ms = 0, acquire_ms = 0;
+        uint64_t acquires = 0, idle_waits = 0;
+    } g_fifo_time;
+
+    void report_fifo_time()
+    {
+        const double wall = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g_fifo_time.since).count();
+        if (wall < 5000) return;
+        log_line("rsx fifo: %.0f ms wall: idle %.0f ms (%llu waits), semaphore acquire %.0f ms (%llu), commands %.0f ms",
+            wall, g_fifo_time.idle_ms, (unsigned long long)g_fifo_time.idle_waits, g_fifo_time.acquire_ms,
+            (unsigned long long)g_fifo_time.acquires, wall - g_fifo_time.idle_ms - g_fifo_time.acquire_ms);
+        g_fifo_time = FifoTime{};
+    }
+
     void fifo_thread()
     {
         const uint32_t ctrl = g_rsx.dma_address;
@@ -155,9 +184,13 @@ namespace
             const uint32_t put = guest_load_u32(ctrl + 0x40);
             uint32_t get = guest_load_u32(ctrl + 0x44);
             rsx_gl_poll();
+            report_fifo_time();
             if (get == put)
             {
+                const auto t0 = std::chrono::steady_clock::now();
                 std::this_thread::sleep_for(std::chrono::microseconds(200));
+                g_fifo_time.idle_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                g_fifo_time.idle_waits++;
                 continue;
             }
             if (!g_rsx.first_submit_logged.exchange(1))
@@ -204,8 +237,7 @@ namespace
                 switch (reg)
                 {
                 case 0x0050: // NV406E_SET_REFERENCE
-                    rsx_gl_barrier();
-                    guest_store_u32(ctrl + 0x48, arg);
+                    rsx_gl_release(ctrl + 0x48, arg);
                     break;
                 case 0x0060: sem_ctx_406e = arg; break;
                 case 0x0064: sem_off_406e = arg; break;
@@ -214,11 +246,15 @@ namespace
                     const uint32_t a = rsx_address(sem_off_406e, sem_ctx_406e);
                     remember_label(get,reg,sem_ctx_406e,sem_off_406e,a,arg);
                     if (a & 3) { log_line("rsx: unaligned semaphore acquire %08X",a); break; }
-                    for (int spin = 0; a && load_label(a) != arg && spin < 5000; spin++)
+                    const auto acquire_start = std::chrono::steady_clock::now();
+                    const auto deadline = acquire_start + std::chrono::seconds(5);
+                    while (a && load_label(a) != arg && std::chrono::steady_clock::now() < deadline)
                     {
                         rsx_gl_poll();
                         std::this_thread::sleep_for(std::chrono::microseconds(100));
                     }
+                    g_fifo_time.acquire_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - acquire_start).count();
+                    g_fifo_time.acquires++;
                     static uint32_t timeouts = 0;
                     if (a && load_label(a) != arg && timeouts++ < 8)
                     {
@@ -234,8 +270,7 @@ namespace
                         // RPCS3 nv406e.cpp: the device flip-sync register latches 1 on a zero write.
                         const uint32_t value = a == g_rsx.device_addr + 0x30 && !arg ? 1 : arg;
                         remember_label(get,reg,sem_ctx_406e,sem_off_406e,a,value);
-                        rsx_gl_barrier();
-                        store_label(a,value);
+                        release_label(a,value);
                     }
                     break;
                 case 0x01A4: sem_ctx_4097 = arg; break;
@@ -246,8 +281,7 @@ namespace
                         if (sem_off_4097 & 15) { log_line("rsx: unaligned backend semaphore release %08X",a); break; }
                         const uint32_t value = (arg & 0xFF00FF00) | ((arg & 0xFF) << 16) | ((arg >> 16) & 0xFF);
                         remember_label(get,reg,sem_ctx_4097,sem_off_4097,a,value);
-                        rsx_gl_barrier();
-                        store_label(a,value);
+                        release_label(a,value);
                     }
                     break;
                 case 0x1D74: // NV4097_TEXTURE_READ_SEMAPHORE_RELEASE
@@ -255,8 +289,7 @@ namespace
                     {
                         if (sem_off_4097 & 15) { log_line("rsx: unaligned texture semaphore release %08X",a); break; }
                         remember_label(get,reg,sem_ctx_4097,sem_off_4097,a,arg);
-                        rsx_gl_barrier();
-                        store_label(a,arg);
+                        release_label(a,arg);
                     }
                     break;
                 case 0xE920: case 0xE924: // GCM_FLIP_HEAD: display flip (package 0x102)

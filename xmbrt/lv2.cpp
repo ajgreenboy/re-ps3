@@ -2,8 +2,15 @@
 // and fail with CELL_ENOSYS, so the first missing one is obvious in the log.
 #include "kernel.h"
 
-#include <iterator>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstring>
+#include <iterator>
+#include <map>
+#include <mutex>
+#include <tuple>
+#include <vector>
 
 #include "syscall_names.inc"
 
@@ -12,6 +19,48 @@ namespace
     SyscallFn g_table[1024];
     std::atomic_bool g_reported_unsupported[1024]{};
     std::atomic_bool g_reported_out_of_range{};
+
+    // XMBRT_SYSCALL_TIMING=1: wall time the main thread spends inside each syscall call site, reported
+    // every 10 s, to find what paces frame production. =all times every guest thread (top sites overall).
+    struct SiteTime { double ms = 0; uint64_t calls = 0; };
+    struct MainTiming
+    {
+        bool on = getenv("XMBRT_SYSCALL_TIMING") != nullptr;
+        bool all = [] { const char* v = getenv("XMBRT_SYSCALL_TIMING"); return v && !strcmp(v, "all"); }();
+        std::mutex m;
+        std::map<std::tuple<uint32_t, uint64_t, uint32_t>, SiteTime> thread_sites; // (thread, syscall, lr)
+        std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+        double in_syscalls_ms = 0;
+        std::map<std::pair<uint64_t, uint32_t>, SiteTime> sites;
+    } g_main_timing;
+}
+
+static const char* syscall_name(uint64_t number);
+
+static void report_main_timing()
+{
+    auto& m = g_main_timing;
+    const double wall = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - m.since).count();
+    if (wall < 10000) return;
+    std::vector<std::pair<std::pair<uint64_t, uint32_t>, SiteTime>> top(m.sites.begin(), m.sites.end());
+    std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.second.ms > b.second.ms; });
+    log_line("main timing: %.0f ms wall, %.0f ms in syscalls (%.0f%%)", wall, m.in_syscalls_ms, 100 * m.in_syscalls_ms / wall);
+    for (size_t i = 0; i < top.size() && i < 8; i++)
+        log_line("main timing:   %8.0f ms %7llu calls  sys %llu %s lr=%08X", top[i].second.ms, (unsigned long long)top[i].second.calls,
+            (unsigned long long)top[i].first.first, syscall_name(top[i].first.first), top[i].first.second);
+    m.sites.clear();
+    if (m.all)
+    {
+        std::lock_guard lock(m.m);
+        std::vector<std::pair<std::tuple<uint32_t, uint64_t, uint32_t>, SiteTime>> t(m.thread_sites.begin(), m.thread_sites.end());
+        std::sort(t.begin(), t.end(), [](const auto& a, const auto& b) { return a.second.ms > b.second.ms; });
+        for (size_t i = 0; i < t.size() && i < 16; i++)
+            log_line("thread timing: T%08X %8.0f ms %7llu calls  sys %llu %s lr=%08X", std::get<0>(t[i].first), t[i].second.ms,
+                (unsigned long long)t[i].second.calls, (unsigned long long)std::get<1>(t[i].first), syscall_name(std::get<1>(t[i].first)), std::get<2>(t[i].first));
+        m.thread_sites.clear();
+    }
+    m.in_syscalls_ms = 0;
+    m.since = std::chrono::steady_clock::now();
 }
 
 static const char* syscall_name(uint64_t number)
@@ -69,7 +118,27 @@ void lv2_syscall(PPCContext& ctx, uint64_t number)
     const uint64_t r3 = ctx.r3.u64, r4 = ctx.r4.u64, r5 = ctx.r5.u64, r6 = ctx.r6.u64;
     const SyscallFn fn = number < 1024 ? g_table[number] : nullptr;
     const bool null_ok = !fn && number < std::size(kSyscallNullOk) && kSyscallNullOk[number];
+    const bool main_thread = current_thread_id() == kMainThreadId;
+    const bool timed = g_main_timing.on && (main_thread || g_main_timing.all);
+    const auto t0 = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     const int64_t result = fn ? fn(ctx) : null_ok ? CELL_OK : CELL_ENOSYS;
+    if (timed && !main_thread)
+    {
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        std::lock_guard lock(g_main_timing.m);
+        auto& site = g_main_timing.thread_sites[{ current_thread_id(), number, lr }];
+        site.ms += ms;
+        site.calls++;
+    }
+    if (timed && main_thread)
+    {
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        auto& site = g_main_timing.sites[{ number, lr }];
+        site.ms += ms;
+        site.calls++;
+        g_main_timing.in_syscalls_ms += ms;
+        report_main_timing();
+    }
     ctx.r3.s64 = result;
     if (result == CELL_ENOSYS)
     {
