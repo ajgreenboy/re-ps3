@@ -75,6 +75,67 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 
 ---
 
+## 3a. Next session: start here (2026-10-23)
+
+**State.** All 39 modules load, vsh's main loop runs at 60 Hz, and the GL window presents frames, but
+there are 0 draws. Last commits: `8c708fc`, `de737ba` (local only, never pushed).
+
+**Blocker: SPU execution.** vsh's boot stalls because SPU code never runs:
+
+1. The main thread imports a small SPU program embedded in vsh (`_sys_spu_image_import`, src 0x6B9980, size
+   0x8D4). It creates a 1-thread group, binds event queue A with `sys_spu_thread_bind_queue`, connects queue B
+   on port 0x21 with `sys_spu_thread_connect_event`, and starts the group.
+2. A ScePafJob thread posts work to queue A and waits on queue B (`sys_event_queue_receive` at lr 0x0043C33C).
+   With no SPU running, the reply never comes. RPCS3 joins that job at trace call 28,280; ours never does.
+3. Downstream, sys_audio starts and joins its own group about 2,600 times (one mix batch per run). The
+   custom_render plugin (wave) then initialises cellSpurs (first call at RPCS3 trace 56,467). SPURS is HLE'd
+   inside RPCS3 and also needs SPU execution.
+
+**What to build** (reference: RPCS3 0b0fa08, `Emu/Cell/SPUInterpreter.cpp`, `SPUThread.cpp`, `lv2/sys_spu.cpp`):
+
+- **New `xmbrt/k_spu.cpp`.** Register its syscalls from `lv2.cpp` and remove the SPU stand-ins from
+  `k_extra.cpp`: 157 (image import), 165, 170–173, 178, 181/182, 184, 187/188, 190–194, 251/252.
+- **Image import.** Parse the SPU ELF (`PT_LOAD` → COPY + FILL segments). Write the image struct as a KERNEL
+  type (1) whose `entry_point` is the object id, as RPCS3 does. Thread initialize also has to accept USER
+  (type 0) images whose segment list is in guest memory; sys_audio uses one.
+- **IDs.** SPU thread id = `spu_num << 24 | (group_id & 0xFFFFFF)` (the trace shows `0x200` for group
+  `0x4000200`). Group ids come from `kobj_add(0x04, …)`.
+- **Group start.** Zero the LS, write the thread loader/args at 0x30, deploy the segments, zero the GPRs, and
+  put arg N in the preferred doubleword of r3–r6. Send the group RUN event if one is connected. Run each SPU
+  thread on its own host thread.
+- **Group join** must block the PPU thread with `sleep_thread`/`wake_thread` (`kernel.h`) until every thread
+  exits. Cause is 1 for group exit (stop 0x101) or 2 for all threads exiting (stop 0x102); status comes from
+  the out mailbox.
+- **Channels:**
+  - Mailboxes, SigNotify 1/2, decrementer, event mask/stat with the lock-line-lost event, and the MFC
+    channels.
+  - DMA can complete synchronously.
+  - GETLLAR/PUTLLC should compare and copy the 128-byte line under one lock. PPU `stwcx.`/`stdcx.` are host
+    CAS calls in the generated C++ (`__sync_bool_compare_and_swap`), so this interoperates.
+- **Event protocol (SPU side):**
+  - `SPU_WrOutIntrMbox` code < 64 is a send event (reply CELL_OK into the in mailbox); < 128 is a throw event
+    (no reply). The event goes to `spup[code & 63]` with source `0xFFFFFFFF53505501`,
+    d1 = SPU thread id, d2 = `spup << 32 | low 24 bits`, d3 = out mailbox value.
+  - Stop 0x110/0x111 is receive/try-receive on the queue bound to the spuq number in the out mailbox. Reply
+    in the in mailbox is `CELL_OK, d1, d2, d3`, or EBUSY/EINVAL.
+  - The queues are `KEventQueue` (`k_event.h`). Hold `g_kernel` while touching them; polling for SPU-side
+    receive is acceptable at first.
+
+**How to verify:**
+
+1. Rebuild with `xmbrt\build-xmbrt.ps1`; the runtime alone is enough, so no retranslation is needed. Then run
+   `$env:XMBRT_DUMP_AT='70'; xmbrt\run-xmbrt.ps1 -TimeoutSeconds 90 -MaxCalls 600000`.
+2. The main thread should join the second ScePafJob thread and create the next one, matching RPCS3's
+   join/create sequence: `grep "thread_join\|_sys_ppu_thread_create"` on T01000000 in `out\trace\rpcs3.norm`.
+3. Then expect `hle cellSpurs` lines from custom_render (0x195Bxxx) and raf (0x1DDDxxx).
+4. Done when `rsx: N draws` (logged at dump) is above 0 and the window shows something. Draws go through
+   `rsx_gl.cpp`, which is written but has not seen a real draw yet. Expect shader-translation fixes; compile
+   errors are logged with their GLSL source.
+
+**After that:** SPURS (custom_render waits on `cellSpursEventFlagWait` about 1,300 times in RPCS3's boot),
+then renderer debugging against RPCS3 screenshots, then phase 5 (input via `k_pad.cpp`, audio from the
+rsxaudio ring to WASAPI).
+
 ## 4. Remaining work: specification
 
 ### 4.0 Fix the three record-form gaps (small)
