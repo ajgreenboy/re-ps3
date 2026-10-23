@@ -38,6 +38,14 @@ anything that makes it easier except the exact XMB feel.
 - Not yet translated: 4,161 instructions (0.16%) of 37 types (`xenon\unrecognized_boot493.csv`).
   The main ones: `sc` x2612, `rldic` x657, `mtocrf` x355, `cror` x128, `stfsu` x85
 
+## Update (2026-10-23)
+
+- XenonRecomp now translates every instruction in the boot set (0 unrecognized). Al added the missing
+  instructions, the `sc` -> `ctx.syscall` hook and the vsrah/vslh, vcmpgtsw. and rldic. fixes (uncommitted in `C:\dev\deps\XenonRecomp`).
+- All 224 generated translation units compile with clang-cl (`xenon\compile-recomp.ps1`), producing 63 MB of objects in `out\recomp_obj`.
+- Not linked or run yet. Before running, set `PPC_IMAGE_SIZE` to the real guest span: it currently comes from the
+  image.elf file size (0x10B26F4) and would overlap the plugins at 0x01000000+ and the HLE stubs at 0x0F000000.
+
 ## Open items
 
 1. Add the 36 missing instruction types to XenonRecomp's code generator and route `sc` to a native

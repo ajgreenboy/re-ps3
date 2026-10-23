@@ -45,8 +45,10 @@ while ($true) {
     foreach ($t in $top) { Write-Host ("        {0,-10} x{1}" -f $t.Name, $t.Count) }
     Write-Host ''
     Write-Host 'Next' -ForegroundColor Cyan
-    Show 'Missing instructions + sc -> LV2 layer' $false 'needs code-generator work (stopped here)'
+    Show 'Missing instructions + sc hook' ($unrec.Count -eq 0) 'added in XenonRecomp (user patch)'
     Show 'Native runtime (memory, LV2, HLE, RSX)' $false 'not started'
-    Show 'Compile generated C++ (clang-cl)' $false 'not started'
+    $objs = Count C:\dev\xmb\out\recomp_obj '*.obj'
+    $cpps = Count C:\dev\xmb\out\recomp_boot493 '*.cpp'
+    Show 'Compile generated C++ (clang-cl)' ($cpps -gt 0 -and $objs -ge $cpps) "$objs / $cpps objects"
     Start-Sleep 5
 }
