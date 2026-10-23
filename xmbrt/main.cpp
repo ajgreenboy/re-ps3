@@ -6,6 +6,7 @@
 //   <vsh.elf> is the decrypted vsh, read for its TLS and process-param program headers.
 // env:   XMBRT_LOG (default xmbrt.log), XMBRT_MAX_CALLS (default 10000), XMBRT_IDLE_SECONDS (default 15)
 #include "xmbrt.h"
+#include "kernel.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -24,7 +25,10 @@ static FILE* g_log;
 static std::mutex g_log_mutex;
 static std::atomic<uint64_t> g_call_seq;
 static uint64_t g_max_calls = 10000;
-static thread_local uint32_t t_thread_id;
+
+void lv2_init();
+bool prx_init(const std::string& dir);
+void misc_set_sdk_version(uint32_t version);
 
 void log_line(const char* fmt, ...)
 {
@@ -54,8 +58,6 @@ uint64_t next_call_seq()
     }
     return seq;
 }
-
-uint32_t current_thread_id() { return t_thread_id; }
 
 void fatal_exit(int code)
 {
@@ -133,7 +135,18 @@ static bool load_image(const std::string& path)
 // Default for every table slot that isn't a translated function or an HLE stub.
 static void bad_indirect_call(PPCContext& __restrict__ ctx, uint8_t*)
 {
-    log_line("indirect call to an address with no function: ctr=%08X lr=%08X", ctx.ctr.u32, uint32_t(ctx.lr));
+    // Name the nearest translated function below the target, to tell a mid-function target from data
+    uint32_t below = 0;
+    for (uint32_t a = ctx.ctr.u32 & ~3u; a >= PPC_CODE_BASE && a + 0x10000 > ctx.ctr.u32; a -= 4)
+    {
+        if (func_slot(a) != &bad_indirect_call)
+        {
+            below = a;
+            break;
+        }
+    }
+    log_line("indirect call to an address with no function: ctr=%08X lr=%08X (nearest function below: %08X) T%08X",
+        ctx.ctr.u32, uint32_t(ctx.lr), below, current_thread_id());
     fatal_exit(2);
 }
 
@@ -179,6 +192,7 @@ struct VshParams
     int32_t primary_prio = 1001;
     uint32_t primary_stacksize = 0x100000;
     uint32_t malloc_pagesize = 0x100000;
+    uint32_t sdk_version = 0;
 };
 
 // Reads e_entry, PT_TLS and the process-param segment from vsh.elf (ELF64 big-endian).
@@ -208,6 +222,7 @@ static bool read_vsh_params(const std::string& path, VshParams& p)
                 log_line("process param at %08X has a bad magic", vaddr);
                 continue;
             }
+            p.sdk_version = guest_load_u32(vaddr + 0x0C);
             p.primary_prio = int32_t(guest_load_u32(vaddr + 0x10));
             p.primary_stacksize = guest_load_u32(vaddr + 0x14);
             p.malloc_pagesize = guest_load_u32(vaddr + 0x18);
@@ -260,7 +275,6 @@ int main(int argc, char** argv)
     const char* log_path = getenv("XMBRT_LOG");
     g_log = fopen(log_path && *log_path ? log_path : "xmbrt.log", "w");
     g_max_calls = env_u64("XMBRT_MAX_CALLS", 10000);
-    t_thread_id = kMainThreadId;
 
     g_base = (uint8_t*)VirtualAlloc(nullptr, PPC_MEMORY_SIZE, MEM_RESERVE, PAGE_NOACCESS);
     if (!g_base)
@@ -273,6 +287,8 @@ int main(int argc, char** argv)
     build_func_table();
     if (!hle_load((dir + "\\hle.csv").c_str())) return 1;
     hle_install();
+    if (!prx_init(dir)) return log_line("cannot read %s\\modules.csv", dir.c_str()), 1;
+    lv2_init();
 
     VshParams vsh;
     if (!read_vsh_params(argv[2], vsh)) return 1;
@@ -281,11 +297,13 @@ int main(int argc, char** argv)
         vsh.entry_opd, entry_func, entry_toc, vsh.tls_vaddr, vsh.tls_fsize, vsh.tls_vsize,
         vsh.primary_prio, vsh.primary_stacksize, vsh.malloc_pagesize);
 
+    misc_set_sdk_version(vsh.sdk_version);
+
     // Main thread stack, laid out as ppu_load_exec does: argv/envp pointer block and strings
     // at the top, r1 = top - 0x70 (ppu_stack_start_offset) - that block.
     const uint32_t stack_size = primary_stack_size(vsh.primary_stacksize);
-    const uint32_t stack_addr = kStackBase + 0x10000; // first page block left as a guard
-    if (!commit(stack_addr, stack_size)) return 1;
+    const uint32_t stack_addr = alloc_stack(stack_size); // 0xD0001000, as in RPCS3
+    if (!stack_addr) return log_line("cannot allocate the main stack"), 1;
     const std::vector<std::string> guest_argv = { "/dev_flash/vsh/module/vsh.self" };
     const uint32_t pointers_size = 8 * ((uint32_t(guest_argv.size()) + 2 + 1) & ~1u);
     uint32_t alloc_size = pointers_size;
@@ -320,6 +338,7 @@ int main(int argc, char** argv)
     ctx->r11.u64 = vsh.entry_opd;
     ctx->r12.u64 = vsh.malloc_pagesize;
     ctx->lr = 0;
+    kernel_init_main_thread(ctx, stack_addr, stack_size);
 
     std::thread(idle_watchdog, uint32_t(env_u64("XMBRT_IDLE_SECONDS", 15))).detach();
 
@@ -327,7 +346,16 @@ int main(int argc, char** argv)
     if (entry == &bad_indirect_call)
         return log_line("vsh entry %08X has no translated function", entry_func), 1;
     log_line("calling vsh entry %08X (r1=%08X r2=%08X)", entry_func, ctx->r1.u32, ctx->r2.u32);
-    entry(*ctx, g_base);
-    log_line("vsh entry returned r3=%llX after %llu calls", (unsigned long long)ctx->r3.u64, (unsigned long long)g_call_seq.load());
+    try
+    {
+        entry(*ctx, g_base);
+        log_line("vsh entry returned r3=%llX after %llu calls", (unsigned long long)ctx->r3.u64, (unsigned long long)g_call_seq.load());
+    }
+    catch (const ThreadExit& e)
+    {
+        // On LV2 the process outlives its main thread; other threads keep running until process exit.
+        log_line("main thread exited with %llX; process continues", (unsigned long long)e.status);
+        for (;;) Sleep(INFINITE);
+    }
     fatal_exit(0);
 }

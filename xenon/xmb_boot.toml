@@ -6,3 +6,5 @@ file_path = "../out/boot493/image.elf"
 out_directory_path = "../out/recomp_boot493"
 # function boundaries come from Ghidra via .pdata; see the pdata_only patch in our XenonRecomp checkout
 pdata_only = true
+# PS3 jump tables found by gen-switch-tables.ts
+switch_table_file_path = "xmb_switch_tables.toml"
