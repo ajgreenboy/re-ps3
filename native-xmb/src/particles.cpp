@@ -21,15 +21,16 @@ constexpr float nearAlign=.722f;
 constexpr float glareDay=.201367f,glareNight=.159705f,glareScale=5.44386f,glareP1=.99f,glareP2=4.44f;
 // Reconstructed (the SPU simulation and the CPU uniform setters are not traced):
 constexpr float sceneScale=3.2f;     // firmware units per view unit: puts the ribbon (view z = -3) near the focus band
-constexpr int maxParticles=1500;
-constexpr float emitScatter=.6f;     // firmware units around the emission point (particles fill a volume, not the line)
+constexpr int maxParticles=500;
+constexpr float emitRate=.15f;       // share of EMIT PER FRAME x EMIT PROB actually emitted: ~400 alive, a sparse cloud (fitted by eye)
+constexpr float emitScatter=1.f;      // firmware units around the emission point (particles fill a volume, not the line)
 constexpr float darknessAngle=1.5f;  // _FocusCurves.z: divides the angular-size term of near/far darkness
 constexpr float brownianKick=.25f;   // velocity kick per step per unit BROWNIAN SCALE (u/s): ~0.23 u/s steady drift
 constexpr float flowSpeed=.012f;     // fraction of the ribbon per second a particle's anchor may flow, either way
 constexpr float windDecay=.04f;      // per step: a navigation gust fades in ~0.4 s
 constexpr float iconWind=11.3877f,dpadScaleX=1.f; // PARTICLES_UI.mnu ICON WIND, DPAD SCALE X
 constexpr float windPerIconWind=.06f; // u/s of gust per unit ICON WIND (reconstructed)
-constexpr float particleGain=2.5f;   // _Gamma: particle output gain, so that specular glints cross the HDR glare threshold
+constexpr float particleGain=2.f;   // _Gamma: particle output gain, so that specular glints cross the HDR glare threshold
                                      // (the plugin draws particles into its x8-encoded frame; that scale is not traced)
 constexpr double step=1./60;         // the plugin advances once per frame
 }
@@ -88,7 +89,7 @@ void Particles::update(double seconds,const std::vector<QVector3D>& emitter) {
         // Emission: EMIT PER FRAME tries with EMIT PROB each, from a random point on the ribbon's centre line, inside
         // a cone of EMIT CONE ANGLE around up (down with EMIT NEG PROB), speed MIN + MUL x (1 +- VAR).
         for(int i=0;i<int(std::ceil(emitPerFrame));++i) {
-            if(unit(random_)>emitProb*std::min(1.f,emitPerFrame-i) || int(particles_.size())>=maxParticles)continue;
+            if(unit(random_)>emitProb*emitRate*std::min(1.f,emitPerFrame-i) || int(particles_.size())>=maxParticles)continue;
             const float cone=emitConeAngle*float(std::numbers::pi)/180.f*std::sqrt(unit(random_)),around=unit(random_)*2.f*float(std::numbers::pi);
             QVector3D direction(std::sin(cone)*std::cos(around),std::cos(cone),std::sin(cone)*std::sin(around));
             if(unit(random_)<emitNegProb)direction.setY(-direction.y());
