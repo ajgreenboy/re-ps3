@@ -79,7 +79,7 @@ std::string translateVertex(const std::vector<quint32>& w,quint32& inputs,int& c
         case 0x01:setDst(false,s0);break;
         case 0x02:setDst(false,s0+" * "+s1);break;
         case 0x03:setDst(false,s0+" + "+s2);break;
-        case 0x04:setDst(false,"fma("+s0+", "+s1+", "+s2+")");break;
+        case 0x04:setDst(false,"(("+s0+") * ("+s1+") + ("+s2+"))");break;
         case 0x05:setDst(false,"vec4(dot("+s0+".xyz, "+s1+".xyz))");break;
         case 0x06:setDst(false,"vec4(dot(vec4("+s0+".xyz, 1.), "+s1+"))");break;
         case 0x07:setDst(false,"vec4(dot("+s0+", "+s1+"))");break;
@@ -218,7 +218,7 @@ std::string translateFragment(const QByteArray& u,bool outputFromH0,bool depthRe
         case 0x01:setDst(a);break;
         case 0x02:setDst(a+" * "+b);break;
         case 0x03:setDst(a+" + "+b);break;
-        case 0x04:setDst("fma("+a+", "+b+", "+c+")");break;
+        case 0x04:setDst("(("+a+") * ("+b+") + ("+c+"))");break;
         case 0x05:setDst("vec4(dot("+a+".xyz, "+b+".xyz))");break;
         case 0x06:setDst("vec4(dot("+a+", "+b+"))");break;
         case 0x07:setDst("vec4(1., "+a+".y * "+b+".y, "+a+".z, "+b+".w)");break;

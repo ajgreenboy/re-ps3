@@ -91,6 +91,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(
     static const char* fragment=R"(#version 330 core
 in vec2 uv;out vec4 colour;uniform float seconds;uniform vec3 tint;uniform vec2 resolution;
 uniform sampler2D monthPalette;uniform bool useMonthPalette;uniform bool classic;
+uniform bool overlay;  // true: draw only the ribbon and particles, additively, over the original background
 uniform float dayLight; // 0 night .. 1 day; clock-driven curve measured from reference video (audit/VIDEO-REFERENCES.md)
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 // Ribbon crest as a fraction of height from the top, fitted to the reference: it rests near 0.42,
@@ -107,6 +108,7 @@ void main(){
     float nightProfile=.25*smoothstep(.42,.95,fromTop);
     c*=mix(nightProfile,1.0,dayLight);
     c+=tint*.045*dayLight*exp(-length((p-vec2(.42,.28))*vec2(.7,1.6))*2.0);
+    if(overlay)c=vec3(0.);
     float ribbonLight=mix(.5,1.0,dayLight);
     for(int i=0;i<7;++i){
         float k=float(i);float line=wave(p.x,seconds)+.019*sin(p.x*4.8+t+k*.50)+k*.0035;
@@ -128,6 +130,7 @@ void main(){
     glReady_=background_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex)&&background_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment)&&background_.link();
     if(!glReady_)qCritical().noquote()<<background_.log();
     glGenVertexArrays(1,&vao_);
+    initOriginalBackground();
     if(!monthImage_.isNull()) {
         monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
         monthTexture_->setMinificationFilter(QOpenGLTexture::Linear);monthTexture_->setMagnificationFilter(QOpenGLTexture::Linear);
@@ -146,9 +149,17 @@ double View::dayLight(double hour) {
 }
 void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHeight) {
     static const QVector3D colours[]={{.55f,.39f,.13f},{.12f,.36f,.68f},{.40f,.20f,.60f},{.62f,.17f,.18f},{.16f,.43f,.32f},{.48f,.50f,.54f}};
-    glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glDisable(GL_SCISSOR_TEST);
+    // Original colour theme: the firmware's own background shader and monthly palettes.
+    const bool original=originalReady_ && (forceOriginal_ || (shell_.theme()==0 && shell_.backgroundMode()!=2));
+    if(original) {
+        const QDateTime when=backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime();
+        if(when.date().month()!=texturesMonth_)loadMonthTextures(when.date().month());
+        renderOriginalBackground(backgroundTime(when),pixelWidth,pixelHeight);
+    }
+    glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);
+    if(original){glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE);} else glDisable(GL_BLEND);
     glViewport(0,0,pixelWidth,pixelHeight);
-    background_.bind();background_.setUniformValue("seconds",seconds);background_.setUniformValue("dayLight",light);
+    background_.bind();background_.setUniformValue("overlay",original);background_.setUniformValue("seconds",seconds);background_.setUniformValue("dayLight",light);
     background_.setUniformValue("tint",colours[std::clamp(shell_.theme(),0,5)]);
     background_.setUniformValue("resolution",QVector2D(float(pixelWidth),float(pixelHeight)));
     background_.setUniformValue("monthPalette",0);background_.setUniformValue("useMonthPalette",shell_.theme()==0 && bool(monthTexture_));
@@ -156,6 +167,85 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     if(monthTexture_)monthTexture_->bind(0);
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);background_.release();
     if(monthTexture_)monthTexture_->release(0);
+    glDisable(GL_BLEND);
+}
+// Inputs of qgl/lines back_colours0.fpo. Window values are the firmware's override/day BACKGROUND.mnu keys
+// (NIGHT2DAY 0-5.166 h, DAY2NIGHT 18.498-20.331 h, NIGHT WHIT BIAS 0.486). The plugin's exact mapping onto
+// DayTime/NightTime/NightDayBlend is not decoded yet; this first mapping is checked against the reference video.
+View::BackgroundTime View::backgroundTime(const QDateTime& when) {
+    const auto t=when.time();const double hour=t.hour()+t.minute()/60.+t.second()/3600.;
+    const auto date=when.date();
+    BackgroundTime b;
+    // _DayTime/_NightTime are clock hours x100 (0..2400): the shader evaluates cos(pi*(t-600)/1200), symmetric at noon.
+    // DAYSPREAD (2.68038 in override/day BACKGROUND.mnu) widens the day profile around noon; fitted against the
+    // reference day cycle, where 16:30 is still full brightness and 18:00 is ~80%.
+    constexpr double daySpread=2.68038;
+    b.day=float(1200.+(hour*100.-1200.)/daySpread);
+    b.night=float(hour*100.);
+    b.month=float((date.day()-1+hour/24.)/date.daysInMonth());
+    b.nightBrightness=.486059f;
+    const auto ramp=[](double x,double a,double c){return std::clamp((x-a)/(c-a),0.,1.);};
+    // Linear ramps. Evening uses the preset's DAY2NIGHT 18.498-20.3312 h; the preset's NIGHT2DAY (0-5.16611 h) is
+    // remapped on the CPU in a way not traced yet, so the morning window is fitted to the reference (03:00 still
+    // black, 04:30 ~40%, 06:00 ~80% of midday).
+    const double blend=hour<12.?ramp(hour,3.,6.):1.-ramp(hour,18.498,20.3312);
+    b.nightDayBlend=float(blend);
+    b.alpha=1.f;
+    return b;
+}
+void View::initOriginalBackground() {
+    QByteArray binary;
+    try { binary=assets_.qglFile("lines","lib/moyou/back_colours0.fpo"); } catch(const std::exception& e) { qWarning()<<"original background unavailable:"<<e.what();return; }
+    QString error;backColours_=CgProgram::load(binary,&error);
+    if(!backColours_.valid()){qWarning().noquote()<<"original background translation failed:"<<error;return;}
+    static const char* vertex=R"(#version 330 core
+out vec4 v_col0, v_col1, v_fog;
+out vec4 v_tc[10];
+void main(){
+    vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);
+    for(int i=0;i<10;++i)v_tc[i]=vec4(0.);
+    v_tc[0]=vec4(p,0.,1.); // the firmware quad's uv: y=0 at the bottom (measured: night colour sits low)
+    v_col0=v_col1=v_fog=vec4(0.);
+    gl_Position=vec4(p*2.0-1.0,0.0,1.0);
+}
+)";
+    if(!original_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) || !original_.addShaderFromSourceCode(QOpenGLShader::Fragment,backColours_.glsl) || !original_.link()) {
+        qWarning().noquote()<<"original background shader failed:"<<original_.log();return;
+    }
+    if(!loadMonthTextures(QDate::currentDate().month()))return;
+    originalReady_=true;
+    qInfo()<<"original background: back_colours0"<<backColours_.instructionCount<<"instructions,"<<backColours_.constants.size()<<"constants";
+}
+bool View::loadMonthTextures(int month) {
+    const int next=month%12+1;
+    const QString names[4]={QString("textures/month_bg/rgb/%1.dds").arg(month,2,10,QChar('0')),QString("textures/month_bg/rgb/%1.dds").arg(next,2,10,QChar('0')),
+                            QString("textures/month_bg/night/%1.dds").arg(month,2,10,QChar('0')),QString("textures/month_bg/night/%1.dds").arg(next,2,10,QChar('0'))};
+    for(int i=0;i<4;++i) {
+        const auto& image=assets_.image("qgl/lines",names[i]);
+        if(image.isNull()){qWarning().noquote()<<"original background texture missing:"<<names[i];return false;}
+        monthTextures_[i]=std::make_unique<QOpenGLTexture>(image); // RSX images are stored top row first
+        monthTextures_[i]->setMinificationFilter(QOpenGLTexture::Linear);monthTextures_[i]->setMagnificationFilter(QOpenGLTexture::Linear);
+        monthTextures_[i]->setWrapMode(QOpenGLTexture::ClampToEdge);
+    }
+    texturesMonth_=month;
+    return true;
+}
+void View::renderOriginalBackground(const BackgroundTime& time,int pixelWidth,int pixelHeight) {
+    QVector<QVector4D> fc=backColours_.constants;
+    const auto set=[&](const char* name,float value){
+        const auto it=backColours_.parameters.constFind(name);if(it==backColours_.parameters.cend())return;
+        for(int slot:it->constantSlots)if(slot<fc.size())fc[slot]=QVector4D(value,value,value,value);
+    };
+    set("_DayTime",time.day);set("_NightTime",time.night);set("_MonthTime",time.month);
+    set("_NightBrightness",time.nightBrightness);set("_NightDayBlend",time.nightDayBlend);set("_Alpha",time.alpha);
+    glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glDisable(GL_SCISSOR_TEST);
+    glViewport(0,0,pixelWidth,pixelHeight);
+    original_.bind();
+    original_.setUniformValueArray("fc",fc.constData(),fc.size());
+    for(int i=0;i<4;++i){monthTextures_[i]->bind(i);original_.setUniformValue(QString("tex%1").arg(i).toUtf8().constData(),i);}
+    glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);
+    for(int i=0;i<4;++i)monthTextures_[i]->release(i);
+    original_.release();
 }
 bool View::measureReference(const QString& path) {
     if(!glReady_)return false;
@@ -167,7 +257,10 @@ bool View::measureReference(const QString& path) {
     if(!file.open(QIODevice::WriteOnly|QIODevice::Text)){fbo.release();doneCurrent();return false;}
     QTextStream out(&file);
     const auto hex=[](double r,double g,double b){return QString("%1%2%3").arg(int(r+.5),2,16,QChar('0')).arg(int(g+.5),2,16,QChar('0')).arg(int(b+.5),2,16,QChar('0'));};
-    out<<"# native background measured like audit/VIDEO-REFERENCES.md; theme "<<shell_.theme()<<", month palette "<<(shell_.theme()==0 && monthTexture_?"on":"off")<<"\n";
+    forceOriginal_=originalReady_; // measure the firmware background regardless of the saved theme
+    const QDate measureDate=QDate::currentDate();
+    const auto at=[&](double hour){backgroundOverride_=QDateTime(measureDate,QTime(int(hour),int(std::fmod(hour,1.)*60)));};
+    out<<"# native background measured like audit/VIDEO-REFERENCES.md; "<<(forceOriginal_?QString("original back_colours0, %1").arg(measureDate.toString(Qt::ISODate)):QString("procedural, theme %1").arg(shell_.theme()))<<"\n";
     out<<"# clock  dayLight  bands 1-12 (hex RGB, top to bottom)  |  band luma relative to the 12:00 top band\n";
     QVector<double> middayLuma;
     const auto bands=[&](const QImage& image,QStringList& hexes,QVector<double>& luma){
@@ -175,22 +268,22 @@ bool View::measureReference(const QString& path) {
             for(int y=b*H/12;y<(b+1)*H/12;y+=4)for(int x=0;x<W;x+=8){const QRgb p=image.pixel(x,y);s[0]+=qRed(p);s[1]+=qGreen(p);s[2]+=qBlue(p);++n;}
             hexes<<hex(s[0]/n,s[1]/n,s[2]/n);luma<<(.2126*s[0]+.7152*s[1]+.0722*s[2])/n;}
     };
-    { renderBackground(420.f,float(dayLight(12)),W,H);QStringList h;bands(fbo.toImage(),h,middayLuma); }
+    { at(12);renderBackground(420.f,float(dayLight(12)),W,H);QStringList h;bands(fbo.toImage(),h,middayLuma); }
     for(int step=0;step<16;++step) {
         const double hour=step*1.5;const double light=dayLight(hour);
-        renderBackground(420.f,float(light),W,H);
+        at(hour);renderBackground(420.f,float(light),W,H);
         QStringList h;QVector<double> luma;bands(fbo.toImage(),h,luma);
         QStringList rel;for(double l:luma)rel<<QString::number(l/std::max(1.,middayLuma[0]),'f',2);
         out<<QString("%1:%2").arg(int(hour),2,10,QChar('0')).arg(int(std::fmod(hour,1.)*60),2,10,QChar('0'))<<"  "<<QString::number(light,'f',2)<<"  "<<h.join(' ')<<"  |  "<<rel.join(' ')<<"\n";
     }
     // Background-only frames next to the statistics, for visual comparison with the reference video.
     for(const auto& [hour,name]:std::initializer_list<std::pair<double,const char*>>{{12.,"midday"},{22.5,"night"},{19.5,"dusk"}}) {
-        renderBackground(141.f,float(dayLight(hour)),W,H);
+        at(hour);renderBackground(141.f,float(dayLight(hour)),W,H);
         fbo.toImage().save(QFileInfo(path).dir().filePath(QString("video-reference-%1.png").arg(name)));
     }
     out<<"# ribbon crest, fraction of height from the top, 8 columns, 40 s at 1 s steps (midday)\n";
     for(int i=0;i<40;++i) {
-        renderBackground(float(120+i),float(dayLight(12)),W,H);const QImage image=fbo.toImage();
+        at(12);renderBackground(float(120+i),float(dayLight(12)),W,H);const QImage image=fbo.toImage();
         QStringList crest;
         for(int k=0;k<8;++k){const int x0=(2*k+1)*W/16;QVector<double> prof(H);
             for(int y=0;y<H;++y){double s=0;for(int x=x0-12;x<=x0+12;x+=3){const QRgb p=image.pixel(x,y);s+=qRed(p)+qGreen(p)+qBlue(p);}prof[y]=s;}
@@ -202,7 +295,35 @@ bool View::measureReference(const QString& path) {
     out<<"# ease-out: settle to 10% = time constant * ln(10)\n";
     for(const auto& [name,tau]:std::initializer_list<std::pair<const char*,double>>{{"category",.120},{"item",.085},{"depth/entry",.110}})
         out<<name<<": tau "<<int(tau*1000)<<" ms, settle "<<int(tau*std::log(10.)*1000)<<" ms ("<<QString::number(tau*std::log(10.)*60,'f',1)<<" frames at 60 fps)\n";
+    if(originalReady_) {
+        // Firmware background shader on its own: every month's palette at noon, then a raw input sweep of
+        // _DayTime = _NightTime (clock hours x100) x NightDayBlend, independent of the clock mapping above.
+        out<<"# original back_colours0 by month, 15th 12:00: mean RGB of the top, middle and bottom bands\n";
+        for(int m=1;m<=12;++m) {
+            backgroundOverride_=QDateTime(QDate(measureDate.year(),m,15),QTime(12,0));
+            loadMonthTextures(m);
+            renderOriginalBackground(backgroundTime(backgroundOverride_),W,H);
+            const QImage image=fbo.toImage();
+            const auto mean=[&](int y){long r=0,g=0,b=0,n=0;for(int x=0;x<W;x+=16){const QRgb p=image.pixel(x,y);r+=qRed(p);g+=qGreen(p);b+=qBlue(p);++n;}return QString::asprintf("%02lx%02lx%02lx",r/n,g/n,b/n);};
+            out<<QString("%1  %2 %3 %4\n").arg(m,2,10,QChar('0')).arg(mean(H/20)).arg(mean(H/2)).arg(mean(H-H/20));
+        }
+        loadMonthTextures(measureDate.month());
+        out<<"# original back_colours0 sweep: DayTime  |  luma top/mid/bottom for NightDayBlend 0, 0.5, 1\n";
+        for(int d=0;d<=24;d+=2) {
+            out<<QString::number(d*100)<<"  |";
+            for(float blend:{0.f,.5f,1.f}) {
+                BackgroundTime b=backgroundTime(QDateTime(measureDate,QTime(12,0)));
+                b.day=b.night=float(d*100);b.nightDayBlend=blend;
+                renderOriginalBackground(b,W,H);
+                const QImage image=fbo.toImage();
+                const auto luma=[&](int y){double s=0;int n=0;for(int x=0;x<W;x+=16){const QRgb p=image.pixel(x,y);s+=.2126*qRed(p)+.7152*qGreen(p)+.0722*qBlue(p);++n;}return s/n;};
+                out<<QString("  %1/%2/%3").arg(luma(H/20),5,'f',1).arg(luma(H/2),5,'f',1).arg(luma(H-H/20),5,'f',1);
+            }
+            out<<"\n";
+        }
+    }
     fbo.release();doneCurrent();
+    forceOriginal_=false;backgroundOverride_={};
     return out.status()==QTextStream::Ok;
 }
 void View::paintGL() {
