@@ -480,14 +480,15 @@ void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect)
 void View::drawScene(QPainter& p) {
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
-        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(QColor(0,0,0,70));p.drawText(r.translated(1.5,1.5),flags,value);p.setPen(colour);p.drawText(r,flags,value);
+        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferVerticalHinting);p.setFont(f);p.setPen(QColor(0,0,0,38));p.drawText(r.translated(1,1),flags,value);p.setPen(colour);p.drawText(r,flags,value);
     };
     // Soft white halo behind a label (the XMB's focused-item glow): the text drawn at low alpha in a ring of offsets.
     auto glow=[&](const QRectF& r,const QString& value,int size,double strength,int flags=Qt::AlignLeft|Qt::AlignVCenter){
         QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);p.setFont(f);
-        for(const double radius:{4.,2.5})for(int k=0;k<12;++k) {
-            const double a=k*std::numbers::pi/6;
-            p.setPen(QColor(255,255,255,int(14*strength)));p.drawText(r.translated(std::cos(a)*radius,std::sin(a)*radius),flags,value);
+        constexpr double radius=3.;
+        for(int k=0;k<8;++k) {
+            const double a=k*std::numbers::pi/4;
+            p.setPen(QColor(255,255,255,int(9*strength)));p.drawText(r.translated(std::cos(a)*radius,std::sin(a)*radius),flags,value);
         }
     };
     if(shell_.backgroundMode()==2 && !wallpaperImage_.isNull()) {
