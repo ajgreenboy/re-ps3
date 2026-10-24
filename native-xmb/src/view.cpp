@@ -159,7 +159,9 @@ double View::dayLight(double hour) {
 void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHeight) {
     static const QVector3D colours[]={{.55f,.39f,.13f},{.12f,.36f,.68f},{.40f,.20f,.60f},{.62f,.17f,.18f},{.16f,.43f,.32f},{.48f,.50f,.54f}};
     // Original colour theme: the firmware's own background shader and monthly palettes.
-    const bool original=originalReady_ && (forceOriginal_ || (shell_.theme()==0 && shell_.backgroundMode()!=2));
+    // The firmware background renders every colour setting (as on the PS3, a fixed colour is the same wave pinned to one
+    // palette); only the wallpaper mode bypasses it.
+    const bool original=originalReady_ && (forceOriginal_ || shell_.backgroundMode()!=2);
     const bool originalRibbon=original && ribbon_.ready();
     const bool originalParticles=originalRibbon && particles_.ready() && shell_.backgroundMode()!=1; // "classic" hides particles
     GLint target=0;glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
@@ -167,7 +169,11 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     float presetBlend=1; // day/night preset weight for ribbon, particles and HDR: 0 night .. 1 day
     if(original) {
         const GLuint scene=hdr?hdr_.begin(*this,pixelWidth,pixelHeight):GLuint(target);
-        const QDateTime when=backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime();
+        QDateTime when=backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime();
+        // Fixed colours pin the month palette (day 1: that month's textures alone); the clock still drives day/night.
+        static const int fixedMonth[]={0,8,6,12,5,1}; // Original, Blue, Purple, Red, Green, Silver
+        if(!backgroundOverride_.isValid() && shell_.theme()>0 && shell_.theme()<int(std::size(fixedMonth)))
+            when=QDateTime(QDate(when.date().year(),fixedMonth[shell_.theme()],1),when.time());
         if(when.date().month()!=texturesMonth_)loadMonthTextures(when.date().month());
         const BackgroundTime time=backgroundTime(when);presetBlend=std::clamp((time.nightDayBlend-.5f)/.5f,0.f,1.f); // NightDayBlend runs 0.5 (night) .. 1
         renderOriginalBackground(time,pixelWidth,pixelHeight);
