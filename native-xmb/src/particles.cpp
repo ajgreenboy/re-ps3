@@ -1,4 +1,5 @@
 #include "particles.h"
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <QDebug>
@@ -61,13 +62,22 @@ bool Particles::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
 void Particles::update(double seconds,const std::vector<QVector3D>& emitter) {
     if(!ready_ || emitter.size()<2)return;
     std::uniform_real_distribution<float> unit(0.f,1.f);std::normal_distribution<float> gauss(0.f,1.f);
+    // Emit uniformly by arc length: the ribbon's x is quadratic in its parameter, so equal parameter steps bunch up
+    // at the left end.
+    std::vector<float> length(emitter.size(),0.f);
+    for(size_t k=1;k<emitter.size();++k)length[k]=length[k-1]+(emitter[k]-emitter[k-1]).length();
+    const auto pointAt=[&](float s) {
+        const auto it=std::upper_bound(length.begin(),length.end(),s);
+        const size_t k=std::clamp<size_t>(size_t(it-length.begin()),1,emitter.size()-1);
+        const float span=std::max(1e-6f,length[k]-length[k-1]);
+        return emitter[k-1]+(emitter[k]-emitter[k-1])*std::clamp((s-length[k-1])/span,0.f,1.f);
+    };
     const auto stepOnce=[&] {
         // Emission: EMIT PER FRAME tries with EMIT PROB each, from a random point on the ribbon's centre line, inside
         // a cone of EMIT CONE ANGLE around up (down with EMIT NEG PROB), speed MIN + MUL x (1 +- VAR).
         for(int i=0;i<int(std::ceil(emitPerFrame));++i) {
             if(unit(random_)>emitProb*std::min(1.f,emitPerFrame-i) || int(particles_.size())>=maxParticles)continue;
-            const float at=unit(random_)*float(emitter.size()-1);const size_t k=std::min(size_t(at),emitter.size()-2);
-            const QVector3D origin=(emitter[k]+(emitter[k+1]-emitter[k])*(at-float(k)))*sceneScale;
+            const QVector3D origin=pointAt(unit(random_)*length.back())*sceneScale;
             const float cone=emitConeAngle*float(std::numbers::pi)/180.f*std::sqrt(unit(random_)),around=unit(random_)*2.f*float(std::numbers::pi);
             QVector3D direction(std::sin(cone)*std::cos(around),std::cos(cone),std::sin(cone)*std::sin(around));
             if(unit(random_)<emitNegProb)direction.setY(-direction.y());
