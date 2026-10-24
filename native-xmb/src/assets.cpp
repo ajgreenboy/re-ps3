@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <limits>
 #include <array>
+#include <vector>
 #include <QStringDecoder>
 #include <QTransform>
 
@@ -325,5 +326,25 @@ QString Assets::text(const QString& container,const QString& name,const QString&
         texts_.insert(container,std::move(strings));
     }
     return texts_[container].value(name,fallback);
+}
+QImage Assets::decodeTga(const QByteArray& file) {
+    if(file.size()<18)return {};
+    const auto* d=reinterpret_cast<const uchar*>(file.constData());
+    const int idLength=d[0],mapType=d[1],type=d[2],width=d[12]|(d[13]<<8),height=d[14]|(d[15]<<8),bpp=d[16],descriptor=d[17];
+    if(mapType!=0 || !(type==2||type==3||type==10||type==11) || width<=0 || height<=0 || !(bpp==8||bpp==24||bpp==32))return {};
+    const int bytes=bpp/8;qsizetype at=18+idLength;
+    QImage image(width,height,QImage::Format_ARGB32);
+    const auto pixel=[&](const uchar* p){return bytes==1?qRgb(p[0],p[0],p[0]):qRgba(p[2],p[1],p[0],bytes==4?p[3]:255);};
+    std::vector<QRgb> pixels;pixels.reserve(size_t(width)*height);
+    while(pixels.size()<size_t(width)*height) {
+        if(type<9) { if(at+bytes>file.size())return {}; pixels.push_back(pixel(d+at));at+=bytes;continue; }
+        if(at>=file.size())return {};
+        const int header=d[at++],count=(header&0x7f)+1;
+        if(header&0x80) { if(at+bytes>file.size())return {}; const QRgb p=pixel(d+at);at+=bytes;for(int i=0;i<count;++i)pixels.push_back(p); }
+        else for(int i=0;i<count;++i) { if(at+bytes>file.size())return {}; pixels.push_back(pixel(d+at));at+=bytes; }
+    }
+    const bool topFirst=descriptor&0x20;
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x)image.setPixel(x,topFirst?y:height-1-y,pixels[size_t(y)*width+x]);
+    return image;
 }
 }

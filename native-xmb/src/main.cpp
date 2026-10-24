@@ -82,7 +82,7 @@ int main(int argc,char** argv) {
                                 "moyou/LinesEdge","moyou/lines0","moyou/lines1","moyou/lines2","moyou/ffd_shader0","moyou/ffd_shader1","moyou/ffd_shader2","moyou/ffd_shader3",
                                 "moyou/ffd_alpha_blend","glutils/Copy","glutils/GlareSource","glutils/GlareSourcePre","glutils/GlareSourceNoTone","glutils/Gaussian",
                                 "glutils/ApplyDisplay","glutils/ToneApplyDisplay","glutils/AccGlare","glutils/DoubleGaussian","glutils/GaussBloomAndBlur","glutils/BlurAcc",
-                                "glutils/BloomCone","glutils/ToneMap","glutils/ApplyGlare"})
+                                "glutils/BloomCone","glutils/ToneMap","glutils/ApplyGlare","particles/particles_quads","particles/particles_second"})
             for(const QString ext:{"vpo","fpo"}) {
                 QByteArray bytes;
                 try { bytes=assets.qglFile("lines","lib/"+name+"."+ext); } catch(const std::exception&) { continue; } // not every program has both stages

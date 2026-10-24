@@ -24,27 +24,6 @@ constexpr float fieldToY=-.60f;      // view-space height per field unit (negati
 constexpr float sheetRise=.22f,sheetDepth=1.1f; // the line sheet's extent across its width (height, depth)
 constexpr float normalScale=1.5f;    // line weight: lines1.vpo scales by |n| / |position|
 
-// Uncompressed or RLE true-colour/grey TGA, returned top row first.
-QImage decodeTga(const QByteArray& file) {
-    if(file.size()<18)return {};
-    const auto* d=reinterpret_cast<const uchar*>(file.constData());
-    const int idLength=d[0],mapType=d[1],type=d[2],width=d[12]|(d[13]<<8),height=d[14]|(d[15]<<8),bpp=d[16],descriptor=d[17];
-    if(mapType!=0 || !(type==2||type==3||type==10||type==11) || width<=0 || height<=0 || !(bpp==8||bpp==24||bpp==32))return {};
-    const int bytes=bpp/8;qsizetype at=18+idLength;
-    QImage image(width,height,QImage::Format_ARGB32);
-    const auto pixel=[&](const uchar* p){return bytes==1?qRgb(p[0],p[0],p[0]):qRgba(p[2],p[1],p[0],bytes==4?p[3]:255);};
-    std::vector<QRgb> pixels;pixels.reserve(size_t(width)*height);
-    while(pixels.size()<size_t(width)*height) {
-        if(type<9) { if(at+bytes>file.size())return {}; pixels.push_back(pixel(d+at));at+=bytes;continue; }
-        if(at>=file.size())return {};
-        const int header=d[at++],count=(header&0x7f)+1;
-        if(header&0x80) { if(at+bytes>file.size())return {}; const QRgb p=pixel(d+at);at+=bytes;for(int i=0;i<count;++i)pixels.push_back(p); }
-        else for(int i=0;i<count;++i) { if(at+bytes>file.size())return {}; pixels.push_back(pixel(d+at));at+=bytes; }
-    }
-    const bool topFirst=descriptor&0x20;
-    for(int y=0;y<height;++y)for(int x=0;x<width;++x)image.setPixel(x,topFirst?y:height-1-y,pixels[size_t(y)*width+x]);
-    return image;
-}
 std::unique_ptr<QOpenGLTexture> floatTexture(int width,int height,const std::vector<float>& rgba,QOpenGLTexture::Filter filter) {
     auto texture=std::make_unique<QOpenGLTexture>(QOpenGLTexture::Target2D);
     texture->setSize(width,height);texture->setFormat(QOpenGLTexture::RGBA32F);texture->allocateStorage();
@@ -121,7 +100,7 @@ void main(){
     for(int i=0;i<4096;++i){float* p=&encode[size_t(i)*4];p[0]=p[2]=float(i)/4095;p[1]=p[3]=0;}
     encode_=floatTexture(4096,1,encode,QOpenGLTexture::Linear);
     QImage lut;
-    try { lut=decodeTga(assets.qglFile("lines","textures/TGA/freslut1.tga")); } catch(const std::exception& e) { qWarning()<<"ribbon:"<<e.what(); }
+    try { lut=Assets::decodeTga(assets.qglFile("lines","textures/TGA/freslut1.tga")); } catch(const std::exception& e) { qWarning()<<"ribbon:"<<e.what(); }
     if(lut.isNull()){qWarning()<<"ribbon: freslut1.tga could not be decoded";return false;}
     fresLut_=std::make_unique<QOpenGLTexture>(lut); // RSX images are stored top row first
     fresLut_->setMinificationFilter(QOpenGLTexture::Linear);fresLut_->setMagnificationFilter(QOpenGLTexture::Linear);fresLut_->setWrapMode(QOpenGLTexture::ClampToEdge);
@@ -171,6 +150,7 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,float light,int
         const float c=float(j)/(across_-1)-.5f;
         positions[size_t(j)*along_+i]=QVector3D((f[0]-.6f)*ffdScaleX,restY+fieldToY*f[1]+c*sheetRise,-latticeDepth-c*sheetDepth);
     }
+    centreLine_.assign(positions.begin()+ptrdiff_t(across_/2)*along_,positions.begin()+ptrdiff_t(across_/2+1)*along_);
     for(int j=0;j<across_;++j)for(int i=0;i<along_;++i) {
         const auto at=[&](int x,int y){return positions[size_t(std::clamp(y,0,across_-1))*along_+std::clamp(x,0,along_-1)];};
         const QVector3D p=at(i,j),normal=QVector3D::crossProduct(at(i+1,j)-at(i-1,j),at(i,j+1)-at(i,j-1)).normalized()*normalScale;
