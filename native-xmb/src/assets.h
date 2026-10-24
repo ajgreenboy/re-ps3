@@ -23,6 +23,8 @@ public:
     static QImage decodeTga(const QByteArray& file);
     // Image names in an RCO container (local analysis).
     QStringList imageNames(const QString& container) const { return readContainer(container).entries.keys(); }
+    // Every English string of an RCO container, id -> text (local analysis).
+    QHash<QString,QString> allText(const QString& container) const { return readEnglish(readContainer(container)); }
 private:
     struct Container { QByteArray file, tables; quint32 labels=0, imageData=0; QHash<QString,quint32> entries; };
     QString root_, font_;

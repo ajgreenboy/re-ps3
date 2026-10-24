@@ -89,6 +89,19 @@ void Shell::openSettings(const QString& id) {
         page.entries={option("controller","Controller Settings","XInput D-pad, A and B control navigation when this window has focus.",{},Action::Information,
             "Controller Settings\n\nXInput controller 1\nD-pad: Navigate\nA: Enter\nB: Back\n\nKeyboard: Arrow keys, Enter, Backspace\nPage Up / Down: Move ten items"),
             option("bluetooth","Manage Bluetooth Devices","Native Bluetooth pairing is not implemented.",{},Action::Unavailable)};
+    } else if(id=="chat" || id=="security" || id=="remote" || id=="print" || id=="network" || id=="game") {
+        // Labels and explanations are the firmware's own (sysconf_plugin); the features behind them are not native yet.
+        const auto info=[&](const QString& key,const QString& fallback){return option(key,tr("msg_"+key,fallback),tr("msg_"+key+"_explanation",{}),{},Action::Unavailable);};
+        static const QHash<QString,QPair<QString,QStringList>> pages{
+            {"chat",{"msg_chat_setting",{"av_chat_start","audio_device_setting","camera_device_setting"}}},
+            {"security",{"msg_security_setting",{"gameetc_pc"}}},
+            {"remote",{"msg_remoteplay_setting",{"remoteplay_device_psp","remote_start"}}},
+            {"print",{"msg_printer_settings",{"printer_selection","printer_manager"}}},
+            {"network",{"msg_net_setting",{"internet_connect","internet_connect_setting","internet_connect_test","internetbrowser_setting"}}},
+            {"game",{"msg_game_setting",{"game_other_feature"}}}};
+        const auto& definition=pages[id];
+        page.title=tr(definition.first,id);
+        for(const auto& key:definition.second)page.entries.push_back(info(key,key));
     } else return;
     pages_.push_back(std::move(page));
 }
