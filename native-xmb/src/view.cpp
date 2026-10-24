@@ -521,12 +521,49 @@ void View::drawScene(QPainter& p) {
             if(i==shell_.category()){p.setOpacity(1.-childAmount);text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
         }
+        const auto isChoiceColumn=[](const Column& column) {
+            if(column.entries.isEmpty())return false;
+            for(const auto& entry:column.entries)if(entry.action!=Action::SetSetting)return false;
+            return true;
+        };
+        // Options panel (reference frame 45.4 s): a translucent light strip from x~1330 to the right edge with a bright
+        // left edge; options 23 px, 40 px apart, centred on the focus row; the focused option glows. Slides in from the right.
+        const auto drawOptionsPanel=[&](const Column& column,double alpha,double ahead) {
+            const double x0=1330+ahead*600;
+            p.save();p.setOpacity(alpha);
+            QLinearGradient fill(x0,0,1920,0);fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
+            p.fillRect(QRectF(x0,0,1920-x0,1080),fill);
+            QLinearGradient edge(x0-10,0,x0+4,0);edge.setColorAt(0,QColor(255,255,255,0));edge.setColorAt(.75,QColor(255,255,255,70));edge.setColorAt(1,QColor(255,255,255,0));
+            p.fillRect(QRectF(x0-10,0,14,1080),edge);
+            for(int i=0;i<column.entries.size();++i) {
+                const double distance=i-column.position,y=505+distance*40;
+                if(y<-40 || y>1120)continue;
+                const double focus=std::max(0.,1.-std::abs(distance));
+                const QRectF rect(x0+16,y-20,1920-x0-40,40);
+                if(focus>.5)glow(rect,column.entries[i].title,23,(focus-.5)*2);
+                text(rect,column.entries[i].title,23,QColor(255,255,255,int(255*(.78+.22*focus))));
+            }
+            p.restore();
+        };
         const auto drawColumns=[&](const QVector<Column>& columns,double opacity,double offset,bool active) {
+        // An open options panel is not a level of its own: the columns keep the layout of the page under it.
+        const double panelOpen=columns.size()>=2 && isChoiceColumn(columns.back())?std::clamp(depthPosition_-(columns.size()-2),0.,1.):0.;
+        const double layoutDepth=depthPosition_-panelOpen;
+        const int lastLevel=int(columns.size())-1-(panelOpen>0?1:0);
         for(int level=0;level<columns.size();++level) {
             const auto& column=columns[level];
-            const double behind=std::clamp(depthPosition_-level,0.,1.),ahead=std::clamp(level-depthPosition_,0.,1.);
-            if(behind>.999 && level<shell_.depth()-1)continue;
+            const bool panelColumn=isChoiceColumn(column);
+            double behind=std::clamp((panelColumn?depthPosition_:layoutDepth)-level,0.,1.);
+            const double ahead=std::clamp(level-(panelColumn?depthPosition_:layoutDepth),0.,1.);
             const double columnAlpha=(1.-ahead)*opacity;
+            // A setting's choices open as the PS3 options panel on the right instead of a new column.
+            if(panelColumn) {
+                if(columnAlpha>0)drawOptionsPanel(column,columnAlpha,ahead);
+                continue;
+            }
+            // The list under an open options panel stays in place; unfocused rows drop to icons only.
+            const double panelAmount=level+1<columns.size() && isChoiceColumn(columns[level+1])?panelOpen:0.;
+            if(behind>.999 && level<lastLevel-1)continue;
             for(int i=0;i<column.entries.size();++i) {
                 const auto& entry=column.entries[i];
                 const double distance=i-column.position;
@@ -545,7 +582,7 @@ void View::drawScene(QPainter& p) {
                 const double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
                 const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
                 drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
-                p.save();p.setOpacity(columnAlpha*(1.-behind));
+                p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus)));
                 // One label column per level, as on the PS3 (reference: x ~669 at the top level, ~624 inside a page).
                 const double labelX=(level==0?(tile?744:670):624)+ahead*250+offset;
                 const double alpha=.72+.28*focus;
@@ -555,11 +592,11 @@ void View::drawScene(QPainter& p) {
                 const QRectF labelRect(labelX,y-28,value.isEmpty()?1100.:650.,56);
                 if(focus>.5)glow(labelRect,label,27,(focus-.5)*2); // the focused label carries a soft white glow
                 text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
-                if(!value.isEmpty())text({1300+offset,y-25,440,50},value,21,QColor(255,255,255,int(230*alpha)));
-                if(focus>.95 && !entry.detail.isEmpty())text({labelX,y+18,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
+                if(!value.isEmpty() && panelAmount<.5)text({1300+offset,y-25,440,50},value,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
+                if(focus>.95 && !entry.detail.isEmpty())text({labelX,y+24,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
                 p.restore();
             }
-            if(level>0 && columnAlpha>0) {
+            if(level>0 && columnAlpha>0 && panelAmount<.999) {
                 p.save();p.setOpacity(columnAlpha*(1.-behind));text({420+ahead*250,480,50,50},QString(QChar(0x2039)),42,Qt::white,Qt::AlignCenter);p.restore();
             }
         }
