@@ -163,17 +163,17 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     const bool originalParticles=originalRibbon && particles_.ready() && shell_.backgroundMode()!=1; // "classic" hides particles
     GLint target=0;glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
     const bool hdr=original && hdr_.ready(); // the original background is drawn as HDR and tone mapped with glare
-    float nightDayBlend=1;
+    float presetBlend=1; // day/night preset weight for ribbon, particles and HDR: 0 night .. 1 day
     if(original) {
         const GLuint scene=hdr?hdr_.begin(*this,pixelWidth,pixelHeight):GLuint(target);
         const QDateTime when=backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime();
         if(when.date().month()!=texturesMonth_)loadMonthTextures(when.date().month());
-        const BackgroundTime time=backgroundTime(when);nightDayBlend=time.nightDayBlend;
+        const BackgroundTime time=backgroundTime(when);presetBlend=std::clamp((time.nightDayBlend-.5f)/.5f,0.f,1.f); // NightDayBlend runs 0.5 (night) .. 1
         renderOriginalBackground(time,pixelWidth,pixelHeight);
-        if(originalRibbon)ribbon_.render(*this,seconds,time.nightDayBlend,pixelWidth,pixelHeight,scene);
+        if(originalRibbon)ribbon_.render(*this,seconds,presetBlend,pixelWidth,pixelHeight,scene);
         if(originalParticles) {
             particles_.update(seconds,ribbon_.centreLine());
-            particles_.render(*this,time.nightDayBlend,pixelWidth,pixelHeight);
+            particles_.render(*this,presetBlend,pixelWidth,pixelHeight);
         }
     }
     glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);
@@ -189,29 +189,36 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);background_.release();
     if(monthTexture_)monthTexture_->release(0);
     glDisable(GL_BLEND);
-    if(hdr)hdr_.finish(*this,nightDayBlend,GLuint(target));
+    if(hdr)hdr_.finish(*this,presetBlend,GLuint(target));
 }
-// Inputs of qgl/lines back_colours0.fpo. Window values are the firmware's override/day BACKGROUND.mnu keys
-// (NIGHT2DAY 0-5.166 h, DAY2NIGHT 18.498-20.331 h, NIGHT WHIT BIAS 0.486). The plugin's exact mapping onto
-// DayTime/NightTime/NightDayBlend is not decoded yet; this first mapping is checked against the reference video.
+// Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
+// as a day fraction t in [0,1] and the month as a float in [0,12] (constants at 0x92e54..0x92e6c, preset hours / 24
+// at 0x91f6c), with the override/day BACKGROUND.mnu values.
 View::BackgroundTime View::backgroundTime(const QDateTime& when) {
-    const auto t=when.time();const double hour=t.hour()+t.minute()/60.+t.second()/3600.;
+    const auto clock=when.time();const double hour=clock.hour()+clock.minute()/60.+clock.second()/3600.,t=hour/24.;
     const auto date=when.date();
     BackgroundTime b;
-    // _DayTime/_NightTime are clock hours x100 (0..2400): the shader evaluates cos(pi*(t-600)/1200), symmetric at noon.
-    // DAYSPREAD (2.68038 in override/day BACKGROUND.mnu) widens the day profile around noon; fitted against the
-    // reference day cycle, where 16:30 is still full brightness and 18:00 is ~80%.
+    // _DayTime: a day-curve of t (FUN_00052a28, whose arguments the decompile lost) x 2400. Only the day half of the
+    // shader reads it (dark below ~400 and above ~2000, peak at 1200). Fitted: DAYSPREAD (2.68038) widens 06:00-18:00
+    // around noon (16:30 still full, 18:00 ~80% in the reference); outside that the curve falls to 0 / 2400 at
+    // midnight through keyframes fitted to the reference (03:00 black, 04:30 ~40%, 19:30 ~25%, 21:00 black).
     constexpr double daySpread=2.68038;
-    b.day=float(1200.+(hour*100.-1200.)/daySpread);
-    b.night=float(hour*100.);
-    b.month=float((date.day()-1+hour/24.)/date.daysInMonth());
-    b.nightBrightness=.486059f;
-    const auto ramp=[](double x,double a,double c){return std::clamp((x-a)/(c-a),0.,1.);};
-    // Linear ramps. Evening uses the preset's DAY2NIGHT 18.498-20.3312 h; the preset's NIGHT2DAY (0-5.16611 h) is
-    // remapped on the CPU in a way not traced yet, so the morning window is fitted to the reference (03:00 still
-    // black, 04:30 ~40%, 06:00 ~80% of midday).
-    const double blend=hour<12.?ramp(hour,3.,6.):1.-ramp(hour,18.498,20.3312);
-    b.nightDayBlend=float(blend);
+    const auto spread=[&](double h){return 1200.+(h-12.)*100./daySpread;};
+    static const double keys[][2]={{0,0},{3,380},{4.5,800},{6,spread(6)},{18,spread(18)},{19.5,1650},{21,2030},{24,2400}};
+    double day=spread(hour);
+    if(hour<6 || hour>18)for(size_t i=1;i<std::size(keys);++i)if(hour<=keys[i][0]){day=keys[i-1][1]+(keys[i][1]-keys[i-1][1])*(hour-keys[i-1][0])/(keys[i][0]-keys[i-1][0]);break;}
+    b.day=float(day);
+    // _NightTime: (t - 0.5, wrapped) x 2400, i.e. the night palette's own clock peaks at midnight.
+    b.night=float(std::fmod(t+.5,1.)*2400.);
+    // _MonthTime: frac(month) x 30; the integer part picks this/next month's textures (loadMonthTextures).
+    b.month=float((date.day()-1+t)/date.daysInMonth()*30.);
+    b.nightBrightness=.486059f;                                      // NIGHT WHIT BIAS
+    // NightDayBlend = 1 + NIGHT BLEND x (s1 (1 - s2) - 1), s1/s2 smoothsteps over NIGHT2DAY and DAY2NIGHT (hours / 24):
+    // 1 by day, 1 - NIGHT BLEND (0.5) at night.
+    const auto smooth=[](double a,double c,double x){if(x<a)return 0.;if(x>c)return 1.;const double f=(x-a)/(c-a);return f*f*(3.-2.*f);};
+    constexpr double nightBlend=.499947;
+    const double s1=smooth(0./24,5.16611/24,t),s2=smooth(18.498/24,20.3312/24,t);
+    b.nightDayBlend=float(1.+nightBlend*(s1*(1.-s2)-1.));
     b.alpha=1.f;
     return b;
 }
@@ -335,18 +342,20 @@ bool View::measureReference(const QString& path) {
             out<<QString("%1  %2 %3 %4\n").arg(m,2,10,QChar('0')).arg(mean(H/20)).arg(mean(H/2)).arg(mean(H-H/20));
         }
         loadMonthTextures(measureDate.month());
-        out<<"# original back_colours0 sweep: DayTime  |  luma top/mid/bottom for NightDayBlend 0, 0.5, 1\n";
-        for(int d=0;d<=24;d+=2) {
-            out<<QString::number(d*100)<<"  |";
-            for(float blend:{0.f,.5f,1.f}) {
-                BackgroundTime b=backgroundTime(QDateTime(measureDate,QTime(12,0)));
-                b.day=b.night=float(d*100);b.nightDayBlend=blend;
-                renderOriginalBackground(b,W,H);
-                const QImage image=fbo.toImage();
-                const auto luma=[&](int y){double s=0;int n=0;for(int x=0;x<W;x+=16){const QRgb p=image.pixel(x,y);s+=.2126*qRed(p)+.7152*qGreen(p)+.0722*qBlue(p);++n;}return s/n;};
-                out<<QString("  %1/%2/%3").arg(luma(H/20),5,'f',1).arg(luma(H/2),5,'f',1).arg(luma(H-H/20),5,'f',1);
+        for(float blend:{1.f,0.f}) {
+            out<<"# original back_colours0 sweep, NightDayBlend "<<blend<<": rows _DayTime, columns _NightTime 0..2400 step 400, luma top/bottom\n";
+            for(int d=0;d<=2400;d+=400) {
+                out<<QString("%1 |").arg(d,4);
+                for(int n=0;n<=2400;n+=400) {
+                    BackgroundTime b=backgroundTime(QDateTime(measureDate,QTime(12,0)));
+                    b.day=float(d);b.night=float(n);b.nightDayBlend=blend;
+                    renderOriginalBackground(b,W,H);
+                    const QImage image=fbo.toImage();
+                    const auto luma=[&](int y){double s=0;int k=0;for(int x=0;x<W;x+=16){const QRgb p=image.pixel(x,y);s+=.2126*qRed(p)+.7152*qGreen(p)+.0722*qBlue(p);++k;}return s/k;};
+                    out<<QString(" %1/%2").arg(luma(H/20),5,'f',1).arg(luma(H-H/20),5,'f',1);
+                }
+                out<<"\n";
             }
-            out<<"\n";
         }
     }
     fbo.release();doneCurrent();
