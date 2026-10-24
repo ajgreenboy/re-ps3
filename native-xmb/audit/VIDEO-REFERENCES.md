@@ -159,3 +159,33 @@ Still different, and not fixed by constant fitting:
   them only slightly (≈0.7× the top band). It follows from the ribbon shape above.
 - **Theme hues.** The measured video uses a lavender month palette; the comparison ran with the user's persisted
   Green theme. Only brightness ratios are compared, not hue.
+
+## Original background shader (October 24, later)
+
+The Original theme now draws the firmware's own background: `qgl/lines` `lib/moyou/back_colours0.fpo`, translated from
+RSX fragment ucode to GLSL (`src/rsx_program.cpp`), with this and next month's `textures/month_bg/{rgb,night}/MM.dds`.
+The procedural ribbon is still composited on top. Inputs worked out by sweeping the shader:
+
+- `_DayTime` / `_NightTime` are clock hours ×100 (0–2400). The shader evaluates `cos(pi*(t-600)/1200)`, so its
+  output is symmetric about noon. `_DayTime` is widened around noon by the preset DAYSPREAD (2.68038):
+  `1200 + (hour*100 - 1200) / 2.68038`.
+- `_NightDayBlend` 1 is the day palette, 0 the night palette. The evening uses linear DAY2NIGHT 18.498–20.3312 h.
+  The morning window is **fitted** (03:00–06:00): the preset's NIGHT2DAY 0–5.16611 h is remapped on the CPU in a way
+  that is not traced yet.
+- The fullscreen quad's uv has y=0 at the bottom (the night palette's colour sits low, as in the reference).
+- All twelve palettes at noon come out as the familiar monthly colours (January silver through December red), which
+  also confirms the texture channel order.
+
+| Top band relative to midday | Reference | Native (October palette) |
+|---|---|---|
+| 03:00 | 0.00 | 0.01 |
+| 04:30 | 0.38 | 0.34 |
+| 06:00 | 0.75–0.85 | 0.80 |
+| 16:30 | ≈1.0 | 0.91 |
+| 18:00 | ≈0.8 | 0.82 |
+| 19:30 | 0.24 | 0.32 |
+
+Remaining gaps: night lower bands are brighter than the reference (0.54 against ≈0.17 relative to the midday top;
+different month, and the ribbon/HDR passes are not ported); `_MonthTime` uses a first-guess fraction of the month;
+the ribbon is still procedural (next: `lines1` programs, geometry from `LINE1.mnu` and `spurs/moyou/spline/spline.elf`,
+`LinesController` compositing).
