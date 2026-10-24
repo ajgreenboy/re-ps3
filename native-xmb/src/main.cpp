@@ -11,6 +11,7 @@
 #include <QLoggingCategory>
 #include <QPainter>
 #include <QImageReader>
+#include <QTimer>
 
 int main(int argc,char** argv) {
     QSurfaceFormat format;format.setVersion(3,3);format.setProfile(QSurfaceFormat::CoreProfile);format.setSwapInterval(1);format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);
@@ -19,7 +20,8 @@ int main(int argc,char** argv) {
     parser.addOption({"dev-flash","Local dev_flash asset directory","directory"});
     parser.addOption({"data-dir","Writable native application data directory","directory"});
     parser.addOption({"inventory","Write the local XMBML definition inventory and exit","json-file"});
-    parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});parser.process(app);
+    parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
+    parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});parser.process(app);
     if(!parser.isSet("dev-flash"))parser.showHelp(2);
     const QString data=parser.isSet("data-dir")?parser.value("data-dir"):QDir(QCoreApplication::applicationDirPath()).filePath("data");
     if(parser.isSet("inventory")) {
@@ -47,7 +49,16 @@ int main(int argc,char** argv) {
     }
     xmb::Shell shell(data,assets);
     QSettings windowSettings(QDir(data).filePath("settings.ini"),QSettings::IniFormat);
-    QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");window.setCentralWidget(new xmb::View(shell,assets,&window));window.resize(960,540);
+    QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);window.setCentralWidget(view);window.resize(960,540);
+    if(parser.isSet("measure-reference")) {
+        window.show();
+        QTimer::singleShot(1000,&app,[&]{
+            const bool ok=view->measureReference(parser.value("measure-reference"));
+            if(!ok)qCritical()<<"Background measurement failed";
+            app.exit(ok?0:1);
+        });
+        return app.exec();
+    }
     if(windowSettings.contains("window/geometry"))window.restoreGeometry(windowSettings.value("window/geometry").toByteArray());
     QObject::connect(&app,&QApplication::aboutToQuit,&window,[&]{windowSettings.setValue("window/geometry",window.saveGeometry());windowSettings.sync();});
     QObject::connect(&shell,&xmb::Shell::requestQuit,&app,&QApplication::quit);
