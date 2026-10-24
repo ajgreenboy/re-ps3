@@ -297,3 +297,9 @@ ribbon, particle and HDR presets now blend on `(NightDayBlend − 0.5)/0.5`.
 | 19:30 / 21:00 | 0.24 / 0.00 | 0.22 / 0.05 |
 
 The night lower bands are now 0.29–0.45 of the midday top (reference ≈0.11–0.27, different month), down from 0.67.
+
+**Month palette.** `_MonthTime` (days, 0–30) moves the palette from this month's textures (day 0: October exactly,
+`998426`) to next month's (day 30: November exactly, `685530`). The shader shapes the middle of the month with a
+Gaussian around day 15. On 24 October the Original theme therefore shows mostly November's brown, as the firmware
+does. `--measure-reference` reports this sweep. Particles are now emitted uniformly by arc length along the ribbon:
+the ribbon's x is quadratic in its parameter, so uniform-parameter emission had piled particles up at the left end.
