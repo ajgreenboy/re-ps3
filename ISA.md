@@ -11,6 +11,12 @@ updated: 2026-10-23
 
 ## Problem
 
+**Active direction:** the user changed the goal to a complete native C++ XMB
+recreation. Its current criteria and evidence are in [native-xmb/ISA.md](native-xmb/ISA.md)
+and [native-xmb/HANDOFF.md](native-xmb/HANDOFF.md). The firmware compatibility
+criteria below preserve the earlier execution track and are not the native app's
+completion checklist.
+
 Firmware 4.93 VSH renders parts of XMB in the native Windows runtime, but recovery,
 navigation, SPURS execution and service teardown expose missing code coverage and
 incomplete OS semantics. Registered functions and loaded modules are insufficient
