@@ -56,7 +56,15 @@ bool Ribbon::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     if(!ffd_.addShaderFromSourceCode(QOpenGLShader::Vertex,fullscreenVertex) || !ffd_.addShaderFromSourceCode(QOpenGLShader::Fragment,ffdCg_.glsl) || !ffd_.link()) {
         qWarning().noquote()<<"ribbon: ffd_shader1 failed:"<<ffd_.log();return false;
     }
-    if(!lines_.addShaderFromSourceCode(QOpenGLShader::Vertex,linesVertexCg_.glsl) || !lines_.addShaderFromSourceCode(QOpenGLShader::Fragment,linesFragmentCg_.glsl) || !lines_.link()) {
+    // The stripe coordinate is fract(u x SPACING); its screen derivatives jump at every wrap, so plain texture() picks
+    // a wrong mip there and leaves dark dashes in the band. Sample with the gradients of the unwrapped coordinate
+    // instead (the RSX's quad-based LOD hid this). Only that one fetch changes.
+    QString fragment=linesFragmentCg_.glsl;
+    const QString stripeFetch="texture(tex0, (h[0]).xy)";
+    if(fragment.count(stripeFetch)==1)
+        fragment.replace(stripeFetch,"textureGrad(tex0, (h[0]).xy, vec2(dFdx(v_tc[0].x*fc[1].x), dFdx(v_tc[0].y)), vec2(dFdy(v_tc[0].x*fc[1].x), dFdy(v_tc[0].y)))");
+    else qWarning()<<"ribbon: stripe fetch not found in lines1.fpo translation; mip seams stay";
+    if(!lines_.addShaderFromSourceCode(QOpenGLShader::Vertex,linesVertexCg_.glsl) || !lines_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment) || !lines_.link()) {
         qWarning().noquote()<<"ribbon: lines1 failed:"<<lines_.log();return false;
     }
     // LinesController.fpo, reduced: the summed line intensity times the horizontal gradient of BACKGROUND.mnu colours
