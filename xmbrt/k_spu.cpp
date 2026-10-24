@@ -27,6 +27,21 @@ namespace
     constexpr uint32_t kStopReceiveEvent = 0x110, kStopTryReceiveEvent = 0x111;
     constexpr uint64_t kEventSource = 0xFFFFFFFF53505501ull;
     constexpr uint32_t kEventLockLost = 0x400;
+    // Immediate conversion scales, indexed by exponent + 155. Like RPCS3's
+    // scale table, these are IEEE float powers of two (including subnormals,
+    // zero and infinity), avoiding a library call on every conversion.
+    constexpr auto kConversionScale = []
+    {
+        std::array<float, 329> scales{};
+        for (int exponent = -155; exponent <= 173; ++exponent)
+        {
+            const uint32_t bits = exponent > 127 ? 0x7f800000u :
+                exponent >= -126 ? uint32_t(exponent + 127) << 23 :
+                exponent >= -149 ? 1u << (exponent + 149) : 0u;
+            scales[exponent + 155] = std::bit_cast<float>(bits);
+        }
+        return scales;
+    }();
     std::mutex g_reservation_lock;
 
     uint16_t be16(const uint8_t* p) { return uint16_t(p[0] << 8 | p[1]); }
@@ -69,6 +84,7 @@ namespace
         std::atomic<bool> task_signal{false};
         std::atomic<bool> stop_requested{false};
         std::atomic<uint32_t> observed_pc{0}, task_state{0};
+        std::atomic<uint64_t> observed_instruction{0}; // PC and opcode from the same code overlay
         std::atomic<uint64_t> instructions{0};
         uint64_t executed_instructions=0; // written only by this SPU's host thread
     };
@@ -98,11 +114,15 @@ namespace
     void ls_store_word(KSpuThread& t, uint32_t a, uint32_t v) { put_be32(t.ls.data() + (a & (kLsSize - 4)), v); }
     void load_quad(KSpuThread& t, uint32_t addr, std::array<uint32_t, 4>& out)
     {
-        for (int i = 0; i < 4; ++i) out[3 - i] = ls_word(t, addr + i * 4);
+        const __m128i bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(t.ls.data() + addr));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out.data()),
+            _mm_shuffle_epi8(bytes, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)));
     }
     void store_quad(KSpuThread& t, uint32_t addr, const std::array<uint32_t, 4>& value)
     {
-        for (int i = 0; i < 4; ++i) ls_store_word(t, addr + i * 4, value[3 - i]);
+        const __m128i bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(value.data()));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(t.ls.data() + addr),
+            _mm_shuffle_epi8(bytes, _mm_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)));
     }
     void write_thread_loader(KSpuThread& t)
     {
@@ -212,7 +232,7 @@ namespace
         {
         case 0: // SPU_RdEventStat blocks until an unmasked event is pending
         {
-            for (uint32_t spins = 0; t.event_mask; spins++)
+            for (uint32_t spins = 0;; spins++)
             {
                 check_reservation(t);
                 if (t.event_stat & t.event_mask) break;
@@ -221,9 +241,9 @@ namespace
                 else if (spins < 2100) std::this_thread::yield();
                 else std::this_thread::sleep_for(std::chrono::microseconds(50));
             }
-            const uint32_t v = t.event_stat & t.event_mask;
-            t.event_stat &= ~v;
-            return v;
+            // RDCH observes pending events; only SPU_WrEventAck clears them.
+            // A zero mask still blocks, as there is no enabled event to return.
+            return t.event_stat & t.event_mask;
         }
         case 3: case 4: { uint32_t& v = t.snr[ch - 3]; const uint32_t r = v; v = 0; return r; }
         case 8: return t.dec;
@@ -389,6 +409,7 @@ namespace
         if((++t.executed_instructions&1023)==0)
         {
             t.observed_pc.store(t.pc,std::memory_order_relaxed);
+            t.observed_instruction.store((uint64_t(t.pc) << 32) | ls_word(t, t.pc),std::memory_order_relaxed);
             t.instructions.store(t.executed_instructions,std::memory_order_relaxed);
         }
         if (t.taskset && t.pc == 0xa70)
@@ -447,19 +468,20 @@ namespace
         } // SELB
         if (d >= 0x580 && d <= 0x5ff)
         {
-            const uint32_t dst=(ins>>21)&127; const auto c=t.r[ins&127]; uint8_t ab[32]{};
-            for(int i=0;i<4;i++)for(int j=0;j<4;j++){ab[i*4+j]=uint8_t(a[3-i]>>(24-j*8));ab[16+i*4+j]=uint8_t(b[3-i]>>(24-j*8));}
-            for(int i=0;i<4;i++)
-            {
-                uint32_t v=0;
-                for(int j=0;j<4;j++)
-                {
-                    const uint32_t sh=24-j*8;const uint8_t ctrl=uint8_t(c[3-i]>>sh);
-                    const uint8_t value=ctrl>=0xe0?0x80:ctrl>=0xc0?0xff:ctrl>=0x80?0:ab[ctrl&31];
-                    v|=uint32_t(value)<<sh;
-                }
-                t.r[dst][3-i]=v;
-            }
+            const uint32_t dst = (ins >> 21) & 127;
+            const __m128i control = _mm_loadu_si128(reinterpret_cast<const __m128i*>(t.r[rt].data()));
+            const __m128i left = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a.data()));
+            const __m128i right = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b.data()));
+            // Host register bytes run opposite to SPU byte numbering. Bit 4
+            // selects RA/RB; PSHUFB also zeroes the special (bit 7) controls.
+            const __m128i indices = _mm_xor_si128(control, _mm_set1_epi8(15));
+            const __m128i from_right = _mm_cmpeq_epi8(_mm_and_si128(control, _mm_set1_epi8(16)), _mm_set1_epi8(16));
+            const __m128i bytes = _mm_blendv_epi8(_mm_shuffle_epi8(left, indices), _mm_shuffle_epi8(right, indices), from_right);
+            const __m128i xc0 = _mm_set1_epi8(char(0xc0));
+            const __m128i special_ff = _mm_cmpeq_epi8(_mm_and_si128(control, xc0), xc0);
+            const __m128i special_80 = _mm_cmpeq_epi8(_mm_and_si128(control, _mm_set1_epi8(char(0xe0))), xc0);
+            const __m128i result = _mm_or_si128(bytes, _mm_avg_epu8(special_ff, special_80));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(t.r[dst].data()), result);
             t.pc=next;return true;
         } // SHUFB
         if (d >= 0x600 && d < 0x680) // MPYA
@@ -491,7 +513,7 @@ namespace
             __m128i result;
             if (operation < 2)
             {
-                const __m128 scaled = _mm_mul_ps(_mm_castsi128_ps(input), _mm_set1_ps(std::ldexp(1.f, 173 - int(imm))));
+                const __m128 scaled = _mm_mul_ps(_mm_castsi128_ps(input), _mm_set1_ps(kConversionScale[328 - imm]));
                 if (!operation)
                     result = _mm_xor_si128(_mm_cvttps_epi32(scaled), _mm_castps_si128(_mm_cmpge_ps(scaled, _mm_set1_ps(2147483648.f))));
                 else
@@ -506,7 +528,7 @@ namespace
                 const __m128 value = operation == 2 ? _mm_cvtepi32_ps(input) :
                     _mm_add_ps(_mm_cvtepi32_ps(_mm_and_si128(input, _mm_set1_epi32(0x7fffffff))),
                         _mm_and_ps(_mm_castsi128_ps(_mm_srai_epi32(input, 31)), _mm_set1_ps(2147483648.f)));
-                result = _mm_castps_si128(_mm_mul_ps(value, _mm_set1_ps(std::ldexp(1.f, int(imm) - 155))));
+                result = _mm_castps_si128(_mm_mul_ps(value, _mm_set1_ps(kConversionScale[imm])));
             }
             _mm_storeu_si128(reinterpret_cast<__m128i*>(out.data()), result);
             t.pc = next;
@@ -637,16 +659,31 @@ namespace
             const uint32_t n = bits ? (right ? (0 - units) & 7 : units & 7) :
                 (right ? (0 - units) & 31 : units & (rotate ? 15 : 31)) * 8;
             const auto input = a;
-            out.fill(0);
-            for (uint32_t bit = 0; bit < 128; ++bit)
+            if (!n) out = input;
+            else if (n >= 128) out.fill(0);
+            else
             {
-                int source = right ? int(bit) - int(n) : int(bit + n);
-                if (rotate) source &= 127;
-                if (source >= 0 && source < 128)
+                const uint64_t low = uint64_t(input[0]) | (uint64_t(input[1]) << 32);
+                const uint64_t high = uint64_t(input[2]) | (uint64_t(input[3]) << 32);
+                uint64_t lo, hi;
+                if (rotate)
                 {
-                    const uint32_t value = (input[3 - source / 32] >> (31 - source % 32)) & 1;
-                    out[3 - bit / 32] |= value << (31 - bit % 32);
+                    const uint64_t l = n >= 64 ? high : low, h = n >= 64 ? low : high;
+                    const uint32_t shift = n & 63;
+                    lo = shift ? (l << shift) | (h >> (64 - shift)) : l;
+                    hi = shift ? (h << shift) | (l >> (64 - shift)) : h;
                 }
+                else if (right)
+                {
+                    lo = n >= 64 ? high >> (n - 64) : (low >> n) | (high << (64 - n));
+                    hi = n >= 64 ? 0 : high >> n;
+                }
+                else
+                {
+                    lo = n >= 64 ? 0 : low << n;
+                    hi = n >= 64 ? low << (n - 64) : (high << n) | (low >> (64 - n));
+                }
+                out = {uint32_t(lo), uint32_t(lo >> 32), uint32_t(hi), uint32_t(hi >> 32)};
             }
             t.pc = next;
             return true;
@@ -1346,7 +1383,7 @@ static void start_spu_sampler()
     std::thread([id]
     {
         std::this_thread::sleep_for(std::chrono::seconds(20));
-        std::unordered_map<uint32_t, uint32_t> running, parked;
+        std::unordered_map<uint64_t, uint32_t> running, parked;
         uint64_t last = 0, first = 0, samples = 0;
         const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(20);
         while (std::chrono::steady_clock::now() < end)
@@ -1359,19 +1396,21 @@ static void start_spu_sampler()
             if (t)
             {
                 const uint64_t n = t->instructions.load();
-                const uint32_t pc = t->observed_pc.load();
+                const uint64_t instruction = t->observed_instruction.load(std::memory_order_relaxed);
                 if (!samples) first = n;
-                (n != last ? running : parked)[pc & ~0xFu]++;
+                (n != last ? running : parked)[instruction]++;
                 last = n;
                 samples++;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
-        auto top = [](const std::unordered_map<uint32_t, uint32_t>& m, const char* what)
+        auto top = [](const std::unordered_map<uint64_t, uint32_t>& m, const char* what)
         {
-            std::vector<std::pair<uint32_t, uint32_t>> v(m.begin(), m.end());
+            std::vector<std::pair<uint64_t, uint32_t>> v(m.begin(), m.end());
             std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.second > b.second; });
-            for (size_t i = 0; i < v.size() && i < 8; i++) log_line("spu sample:   %s pc=%05X samples=%u", what, v[i].first, v[i].second);
+            for (size_t i = 0; i < v.size() && i < 8; i++)
+                log_line("spu sample:   %s pc=%05X ins=%08X samples=%u", what,
+                    uint32_t(v[i].first >> 32), uint32_t(v[i].first), v[i].second);
         };
         uint64_t r = 0, p = 0;
         for (auto& [k, c] : running) r += c;
