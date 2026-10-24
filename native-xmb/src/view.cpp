@@ -18,6 +18,7 @@
 #include <QDir>
 #include <QTime>
 #include <cmath>
+#include <numbers>
 #include <algorithm>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -416,9 +417,20 @@ void View::paintGL() {
         renderBackground(float(now)/1000.f,float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
             int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
     }
-    QPainter painter(this);painter.setRenderHint(QPainter::Antialiasing);painter.setRenderHint(QPainter::SmoothPixmapTransform);
-    const double scale=std::min(width()/1920.,height()/1080.);
-    painter.translate((width()-1920*scale)/2,(height()-1080*scale)/2);painter.scale(scale,scale);drawScene(painter);
+    // The UI layer is drawn by Qt's raster engine at the window's real pixel size (antialiased, properly rasterised
+    // glyphs at any scale) and composited over the GL background in one draw. The GL paint engine renders scaled text
+    // unhinted and jagged.
+    const QSize pixels(int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
+    if(uiLayer_.size()!=pixels)uiLayer_=QImage(pixels,QImage::Format_ARGB32_Premultiplied);
+    uiLayer_.fill(Qt::transparent);
+    {
+        QPainter ui(&uiLayer_);
+        ui.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing|QPainter::SmoothPixmapTransform);
+        const double scale=std::min(pixels.width()/1920.,pixels.height()/1080.);
+        ui.translate((pixels.width()-1920*scale)/2,(pixels.height()-1080*scale)/2);ui.scale(scale,scale);drawScene(ui);
+    }
+    QPainter painter(this);painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    painter.drawImage(QRectF(0,0,width(),height()),uiLayer_);
     painter.end();
     ++frames_;if(now-reportAt_>=5000){qInfo()<<"native frames:"<<frames_*1000./double(now-reportAt_)<<"fps; decoded images"<<assets_.decodedImages()<<"missing images"<<assets_.failedImages();frames_=0;reportAt_=now;}
 }
@@ -441,8 +453,8 @@ void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect)
     if(!iconMaterials_.contains(key)) {
         QImage material=original.convertToFormat(QImage::Format_ARGB32);
         QRect bounds;
-        static const QColor tints[]={QColor(192,179,112),QColor(180,211,240),QColor(211,186,229),QColor(230,184,175),QColor(178,218,189),QColor(214,215,218)};
-        const QColor tint=tints[theme];
+        // Icons are near-white over every palette (reference video): the colour comes from the firmware background.
+        const QColor tint(238,240,242);
         for(int y=0;y<material.height();++y) {
             auto* row=reinterpret_cast<QRgb*>(material.scanLine(y));
             for(int x=0;x<material.width();++x) {
@@ -468,7 +480,15 @@ void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect)
 void View::drawScene(QPainter& p) {
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
-        QFont f(shell_.fontFamily());f.setPixelSize(size);p.setFont(f);p.setPen(QColor(0,0,0,100));p.drawText(r.translated(2,2),flags,value);p.setPen(colour);p.drawText(r,flags,value);
+        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(QColor(0,0,0,70));p.drawText(r.translated(1.5,1.5),flags,value);p.setPen(colour);p.drawText(r,flags,value);
+    };
+    // Soft white halo behind a label (the XMB's focused-item glow): the text drawn at low alpha in a ring of offsets.
+    auto glow=[&](const QRectF& r,const QString& value,int size,double strength,int flags=Qt::AlignLeft|Qt::AlignVCenter){
+        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);p.setFont(f);
+        for(const double radius:{4.,2.5})for(int k=0;k<12;++k) {
+            const double a=k*std::numbers::pi/6;
+            p.setPen(QColor(255,255,255,int(14*strength)));p.drawText(r.translated(std::cos(a)*radius,std::sin(a)*radius),flags,value);
+        }
     };
     if(shell_.backgroundMode()==2 && !wallpaperImage_.isNull()) {
         const auto size=QSizeF(wallpaperImage_.size()).scaled(QSizeF(1920,1080),Qt::KeepAspectRatioByExpanding);
@@ -495,10 +515,10 @@ void View::drawScene(QPainter& p) {
         const double childAmount=std::clamp(depthPosition_,0.,1.);
         for(int i=0;i<categories.size();++i) {
             const auto& cat=categories[i];const double distance=i-categoryPosition_,x=560+distance*202-childAmount*250;
-            const double focus=std::max(0.,1.-std::abs(distance));const double size=72+focus*40;
+            const double focus=std::max(0.,1.-std::abs(distance));const double size=82+focus*10; // reference: ~86 px, focus barely larger
             p.save();p.setOpacity(i==shell_.category()?1.:1.-childAmount);
             drawCategory(p,cat,{x-size/2,290-size/2,size,size});
-            if(i==shell_.category()){p.setOpacity(1.-childAmount);text({x-140,338,280,45},cat.title,24,Qt::white,Qt::AlignCenter);}
+            if(i==shell_.category()){p.setOpacity(1.-childAmount);text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
         }
         const auto drawColumns=[&](const QVector<Column>& columns,double opacity,double offset,bool active) {
@@ -518,21 +538,25 @@ void View::drawScene(QPainter& p) {
                 if(y<-100 || y>1050)continue;
                 const double focus=std::max(0.,1.-std::abs(distance));
                 const double iconX=560-behind*(100+150*focus)+ahead*250+offset;
-                const double size=level==0?52+focus*108:22+focus*20;
-                const bool tile=entry.texture.contains("folder") || entry.texture.contains("default") || entry.texture.contains("album");
+                // Reference (RPCS3 4.x video): square icons ~60 px, ~105 px when focused; utility folders are icons too.
+                // Only media thumbnails (album art) keep a wide tile.
+                const double size=level==0?60+focus*44:40+focus*16;
+                const bool tile=entry.texture.contains("album");
                 const double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
                 const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
                 drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
                 p.save();p.setOpacity(columnAlpha*(1.-behind));
-                // One label column per level, as on the PS3: it clears the widest icon (a focused tile reaches x=720).
-                const double labelX=(level==0?744:620)+ahead*250+offset;
-                const double alpha=.36+.64*focus;
+                // One label column per level, as on the PS3 (reference: x ~669 at the top level, ~624 inside a page).
+                const double labelX=(level==0?(tile?744:670):624)+ahead*250+offset;
+                const double alpha=.72+.28*focus;
                 const auto value=active?shell_.valueText(entry):QString{};
-                QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(int(28+focus*8));
+                QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(27);
                 const auto label=QFontMetrics(labelFont).elidedText(entry.title,Qt::ElideRight,value.isEmpty()?1050:640);
-                text({labelX,y-28,value.isEmpty()?1100.:650.,56},label,int(28+focus*8),QColor(255,255,255,int(255*alpha)));
-                if(!value.isEmpty())text({1300+offset,y-25,440,50},value,24,QColor(255,255,255,int(240*alpha)));
-                if(focus>.95 && !entry.detail.isEmpty())text({labelX,y+23,1100,82},entry.detail,21,QColor(220,220,220),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
+                const QRectF labelRect(labelX,y-28,value.isEmpty()?1100.:650.,56);
+                if(focus>.5)glow(labelRect,label,27,(focus-.5)*2); // the focused label carries a soft white glow
+                text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
+                if(!value.isEmpty())text({1300+offset,y-25,440,50},value,21,QColor(255,255,255,int(230*alpha)));
+                if(focus>.95 && !entry.detail.isEmpty())text({labelX,y+18,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
                 p.restore();
             }
             if(level>0 && columnAlpha>0) {
@@ -544,8 +568,6 @@ void View::drawScene(QPainter& p) {
         drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*202,true);
         if(!shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
         text({1240,103,550,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
-        drawImage(p,"system_plugin","tex_circle",{1520,1010,26,26});text({1558,1004,210,40},"Back",23,QColor(225,225,225));
-        drawImage(p,"system_plugin","tex_cross",{1310,1010,26,26});text({1348,1004,160,40},"Enter",23,QColor(225,225,225));
     }
     if(!shell_.message().isEmpty()) {
         p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,150));

@@ -48,6 +48,7 @@ private:
     int previousDepth_=0;
     void syncColumns();
     QImage mediaFrame_;
+    QImage uiLayer_; // raster-drawn UI, composited over the GL background each frame
     QImage wallpaperImage_,monthImage_;
     QString wallpaperPath_;
     quint64 wallpaperRequest_=0;
