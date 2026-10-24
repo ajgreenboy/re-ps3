@@ -138,6 +138,7 @@ void main(){
     initOriginalBackground();
     ribbon_.init(*this,assets_);
     hdr_.init(*this,assets_);
+    particles_.init(*this,assets_);
     if(!monthImage_.isNull()) {
         monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
         monthTexture_->setMinificationFilter(QOpenGLTexture::Linear);monthTexture_->setMagnificationFilter(QOpenGLTexture::Linear);
@@ -159,6 +160,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     // Original colour theme: the firmware's own background shader and monthly palettes.
     const bool original=originalReady_ && (forceOriginal_ || (shell_.theme()==0 && shell_.backgroundMode()!=2));
     const bool originalRibbon=original && ribbon_.ready();
+    const bool originalParticles=originalRibbon && particles_.ready() && shell_.backgroundMode()!=1; // "classic" hides particles
     GLint target=0;glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
     const bool hdr=original && hdr_.ready(); // the original background is drawn as HDR and tone mapped with glare
     float nightDayBlend=1;
@@ -169,6 +171,10 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         const BackgroundTime time=backgroundTime(when);nightDayBlend=time.nightDayBlend;
         renderOriginalBackground(time,pixelWidth,pixelHeight);
         if(originalRibbon)ribbon_.render(*this,seconds,time.nightDayBlend,pixelWidth,pixelHeight,scene);
+        if(originalParticles) {
+            particles_.update(seconds,ribbon_.centreLine());
+            particles_.render(*this,time.nightDayBlend,pixelWidth,pixelHeight);
+        }
     }
     glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);
     if(original){glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE);} else glDisable(GL_BLEND);
@@ -178,7 +184,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     background_.setUniformValue("tint",colours[std::clamp(shell_.theme(),0,5)]);
     background_.setUniformValue("resolution",QVector2D(float(pixelWidth),float(pixelHeight)));
     background_.setUniformValue("monthPalette",0);background_.setUniformValue("useMonthPalette",shell_.theme()==0 && bool(monthTexture_));
-    background_.setUniformValue("classic",shell_.backgroundMode()==1);
+    background_.setUniformValue("classic",shell_.backgroundMode()==1 || originalParticles); // firmware particles replace ours
     if(monthTexture_)monthTexture_->bind(0);
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);background_.release();
     if(monthTexture_)monthTexture_->release(0);

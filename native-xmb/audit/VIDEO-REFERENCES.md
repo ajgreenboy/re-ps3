@@ -244,3 +244,30 @@ HDR.mnu with the firmware's glutils programs (`src/hdr.cpp`). The UI layer stays
 Effect on the measurements: day band ratios are within 0.05 of the previous table. Night lower bands rise to 0.67
 of the midday top (reference ≈0.17), driven by the night exposure. This widens the existing month and palette gap and
 is not tuned away. Live rendering holds ~60 fps.
+
+## Original particles (October 24, later)
+
+The procedural particles are replaced by the firmware's (`src/particles.cpp`) whenever the original ribbon is drawn.
+They draw into the HDR scene, so the glare applies to them too.
+
+- **Drawing** uses `lib/particles/particles_quads.vpo/.fpo` unmodified. Each particle is a quad rotated by its own
+  quaternion. Depth of field sets the size, near → middle → far (0.077 / 0.046–0.054 / 0.87, the far ones becoming
+  soft bokeh) through `_Focus` and `_FocusCurves`. Near particles turn to face the camera
+  (`_FrontFacingQuaternion`, `_NearControl`). Alpha fades with fresnel (`_Transparency`), near/far darkness and the
+  life-bounds box. The fragment program lights each particle from the PARTICLES.mnu spot (lambert + specular) over
+  `particles/proc_iridescent.tga`. It applies exposure as `1 − e^(−k·light)` and cuts the quad to a disc whose edge
+  softens with blur.
+- **`_LightPack`, decoded from both programs**, is packed by column: x the eye, y the spot position / specular power,
+  z the attenuation `c + l·d + q·d²`, w lambert / specular coeff / exposure / colour control. All values come from
+  PARTICLES.mnu.
+- **The simulation** (`spurs/particles/particles/particles.elf`, SPU) is reimplemented at 60 Hz from PARTICLES.mnu.
+  It uses EMIT PER FRAME × EMIT PROB, cone emission (EMIT CONE ANGLE, EMIT NEG PROB), speed
+  MIN + MUL·(1 ± VAR), FRICTION, BROWNIAN, GRAVITY, AGING SPEED ± VARIANCE, and spin. Particles are emitted from the
+  ribbon's centre line.
+- **Reconstructed:**
+  - Positions are scaled ×3.2 into firmware units so the ribbon sits in the focus band.
+  - Emission scatter is 0.6 units.
+  - The population is capped at 1500.
+  - `_FocusCurves.z` is 4, not SIZE ALIGN (13.19). SIZE ALIGN left far bokeh undarkened, and thousands of far
+    discs summed into a white blob.
+  - The life-bounds box and the per-life alpha (`sin(π·age)`) are also mine.

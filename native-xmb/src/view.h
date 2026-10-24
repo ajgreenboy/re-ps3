@@ -1,6 +1,7 @@
 #pragma once
 #include "assets.h"
 #include "hdr.h"
+#include "particles.h"
 #include "ribbon.h"
 #include "rsx_program.h"
 #include "shell.h"
@@ -71,6 +72,7 @@ private:
     std::array<std::unique_ptr<QOpenGLTexture>,4> monthTextures_; // tex0..3: day this/next month, night this/next month
     Ribbon ribbon_;
     Hdr hdr_;
+    Particles particles_;
     bool forceOriginal_=false;
     QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     void drawScene(QPainter& painter);

@@ -4,6 +4,7 @@
 #include <array>
 #include <memory>
 #include <vector>
+#include <QVector3D>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
@@ -27,6 +28,8 @@ public:
     // Crest of the ribbon centre line as a fraction of screen height from the top, sampled left to right across
     // the screen after the last render (for the procedural particles and for measurement).
     const std::array<float,33>& crest() const { return crest_; }
+    // The sheet's centre line in view space after the last render, left to right (the particle emitter).
+    const std::vector<QVector3D>& centreLine() const { return centreLine_; }
 private:
     struct Preset { float brightness,fresnel,mipmapBias,spacing; };
     static constexpr int along_=128,across_=24;
@@ -39,5 +42,6 @@ private:
     GLsizei indexCount_=0;
     std::vector<float> fieldPixels_,vertices_;
     std::array<float,33> crest_{};
+    std::vector<QVector3D> centreLine_;
 };
 }
