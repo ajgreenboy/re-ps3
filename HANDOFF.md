@@ -82,6 +82,32 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 
 ## 3a. Next session: start here (2026-10-23)
 
+### Direction change: native C++ recreation (October 23, evening)
+
+The user has explicitly changed the active objective to a full native C++ XMB
+recreation, with coherent architecture and functioning features. Work under
+`native-xmb/` is the active track. The firmware runtime remains a reference and
+is not the new application's execution engine. Read `native-xmb/HANDOFF.md` first.
+
+Claude's completed changes were preserved in commit `5a6b3db`. They include 1ms
+Windows timer resolution, asynchronous GL completion fences, stale-turnoff-marker
+clearing, syscall/FIFO timing and SPU event/reservation work. Clearing the dirty
+shutdown marker avoids the recovery route; it does not fix database recovery.
+
+Takeover corrections in `k_spu.cpp`: event reads no longer acknowledge events;
+zero event masks block; conversion scales are constant; byte shuffles and quadword
+loads/stores use SIMD; quadword shifts use whole-word operations. These compiled
+and linked. Timed sessions still fell to about 1.2–1.4 guest FPS. The work is not
+a demonstrated performance fix. One repeat (`20261023-185503-219-profile`) aborted
+in `queuePush.c:127`, result `80410905`, taskset `105EDC00`, task0, AC3 SPURS group.
+
+The old CPU profiler omitted exited threads. Corrected process-level captures
+showed 100–123% of one core versus only 12–23% for surviving threads. SPU samples
+now retain opcode plus PC: dynamic code overlays made comparisons against a later
+local-store dump unreliable. Latest guest-only profile:
+`20261023-190204-783-profile`; summary `work/quadword-profile.txt` (local only).
+Preserve the VFS overlay, firmware and console identity when changing tracks.
+
 ### Current continuation: JPEG coverage and texture-unit sampling
 
 Previous boot `20261023-165609-569` boot1 later failed at `01A323B0`, LR `01A31DFC`,
