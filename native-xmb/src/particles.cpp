@@ -24,6 +24,11 @@ constexpr float sceneScale=3.2f;     // firmware units per view unit: puts the r
 constexpr int maxParticles=1500;
 constexpr float emitScatter=.6f;     // firmware units around the emission point (particles fill a volume, not the line)
 constexpr float darknessAngle=1.5f;  // _FocusCurves.z: divides the angular-size term of near/far darkness
+constexpr float brownianKick=.25f;   // velocity kick per step per unit BROWNIAN SCALE (u/s): ~0.23 u/s steady drift
+constexpr float flowSpeed=.012f;     // fraction of the ribbon per second a particle's anchor may flow, either way
+constexpr float windDecay=.04f;      // per step: a navigation gust fades in ~0.4 s
+constexpr float iconWind=11.3877f,dpadScaleX=1.f; // PARTICLES_UI.mnu ICON WIND, DPAD SCALE X
+constexpr float windPerIconWind=.06f; // u/s of gust per unit ICON WIND (reconstructed)
 constexpr float particleGain=2.5f;   // _Gamma: particle output gain, so that specular glints cross the HDR glare threshold
                                      // (the plugin draws particles into its x8-encoded frame; that scale is not traced)
 constexpr double step=1./60;         // the plugin advances once per frame
@@ -84,12 +89,12 @@ void Particles::update(double seconds,const std::vector<QVector3D>& emitter) {
         // a cone of EMIT CONE ANGLE around up (down with EMIT NEG PROB), speed MIN + MUL x (1 +- VAR).
         for(int i=0;i<int(std::ceil(emitPerFrame));++i) {
             if(unit(random_)>emitProb*std::min(1.f,emitPerFrame-i) || int(particles_.size())>=maxParticles)continue;
-            const QVector3D origin=pointAt(unit(random_)*length.back())*sceneScale;
             const float cone=emitConeAngle*float(std::numbers::pi)/180.f*std::sqrt(unit(random_)),around=unit(random_)*2.f*float(std::numbers::pi);
             QVector3D direction(std::sin(cone)*std::cos(around),std::cos(cone),std::sin(cone)*std::sin(around));
             if(unit(random_)<emitNegProb)direction.setY(-direction.y());
             Particle p;
-            p.position=origin+QVector3D(gauss(random_),gauss(random_),gauss(random_))*emitScatter;
+            p.anchor=unit(random_);p.flow=(unit(random_)*2.f-1.f)*flowSpeed;
+            p.offset=QVector3D(gauss(random_),gauss(random_),gauss(random_))*emitScatter;
             p.velocity=direction*(emitVelMin+emitVelMul*(1.f+emitVelVar*(unit(random_)*2.f-1.f)));
             p.rotation=QQuaternion::fromAxisAndAngle(QVector3D(gauss(random_),gauss(random_),gauss(random_)).normalized(),unit(random_)*360.f);
             p.spinAxis=QVector3D(gauss(random_),gauss(random_),gauss(random_)).normalized();
@@ -97,15 +102,20 @@ void Particles::update(double seconds,const std::vector<QVector3D>& emitter) {
             p.agingRate=agingSpeed*(1.f+agingVariance*(unit(random_)*2.f-1.f));
             particles_.push_back(p);
         }
-        // Motion: friction, brownian kick, gravity; aging; spin.
+        // Motion, per 1/60 s step, in firmware units per second: FRICTION per step, a BROWNIAN kick per step that keeps
+        // a steady wandering drift (~BROWNIAN / sqrt(2 FRICTION) per axis), GRAVITY, navigation wind. Each particle rides
+        // the ribbon at its anchor (which flows slowly along it), so it moves with the wave.
         for(auto& p:particles_) {
             p.velocity*=1.f-friction;
-            p.velocity+=QVector3D(gauss(random_),gauss(random_),gauss(random_))*brownianScale*deltaTime*4.f;
+            p.velocity+=QVector3D(gauss(random_),gauss(random_),gauss(random_))*brownianScale*brownianKick;
             p.velocity.setY(p.velocity.y()+gravity);
-            p.position+=p.velocity*deltaTime;
+            p.offset+=(p.velocity+wind_)*float(step);
+            p.anchor=std::clamp(p.anchor+p.flow*float(step),0.f,1.f);
+            p.position=pointAt(p.anchor*length.back())*sceneScale+p.offset;
             p.age+=p.agingRate;
             p.rotation=(QQuaternion::fromAxisAndAngle(p.spinAxis,p.spin)*p.rotation).normalized();
         }
+        wind_*=1.f-windDecay;
         std::erase_if(particles_,[](const Particle& p){return p.age>=1.f;});
     };
     if(simulated_<0 || seconds<simulated_ || seconds-simulated_>2) { // start, clock jump or long pause: warm up
@@ -113,6 +123,11 @@ void Particles::update(double seconds,const std::vector<QVector3D>& emitter) {
         for(int i=0;i<int(1.2f/agingSpeed);++i)stepOnce();
     }
     for(;simulated_+step<=seconds;simulated_+=step)stepOnce();
+}
+
+void Particles::nudge(float direction) {
+    // A gust against the navigation direction: the menu slides one way and the dust is pushed the other.
+    wind_+=QVector3D(-direction*dpadScaleX*iconWind*windPerIconWind,0,0);
 }
 
 void Particles::render(QOpenGLFunctions_3_3_Core& gl,float light,int pixelWidth,int pixelHeight,bool glarePass) {

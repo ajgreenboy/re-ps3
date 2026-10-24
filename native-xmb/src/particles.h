@@ -27,8 +27,12 @@ public:
     // Adds the particles (particles_quads) to the currently bound target, additively. With glarePass, draws their
     // particles_second halos instead (into the HDR glare source), reusing the vertices of the last particle pass.
     void render(QOpenGLFunctions_3_3_Core& gl,float light,int pixelWidth,int pixelHeight,bool glarePass=false);
+    // Navigation gust (PARTICLES_UI.mnu ICON WIND / DPAD SCALE): direction -1 left, +1 right.
+    void nudge(float direction);
 private:
-    struct Particle { QVector3D position,velocity; QQuaternion rotation; QVector3D spinAxis; float spin=0,age=0,agingRate=0; };
+    // anchor: fraction along the ribbon the particle rides; offset: its position relative to that point.
+    struct Particle { QVector3D position,offset,velocity; QQuaternion rotation; QVector3D spinAxis; float anchor=0,flow=0,spin=0,age=0,agingRate=0; };
+    QVector3D wind_;
     // particles_quads (the particle) and particles_second (its glare halo: larger quad, radial falloff, lit by the same
     // spot specular, PARTICLES.mnu GLARE / GLARE SCALE / GLARE P1 / GLARE P2). Their uniforms sit at different registers.
     struct Pass { CgProgram vertex,fragment; QOpenGLShaderProgram program; };
