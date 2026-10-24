@@ -29,6 +29,7 @@ int main(int argc,char** argv) {
     parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
     parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
+    parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
     parser.addOption({"month-sheet","Write a local contact sheet of the qgl/lines month_bg day/night textures and exit","image-file"});
     parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
@@ -58,6 +59,19 @@ int main(int argc,char** argv) {
             else qInfo()<<"exported"<<item<<image.size();
         }
         return failures?1:0;
+    }
+    if(parser.isSet("rco-text")) { // local analysis: container,container...@file -> "container id = text" lines
+        const auto spec=parser.value("rco-text").split('@');
+        if(spec.size()!=2){qCritical()<<"use --rco-text container,...@file";return 2;}
+        QFile out(spec[1]);if(!out.open(QIODevice::WriteOnly|QIODevice::Text)){qCritical()<<out.errorString();return 2;}
+        QTextStream stream(&out);
+        for(const auto& container:spec[0].split(',')) {
+            try {
+                const auto strings=assets.allText(container);auto keys=strings.keys();keys.sort();
+                for(const auto& key:keys)stream<<container<<" "<<key<<" = "<<QString(strings[key]).replace('\n',"\\n")<<"\n";
+            } catch(const std::exception& e) { stream<<container<<": "<<e.what()<<"\n"; }
+        }
+        return 0;
     }
     if(parser.isSet("rco-images")) { // local analysis: every image name in every vsh/resource RCO
         QFile out(parser.value("rco-images"));
