@@ -57,6 +57,7 @@ private:
     void loadWallpaper();
     struct IconMaterial { QImage image; QRect bounds; };
     QHash<QString,IconMaterial> iconMaterials_;
+    QHash<QString,QRect> imageBounds_; // visible (alpha) bounds per RCO image
     quint16 buttons_=0;
     qint64 repeatAt_=0;
     void pollController();

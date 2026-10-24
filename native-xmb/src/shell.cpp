@@ -49,10 +49,10 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("psp","Saved Data Utility (PSP)","item_tex_pspgame_folder"),item("ps3","Saved Data Utility (PS3)","item_tex_ps3sd_folder"),
             item("store","PlayStation Store","item_tex_ps_store")}},
         {"network","Network","qgl/icontex","7n",{
-            item("manual","Online Instruction Manuals","tex_browser","explore_category_network"),
+            item("manual","Online Instruction Manuals","tex_onlinemanual","explore_category_network"),
             item("remote","Remote Play","tex_premo","explore_category_network"),
             item("browser","Internet Browser","tex_browser","explore_category_network"),
-            item("search","Internet Search","tex_browser","explore_category_network"),
+            item("search","Internet Search","tex_kensaku","explore_category_network"),
             item("downloads","Download Management","tex_dl_manage","explore_category_network")}},
         {"psn","PlayStation Network",full,"tex_psn",{item("signin","Sign In","tex_Sign_In"),item("trophy","Trophy Collection","item_tex_trophy"),item("store","PlayStation Store","item_tex_ps_store")}},
         {"friends","Friends","qgl/icontex","8n",{item("add","Add a Friend","item_tex_NewFriend"),item("chat","Start New Chat","item_tex_NewAvc"),item("players","Players Met","item_tex_Players")}}
