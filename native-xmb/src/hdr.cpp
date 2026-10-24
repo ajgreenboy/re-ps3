@@ -85,7 +85,7 @@ GLuint Hdr::begin(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) 
     return scene_->handle();
 }
 
-void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint targetFbo) {
+void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint targetFbo,const std::function<void(int,int)>& extraGlare) {
     const auto mix=[&](float n,float d){return n+(d-n)*nightDayBlend;};
     const float exposure=mix(night.exposure,day.exposure),white=mix(night.white,day.white),glareLevel=mix(night.glareLevel,day.glareLevel);
     const float threshold=mix(night.threshold,day.threshold),sumPow=mix(night.sumPow,day.sumPow);
@@ -111,6 +111,11 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
         source_->bind();gl.glViewport(0,0,source_->width(),source_->height());
         glareSource_.program.bind();glareSource_.program.setUniformValue("tex0",0);bindTexture(0,scene_->texture());
         fullscreen(glareSource_.program,fc);glareSource_.program.release();
+        if(extraGlare) {
+            source_->bind();gl.glViewport(0,0,source_->width(),source_->height());
+            extraGlare(source_->width(),source_->height());
+            gl.glDisable(GL_BLEND);
+        }
         bindTexture(0,source_->texture());gl.glGenerateMipmap(GL_TEXTURE_2D);
     }
     // 3. Per level: 15-tap Gaussian across then down, each channel with its own radius (in texels of that level),

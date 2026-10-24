@@ -1,6 +1,7 @@
 #pragma once
 #include "assets.h"
 #include "rsx_program.h"
+#include <functional>
 #include <memory>
 #include <vector>
 #include <QOpenGLFunctions_3_3_Core>
@@ -24,7 +25,9 @@ public:
     // Binds the float scene target (cleared). Returns its framebuffer id for passes that rebind their own.
     GLuint begin(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight);
     // Tone maps the scene with glare into targetFbo. nightDayBlend: 0 night preset .. 1 day preset.
-    void finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint targetFbo);
+    // extraGlare, when set, draws additively into the glare source (bound, viewport set) after the threshold pass,
+    // so that it is blurred with the rest of the glare (the particles' particles_second halos).
+    void finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint targetFbo,const std::function<void(int width,int height)>& extraGlare={});
 private:
     struct Pass { CgProgram cg; QOpenGLShaderProgram program; };
     bool load(Assets& assets,Pass& pass,const char* fragment,const char* vertexName=nullptr);

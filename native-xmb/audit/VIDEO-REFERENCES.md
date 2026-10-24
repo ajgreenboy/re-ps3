@@ -303,3 +303,16 @@ The night lower bands are now 0.29–0.45 of the midday top (reference ≈0.11�
 Gaussian around day 15. On 24 October the Original theme therefore shows mostly November's brown, as the firmware
 does. `--measure-reference` reports this sweep. Particles are now emitted uniformly by arc length along the ribbon:
 the ribbon's x is quadratic in its parameter, so uniform-parameter emission had piled particles up at the left end.
+
+## Sparkle glints and month gradients (October 24, later)
+
+- **Glints.** The plugin's second particle pass, `particles_second.vpo/.fpo`, is now drawn. It is a larger quad
+  (GLARE SCALE 5.44) with a radial halo `e^(−4.44·r^0.99)`, lit by the same spot specular and iridescence and scaled
+  by GLARE (0.20 day / 0.16 night). It draws into the HDR glare source, so the mip blur turns it into soft bloom; drawn
+  on screen directly it showed square quad edges. Particle output gain (`_Gamma`) is 2.5 and the near/far darkening
+  divisor is 1.5, both fitted. At gain 1, specular glints (`1 − e^(−0.039·(8 + 74.7·spec))` ≈ 0.7) never crossed the
+  0.74 glare threshold. The plugin's particles land in its ×8-encoded frame, a scale not traced.
+- **Gradients.** The 64×32 month textures are the full background images: soft diagonal falls, deep blue to cyan
+  for August, lavender to pink for June. back_colours0 reproduces them (see `video-reference-month-{02,06,08,12}.png`
+  from `--measure-reference`). October and November are the two flattest palettes, which is why a late-October
+  frame looks nearly uniform. `--month-sheet <png>` writes all 24 textures locally for inspection.

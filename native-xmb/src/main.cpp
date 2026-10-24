@@ -25,6 +25,7 @@ int main(int argc,char** argv) {
     parser.addOption({"data-dir","Writable native application data directory","directory"});
     parser.addOption({"inventory","Write the local XMBML definition inventory and exit","json-file"});
     parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
+    parser.addOption({"month-sheet","Write a local contact sheet of the qgl/lines month_bg day/night textures and exit","image-file"});
     parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
     parser.addOption({"dump-cg","Translate the original qgl/lines Cg programs to GLSL into a local folder and exit","directory"});
     parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});parser.process(app);
@@ -41,6 +42,19 @@ int main(int argc,char** argv) {
         return inventory.value("errorCount").toInt()?1:0;
     }
     xmb::Assets assets(parser.value("dev-flash"));
+    if(parser.isSet("month-sheet")) { // local analysis only: firmware-derived pixels, keep out of Git
+        constexpr int scale=6;QImage sheet;QPainter painter;
+        for(int m=1;m<=12;++m)for(int kind=0;kind<2;++kind) {
+            const auto& image=assets.image("qgl/lines",QString("textures/month_bg/%1/%2.dds").arg(kind?"night":"rgb").arg(m,2,10,QChar('0')));
+            if(image.isNull())continue;
+            if(sheet.isNull()){sheet=QImage(image.width()*scale*2+30,(image.height()*scale+20)*12,QImage::Format_RGB32);sheet.fill(Qt::black);painter.begin(&sheet);painter.setPen(Qt::white);}
+            const QRect target(kind*(image.width()*scale+30),(m-1)*(image.height()*scale+20),image.width()*scale,image.height()*scale);
+            painter.drawImage(target,image);painter.drawText(target.adjusted(4,2,0,0),Qt::AlignLeft|Qt::AlignTop,QString("%1 %2").arg(m).arg(kind?"night":"day"));
+        }
+        if(painter.isActive())painter.end();
+        if(sheet.isNull() || !sheet.save(parser.value("month-sheet"))){qCritical()<<"Cannot write month sheet";return 2;}
+        return 0;
+    }
     if(parser.isSet("icon-sheet")) {
         QImage sheet(1400,1200,QImage::Format_RGB32);sheet.fill(QColor(45,40,25));QPainter painter(&sheet);
         painter.setPen(Qt::white);
