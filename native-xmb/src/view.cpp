@@ -189,7 +189,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);background_.release();
     if(monthTexture_)monthTexture_->release(0);
     glDisable(GL_BLEND);
-    if(hdr)hdr_.finish(*this,presetBlend,GLuint(target));
+    if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),originalParticles?std::function<void(int,int)>([&](int w,int h){particles_.render(*this,presetBlend,w,h,true);}):std::function<void(int,int)>());
 }
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
 // as a day fraction t in [0,1] and the month as a float in [0,12] (constants at 0x92e54..0x92e6c, preset hours / 24
@@ -340,6 +340,12 @@ bool View::measureReference(const QString& path) {
             const QImage image=fbo.toImage();
             const auto mean=[&](int y){long r=0,g=0,b=0,n=0;for(int x=0;x<W;x+=16){const QRgb p=image.pixel(x,y);r+=qRed(p);g+=qGreen(p);b+=qBlue(p);++n;}return QString::asprintf("%02lx%02lx%02lx",r/n,g/n,b/n);};
             out<<QString("%1  %2 %3 %4\n").arg(m,2,10,QChar('0')).arg(mean(H/20)).arg(mean(H/2)).arg(mean(H-H/20));
+        }
+        // Full frames (background, ribbon, particles, HDR) on the 1st of months with strong texture gradients.
+        for(int m:{2,6,8,12}) {
+            backgroundOverride_=QDateTime(QDate(measureDate.year(),m,1),QTime(12,0));
+            renderBackground(141.f,1.f,W,H);
+            fbo.toImage().save(QFileInfo(path).dir().filePath(QString("video-reference-month-%1.png").arg(m,2,10,QChar('0'))));
         }
         loadMonthTextures(measureDate.month());
         out<<"# original back_colours0, this/next month textures, 12:00: _MonthTime 0..30 -> mean RGB top / middle\n";

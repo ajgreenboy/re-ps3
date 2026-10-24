@@ -17,24 +17,30 @@ constexpr float colorControl=1.f,iridescentExp=1.f,globalAlpha=1.f;
 constexpr float sizeMiddleDay=.0464771f,sizeMiddleNight=.0536233f,sizeNear=.0772033f,sizeFar=.874062f;
 constexpr float nearFocus=6.12435f,nearFocusDist=1.3193f,nearFocusPow=2.47206f,nearDarkness=6.24028f,nearFuzziness=3.79f;
 constexpr float farFocus=12.8327f,farFocusDistDay=4.02735f,farFocusDistNight=4.09678f,farFocusPow=1.83324f,farDarkness=13.9f;
-constexpr float nearAlign=.722f,sizeAlign=13.19f;
+constexpr float nearAlign=.722f;
+constexpr float glareDay=.201367f,glareNight=.159705f,glareScale=5.44386f,glareP1=.99f,glareP2=4.44f;
 // Reconstructed (the SPU simulation and the CPU uniform setters are not traced):
 constexpr float sceneScale=3.2f;     // firmware units per view unit: puts the ribbon (view z = -3) near the focus band
 constexpr int maxParticles=1500;
 constexpr float emitScatter=.6f;     // firmware units around the emission point (particles fill a volume, not the line)
-constexpr float darknessAngle=4.f;   // _FocusCurves.z: divides the angular-size term of near/far darkness
+constexpr float darknessAngle=1.5f;  // _FocusCurves.z: divides the angular-size term of near/far darkness
+constexpr float particleGain=2.5f;   // _Gamma: particle output gain, so that specular glints cross the HDR glare threshold
+                                     // (the plugin draws particles into its x8-encoded frame; that scale is not traced)
 constexpr double step=1./60;         // the plugin advances once per frame
 }
 
 bool Particles::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
-    QString error;
-    try {
-        vertexCg_=CgProgram::load(assets.qglFile("lines","lib/particles/particles_quads.vpo"),&error);
-        if(vertexCg_.valid())fragmentCg_=CgProgram::load(assets.qglFile("lines","lib/particles/particles_quads.fpo"),&error);
-    } catch(const std::exception& e) { error=e.what(); }
-    if(!vertexCg_.valid() || !fragmentCg_.valid()){qWarning().noquote()<<"particles: programs unavailable:"<<error;return false;}
-    if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) || !program_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragmentCg_.glsl) || !program_.link()) {
-        qWarning().noquote()<<"particles: link failed:"<<program_.log();return false;
+    const char* names[2]={"particles_quads","particles_second"};
+    for(int i=0;i<2;++i) {
+        Pass& pass=passes_[size_t(i)];QString error;
+        try {
+            pass.vertex=CgProgram::load(assets.qglFile("lines",QString("lib/particles/%1.vpo").arg(names[i])),&error);
+            if(pass.vertex.valid())pass.fragment=CgProgram::load(assets.qglFile("lines",QString("lib/particles/%1.fpo").arg(names[i])),&error);
+        } catch(const std::exception& e) { error=e.what(); }
+        if(!pass.vertex.valid() || !pass.fragment.valid()){qWarning().noquote()<<"particles:"<<names[i]<<"unavailable:"<<error;return false;}
+        if(!pass.program.addShaderFromSourceCode(QOpenGLShader::Vertex,pass.vertex.glsl) || !pass.program.addShaderFromSourceCode(QOpenGLShader::Fragment,pass.fragment.glsl) || !pass.program.link()) {
+            qWarning().noquote()<<"particles:"<<names[i]<<"link failed:"<<pass.program.log();return false;
+        }
     }
     QImage iridescent;
     try { iridescent=Assets::decodeTga(assets.qglFile("lines","particles/proc_iridescent.tga")); } catch(const std::exception& e) { qWarning()<<"particles:"<<e.what(); }
@@ -55,7 +61,8 @@ bool Particles::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     gl.glBindVertexArray(0);
     particles_.reserve(maxParticles);vertices_.reserve(size_t(maxParticles)*48);
     ready_=true;
-    qInfo()<<"particles: particles_quads"<<vertexCg_.instructionCount<<"/"<<fragmentCg_.instructionCount<<"instructions, iridescent"<<iridescent.size();
+    qInfo()<<"particles: particles_quads"<<passes_[0].vertex.instructionCount<<"/"<<passes_[0].fragment.instructionCount
+           <<"+ particles_second"<<passes_[1].vertex.instructionCount<<"/"<<passes_[1].fragment.instructionCount<<"instructions, iridescent"<<iridescent.size();
     return true;
 }
 
@@ -108,49 +115,57 @@ void Particles::update(double seconds,const std::vector<QVector3D>& emitter) {
     for(;simulated_+step<=seconds;simulated_+=step)stepOnce();
 }
 
-void Particles::render(QOpenGLFunctions_3_3_Core& gl,float light,int pixelWidth,int pixelHeight) {
+void Particles::render(QOpenGLFunctions_3_3_Core& gl,float light,int pixelWidth,int pixelHeight,bool glarePass) {
     if(!ready_ || particles_.empty())return;
     const auto mix=[&](float n,float d){return n+(d-n)*light;};
-    vertices_.clear();
-    static const float corners[4][2]={{0,0},{1,0},{0,1},{1,1}};
-    for(const auto& p:particles_) {
-        const float alpha=std::sin(float(std::numbers::pi)*std::clamp(p.age,0.f,1.f)); // fade in and out over the life
-        for(const auto& c:corners)vertices_.insert(vertices_.end(),{p.position.x(),p.position.y(),p.position.z(),alpha,c[0],c[1],0,0,
-                                                                    p.rotation.x(),p.rotation.y(),p.rotation.z(),p.rotation.scalar()});
+    if(!glarePass) { // the glare pass reuses this frame's vertices
+        vertices_.clear();
+        static const float corners[4][2]={{0,0},{1,0},{0,1},{1,1}};
+        for(const auto& p:particles_) {
+            const float alpha=std::sin(float(std::numbers::pi)*std::clamp(p.age,0.f,1.f)); // fade in and out over the life
+            for(const auto& c:corners)vertices_.insert(vertices_.end(),{p.position.x(),p.position.y(),p.position.z(),alpha,c[0],c[1],0,0,
+                                                                        p.rotation.x(),p.rotation.y(),p.rotation.z(),p.rotation.scalar()});
+        }
     }
     // View space is world space; positions are in firmware units, so the projection undoes the scale.
     QMatrix4x4 projection;projection.perspective(71.846f,float(pixelWidth)/float(pixelHeight),.1f,100.f);projection.scale(1.f/sceneScale);
-    std::vector<QVector4D> vc(468);
-    for(const auto& param:vertexCg_.parameters)if(param.resourceIndex>=0 && param.resourceIndex<468 && !param.defaults.isEmpty())
-        vc[param.resourceIndex]=QVector4D(param.defaults.value(0),param.defaults.value(1),param.defaults.value(2),param.defaults.value(3));
-    for(int row=0;row<4;++row){vc[256+row]=projection.row(row);vc[260+row][row]=1;}
     // _LightPack, by column: x eye, y spot position / specular power, z attenuation, w lambert / specular / exposure / colour control.
     const QVector4D lightPack[4]={{0,spotX,spotAttn[0],lambertCoeff},{0,spotY,spotAttn[1],specularCoeff},{0,spotZ,spotAttn[2],exposure},{0,specularPower,0,colorControl}};
-    for(int row=0;row<4;++row)vc[264+row]=lightPack[row];
     const QVector4D nearControl(1.f,nearFuzziness,nearAlign,0.f);
-    const auto setVc=[&](const char* name,const QVector4D& value){const auto it=vertexCg_.parameters.constFind(name);if(it!=vertexCg_.parameters.cend() && it->resourceIndex>=0)vc[it->resourceIndex]=value;};
-    setVc("_ParticleSize",QVector4D(mix(sizeMiddleNight,sizeMiddleDay),sizeNear,sizeFar,0));
-    setVc("_Transparency",QVector4D(fresnel,globalAlpha,0,0));
-    setVc("_Focus",QVector4D(nearFocusDist,nearFocus,farFocus-mix(farFocusDistNight,farFocusDistDay),farFocus));
-    setVc("_FocusCurves",QVector4D(nearFocusPow,farFocusPow,darknessAngle,0)); // SIZE ALIGN's role is not traced
-    setVc("_FrontFacingQuaternion",QVector4D(0,0,0,1));
-    setVc("_NearControl",nearControl);
-    setVc("_LifeBoundsMin",QVector4D(-30,-14,-40,0));setVc("_LifeBoundsMax",QVector4D(30,14,-1,0));
-    setVc("_Darkness",QVector4D(nearDarkness,farDarkness,0,0));
-    QVector<QVector4D> fc=fragmentCg_.constants;
-    const auto setFc=[&](const char* name,const QVector4D& value){for(int slot:fragmentCg_.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=value;};
-    for(int row=0;row<4;++row)setFc(QString("_LightPack[%1]").arg(row).toUtf8().constData(),lightPack[row]);
-    setFc("_NearControl",nearControl);setFc("_Color",QVector4D(1,1,1,0));setFc("_Gamma",QVector4D(1,1,1,1));
-    setFc("_IridescentExp",QVector4D(1,1,1,1)*iridescentExp);
+    // _Glare (particles_second): x intensity, y quad scale, z falloff exponent, w falloff rate: e^(-w r^z) around the particle.
+    const QVector4D glare(mix(glareNight,glareDay),glareScale,glareP1,glareP2);
+    gl.glBindVertexArray(vao_);gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);
+    if(!glarePass)gl.glBufferSubData(GL_ARRAY_BUFFER,0,GLsizeiptr(vertices_.size()*sizeof(float)),vertices_.data());
     gl.glDisable(GL_DEPTH_TEST);gl.glDisable(GL_CULL_FACE);gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_ONE,GL_ONE);
     gl.glViewport(0,0,pixelWidth,pixelHeight);
-    program_.bind();
-    program_.setUniformValueArray("vc",vc.data(),int(vc.size()));program_.setUniformValueArray("fc",fc.constData(),fc.size());
-    program_.setUniformValue("tex0",0);iridescent_->bind(0);
-    gl.glBindVertexArray(vao_);gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);
-    gl.glBufferSubData(GL_ARRAY_BUFFER,0,GLsizeiptr(vertices_.size()*sizeof(float)),vertices_.data());
-    gl.glDrawElements(GL_TRIANGLES,GLsizei(particles_.size()*6),GL_UNSIGNED_INT,nullptr);
-    gl.glBindVertexArray(0);iridescent_->release(0);program_.release();
+    iridescent_->bind(0);
+    {
+        Pass& pass=passes_[glarePass?1:0];
+        std::vector<QVector4D> vc(468);
+        for(const auto& param:pass.vertex.parameters)if(param.resourceIndex>=0 && param.resourceIndex<468 && !param.defaults.isEmpty())
+            vc[param.resourceIndex]=QVector4D(param.defaults.value(0),param.defaults.value(1),param.defaults.value(2),param.defaults.value(3));
+        for(int row=0;row<4;++row){vc[256+row]=projection.row(row);vc[260+row]=QVector4D();vc[260+row][row]=1;vc[264+row]=lightPack[row];}
+        const auto setVc=[&](const char* name,const QVector4D& value){const auto it=pass.vertex.parameters.constFind(name);if(it!=pass.vertex.parameters.cend() && it->resourceIndex>=0 && it->resourceIndex<468)vc[it->resourceIndex]=value;};
+        setVc("_ParticleSize",QVector4D(mix(sizeMiddleNight,sizeMiddleDay),sizeNear,sizeFar,0));
+        setVc("_Transparency",QVector4D(fresnel,globalAlpha,0,0));
+        setVc("_Focus",QVector4D(nearFocusDist,nearFocus,farFocus-mix(farFocusDistNight,farFocusDistDay),farFocus));
+        setVc("_FocusCurves",QVector4D(nearFocusPow,farFocusPow,darknessAngle,0)); // SIZE ALIGN's role is not traced
+        setVc("_FrontFacingQuaternion",QVector4D(0,0,0,1));
+        setVc("_NearControl",nearControl);setVc("_Glare",glare);
+        setVc("_LifeBoundsMin",QVector4D(-30,-14,-40,0));setVc("_LifeBoundsMax",QVector4D(30,14,-1,0));
+        setVc("_Darkness",QVector4D(nearDarkness,farDarkness,0,0));
+        QVector<QVector4D> fc=pass.fragment.constants;
+        const auto setFc=[&](const char* name,const QVector4D& value){for(int slot:pass.fragment.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=value;};
+        for(int row=0;row<4;++row)setFc(QString("_LightPack[%1]").arg(row).toUtf8().constData(),lightPack[row]);
+        setFc("_NearControl",nearControl);setFc("_Glare",glare);setFc("_Color",QVector4D(1,1,1,0));setFc("_Gamma",QVector4D(1,1,1,1)*particleGain);
+        setFc("_IridescentExp",QVector4D(1,1,1,1)*iridescentExp);
+        pass.program.bind();
+        pass.program.setUniformValueArray("vc",vc.data(),int(vc.size()));pass.program.setUniformValueArray("fc",fc.constData(),fc.size());
+        pass.program.setUniformValue("tex0",0);
+        gl.glDrawElements(GL_TRIANGLES,GLsizei(particles_.size()*6),GL_UNSIGNED_INT,nullptr);
+        pass.program.release();
+    }
+    gl.glBindVertexArray(0);iridescent_->release(0);
     gl.glDisable(GL_BLEND);
 }
 }
