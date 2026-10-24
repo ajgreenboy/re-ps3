@@ -1,6 +1,9 @@
 #pragma once
 #include "assets.h"
+#include "rsx_program.h"
 #include "shell.h"
+#include <array>
+#include <QDateTime>
 #include <QOpenGLWidget>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
@@ -53,6 +56,19 @@ private:
     qint64 repeatAt_=0;
     void pollController();
     void renderBackground(float seconds,float light,int pixelWidth,int pixelHeight);
+    // Original firmware background: qgl/lines back_colours0.fpo with this/next month's day and night palettes.
+    struct BackgroundTime { float day=0,month=0,night=0,nightBrightness=0,nightDayBlend=1,alpha=1; };
+    static BackgroundTime backgroundTime(const QDateTime& when);
+    void initOriginalBackground();
+    bool loadMonthTextures(int month);
+    int texturesMonth_=0;
+    void renderOriginalBackground(const BackgroundTime& time,int pixelWidth,int pixelHeight);
+    QOpenGLShaderProgram original_;
+    bool originalReady_=false;
+    CgProgram backColours_;
+    std::array<std::unique_ptr<QOpenGLTexture>,4> monthTextures_; // tex0..3: day this/next month, night this/next month
+    bool forceOriginal_=false;
+    QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     void drawScene(QPainter& painter);
     void drawImage(QPainter& painter,const QString& container,const QString& texture,const QRectF& rect,qreal opacity=1);
     void drawCategory(QPainter& painter,const Category& category,const QRectF& rect);
