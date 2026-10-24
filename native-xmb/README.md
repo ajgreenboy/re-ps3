@@ -4,7 +4,7 @@ This is the active application track following the user's October 23 direction
 change. It rebuilds XMB behavior as a native application. The older firmware
 runtime under `xmbrt/` remains a reference.
 
-The target is complete behavior and presentation coverage. Version 0.1 is the
+The target is complete behavior and presentation coverage. Version 0.2 is the
 first application foundation, **not a completed XMB recreation**.
 
 ## Build and run
@@ -32,6 +32,9 @@ screen, Space pauses/resumes media. XInput D-pad and A/B share the same actions.
 | `Assets` / `QrcArchive` | Read-only firmware font, RCO/GIM, QRC/DDS decoding, English strings; named image cache |
 | `catalog` | Bounded XMBML parsing, original file hashes and definition inventory |
 | `Shell` | Stable menu IDs, navigation state, settings, service actions |
+| `Preferences` / `Profiles` | Validated, versioned atomic native settings and local identity stores |
+| `MediaLibrary` | Background directory enumeration, bounded results and stale-request cancellation |
+| `InteractionAudio` | Original RCO/VAG interaction cues and native audio output |
 | `View` | OpenGL background, original icons/text, animation, keyboard/controller input |
 | Qt Multimedia | Host audio/video decoding and playback; video frames return to the view |
 | `main` | Composition, paths, desktop lifecycle |
@@ -39,6 +42,14 @@ screen, Space pauses/resumes media. XInput D-pad and A/B share the same actions.
 The renderer has no PPU, SPU, LV2, firmware callback or guest FIFO dependency.
 It redraws from application state. UI timing uses elapsed time rather than
 firmware frame pacing. Source assets remain read-only.
+
+The latest service slice includes setting values, original Latin font choices,
+wallpaper, clock display formats/time zones, volume/mute/key tone, native local
+profile creation/selection, async media browsing and photo decode, rotation and
+slideshow. Preferences migrate legacy color/library paths to `preferences.json`;
+profiles are stored in `profiles.json`. Preferences remain shared between local
+profiles. These source implementations are not complete original workflows;
+see the audit's feature-specific gaps and observed-evidence distinctions.
 
 ## Original assets
 
@@ -87,5 +98,6 @@ The main category/menu catalog is currently curated from the reference. A comple
 XMBML/resource-driven catalog and localization are required before fidelity can
 be claimed.
 
-See [handoff](HANDOFF.md), [recorded reference findings](REFERENCE-2026-10-23.md)
+See the [full feature/presentation audit and new handoff](audit/README.md),
+[handoff](HANDOFF.md), [recorded reference findings](REFERENCE-2026-10-23.md)
 and [completion criteria](ISA.md).

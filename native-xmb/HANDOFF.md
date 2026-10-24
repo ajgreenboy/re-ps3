@@ -2,6 +2,10 @@
 
 ## Active direction
 
+**Latest continuation:** see [October24 full audit and handoff](audit/HANDOFF.md)
+for version0.2 settings/media/profiles/audio integration, the icon orientation
+fix,307-topic guide catalog,122-file RCO scan and finer animation observations.
+
 User requested a complete native C++ XMB recreation using original XMB assets,
 and rejected continuing as a rendering patch over the firmware runtime.
 

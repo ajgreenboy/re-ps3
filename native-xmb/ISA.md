@@ -2,10 +2,16 @@
 task: Complete native C++ recreation of PS3 XMB
 phase: execute
 progress: in-progress
-updated: 2026-10-23
+updated: 2026-10-24
 ---
 
-# Ideal state
+# Native XMB ideal state
+
+## Problem
+
+The native application has original assets and basic navigation but incomplete original services and presentation behavior. The audit identifies broad gaps that a smooth root menu cannot establish as complete.
+
+## Vision
 
 A native C++ application reproduces firmware 4.93 XMB's visual presentation,
 navigation, timing, sound, local services and lifecycle using original assets
@@ -13,51 +19,83 @@ from the user's local firmware. Every visible operation has a real service or
 an explicitly recorded unavailable capability. Functional breadth, visual
 accuracy and responsiveness are separate completion requirements.
 
+## Out of Scope
+
+Firmware execution is preserved as a reference track. This native application does not implement Sony's private online services by displaying fabricated successful operations.
+
+## Principles
+
+- Preserve the relationship between visible operations and actual capabilities.
+- Keep presentation fidelity separate from functional correctness.
+- Record measured, resource-derived and unknown behavior distinctly.
+
 ## Constraints
 
 - Preserve the existing firmware runtime and user overlay as reference evidence.
-- No firmware, derived assets, console identity or build outputs in Git.
+- No firmware, raw extracted assets, console identity or build outputs in Git. Approved UI evidence screenshots are retained separately from raw assets.
 - No success stubs presented as functioning features.
 - Use native C++ application components; keep rendering separate from services.
 - Keep reference captures and feature evidence per firmware/version and scenario.
 - No new test suites without the user's request; use requested build/run evidence.
 
-## Completion criteria
+## Goal
 
-- [x] Native C++ application builds with a reproducible documented toolchain.
-- [x] A clean launch runs independently of the firmware executable and overlay.
-- [x] Actual firmware font and named icon textures are visibly used.
-- [x] Resource failures identify the container, name and unsupported format.
-- [ ] Every main category has reference-correct order, icon, labels and focus behavior.
-- [ ] Horizontal and vertical movement, repeat timing and transitions match reference captures.
-- [ ] Keyboard and controller share navigation/actions without separate behavior.
-- [ ] All submenu/overlay transitions preserve selection and return history.
-- [ ] Rendering sustains the display refresh rate with measured frame pacing.
-- [ ] Background geometry, material, colour and motion match recorded reference.
-- [ ] Original interaction sounds have reference-correct timing and mixing.
-- [ ] RCO text/localization, layout, animation, image and model resources are supported.
-- [ ] User/profile creation, selection and persistent settings work.
-- [ ] Theme, display, sound, date/time, input and power options have native backends.
-- [ ] Local photo browsing, viewing, rotation and slideshow work.
-- [ ] Local audio browsing, playback, metadata, playlists and controls work.
-- [ ] Local video browsing, playback, subtitles and controls work.
-- [ ] Removable media and library updates appear without blocking rendering.
-- [ ] Game data/save/trophy browsing uses real content and safe operations.
-- [ ] Game launch integrates a configured execution backend and tracks return lifecycle.
-- [ ] Browser, downloads and local network media have native services.
-- [ ] Online/friend/store features have documented real backend requirements and availability.
-- [ ] Unsupported/discontinued online services never fabricate login, purchases or messages.
-- [ ] Native startup, shutdown and restart have consistent state persistence.
-- [ ] Settings storage is versioned and writes recover safely after interruption.
-- [ ] Asset paths/configuration are portable between installations.
-- [ ] A feature inventory covers every menu/query/plugin found in the local reference resources.
-- [ ] Each feature has implementation status, reference evidence and remaining gaps.
-- [ ] A ten-minute interactive session has no crash, freeze or unbounded resource growth.
-- [ ] Side-by-side captures substantiate visual fidelity across startup, categories and dialogs.
-- [ ] Native build instructions, limitations and phase handoffs are current.
-- [ ] The user can distinguish the completed recreation from an early foundation in the documentation.
+Recreate the stock firmware4.93 XMB feature surface and presentation with native C++ services and original local assets. Completion requires evidence for original workflows and their conditional states, including timing and shading.
+
+## Criteria
+
+- [x] ISC-1: Native C++ application builds with a reproducible documented toolchain.
+- [x] ISC-2: A clean launch runs independently of the firmware executable and overlay.
+- [x] ISC-3: Actual firmware font and named icon textures are visibly used.
+- [x] ISC-4: Resource failures identify the container, name and unsupported format.
+- [ ] ISC-5: Every main category has reference-correct order, icon, labels and focus behavior.
+- [ ] ISC-6: Horizontal and vertical movement, repeat timing and transitions match reference captures.
+- [ ] ISC-7: Keyboard and controller share navigation/actions without separate behavior.
+- [ ] ISC-8: All submenu/overlay transitions preserve selection and return history.
+- [ ] ISC-9: Rendering sustains the display refresh rate with measured frame pacing.
+- [ ] ISC-10: Background geometry, material, colour and motion match recorded reference.
+- [ ] ISC-11: Original interaction sounds have reference-correct timing and mixing.
+- [ ] ISC-12: RCO text/localization, layout, animation, image and model resources are supported.
+- [ ] ISC-13: User/profile creation, selection and persistent settings work.
+- [ ] ISC-14: Theme, display, sound, date/time, input and power options have native backends.
+- [ ] ISC-15: Local photo browsing, viewing, rotation and slideshow work.
+- [ ] ISC-16: Local audio browsing, playback, metadata, playlists and controls work.
+- [ ] ISC-17: Local video browsing, playback, subtitles and controls work.
+- [ ] ISC-18: Removable media and library updates appear without blocking rendering.
+- [ ] ISC-19: Game data/save/trophy browsing uses real content and safe operations.
+- [ ] ISC-20: Game launch integrates a configured execution backend and tracks return lifecycle.
+- [ ] ISC-21: Browser, downloads and local network media have native services.
+- [ ] ISC-22: Online/friend/store features have documented real backend requirements and availability.
+- [ ] ISC-23: Unsupported/discontinued online services never fabricate login, purchases or messages.
+- [ ] ISC-24: Native startup, shutdown and restart have consistent state persistence.
+- [ ] ISC-25: Settings storage is versioned and writes recover safely after interruption.
+- [ ] ISC-26: Asset paths/configuration are portable between installations.
+- [ ] ISC-27: A feature inventory covers every menu/query/plugin found in the local reference resources.
+- [ ] ISC-28: Each feature has implementation status, reference evidence and remaining gaps.
+- [ ] ISC-29: A ten-minute interactive session has no crash, freeze or unbounded resource growth.
+- [ ] ISC-30: Side-by-side captures substantiate visual fidelity across startup, categories and dialogs.
+- [ ] ISC-31: Native build instructions, limitations and phase handoffs are current.
+- [ ] ISC-32: The user can distinguish the completed recreation from an early foundation in the documentation.
+- [ ] ISC-33: Anti: tracked deliverables contain no raw firmware or private console identity.
+- [ ] ISC-34: Antecedent: visual claims identify their reference firmware, theme and recording evidence.
+
+## Test Strategy
+
+Build logs establish compilation. Requested window observations establish specific visible states; source inspection alone does not close workflow criteria. Feature-specific runtime evidence is recorded in audit/HANDOFF.md and audit/VISUAL-BEHAVIOR.md; no new test suite is introduced.
+
+## Features
+
+| Area | Source boundary | Remaining completion work |
+|---|---|---|
+| Shell | Shell/View | Original panels, activity model and matched timelines |
+| Assets | Assets/QrcArchive | Original material, wave and complete resource semantics |
+| Native services | Preferences/Profiles/MediaLibrary/InteractionAudio | Complete original workflows and capability bindings |
+| Feature audit | audit/ | Per-feature state variants and missing reference evidence |
 
 ## Decisions
+
+- 2026-10-24: refined: original unnumbered criteria now have stable ISC IDs; the audit retains source, observed and unmeasured status separately.
+- 2026-10-24: full audit maps307 indexed topics and44 presentation requirements; catalog breadth does not establish complete runtime coverage.
 
 - October 23: user changed the objective from executing firmware to a complete
   native recreation, explicitly in C++ and using original XMB assets.
@@ -72,7 +110,14 @@ accuracy and responsiveness are separate completion requirements.
   Root/child focus gaps and parent columns now use recorded geometry; original
   RSX material, wave simulation and many service pages remain open work.
 
-## Evidence
+## Changelog
+
+- 2026-10-24 | conjectured: directly painting QGL decoded rows preserved icon orientation
+  refuted by: native controller grips pointed upward against the supplied VSH screenshot
+  learned: icon texture coordinates need normalization at ingestion
+  criterion now: original icon fidelity remains open; the specific orientation correction has a native screenshot
+
+## Verification
 
 Native Release build: work/native-reference-build.txt. Session193245-983 loads
 the original font,44 images with no failures,166 English strings and14 resource

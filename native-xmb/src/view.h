@@ -6,6 +6,7 @@
 #include <QOpenGLShaderProgram>
 #include <QElapsedTimer>
 #include <QTimer>
+#include <QOpenGLTexture>
 
 namespace xmb {
 class View final:public QOpenGLWidget,protected QOpenGLFunctions_3_3_Core {
@@ -30,10 +31,18 @@ private:
     int previousCategory_=6;
     struct Column { QVector<Entry> entries; int selection=0; double position=0; };
     QVector<Column> columns_;
+    QVector<Column> outgoing_;
+    int outgoingCategory_=6;
+    double categoryFade_=0;
     double depthPosition_=0;
     int previousDepth_=0;
     void syncColumns();
     QImage mediaFrame_;
+    QImage wallpaperImage_,monthImage_;
+    QString wallpaperPath_;
+    quint64 wallpaperRequest_=0;
+    std::unique_ptr<QOpenGLTexture> monthTexture_;
+    void loadWallpaper();
     struct IconMaterial { QImage image; QRect bounds; };
     QHash<QString,IconMaterial> iconMaterials_;
     quint16 buttons_=0;

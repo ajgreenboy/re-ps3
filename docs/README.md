@@ -9,6 +9,10 @@ Start with [the native application handoff](../native-xmb/HANDOFF.md) and
 [its build instructions](../native-xmb/README.md). The documents below preserve
 the firmware-execution proof of concept as reference evidence.
 
+The [full XMB feature/presentation audit](../native-xmb/audit/README.md) and
+[October24 handoff](../native-xmb/audit/HANDOFF.md) cover the current native work,
+including shading, animation timing, all indexed categories and the orientation fix.
+
 1. [Proof of concept: run, build, evidence](POC.md).
 2. [Phase 4: stability and visual fidelity](phases/04-stability-rendering.md) — active.
 3. [Phase 5: OS services and media](phases/05-services-media.md) — future phase.

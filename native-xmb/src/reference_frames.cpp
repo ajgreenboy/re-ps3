@@ -19,7 +19,11 @@
 int main(int argc,char** argv) {
     QGuiApplication app(argc,argv);
     const auto args=app.arguments();
-    if(args.size()!=3){qCritical()<<"Usage: xmb-reference-frames recording.mp4 output-directory";return 2;}
+    if(args.size()<3 || args.size()>6){qCritical()<<"Usage: xmb-reference-frames recording.mp4 output-directory [interval-ms=200] [start-ms=0] [end-ms=-1]";return 2;}
+    bool intervalOk=true,startOk=true,endOk=true;
+    const int interval=args.size()>3?args[3].toInt(&intervalOk):200;
+    const qint64 start=args.size()>4?args[4].toLongLong(&startOk):0,end=args.size()>5?args[5].toLongLong(&endOk):-1;
+    if(!intervalOk || !startOk || !endOk || interval<0 || interval>1000 || start<0 || (end!=-1 && end<=start)){qCritical()<<"Invalid sample interval or time range";return 2;}
     const QDir output(args[2]);if(!QDir().mkpath(output.absolutePath()))return 2;
     QMediaPlayer player;QVideoSink sink;player.setVideoSink(&sink);
     QJsonArray frames;QVector<QImage> thumbnails;
@@ -27,7 +31,7 @@ int main(int argc,char** argv) {
     const auto finish=[&](int code) {
         if(finished)return;finished=true;player.stop();
         QFile manifest(output.filePath("frames.json"));
-        if(manifest.open(QIODevice::WriteOnly))manifest.write(QJsonDocument(QJsonObject{{"source",args[1]},{"durationMs",double(player.duration())},{"sampleIntervalMs",200},{"frames",frames}}).toJson());
+        if(manifest.open(QIODevice::WriteOnly))manifest.write(QJsonDocument(QJsonObject{{"source",args[1]},{"durationMs",double(player.duration())},{"sampleIntervalMs",interval},{"startMs",double(start)},{"endMs",double(end)},{"frames",frames},{"exitCode",code}}).toJson());
         constexpr int columns=5,rows=4;
         for(int start=0;start<thumbnails.size();start+=columns*rows) {
             QImage sheet(columns*320,rows*204,QImage::Format_RGB32);sheet.fill(QColor(20,20,20));QPainter p(&sheet);
@@ -42,17 +46,21 @@ int main(int argc,char** argv) {
         qInfo()<<"Reference recording:"<<player.duration()<<"ms; captured"<<frames.size()<<"frames to"<<output.absolutePath();app.exit(code);
     };
     QObject::connect(&sink,&QVideoSink::videoFrameChanged,&app,[&](const QVideoFrame& frame) {
-        if(!frame.isValid() || frame.startTime()<0 || frame.startTime()-last<200000)return;
+        if(!frame.isValid() || frame.startTime()<0)return;
+        if(frame.startTime()/1000<start)return;
+        if(end>=0 && frame.startTime()/1000>end){finish(0);return;}
+        if(frame.startTime()-last<qint64(interval)*1000)return;
         const auto image=frame.toImage();if(image.isNull())return;
-        const qint64 timestamp=frame.startTime()/1000;const QString name=QString("frame-%1.jpg").arg(timestamp,8,10,QChar('0'));
-        const auto scaled=image.scaled(1280,800,Qt::KeepAspectRatio,Qt::SmoothTransformation);
-        if(!scaled.save(output.filePath(name),"JPEG",94)){finish(2);return;}
+        const bool precise=interval<100;
+        const qint64 timestamp=frame.startTime()/1000;const QString name=QString("frame-%1.").arg(timestamp,8,10,QChar('0'))+(precise?"png":"jpg");
+        const auto scaled=precise?image:image.scaled(1280,800,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+        if(!scaled.save(output.filePath(name),precise?"PNG":"JPEG",precise?-1:94)){finish(2);return;}
         frames.push_back(QJsonObject{{"timestampMs",double(timestamp)},{"file",name},{"width",image.width()},{"height",image.height()}});
         thumbnails.push_back(image.scaled(320,180,Qt::KeepAspectRatio,Qt::SmoothTransformation));last=frame.startTime();
-        if(frames.size()>=1200)finish(0);
+        if(frames.size()>=6000){qCritical()<<"Frame limit reached before the requested range ended";finish(1);}
     });
     QObject::connect(&player,&QMediaPlayer::mediaStatusChanged,&app,[&](QMediaPlayer::MediaStatus status){
-        if(status==QMediaPlayer::LoadedMedia){player.setPlaybackRate(4.);player.play();}
+        if(status==QMediaPlayer::LoadedMedia){player.setPosition(start);player.setPlaybackRate(interval<100?1.:4.);player.play();}
         if(status==QMediaPlayer::EndOfMedia)finish(0);
     });
     QObject::connect(&player,&QMediaPlayer::errorOccurred,&app,[&](QMediaPlayer::Error,const QString& error){qCritical()<<error;finish(1);});

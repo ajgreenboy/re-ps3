@@ -6,6 +6,11 @@
 #include <QLoggingCategory>
 #include <QVector3D>
 #include <QApplication>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QImageReader>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
 #include <cmath>
 #include <algorithm>
 #ifdef Q_OS_WIN
@@ -24,15 +29,26 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         for(const auto& entry:category.entries)assets_.image(entry.container,entry.texture);
     }
     syncColumns();
-    connect(&shell_,&Shell::changed,this,[this]{syncColumns();update();});
+    monthImage_=assets_.image("qgl/lines",QString("textures/month_bg/rgb/%1.dds").arg(QDateTime::currentDateTime().date().month(),2,10,QChar('0')));
+    connect(&shell_,&Shell::changed,this,[this]{syncColumns();loadWallpaper();update();});
     connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){mediaFrame_=frame;update();});
     connect(&shell_,&Shell::requestLibrary,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,"Choose media folder");if(!path.isEmpty())shell_.chooseLibrary(path);});
+    connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");if(!file.isEmpty())shell_.chooseWallpaper(file);});
+    connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){
+        bool ok=false;const auto name=QInputDialog::getText(this,"System Name","Name",QLineEdit::Normal,value,&ok);
+        if(ok)shell_.setSystemName(name);
+    });
+    connect(&shell_,&Shell::requestNewUser,this,[this]{bool ok=false;const auto name=QInputDialog::getText(this,"Create New User","Name",QLineEdit::Normal,{},&ok);if(ok)shell_.createUser(name);});
+    loadWallpaper();
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
     connect(&timer_,&QTimer::timeout,this,[this]{pollController();update();});timer_.start();
 }
 void View::syncColumns() {
     const int depth=shell_.depth();
-    if(previousCategory_!=shell_.category())columns_.clear();
+    if(previousCategory_!=shell_.category()) {
+        outgoing_=columns_;outgoingCategory_=previousCategory_;categoryFade_=1.;columns_.clear();
+        previousCategory_=shell_.category();
+    }
     // Keep the departed child until the return animation finishes. The shell's
     // actual page stack and selections change immediately and remain canonical.
     for(int i=0;i<=depth;++i) {
@@ -42,7 +58,24 @@ void View::syncColumns() {
     if(depth>previousDepth_)for(int i=previousDepth_+1;i<=depth;++i)columns_[i].position=columns_[i].selection;
     previousDepth_=depth;
 }
-View::~View(){if(context()){makeCurrent();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
+void View::loadWallpaper() {
+    if(shell_.backgroundMode()!=2)return;
+    const auto path=shell_.wallpaper();if(path==wallpaperPath_)return;
+    wallpaperPath_=path;wallpaperImage_={};const auto request=++wallpaperRequest_;
+    if(path.isEmpty())return;
+    auto* watcher=new QFutureWatcher<QImage>(this);
+    connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,request]{
+        watcher->deleteLater();if(request!=wallpaperRequest_)return;
+        wallpaperImage_=watcher->result();if(wallpaperImage_.isNull())qWarning()<<"Wallpaper could not be decoded";update();
+    });
+    watcher->setFuture(QtConcurrent::run([path]{
+        QImageReader reader(path);reader.setAutoTransform(true);const auto size=reader.size();
+        if(!size.isValid() || size.width()>65536 || size.height()>65536)return QImage{};
+        if(size.width()>3840 || size.height()>2160)reader.setScaledSize(size.scaled(3840,2160,Qt::KeepAspectRatio));
+        return reader.read();
+    }));
+}
+View::~View(){if(context()){makeCurrent();monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
     if(!initializeOpenGLFunctions()){qCritical()<<"Native renderer requires OpenGL 3.3";return;}
     static const char* vertex=R"(#version 330 core
@@ -51,11 +84,13 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(
 )";
     static const char* fragment=R"(#version 330 core
 in vec2 uv;out vec4 colour;uniform float seconds;uniform vec3 tint;uniform vec2 resolution;
+uniform sampler2D monthPalette;uniform bool useMonthPalette;uniform bool classic;
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float wave(float x,float t){return .46+.055*sin(x*4.0-t)+.018*sin(x*7.0+t*.6);}
 void main(){
     vec2 p=uv;float t=seconds*.12;
     vec3 c=mix(tint*.16,tint*.58,1.0-smoothstep(0.0,1.0,p.y));
+    if(useMonthPalette)c=texture(monthPalette,p).rgb;
     c+=tint*.045*exp(-length((p-vec2(.42,.28))*vec2(.7,1.6))*2.0);
     for(int i=0;i<7;++i){
         float k=float(i);float line=wave(p.x,t)+.019*sin(p.x*4.8+t+k*.50)+k*.0035;
@@ -64,7 +99,7 @@ void main(){
         c+=mix(tint,vec3(.92),.82)*ribbon;
     }
     vec2 grid=vec2(42.0,24.0);vec2 cell=floor(p*grid);
-    for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){
+    if(!classic)for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){
         vec2 id=cell+vec2(x,y);float seed=hash(id);vec2 centre=(id+vec2(seed,hash(id+51.7)))/grid;
         centre.y+=.004*sin(t*1.8+seed*40.0);
         float weight=exp(-pow((centre.y-wave(centre.x,t))/.16,2.0))*(1.0-.7*centre.x);
@@ -77,6 +112,11 @@ void main(){
     glReady_=background_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex)&&background_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment)&&background_.link();
     if(!glReady_)qCritical().noquote()<<background_.log();
     glGenVertexArrays(1,&vao_);
+    if(!monthImage_.isNull()) {
+        monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
+        monthTexture_->setMinificationFilter(QOpenGLTexture::Linear);monthTexture_->setMagnificationFilter(QOpenGLTexture::Linear);
+        monthTexture_->setWrapMode(QOpenGLTexture::ClampToEdge);
+    }
     qInfo()<<"native renderer:"<<reinterpret_cast<const char*>(glGetString(GL_RENDERER));
 }
 void View::paintGL() {
@@ -84,7 +124,7 @@ void View::paintGL() {
     const double dt=std::min(.1,double(now-previous_)/1000.);previous_=now;
     const double blend=1.-std::exp(-dt*18.);
     categoryPosition_+=(shell_.category()-categoryPosition_)*blend;
-    previousCategory_=shell_.category();
+    categoryFade_*=std::exp(-dt*18.);if(categoryFade_<.001){categoryFade_=0;outgoing_.clear();}
     depthPosition_+=(shell_.depth()-depthPosition_)*blend;
     for(auto& column:columns_)column.position+=(column.selection-column.position)*blend;
     if(std::abs(depthPosition_-shell_.depth())<.001) {
@@ -99,7 +139,11 @@ void View::paintGL() {
         background_.bind();background_.setUniformValue("seconds",float(now)/1000.f);
         background_.setUniformValue("tint",colours[std::clamp(shell_.theme(),0,5)]);
         background_.setUniformValue("resolution",QVector2D(float(width()*devicePixelRatioF()),float(height()*devicePixelRatioF())));
+        background_.setUniformValue("monthPalette",0);background_.setUniformValue("useMonthPalette",shell_.theme()==0 && bool(monthTexture_));
+        background_.setUniformValue("classic",shell_.backgroundMode()==1);
+        if(monthTexture_)monthTexture_->bind(0);
         glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);background_.release();
+        if(monthTexture_)monthTexture_->release(0);
     }
     QPainter painter(this);painter.setRenderHint(QPainter::Antialiasing);painter.setRenderHint(QPainter::SmoothPixmapTransform);
     const double scale=std::min(width()/1920.,height()/1080.);
@@ -151,18 +195,30 @@ void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect)
     p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);
 }
 void View::drawScene(QPainter& p) {
-    QFont font(assets_.fontFamily());font.setPixelSize(27);p.setFont(font);
+    QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
-        QFont f(assets_.fontFamily());f.setPixelSize(size);p.setFont(f);p.setPen(QColor(0,0,0,100));p.drawText(r.translated(2,2),flags,value);p.setPen(colour);p.drawText(r,flags,value);
+        QFont f(shell_.fontFamily());f.setPixelSize(size);p.setFont(f);p.setPen(QColor(0,0,0,100));p.drawText(r.translated(2,2),flags,value);p.setPen(colour);p.drawText(r,flags,value);
     };
+    if(shell_.backgroundMode()==2 && !wallpaperImage_.isNull()) {
+        const auto size=QSizeF(wallpaperImage_.size()).scaled(QSizeF(1920,1080),Qt::KeepAspectRatioByExpanding);
+        p.drawImage(QRectF((1920-size.width())/2,(1080-size.height())/2,size.width(),size.height()),wallpaperImage_);
+        p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,35));
+    }
     if(shell_.mediaOpen()) {
         if(!mediaFrame_.isNull()) {
             p.fillRect(QRectF(0,0,1920,1080),Qt::black);
-            const auto size=QSizeF(mediaFrame_.size()).scaled(QSizeF(1920,1080),Qt::KeepAspectRatio);
+            const auto size=QSizeF(mediaFrame_.size()).scaled(QSizeF(1920,1080),shell_.photoOpen() && shell_.photoFill()?Qt::KeepAspectRatioByExpanding:Qt::KeepAspectRatio);
             p.drawImage(QRectF(QPointF((1920-size.width())/2,(1080-size.height())/2),size),mediaFrame_);
         }
         text({110,970,1500,50},shell_.mediaTitle(),27,Qt::white);
-        text({110,1020,1500,35},"Circle  Back     Cross  Play / Pause",21,QColor(230,230,230));
+        text({110,1020,1700,35},shell_.photoOpen()?QString("Circle  Back     Cross  ")+(shell_.slideshowActive()?"Pause Slideshow":"Start Slideshow")+"     Left / Right  Previous / Next     Up / Down  Rotate":"Circle  Back     Cross  Play / Pause     Left / Right  Seek",21,QColor(230,230,230));
+        if(shell_.busy())text({110,910,1000,45},"Loading…",26,Qt::white);
+        if(!shell_.photoOpen() && shell_.mediaDuration()>0) {
+            const double ratio=std::clamp(double(shell_.mediaPosition())/shell_.mediaDuration(),0.,1.);
+            p.fillRect(QRectF(110,941,1700,4),QColor(255,255,255,60));p.fillRect(QRectF(110,941,1700*ratio,4),Qt::white);
+            const auto time=[](qint64 ms){const auto seconds=ms/1000;return QString("%1:%2").arg(seconds/60).arg(seconds%60,2,10,QChar('0'));};
+            text({1450,963,360,45},time(shell_.mediaPosition())+" / "+time(shell_.mediaDuration()),23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        }
     } else {
         const auto& categories=shell_.categories();
         const double childAmount=std::clamp(depthPosition_,0.,1.);
@@ -174,11 +230,12 @@ void View::drawScene(QPainter& p) {
             if(i==shell_.category()){p.setOpacity(1.-childAmount);text({x-140,338,280,45},cat.title,24,Qt::white,Qt::AlignCenter);}
             p.restore();
         }
-        for(int level=0;level<columns_.size();++level) {
-            const auto& column=columns_[level];
+        const auto drawColumns=[&](const QVector<Column>& columns,double opacity,double offset,bool active) {
+        for(int level=0;level<columns.size();++level) {
+            const auto& column=columns[level];
             const double behind=std::clamp(depthPosition_-level,0.,1.),ahead=std::clamp(level-depthPosition_,0.,1.);
             if(behind>.999 && level<shell_.depth()-1)continue;
-            const double columnAlpha=1.-ahead;
+            const double columnAlpha=(1.-ahead)*opacity;
             for(int i=0;i<column.entries.size();++i) {
                 const auto& entry=column.entries[i];
                 const double distance=i-column.position;
@@ -189,16 +246,20 @@ void View::drawScene(QPainter& p) {
                 const double y=505+row;
                 if(y<-100 || y>1050)continue;
                 const double focus=std::max(0.,1.-std::abs(distance));
-                const double iconX=560-behind*(100+150*focus)+ahead*250;
+                const double iconX=560-behind*(100+150*focus)+ahead*250+offset;
                 const double size=level==0?52+focus*108:22+focus*20;
                 const bool tile=entry.texture.contains("folder") || entry.texture.contains("default") || entry.texture.contains("album");
                 const double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
                 const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
                 drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
                 p.save();p.setOpacity(columnAlpha*(1.-behind));
-                const double labelX=(level==0?(tile?756:680):620)+ahead*250;
+                const double labelX=(level==0?(tile?756:680):620)+ahead*250+offset;
                 const double alpha=.36+.64*focus;
-                text({labelX,y-28,1100,56},entry.title,int(28+focus*8),QColor(255,255,255,int(255*alpha)));
+                const auto value=active?shell_.valueText(entry):QString{};
+                QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(int(28+focus*8));
+                const auto label=QFontMetrics(labelFont).elidedText(entry.title,Qt::ElideRight,value.isEmpty()?1050:640);
+                text({labelX,y-28,value.isEmpty()?1100.:650.,56},label,int(28+focus*8),QColor(255,255,255,int(255*alpha)));
+                if(!value.isEmpty())text({1300+offset,y-25,440,50},value,24,QColor(255,255,255,int(240*alpha)));
                 if(focus>.95 && !entry.detail.isEmpty())text({labelX,y+23,1100,82},entry.detail,21,QColor(220,220,220),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
                 p.restore();
             }
@@ -206,7 +267,11 @@ void View::drawScene(QPainter& p) {
                 p.save();p.setOpacity(columnAlpha*(1.-behind));text({420+ahead*250,480,50,50},QString(QChar(0x2039)),42,Qt::white,Qt::AlignCenter);p.restore();
             }
         }
-        text({1400,103,390,45},QDateTime::currentDateTime().toString("d/M  HH:mm"),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        };
+        if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*202,false);
+        drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*202,true);
+        if(!shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
+        text({1240,103,550,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
         drawImage(p,"system_plugin","tex_circle",{1520,1010,26,26});text({1558,1004,210,40},"Back",23,QColor(225,225,225));
         drawImage(p,"system_plugin","tex_cross",{1310,1010,26,26});text({1348,1004,160,40},"Enter",23,QColor(225,225,225));
     }
@@ -224,7 +289,9 @@ void View::keyPressEvent(QKeyEvent* e) {
     case Qt::Key_Return:case Qt::Key_Enter:shell_.activate();break;
     case Qt::Key_Escape:case Qt::Key_Backspace:shell_.back();break;
     case Qt::Key_Space:shell_.togglePlayback();break;
-    case Qt::Key_F11:if(window()->isFullScreen())window()->showNormal();else window()->showFullScreen();break;
+    case Qt::Key_PageUp:shell_.vertical(-10);break;case Qt::Key_PageDown:shell_.vertical(10);break;
+    case Qt::Key_F5:shell_.refreshDirectory();break;
+    case Qt::Key_F11:shell_.setFullscreen(!window()->isFullScreen());break;
     default:QOpenGLWidget::keyPressEvent(e);return;
     }
     e->accept();
