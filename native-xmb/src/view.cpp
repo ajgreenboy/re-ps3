@@ -524,7 +524,8 @@ void View::drawScene(QPainter& p) {
                 const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
                 drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
                 p.save();p.setOpacity(columnAlpha*(1.-behind));
-                const double labelX=(level==0?(tile?756:680):620)+ahead*250+offset;
+                // One label column per level, as on the PS3: it clears the widest icon (a focused tile reaches x=720).
+                const double labelX=(level==0?744:620)+ahead*250+offset;
                 const double alpha=.36+.64*focus;
                 const auto value=active?shell_.valueText(entry):QString{};
                 QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(int(28+focus*8));
