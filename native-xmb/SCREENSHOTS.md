@@ -12,6 +12,7 @@ October23,2026. Captures are unmodified application screenshots from Computer Us
 | [Parent column](screenshots/06-theme-submenu-parent-column.jpg) | Theme submenu retains its parent; first row-spacing revision |
 | [Restored selection](screenshots/07-submenu-selection-restored.jpg) | Color remains selected after returning from nested choices; first row-spacing revision |
 | [Latest native Video](screenshots/08-original-qgl-video-final-spacing.jpg) | Original category normal maps, final recorded-spacing revision, persisted Green theme |
+| [Corrected icon orientation](screenshots/09-icon-orientation-corrected.jpg) | October24: QGL maps normalized vertically; Game grips now point downward; Green theme preserved |
 | [User-supplied RPCS3 reference](screenshots/reference-rpcs3-game.png) | Original VSH Game menu, gold theme,19:28 |
 
 The reference was attached by the user; it was not captured through automation.

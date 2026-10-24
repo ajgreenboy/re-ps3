@@ -11,6 +11,10 @@
 #include <QUrl>
 #include <QImageReader>
 #include <QLoggingCategory>
+#include <QDateTime>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QTransform>
 #include <algorithm>
 
 namespace xmb {
@@ -20,7 +24,7 @@ Entry item(QString id,QString title,QString texture,QString container="explore_p
 }
 }
 Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(parent),
-    settings_(QDir(dataDirectory).filePath("settings.ini"),QSettings::IniFormat),
+    assets_(assets),preferences_(dataDirectory),library_(),interactionAudio_(assets.root()),profiles_(dataDirectory),
     player_(std::make_unique<QMediaPlayer>()),audio_(std::make_unique<QAudioOutput>()),video_(std::make_unique<QVideoSink>()) {
     QDir().mkpath(dataDirectory);
     const QString sys="explore_category_sysconf",full="explore_plugin_full";
@@ -28,16 +32,16 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         {"user","Users",full,"user_tex_load",{item("new-user","Create New User","item_tex_NewUser"),item("user","User","user_tex_login")}},
         {"settings","Settings","qgl/icontex","2n",{
             item("update","System Update","tex_update",sys),item("game","Game Settings","tex_game",sys),
-            item("video","Video Settings","tex_bddvd",sys),item("music","Music Settings","tex_music",sys),
-            item("chat","Chat Settings","tex_chat",sys),item("system","System Settings","tex_console",sys,Action::Information),
-            item("theme","Theme Settings","tex_thema",sys,Action::Theme),item("date","Date and Time Settings","tex_datetime",sys),
-            item("power","Power Save Settings","tex_power",sys),item("device","Accessory Settings","tex_pd",sys),
-            item("print","Printer Settings","tex_printer",sys),item("display","Display Settings","tex_display",sys),
-            item("sound","Sound Settings","tex_sound",sys),item("security","Security Settings","tex_security",sys),
+            item("video","Video Settings","tex_bddvd",sys,Action::SettingsPage,"video"),item("music","Music Settings","tex_music",sys,Action::SettingsPage,"music"),
+            item("chat","Chat Settings","tex_chat",sys),item("system","System Settings","tex_console",sys,Action::SettingsPage,"system"),
+            item("theme","Theme Settings","tex_thema",sys,Action::SettingsPage,"theme"),item("date","Date and Time Settings","tex_datetime",sys,Action::SettingsPage,"date"),
+            item("power","Power Save Settings","tex_power",sys,Action::SettingsPage,"power"),item("device","Accessory Settings","tex_pd",sys,Action::SettingsPage,"device"),
+            item("print","Printer Settings","tex_printer",sys),item("display","Display Settings","tex_display",sys,Action::SettingsPage,"display"),
+            item("sound","Sound Settings","tex_sound",sys,Action::SettingsPage,"sound"),item("security","Security Settings","tex_security",sys),
             item("remote","Remote Play Settings","tex_remote",sys),item("network","Network Settings","tex_network",sys)}},
-        {"photo","Photo","qgl/icontex","3n",{item("library","Photo Library","photo_tex_album_pic",full,Action::Library)}},
-        {"music","Music","qgl/icontex","4n",{item("library","Music Library","music_tex_album_pic",full,Action::Library)}},
-        {"video","Video","qgl/icontex","5n",{item("library","Video Library","video_tex_album_default",full,Action::Library)}},
+        {"photo","Photo","qgl/icontex","3n",{item("library","Photo Library","photo_tex_album_pic",full,Action::Library),item("options","Photo Settings","tex_photo",full,Action::SettingsPage,"photo"),item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
+        {"music","Music","qgl/icontex","4n",{item("library","Music Library","music_tex_album_pic",full,Action::Library),item("options","Music Settings","tex_music",full,Action::SettingsPage,"music"),item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
+        {"video","Video","qgl/icontex","5n",{item("library","Video Library","video_tex_album_default",full,Action::Library),item("options","Video Settings","tex_video",full,Action::SettingsPage,"video"),item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
         {"tv","TV/Video Services",full,"tex_video",{item("services","My Channels","tex_video")}},
         {"game","Game","qgl/icontex","6n",{
             item("vita","PS Vita System Application Utility","item_tex_vitaformat"),item("data","Game Data Utility","item_tex_ps3game_folder"),
@@ -80,7 +84,42 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         entry.container="qgl/icontex";entry.texture=QString::number(normalMaps[entry.id])+"n";
     }
     selections_.fill(0,categories_.size());
-    player_->setAudioOutput(audio_.get());player_->setVideoSink(video_.get());audio_->setVolume(.6f);
+    rebuildUsers();
+    connect(&profiles_,&Profiles::changed,this,[this]{rebuildUsers();emit changed();});
+    connect(&profiles_,&Profiles::failed,this,[this](const QString& error){message_=error;emit changed();});
+    player_->setAudioOutput(audio_.get());player_->setVideoSink(video_.get());
+    connect(&preferences_,&Preferences::failed,this,[this](const QString& error){message_=error;emit changed();});
+    connect(&preferences_,&Preferences::changed,this,[this]{applyPreferences();emit changed();});
+    connect(&library_,&MediaLibrary::loaded,this,[this](quint64 request,const QString& path,const MediaEntries& files,const QString& error,bool truncated){
+        if(request!=scanRequest_ || pages_.isEmpty())return;
+        loading_=false;scanRequest_=0;
+        auto& page=pages_.last();
+        const QString previous=page.entries.isEmpty()?QString{}:page.entries[page.selection].id;
+        page.directory=path;page.entries.clear();page.selection=0;
+        const QString kind=categories_[category_].id;
+        for(const auto& file:files) {
+            page.entries.push_back(item(file.path,file.title,file.isDirectory?"item_tex_plain_folder":kind=="photo"?"photo_tex_album_pic":kind=="music"?"music_tex_album_pic":"video_tex_album_default","explore_plugin_full",file.isDirectory?Action::Folder:Action::File,file.path));
+            auto& entry=page.entries.last();
+            entry.detail=file.isDirectory?QString{}:QString::number(file.size/1024)+" KB  ·  "+file.modified.toString("yyyy/MM/dd");
+            if(entry.id==previous)page.selection=int(page.entries.size())-1;
+        }
+        status_=truncated?"Showing the first 5,000 matching items.":page.entries.isEmpty()?"There are no supported files.":QString{};
+        if(!error.isEmpty())message_=error;
+        qInfo()<<"media: directory result"<<files.size()<<"entries; truncated"<<truncated<<"error"<<!error.isEmpty();
+        emit changed();
+    });
+    connect(&slideshow_,&QTimer::timeout,this,[this]{stepPhoto(1);});
+    connect(player_.get(),&QMediaPlayer::mediaStatusChanged,this,[this](QMediaPlayer::MediaStatus status){
+        if(status==QMediaPlayer::EndOfMedia && mediaOpen_ && preferences_.value("media/repeat").toBool()){player_->setPosition(0);player_->play();}
+        emit changed();
+    });
+    connect(&idle_,&QTimer::timeout,this,[this]{
+        const int minutes=preferences_.value("power/idleMinutes").toInt();
+        if(minutes && !mediaOpen_ && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
+    });
+    activity_.start();idle_.start(1000);applyPreferences();
+    if(!preferences_.error().isEmpty())message_=preferences_.error();
+    if(!profiles_.error().isEmpty())message_=profiles_.error();
     connect(video_.get(),&QVideoSink::videoFrameChanged,this,[this](const QVideoFrame& frame){emit mediaFrame(frame.toImage());});
     connect(player_.get(),&QMediaPlayer::errorOccurred,this,[this](QMediaPlayer::Error,const QString& error){message_=error;emit changed();});
 }
@@ -89,52 +128,50 @@ const QVector<Entry>& Shell::entries()const {return pages_.isEmpty()?categories_
 const QVector<Entry>& Shell::entriesAt(int depth)const {return depth==0?categories_[category_].entries:pages_.at(depth-1).entries;}
 int Shell::selectionAt(int depth)const {return depth==0?selections_[category_]:pages_.at(depth-1).selection;}
 void Shell::horizontal(int delta) {
+    touch();if(!delta)return;
     if(!message_.isEmpty())return;
     if(mediaOpen_) {
         if(categories_[category_].id=="photo") {
-            const auto& files=entries();
-            for(int i=selection()+delta;i>=0 && i<files.size();i+=delta)if(files[i].action==Action::File) {
-                const auto file=files[i];currentSelection()=i;openFile(file);emit changed();break;
-            }
+            stepPhoto(delta);
         } else player_->setPosition(std::max<qint64>(0,player_->position()+delta*10000));
         return;
     }
     if(!pages_.isEmpty())return;
-    category_=std::clamp(category_+delta,0,int(categories_.size())-1);emit changed();
+    library_.cancel();scanRequest_=0;loading_=false;status_.clear();
+    const int previous=category_;category_=std::clamp(category_+delta,0,int(categories_.size())-1);
+    if(previous!=category_)interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
 }
 void Shell::vertical(int delta) {
-    if(mediaOpen_ || !message_.isEmpty())return;
-    currentSelection()=std::clamp(selection()+delta,0,std::max(0,int(entries().size())-1));emit changed();
+    touch();
+    if(mediaOpen_){if(photoOpen() && !photo_.isNull()){photoRotation_=(photoRotation_+delta*90+360)%360;showPhoto();}return;}
+    if(!message_.isEmpty() || loading_)return;
+    const int previous=selection();currentSelection()=std::clamp(selection()+delta,0,std::max(0,int(entries().size())-1));
+    if(previous!=selection())interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
 }
 void Shell::activate() {
+    touch();
     if(!message_.isEmpty()){message_.clear();emit changed();return;}
     if(mediaOpen_){togglePlayback();return;}
-    if(entries().isEmpty())return;
+    if(entries().isEmpty() || loading_)return;
     const auto entry=entries()[selection()];
+    interactionAudio_.play(entry.action==Action::Unavailable?InteractionAudio::Cue::Error:InteractionAudio::Cue::Confirm);
     switch(entry.action) {
-    case Action::Theme: {
-        Page page;page.title="Theme Settings";
-        page.entries={item("theme","Theme","23n","qgl/icontex"),
-            item("colour","Color","23n","qgl/icontex",Action::Colours),
-            item("background","Background","23n","qgl/icontex"),
-            item("font","Font","23n","qgl/icontex")};
-        page.entries[0].detail="Sets for use of a preset combination of elements such as color, background or icons.";
-        pages_.push_back(std::move(page));
-        break;
-    }
-    case Action::Colours: {
-        Page page;page.title="Theme Settings";page.selection=std::clamp(theme(),0,5);
-        for(int i=0;i<6;++i)page.entries.push_back(item("colour"+QString::number(i),QStringList{"Original","Blue","Purple","Red","Green","Silver"}[i],"23n","qgl/icontex",Action::Colour,QString::number(i)));
-        pages_.push_back(std::move(page));
-        break;
-    }
-    case Action::Colour:settings_.setValue("appearance/colour",entry.value.toInt());settings_.sync();break;
+    case Action::SettingsPage:openSettings(entry.value);break;
+    case Action::SettingChoices:openChoices(entry.setting,entry.title);break;
+    case Action::SetSetting:
+        if(entry.setting=="appearance/background" && entry.option.toInt()==2 && wallpaper().isEmpty()){emit requestWallpaper();break;}
+        if(preferences_.setValue(entry.setting,entry.option) && !pages_.isEmpty())pages_.removeLast();break;
+    case Action::EditName:emit requestSystemName(preferences_.value("system/name").toString());break;
+    case Action::CreateUser:emit requestNewUser();break;
+    case Action::SelectUser:profiles_.select(entry.value);break;
+    case Action::Wallpaper:emit requestWallpaper();break;
     case Action::Information:
-        message_="System Information\n\nNative XMB recreation\n"+QSysInfo::prettyProductName()+"\n"+QSysInfo::currentCpuArchitecture()+"\n\nIndependent C++ application; PS3 services are being rebuilt.";break;
+        message_=entry.value.isEmpty()?"System Information\n\nNative XMB 0.2.0\n"+QSysInfo::prettyProductName()+"\n"+QSysInfo::currentCpuArchitecture():entry.value;break;
     case Action::Library: {
-        const auto path=settings_.value("library/"+categories_[category_].id).toString();
-        if(QDir(path).exists() && !path.isEmpty())openDirectory(path);else emit requestLibrary();break;
+        const auto path=preferences_.value("library/"+categories_[category_].id).toString();
+        if(!path.isEmpty())openDirectory(path);else emit requestLibrary();break;
     }
+    case Action::ChooseLibrary:emit requestLibrary();break;
     case Action::Folder:openDirectory(entry.value);break;
     case Action::File:openFile(entry);break;
     case Action::Unavailable:message_=entry.title+"\n\nThis feature is not available in the native recreation yet.";break;
@@ -142,40 +179,82 @@ void Shell::activate() {
     emit changed();
 }
 void Shell::back() {
+    touch();
+    if(!message_.isEmpty() || mediaOpen_ || !pages_.isEmpty())interactionAudio_.play(InteractionAudio::Cue::Back);
     if(!message_.isEmpty())message_.clear();
-    else if(mediaOpen_){player_->stop();player_->setSource({});mediaOpen_=false;emit mediaFrame({});}
-    else if(!pages_.isEmpty())pages_.removeLast();
+    else if(mediaOpen_){++photoRequest_;slideshow_.stop();photo_={};player_->stop();player_->setSource({});mediaOpen_=false;loading_=false;emit mediaFrame({});}
+    else if(!pages_.isEmpty()){library_.cancel();scanRequest_=0;loading_=false;status_.clear();pages_.removeLast();}
     emit changed();
 }
 void Shell::chooseLibrary(const QString& folder) {
     if(folder.isEmpty())return;
-    settings_.setValue("library/"+categories_[category_].id,folder);settings_.sync();openDirectory(folder);emit changed();
+    if(preferences_.setValue("library/"+categories_[category_].id,folder)){openDirectory(folder);emit changed();}
 }
 void Shell::openDirectory(const QString& path) {
-    QDir dir(path);
-    if(!dir.exists()){message_="This folder is no longer available.";return;}
-    Page page;page.title=dir.dirName();
+    if(pages_.size()>=32){message_="The maximum folder depth has been reached.";return;}
+    Page page;page.title=QFileInfo(path).fileName();page.directory=path;
     const QString kind=categories_[category_].id;
-    const QStringList extensions=kind=="photo"?QStringList{"png","jpg","jpeg","bmp","webp"}:kind=="music"?QStringList{"mp3","flac","wav","m4a","ogg"}:QStringList{"mp4","mkv","avi","mov","webm"};
-    const auto files=dir.entryInfoList(QDir::Dirs|QDir::Files|QDir::NoDotAndDotDot,QDir::DirsFirst|QDir::Name);
-    for(const auto& file:files) {
-        if(page.entries.size()>=2000)break;
-        if(!file.isDir() && !extensions.contains(file.suffix().toLower()))continue;
-        page.entries.push_back(item(file.absoluteFilePath(),file.fileName(),file.isDir()?"item_tex_plain_folder":kind=="photo"?"photo_tex_album_pic":kind=="music"?"music_tex_album_pic":"video_tex_album_default","explore_plugin_full",file.isDir()?Action::Folder:Action::File,file.absoluteFilePath()));
-    }
-    if(page.entries.isEmpty())message_="No supported files in this folder.";
     pages_.push_back(std::move(page));
+    loading_=true;status_="Reading media folder…";
+    scanRequest_=library_.scan(path,kind=="photo"?MediaKind::Photo:kind=="music"?MediaKind::Music:MediaKind::Video);
 }
 void Shell::openFile(const Entry& entry) {
     if(categories_[category_].id=="photo") {
-        QImageReader reader(entry.value);reader.setAutoTransform(true);
-        const auto size=reader.size();
-        if(size.width()>3840 || size.height()>2160)reader.setScaledSize(size.scaled(3840,2160,Qt::KeepAspectRatio));
-        const auto frame=reader.read();
-        if(frame.isNull()){message_="This image could not be opened.";return;}
-        emit mediaFrame(frame);
+        const auto request=++photoRequest_;loading_=true;photoRotation_=0;photo_={};emit mediaFrame({});
+        auto* watcher=new QFutureWatcher<QImage>(this);
+        connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,request]{
+            watcher->deleteLater();if(request!=photoRequest_ || !mediaOpen_)return;
+            loading_=false;photo_=watcher->result();
+            if(photo_.isNull()){slideshow_.stop();mediaOpen_=false;message_="This image could not be opened.";}else showPhoto();
+            emit changed();
+        });
+        watcher->setFuture(QtConcurrent::run([path=entry.value]{
+            QImageReader reader(path);reader.setAutoTransform(true);const auto size=reader.size();
+            if(!size.isValid() || size.width()>65536 || size.height()>65536)return QImage{};
+            if(size.width()>3840 || size.height()>2160)reader.setScaledSize(size.scaled(3840,2160,Qt::KeepAspectRatio));
+            return reader.read();
+        }));
     } else {emit mediaFrame({});player_->setSource(QUrl::fromLocalFile(entry.value));player_->play();}
     mediaOpen_=true;mediaTitle_=entry.title;
 }
-void Shell::togglePlayback(){if(!mediaOpen_ || categories_[category_].id=="photo")return;if(player_->playbackState()==QMediaPlayer::PlayingState)player_->pause();else if(!player_->source().isEmpty())player_->play();}
+bool Shell::photoOpen()const{return mediaOpen_ && categories_[category_].id=="photo";}
+void Shell::showPhoto(){if(!photo_.isNull())emit mediaFrame(photo_.transformed(QTransform().rotate(photoRotation_)));}
+void Shell::stepPhoto(int delta) {
+    if(loading_)return;
+    const auto& files=entries();
+    for(int i=selection()+delta;i>=0 && i<files.size();i+=delta)if(files[i].action==Action::File){const auto file=files[i];currentSelection()=i;openFile(file);emit changed();return;}
+    if(slideshow_.isActive() && preferences_.value("media/repeat").toBool()) {
+        for(int i=0;i<files.size();++i)if(files[i].action==Action::File){const auto file=files[i];currentSelection()=i;openFile(file);emit changed();return;}
+    }
+    slideshow_.stop();
+}
+void Shell::togglePlayback(){
+    touch();if(!mediaOpen_)return;
+    if(photoOpen()){if(slideshow_.isActive())slideshow_.stop();else slideshow_.start(preferences_.value("photo/interval").toInt());emit changed();return;}
+    if(player_->playbackState()==QMediaPlayer::PlayingState)player_->pause();else if(!player_->source().isEmpty())player_->play();
+}
+void Shell::touch(){activity_.restart();}
+void Shell::applyPreferences(){
+    audio_->setVolume(preferences_.value("audio/volume").toInt()/100.f);audio_->setMuted(preferences_.value("audio/muted").toBool());
+    interactionAudio_.setEnabled(preferences_.value("audio/keyTone").toBool() && !preferences_.value("audio/muted").toBool());
+    interactionAudio_.setVolume(preferences_.value("audio/volume").toInt()/100.f);
+    if(slideshow_.isActive())slideshow_.setInterval(preferences_.value("photo/interval").toInt());
+}
+qint64 Shell::mediaPosition()const{return player_->position();}
+qint64 Shell::mediaDuration()const{return player_->duration();}
+void Shell::refreshDirectory(){
+    if(pages_.isEmpty() || pages_.last().directory.isEmpty() || mediaOpen_)return;
+    loading_=true;status_="Reading media folder…";
+    const auto kind=categories_[category_].id;
+    scanRequest_=library_.scan(pages_.last().directory,kind=="photo"?MediaKind::Photo:kind=="music"?MediaKind::Music:MediaKind::Video);emit changed();
+}
+void Shell::rebuildUsers(){
+    auto& users=categories_[0].entries;
+    users={item("new-user","Create New User","item_tex_NewUser","explore_plugin_full",Action::CreateUser)};
+    for(const auto& profile:profiles_.profiles()) {
+        users.push_back(item(profile.id,profile.name,"user_tex_login","explore_plugin_full",Action::SelectUser,profile.id));
+        if(profile.id==profiles_.activeId())selections_[0]=int(users.size())-1;
+    }
+}
+void Shell::createUser(const QString& name){profiles_.create(name);}
 }

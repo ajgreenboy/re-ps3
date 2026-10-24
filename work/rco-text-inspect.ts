@@ -1,5 +1,6 @@
 import {inflateSync} from 'node:zlib';
 const file=Buffer.from(await Bun.file(process.argv[2]).arrayBuffer());
+const filter=new RegExp(process.argv[3]||'msg_(thema|console|update|game_setting|video_setting|music_setting)');
 const u32=(b:Buffer,p:number)=>b.readUInt32BE(p);
 const tables=Buffer.concat([file.subarray(0,0xa4),inflateSync(file.subarray(0xb0,0xb0+u32(file,0xa4)))]);
 const textRoot=u32(file,0x18),labels=u32(file,0x40);
@@ -18,7 +19,7 @@ for(let i=0;i<u32(tables,textRoot+16);i++) {
     for(let j=0;j<count;j++) {
       const entry=info+8+j*12,label=labels+u32(tables,entry),length=u32(tables,entry+4),offset=u32(tables,entry+8);
       const name=tables.toString('utf8',label,tables.indexOf(0,label));
-      if(/msg_(thema|console|update|game_setting|video_setting|music_setting)/.test(name)) {
+      if(filter.test(name)) {
         const text=Buffer.from(english.subarray(offset,offset+length));if(format===1)text.swap16();console.log(name,format===1?text.toString('utf16le'):text.toString('utf8'));
       }
     }

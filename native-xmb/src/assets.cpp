@@ -8,6 +8,7 @@
 #include <limits>
 #include <array>
 #include <QStringDecoder>
+#include <QTransform>
 
 namespace xmb {
 namespace {
@@ -72,6 +73,12 @@ Assets::Assets(QString flashRoot):root_(std::move(flashRoot)),font_("Segoe UI") 
     const QString path=QDir(root_).filePath("data/font/SCE-PS3-RD-R-LATIN.TTF");
     const int id=QFontDatabase::addApplicationFont(path);
     if(id>=0 && !QFontDatabase::applicationFontFamilies(id).isEmpty()) font_=QFontDatabase::applicationFontFamilies(id).first();
+    fonts_.push_back(font_);
+    for(const auto& name:QStringList{"SCE-PS3-SR-R-LATIN.TTF","SCE-PS3-VR-R-LATIN.TTF"}) {
+        const int extra=QFontDatabase::addApplicationFont(QDir(root_).filePath("data/font/"+name));
+        fonts_.push_back(extra>=0 && !QFontDatabase::applicationFontFamilies(extra).isEmpty()?QFontDatabase::applicationFontFamilies(extra).first():font_);
+    }
+    qInfo()<<"assets: font styles"<<fonts_;
     qInfo().noquote()<<"assets: local firmware"<<root_<<"font"<<font_;
 }
 Assets::Container Assets::readContainer(const QString& name) const {
@@ -152,6 +159,10 @@ const QImage& Assets::image(const QString& container,const QString& name) {
     try {
         if(container.startsWith("qgl/")) {
             image=decodeDds(qglFile(container.mid(4),name));
+            // QGL icon maps use the original bottom-up texture coordinates.
+            // Normalize them once for QPainter's top-down image convention.
+            // Other DDS resources and RCO/GIM artwork have separate layouts.
+            if(container=="qgl/icontex")image=image.transformed(QTransform::fromScale(1,-1));
             if(image.isNull())throw std::runtime_error("DDS decoder returned no pixels");
             ++decodedImages_;
             qInfo().noquote()<<"assets: decoded"<<key<<image.size();

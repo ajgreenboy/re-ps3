@@ -10,10 +10,11 @@
 #include <QFile>
 #include <QLoggingCategory>
 #include <QPainter>
+#include <QImageReader>
 
 int main(int argc,char** argv) {
     QSurfaceFormat format;format.setVersion(3,3);format.setProfile(QSurfaceFormat::CoreProfile);format.setSwapInterval(1);format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);
-    QApplication app(argc,argv);app.setApplicationName("re-ps3-native");app.setApplicationVersion("0.1.0");
+    QApplication app(argc,argv);app.setApplicationName("re-ps3-native");app.setApplicationVersion("0.2.0");QImageReader::setAllocationLimit(128);
     QCommandLineParser parser;parser.setApplicationDescription("Native C++ XMB recreation");parser.addHelpOption();parser.addVersionOption();
     parser.addOption({"dev-flash","Local dev_flash asset directory","directory"});
     parser.addOption({"data-dir","Writable native application data directory","directory"});
@@ -49,6 +50,8 @@ int main(int argc,char** argv) {
     QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");window.setCentralWidget(new xmb::View(shell,assets,&window));window.resize(960,540);
     if(windowSettings.contains("window/geometry"))window.restoreGeometry(windowSettings.value("window/geometry").toByteArray());
     QObject::connect(&app,&QApplication::aboutToQuit,&window,[&]{windowSettings.setValue("window/geometry",window.saveGeometry());windowSettings.sync();});
-    window.show();
+    QObject::connect(&shell,&xmb::Shell::requestQuit,&app,&QApplication::quit);
+    QObject::connect(&shell,&xmb::Shell::changed,&window,[&]{if(shell.fullscreen()!=window.isFullScreen()){if(shell.fullscreen())window.showFullScreen();else window.showNormal();}});
+    if(shell.fullscreen())window.showFullScreen();else window.show();
     return app.exec();
 }
