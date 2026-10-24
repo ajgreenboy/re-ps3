@@ -6,6 +6,7 @@
 #include "rsx_program.h"
 #include "shell.h"
 #include <array>
+#include <functional>
 #include <QDateTime>
 #include <QOpenGLWidget>
 #include <QOpenGLFunctions_3_3_Core>
@@ -77,6 +78,17 @@ private:
     bool forceOriginal_=false;
     QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     void drawScene(QPainter& painter);
+    // PS3 on-screen keyboard (reference frame 64 s): 10x4 character grid, two function rows, prediction panel.
+    struct Osk { bool open=false,shift=false,symbols=false; QString title,text; int row=0,column=0,cursor=0; std::function<void(QString)> done; };
+    Osk osk_;
+    void openOsk(const QString& title,const QString& initial,std::function<void(QString)> done);
+    void drawOsk(QPainter& p);
+    void oskMove(int dx,int dy);
+    void oskPress();                 // the focused key
+    void oskInsert(const QString& value);
+    void oskBackspace();
+    void oskClose(bool accept);
+    QString oskCharacter(int row,int column) const;
     void drawImage(QPainter& painter,const QString& container,const QString& texture,const QRectF& rect,qreal opacity=1);
     void drawCategory(QPainter& painter,const Category& category,const QRectF& rect);
 };

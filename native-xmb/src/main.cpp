@@ -25,6 +25,8 @@ int main(int argc,char** argv) {
     parser.addOption({"data-dir","Writable native application data directory","directory"});
     parser.addOption({"inventory","Write the local XMBML definition inventory and exit","json-file"});
     parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
+    parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
+    parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
     parser.addOption({"month-sheet","Write a local contact sheet of the qgl/lines month_bg day/night textures and exit","image-file"});
     parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
     parser.addOption({"dump-cg","Translate the original qgl/lines Cg programs to GLSL into a local folder and exit","directory"});
@@ -42,6 +44,29 @@ int main(int argc,char** argv) {
         return inventory.value("errorCount").toInt()?1:0;
     }
     xmb::Assets assets(parser.value("dev-flash"));
+    if(parser.isSet("export-image")) { // local analysis: container:name[,container:name...] -> <dir>/<name>.png
+        const auto spec=parser.value("export-image").split('@');
+        if(spec.size()!=2){qCritical()<<"use --export-image container:name,...@directory";return 2;}
+        QDir().mkpath(spec[1]);int failures=0;
+        for(const auto& item:spec[0].split(',')) {
+            const auto parts=item.split(':');if(parts.size()!=2){++failures;continue;}
+            const auto& image=assets.image(parts[0],parts[1]);
+            if(image.isNull() || !image.save(QDir(spec[1]).filePath(parts[1]+".png"))){qWarning()<<"cannot export"<<item;++failures;}
+            else qInfo()<<"exported"<<item<<image.size();
+        }
+        return failures?1:0;
+    }
+    if(parser.isSet("rco-images")) { // local analysis: every image name in every vsh/resource RCO
+        QFile out(parser.value("rco-images"));
+        if(!out.open(QIODevice::WriteOnly|QIODevice::Text)){qCritical()<<out.errorString();return 2;}
+        QTextStream stream(&out);
+        for(const auto& file:QDir(QDir(parser.value("dev-flash")).filePath("vsh/resource")).entryInfoList({"*.rco"},QDir::Files,QDir::Name)) {
+            QStringList names;
+            try { names=assets.imageNames(file.completeBaseName()); } catch(const std::exception& e) { stream<<file.completeBaseName()<<": "<<e.what()<<"\n";continue; }
+            names.sort();stream<<file.completeBaseName()<<": "<<names.join(' ')<<"\n";
+        }
+        return 0;
+    }
     if(parser.isSet("month-sheet")) { // local analysis only: firmware-derived pixels, keep out of Git
         constexpr int scale=6;QImage sheet;QPainter painter;
         for(int m=1;m<=12;++m)for(int kind=0;kind<2;++kind) {

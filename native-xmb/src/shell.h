@@ -41,6 +41,8 @@ public:
     int theme() const { return preferences_.value("appearance/colour").toInt(); }
     QString fontFamily() const;
     QString valueText(const Entry& entry) const;
+    // Small line under a row (reference: the signed-in user's name under user-scoped items like Trophy Collection).
+    QString subtitleText(const Entry& entry) const;
     QString clockText() const;
     int backgroundMode() const { return preferences_.value("appearance/background").toInt(); }
     QString wallpaper() const { return preferences_.value("appearance/wallpaper").toString(); }

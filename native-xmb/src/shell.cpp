@@ -257,4 +257,8 @@ void Shell::rebuildUsers(){
     }
 }
 void Shell::createUser(const QString& name){profiles_.create(name);}
+QString Shell::subtitleText(const Entry& entry) const {
+    // User-scoped data carries the active user's name, as in the reference (Trophy Collection, PS3 saved data).
+    return entry.id=="trophy" || entry.id=="ps3"?profiles_.activeName():QString();
+}
 }

@@ -21,6 +21,8 @@ public:
     int failedImages() const { return images_.size()-decodedImages_; }
     // Uncompressed or RLE true-colour/grey TGA (qgl/lines LUTs and particle textures), top row first; null on error.
     static QImage decodeTga(const QByteArray& file);
+    // Image names in an RCO container (local analysis).
+    QStringList imageNames(const QString& container) const { return readContainer(container).entries.keys(); }
 private:
     struct Container { QByteArray file, tables; quint32 labels=0, imageData=0; QHash<QString,quint32> entries; };
     QString root_, font_;

@@ -41,11 +41,8 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){mediaFrame_=frame;update();});
     connect(&shell_,&Shell::requestLibrary,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,"Choose media folder");if(!path.isEmpty())shell_.chooseLibrary(path);});
     connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");if(!file.isEmpty())shell_.chooseWallpaper(file);});
-    connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){
-        bool ok=false;const auto name=QInputDialog::getText(this,"System Name","Name",QLineEdit::Normal,value,&ok);
-        if(ok)shell_.setSystemName(name);
-    });
-    connect(&shell_,&Shell::requestNewUser,this,[this]{bool ok=false;const auto name=QInputDialog::getText(this,"Create New User","Name",QLineEdit::Normal,{},&ok);if(ok)shell_.createUser(name);});
+    connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){openOsk("System Name",value,[this](const QString& name){shell_.setSystemName(name);});});
+    connect(&shell_,&Shell::requestNewUser,this,[this]{openOsk("Create New User",{},[this](const QString& name){shell_.createUser(name);});});
     loadWallpaper();
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
     connect(&timer_,&QTimer::timeout,this,[this]{pollController();update();});timer_.start();
@@ -517,9 +514,9 @@ void View::drawScene(QPainter& p) {
         for(int i=0;i<categories.size();++i) {
             const auto& cat=categories[i];const double distance=i-categoryPosition_,x=560+distance*202-childAmount*250;
             const double focus=std::max(0.,1.-std::abs(distance));const double size=82+focus*10; // reference: ~86 px, focus barely larger
-            p.save();p.setOpacity(i==shell_.category()?1.:1.-childAmount);
+            p.save();p.setOpacity((i==shell_.category()?1.:1.-childAmount)*(shell_.message().isEmpty()?1.:.18));
             drawCategory(p,cat,{x-size/2,290-size/2,size,size});
-            if(i==shell_.category()){p.setOpacity(1.-childAmount);text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
+            if(i==shell_.category()){p.setOpacity((1.-childAmount)*(shell_.message().isEmpty()?1.:.18));text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
         }
         const auto isChoiceColumn=[](const Column& column) {
@@ -594,7 +591,9 @@ void View::drawScene(QPainter& p) {
                 if(focus>.5)glow(labelRect,label,27,(focus-.5)*2); // the focused label carries a soft white glow
                 text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
                 if(!value.isEmpty() && panelAmount<.5)text({1300+offset,y-25,440,50},value,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
-                if(focus>.95 && !entry.detail.isEmpty())text({labelX,y+24,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
+                const auto subtitle=shell_.subtitleText(entry);
+                if(!subtitle.isEmpty())text({labelX,y+20,1100,30},subtitle,17,QColor(230,230,230,int(235*alpha)),Qt::AlignLeft|Qt::AlignTop);
+                else if(focus>.95 && !entry.detail.isEmpty())text({labelX,y+24,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
                 p.restore();
             }
             if(level>0 && columnAlpha>0 && panelAmount<.999) {
@@ -602,19 +601,43 @@ void View::drawScene(QPainter& p) {
             }
         }
         };
-        if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*202,false);
-        drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*202,true);
+        if(shell_.message().isEmpty()) { // behind a message dialog the item columns give way (reference 14.4 s)
+            if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*202,false);
+            drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*202,true);
+        }
         if(!shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
-        text({1240,103,550,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        // Info bar (system_plugin tex_infobar: a translucent white band with a bright bottom edge) framing the clock in the
+        // top-right corner; the clock's centre sits at y~104 as in the reference video.
+        p.drawImage(QRectF(1490,60,430,88),assets_.image("system_plugin","tex_infobar")); // stretched, as the 1x125 strip is meant
+        text({1240,82,550,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
     }
     if(!shell_.message().isEmpty()) {
-        p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,150));
-        QLinearGradient gradient(0,370,0,760);gradient.setColorAt(0,QColor(65,65,67,245));gradient.setColorAt(1,QColor(23,23,25,245));
-        p.fillRect(QRectF(0,365,1920,400),gradient);p.setPen(QColor(255,255,255,80));p.drawLine(0,365,1920,365);p.drawLine(0,765,1920,765);
-        text({340,390,1240,320},shell_.message(),28,Qt::white,Qt::AlignLeft|Qt::AlignVCenter|Qt::TextWordWrap);
+        // PS3 dialog (reference frames 14.4 s / 20.6 s): the XMB dims, two thin full-width rules at y~200 and y~880
+        // frame the dialog, the text is centred in the upper part, and the button hint sits centred under the lower rule.
+        p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,135));
+        // Rules: system_plugin tex_msgdialog_bar, brightest at the centre and fading to both ends.
+        for(const double y:{199.,879.})p.drawImage(QRectF(0,y,1920,2),assets_.image("system_plugin","tex_msgdialog_bar"));
+        auto lines=shell_.message().split('\n');
+        const QString heading=lines.size()>2 && lines[1].isEmpty()?lines.takeFirst():QString();
+        if(!heading.isEmpty())lines.removeFirst();
+        if(!heading.isEmpty())text({260,250,1400,50},heading,25,Qt::white,Qt::AlignHCenter|Qt::AlignVCenter);
+        text({260,heading.isEmpty()?260.:320.,1400,540},lines.join('\n'),22,QColor(240,240,240),Qt::AlignHCenter|Qt::AlignTop|Qt::TextWordWrap);
+        drawImage(p,"system_plugin","tex_cross",{902,895,24,24});text({936,887,160,40},"OK",21,QColor(235,235,235));
     }
+    if(osk_.open)drawOsk(p);
 }
 void View::keyPressEvent(QKeyEvent* e) {
+    if(osk_.open) { // the keyboard owns input: arrows move, Return presses the key (Ctrl+Return accepts), Esc cancels
+        switch(e->key()) {
+        case Qt::Key_Left:oskMove(-1,0);break;case Qt::Key_Right:oskMove(1,0);break;
+        case Qt::Key_Up:oskMove(0,-1);break;case Qt::Key_Down:oskMove(0,1);break;
+        case Qt::Key_Return:case Qt::Key_Enter:if(e->modifiers()&Qt::ControlModifier)oskClose(true);else oskPress();break;
+        case Qt::Key_Escape:oskClose(false);break;
+        case Qt::Key_Backspace:oskBackspace();break;
+        default:if(!e->text().isEmpty() && e->text().at(0).isPrint())oskInsert(e->text());break;
+        }
+        return;
+    }
     switch(e->key()) {
     case Qt::Key_Left:shell_.horizontal(-1);break;case Qt::Key_Right:shell_.horizontal(1);break;
     case Qt::Key_Up:shell_.vertical(-1);break;case Qt::Key_Down:shell_.vertical(1);break;
@@ -635,6 +658,15 @@ void View::pollController() {
     const auto buttons=state.Gamepad.wButtons;const auto edge=quint16(buttons&~buttons_);const auto now=clock_.elapsed();
     const bool repeat=now>=repeatAt_;
     const auto movement=quint16(edge|(repeat?buttons:0));
+    if(osk_.open) { // ✕ press, ○ cancel, □ backspace, △ space, START accept (the PS3 keyboard's own bindings)
+        if(movement&XINPUT_GAMEPAD_DPAD_LEFT)oskMove(-1,0);if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)oskMove(1,0);
+        if(movement&XINPUT_GAMEPAD_DPAD_UP)oskMove(0,-1);if(movement&XINPUT_GAMEPAD_DPAD_DOWN)oskMove(0,1);
+        if(edge&XINPUT_GAMEPAD_A)oskPress();if(edge&XINPUT_GAMEPAD_B)oskClose(false);
+        if(edge&XINPUT_GAMEPAD_X)oskBackspace();if(edge&XINPUT_GAMEPAD_Y)oskInsert(" ");
+        if(edge&XINPUT_GAMEPAD_START)oskClose(true);
+        if(edge&0x000f)repeatAt_=now+300;else if(movement&0x000f)repeatAt_=now+100;
+        buttons_=buttons;return;
+    }
     if(movement&XINPUT_GAMEPAD_DPAD_LEFT)shell_.horizontal(-1);
     if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)shell_.horizontal(1);
     if(movement&XINPUT_GAMEPAD_DPAD_UP)shell_.vertical(-1);
@@ -643,5 +675,113 @@ void View::pollController() {
     if(edge&0x000f)repeatAt_=now+300;else if(movement&0x000f)repeatAt_=now+100;
     buttons_=buttons;
 #endif
+}
+// ---- On-screen keyboard -----------------------------------------------------------------------------------------
+// Geometry from the reference (RPCS3 video, 64 s), at 1080p: window x 493-1427, y 290-788; title bar 290-328;
+// text field 333-389; a 10x4 character grid from x 500 with a 72 px pitch; two function rows; prediction panel at right.
+namespace {
+enum class OskAction { None, Symbols, Shift, Backspace, Space, Left, Right, Enter };
+struct OskKey { const char* label; int column,span; OskAction action; QColor top,bottom; const char* button; };
+const QColor oskYellow1(214,209,150),oskYellow2(176,170,110),oskTeal1(176,206,214),oskTeal2(132,166,176),oskBlue1(140,176,214),oskBlue2(92,128,170);
+const OskKey oskFunctionRows[2][8]={
+    {{"*%#",0,1,OskAction::Symbols,oskYellow1,oskYellow2,""},{"",1,1,OskAction::None,oskYellow1,oskYellow2,""},
+     {"a/à",2,1,OskAction::None,oskTeal1,oskTeal2,"L2"},{"a/A",3,1,OskAction::Shift,oskTeal1,oskTeal2,"R2"},
+     {"Backspace",4,2,OskAction::Backspace,oskTeal1,oskTeal2,"□"},{"Space",6,2,OskAction::Space,oskTeal1,oskTeal2,"△"},
+     {"",8,2,OskAction::None,oskTeal1,oskTeal2,""},{nullptr,0,0,OskAction::None,{},{},""}},
+    {{"▲",0,1,OskAction::None,oskBlue1,oskBlue2,""},{"▼",1,1,OskAction::None,oskBlue1,oskBlue2,""},
+     {"◀",2,1,OskAction::Left,oskBlue1,oskBlue2,"L1"},{"▶",3,1,OskAction::Right,oskBlue1,oskBlue2,"R1"},
+     {"⊞",4,1,OskAction::None,oskBlue1,oskBlue2,""},{"",5,1,OskAction::None,oskTeal1,oskTeal2,""},
+     {"Input Mode",6,2,OskAction::None,oskTeal1,oskTeal2,"SELECT"},{"Enter",8,2,OskAction::Enter,oskTeal1,oskTeal2,"START"}}};
+const OskKey* oskFunctionKey(int row,int column) {
+    for(const auto& key:oskFunctionRows[row-4])if(key.label && column>=key.column && column<key.column+key.span)return &key;
+    return nullptr;
+}
+constexpr double oskRowY[6]={434,488,542,596,650,704};
+}
+QString View::oskCharacter(int row,int column) const {
+    static const char* lower[4]={"1234567890","qwertyuiop","asdfghjkl'","zxcvbnm,.?"};
+    static const char* upper[4]={"1234567890","QWERTYUIOP","ASDFGHJKL\"","ZXCVBNM;:!"};
+    static const char* symbols[4]={"!@#$%^&*()","-_=+[]{}\|","/<>`~;:\"'&","@#%*+-=_.,"};
+    const char* const* set=osk_.symbols?symbols:osk_.shift?upper:lower;
+    return QString(QChar(set[row][column]));
+}
+void View::openOsk(const QString& title,const QString& initial,std::function<void(QString)> done) {
+    osk_=Osk{};osk_.open=true;osk_.title=title;osk_.text=initial;osk_.cursor=int(initial.size());osk_.done=std::move(done);
+    update();
+}
+void View::oskClose(bool accept) {
+    auto done=std::move(osk_.done);const auto value=osk_.text.trimmed();osk_=Osk{};
+    if(accept && done && !value.isEmpty())done(value);
+    update();
+}
+void View::oskInsert(const QString& value){osk_.text.insert(osk_.cursor,value);osk_.cursor+=int(value.size());if(osk_.text.size()>32){osk_.text.truncate(32);osk_.cursor=std::min(osk_.cursor,32);}update();}
+void View::oskBackspace(){if(osk_.cursor>0){osk_.text.remove(osk_.cursor-1,1);--osk_.cursor;}update();}
+void View::oskMove(int dx,int dy) {
+    osk_.row=(osk_.row+dy+6)%6;
+    if(dx!=0) {
+        if(osk_.row>=4) { // jump over multi-column keys
+            const auto* key=oskFunctionKey(osk_.row,osk_.column);
+            osk_.column=dx>0?(key?key->column+key->span:osk_.column+1):(key?key->column-1:osk_.column-1);
+        } else osk_.column+=dx;
+        osk_.column=(osk_.column+10)%10;
+    }
+    if(osk_.row>=4)if(const auto* key=oskFunctionKey(osk_.row,osk_.column))osk_.column=key->column;
+    update();
+}
+void View::oskPress() {
+    if(osk_.row<4){oskInsert(oskCharacter(osk_.row,osk_.column));if(osk_.shift && !osk_.symbols)osk_.shift=false;return;}
+    const auto* key=oskFunctionKey(osk_.row,osk_.column);if(!key)return;
+    switch(key->action) {
+    case OskAction::Symbols:osk_.symbols=!osk_.symbols;break;
+    case OskAction::Shift:osk_.shift=!osk_.shift;break;
+    case OskAction::Backspace:oskBackspace();break;
+    case OskAction::Space:oskInsert(" ");break;
+    case OskAction::Left:osk_.cursor=std::max(0,osk_.cursor-1);break;
+    case OskAction::Right:osk_.cursor=std::min(int(osk_.text.size()),osk_.cursor+1);break;
+    case OskAction::Enter:oskClose(true);return;
+    case OskAction::None:break;
+    }
+    update();
+}
+void View::drawOsk(QPainter& p) {
+    const auto label=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignCenter,bool bold=false) {
+        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setBold(bold);f.setHintingPreference(QFont::PreferVerticalHinting);p.setFont(f);p.setPen(colour);p.drawText(r,flags,value);
+    };
+    const auto key=[&](const QRectF& r,QColor top,QColor bottom,bool focused) {
+        QLinearGradient g(r.topLeft(),r.bottomLeft());g.setColorAt(0,focused?QColor(255,255,255):top);g.setColorAt(1,focused?QColor(225,232,236):bottom);
+        p.setPen(QPen(QColor(60,60,60,160),1));p.setBrush(g);p.drawRoundedRect(r,5,5);
+        if(focused){p.setPen(QPen(QColor(255,255,255,170),3));p.setBrush(Qt::NoBrush);p.drawRoundedRect(r.adjusted(-3,-3,3,3),7,7);}
+    };
+    p.save();
+    p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,120)); // the XMB dims behind the keyboard
+    const QRectF window(493,290,934,498);
+    p.setPen(QPen(QColor(30,30,30),1.5));p.setBrush(QColor(78,78,80));p.drawRect(window);
+    QLinearGradient title(0,290,0,328);title.setColorAt(0,QColor(222,222,222));title.setColorAt(1,QColor(178,178,178));
+    p.fillRect(QRectF(494,291,932,37),title);
+    label({506,291,40,37},QString(QChar(0x270e)),22,QColor(40,40,40));
+    label({540,291,800,37},osk_.title,20,QColor(30,30,30),Qt::AlignLeft|Qt::AlignVCenter);
+    p.fillRect(QRectF(494,330,932,60),QColor(52,52,54));
+    QFont fieldFont(shell_.fontFamily());fieldFont.setPixelSize(26);p.setFont(fieldFont);
+    const double before=QFontMetricsF(fieldFont).horizontalAdvance(osk_.text.left(osk_.cursor));
+    label({512,330,900,60},osk_.text,26,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+    if((clock_.elapsed()/500)%2==0)p.fillRect(QRectF(512+before,342,2,36),QColor(140,220,120)); // blinking cursor
+    for(int row=0;row<4;++row)for(int column=0;column<10;++column) {
+        const QRectF r(500+column*72,oskRowY[row]-23,66,46);
+        key(r,QColor(236,236,236),QColor(190,190,190),osk_.row==row && osk_.column==column);
+        label(r,oskCharacter(row,column),22,QColor(40,40,40));
+    }
+    for(int row=4;row<6;++row)for(const auto& k:oskFunctionRows[row-4]) {
+        if(!k.label)continue;
+        const QRectF r(500+k.column*72,oskRowY[row]-23,k.span*72-6,46);
+        key(r,k.top,k.bottom,osk_.row==row && osk_.column==k.column);
+        const bool highlighted=(k.action==OskAction::Shift && osk_.shift) || (k.action==OskAction::Symbols && osk_.symbols);
+        if(*k.button){label({r.left()+4,r.top()+1,r.width()-8,14},k.button,11,QColor(30,30,30,200),Qt::AlignLeft|Qt::AlignTop);}
+        label(r.adjusted(0,*k.button?8:0,0,0),k.label,k.span>1?19:20,highlighted?QColor(10,90,160):QColor(30,40,50),Qt::AlignCenter,highlighted);
+    }
+    p.fillRect(QRectF(1218,404,197,230),QColor(58,58,60)); // prediction candidates
+    p.fillRect(QRectF(1218,637,197,33),QColor(96,104,112));
+    label({1226,637,120,33},"Prediction",15,QColor(230,230,230),Qt::AlignLeft|Qt::AlignVCenter);
+    p.fillRect(QRectF(494,730,932,57),QColor(64,64,66));
+    p.restore();
 }
 }
