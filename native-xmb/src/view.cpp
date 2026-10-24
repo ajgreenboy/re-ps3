@@ -98,7 +98,12 @@ float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 // a swell crosses the screen left to right in ~8 s once every ~22.5 s and pushes the crest to ~0.62.
 float swell(float x,float s){return exp(-pow((x-(-.9+2.8*fract(s/22.5)))/.42,2.0));}
 float crestFromTop(float x,float s){return .42+.20*swell(x,s)-.05*swell(x+.55,s)+.018*sin(x*4.0-s*.12)+.012*sin(x*7.0+s*.07);}
-float wave(float x,float s){return 1.0-crestFromTop(x,s);} // uv.y runs bottom to top
+uniform bool originalRibbon;     // the firmware ribbon (ribbon.cpp) is drawn: skip ours, particles follow its crest
+uniform float ribbonCrest[33];   // its crest, fraction from the top, left to right
+float wave(float x,float s){ // uv.y runs bottom to top
+    if(originalRibbon){float k=clamp(x,0.,1.)*32.;int i=min(int(k),31);return 1.0-mix(ribbonCrest[i],ribbonCrest[i+1],k-float(i));}
+    return 1.0-crestFromTop(x,s);
+}
 void main(){
     vec2 p=uv;float t=seconds*.12;float fromTop=1.0-p.y;
     // Day: brightest at the top, darkest about halfway down, slightly lighter at the bottom.
@@ -110,7 +115,7 @@ void main(){
     c+=tint*.045*dayLight*exp(-length((p-vec2(.42,.28))*vec2(.7,1.6))*2.0);
     if(overlay)c=vec3(0.);
     float ribbonLight=mix(.5,1.0,dayLight);
-    for(int i=0;i<7;++i){
+    if(!originalRibbon)for(int i=0;i<7;++i){
         float k=float(i);float line=wave(p.x,seconds)+.019*sin(p.x*4.8+t+k*.50)+k*.0035;
         float d=p.y-line;float w=.010+k*.0016;
         float ribbon=exp(-d*d/(w*w))*.075+exp(-d*d/.008)*.009;
@@ -131,6 +136,7 @@ void main(){
     if(!glReady_)qCritical().noquote()<<background_.log();
     glGenVertexArrays(1,&vao_);
     initOriginalBackground();
+    ribbon_.init(*this,assets_);
     if(!monthImage_.isNull()) {
         monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
         monthTexture_->setMinificationFilter(QOpenGLTexture::Linear);monthTexture_->setMagnificationFilter(QOpenGLTexture::Linear);
@@ -151,15 +157,20 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     static const QVector3D colours[]={{.55f,.39f,.13f},{.12f,.36f,.68f},{.40f,.20f,.60f},{.62f,.17f,.18f},{.16f,.43f,.32f},{.48f,.50f,.54f}};
     // Original colour theme: the firmware's own background shader and monthly palettes.
     const bool original=originalReady_ && (forceOriginal_ || (shell_.theme()==0 && shell_.backgroundMode()!=2));
+    const bool originalRibbon=original && ribbon_.ready();
     if(original) {
+        GLint target=0;glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
         const QDateTime when=backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime();
         if(when.date().month()!=texturesMonth_)loadMonthTextures(when.date().month());
-        renderOriginalBackground(backgroundTime(when),pixelWidth,pixelHeight);
+        const BackgroundTime time=backgroundTime(when);
+        renderOriginalBackground(time,pixelWidth,pixelHeight);
+        if(originalRibbon)ribbon_.render(*this,seconds,time.nightDayBlend,pixelWidth,pixelHeight,GLuint(target));
     }
     glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);
     if(original){glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE);} else glDisable(GL_BLEND);
     glViewport(0,0,pixelWidth,pixelHeight);
-    background_.bind();background_.setUniformValue("overlay",original);background_.setUniformValue("seconds",seconds);background_.setUniformValue("dayLight",light);
+    background_.bind();background_.setUniformValue("overlay",original);background_.setUniformValue("originalRibbon",originalRibbon);
+    if(originalRibbon)background_.setUniformValueArray("ribbonCrest",ribbon_.crest().data(),int(ribbon_.crest().size()),1);background_.setUniformValue("seconds",seconds);background_.setUniformValue("dayLight",light);
     background_.setUniformValue("tint",colours[std::clamp(shell_.theme(),0,5)]);
     background_.setUniformValue("resolution",QVector2D(float(pixelWidth),float(pixelHeight)));
     background_.setUniformValue("monthPalette",0);background_.setUniformValue("useMonthPalette",shell_.theme()==0 && bool(monthTexture_));
@@ -290,6 +301,11 @@ bool View::measureReference(const QString& path) {
             double best=-1;int by=0;
             for(int y=std::max(10,int(H*.25));y<std::min(H-10,int(H*.9));++y){double s=0;for(int j=-10;j<=10;++j)s+=prof[y+j];if(s>best){best=s;by=y;}}
             crest<<QString::number(double(by)/H,'f',3);}
+        if(ribbon_.ready()) { // the firmware ribbon is translucent: report its geometric centre line instead
+            crest.clear();
+            for(int k=0;k<8;++k){const double x=(2*k+1)/16.*32;const int j=std::min(int(x),31);
+                crest<<QString::number(ribbon_.crest()[j]+(ribbon_.crest()[j+1]-ribbon_.crest()[j])*(x-j),'f',3);}
+        }
         out<<QString("%1s ").arg(i,2)<<crest.join(' ')<<"\n";
     }
     out<<"# ease-out: settle to 10% = time constant * ln(10)\n";
