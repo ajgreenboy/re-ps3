@@ -28,6 +28,9 @@ are fine: behaviour and appearance should match the PS3, the internals do not ha
 3. `native-xmb/README.md`: build, run and architecture boundaries.
 4. `native-xmb/audit/README.md`, `FUNCTIONS.md`, `FEATURE-CATALOG.md`, `VISUAL-BEHAVIOR.md`: the
    per-feature coverage map.
+   `native-xmb/audit/VIDEO-REFERENCES.md` holds values measured from public 60 fps XMB footage: the
+   day/night background colour curve, ribbon swell speed and height, layout fractions and navigation ease-out
+   timing.
 5. Only if you need the firmware track: root `HANDOFF.md`, newest section 3a first, then `docs/README.md`.
 
 ## 3. Build and run
