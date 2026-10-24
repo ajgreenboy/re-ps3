@@ -13,6 +13,10 @@ class View final:public QOpenGLWidget,protected QOpenGLFunctions_3_3_Core {
 public:
     View(Shell& shell,Assets& assets,QWidget* parent=nullptr);
     ~View() override;
+    static double dayLight(double hour);
+    // Renders the background offscreen at reference times and writes the same statistics measured from the
+    // reference videos (band colours by clock time, ribbon crest over 40 s). Returns false on GL failure.
+    bool measureReference(const QString& path);
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -48,6 +52,7 @@ private:
     quint16 buttons_=0;
     qint64 repeatAt_=0;
     void pollController();
+    void renderBackground(float seconds,float light,int pixelWidth,int pixelHeight);
     void drawScene(QPainter& painter);
     void drawImage(QPainter& painter,const QString& container,const QString& texture,const QRectF& rect,qreal opacity=1);
     void drawCategory(QPainter& painter,const Category& category,const QRectF& rect);

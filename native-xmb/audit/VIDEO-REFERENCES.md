@@ -70,7 +70,7 @@ spaced columns, left → right:
 - A swell enters at the left and moves right. The peak reaches column 1 at about 7 s, column 4 at about
   12–13 s and column 8 at about 15–16 s, so it crosses the screen in **about 8 s**.
 - The next swell follows about **22 s** later (column 1 at about 29 s, column 8 at about 38 s): a cycle of
-  roughly 25–30 s.
+  about **22–23 s**.
 - The crest stays between **≈0.26 and ≈0.65** of screen height and rests near 0.40–0.45 between swells.
 - The motion is slow and continuous with no visible frame-to-frame jitter at 1 s sampling. Finer
   timing (sub-second shimmer and the ribbon's internal lines) still needs 60 fps sampling.
@@ -128,3 +128,34 @@ Findings:
 - **Caveat.** Pixel-difference energy is a proxy for speed. It also depends on content contrast, so treat
   these numbers as bounds for fitting curves, not as exact curve parameters. Confirm against the user's own
   60 fps recording (`out/native-reference/timing-*`) before finalising.
+
+## Native renderer against these references (October 24)
+
+Applied in `native-xmb/src/view.cpp`:
+
+- **Day/night curve.** Keyframed clock brightness (`View::dayLight`). By day the gradient is brightest at the top;
+  by night the upper half goes black and colour stays low.
+- **Ribbon swell.** A Gaussian swell crosses in about 8 s and repeats every 22.5 s, on a crest resting near 0.42.
+- **Ease-out rates.** Separate time constants: categories 120 ms, items 85 ms, entry/depth 110 ms.
+
+Check with `re-ps3-native.exe --dev-flash <dir> --measure-reference <file>`. It renders the background offscreen at
+1920×1080, writes the same band and crest statistics, and saves `video-reference-{midday,night,dusk}.png`.
+
+| Measure | Reference | Native | Status |
+|---|---|---|---|
+| Top-band brightness by clock time | keyframes above | same keyframes (by construction) | matches |
+| Night bottom bands, relative to the midday top | ≈0.11–0.27 (mean ≈0.17) | ≈0.11–0.20 | matches |
+| Dawn 04:30 / dusk 19:30, top → bottom | 0.38→0.52 / 0.24→0.45 | 0.38→0.48 / 0.24→0.40 | close |
+| Swell crossing time | ≈8 s | ≈7 s | close |
+| Swell repeat | ≈22–23 s | ≈23 s | matches |
+| Swell crest / resting crest | 0.60–0.645 / 0.40–0.45 | 0.59–0.62 / 0.37–0.44 | close |
+| Settle to 10%: category / item / entry | 183–283 / 150–266 / ≈270–330 ms | 276 / 195 / 253 ms | within range |
+
+Still different, and not fixed by constant fitting:
+
+- **Ribbon shape.** The reference is a wide, translucent ribbon made of several soft layers. The native ribbon is one
+  thin bright line plus particles. This needs the original lines material (`qgl/lines`) ported, not retuning.
+- **Ribbon brightness.** By day the native ribbon raises its bands to ≈1.0–1.3× the top band; the reference raises
+  them only slightly (≈0.7× the top band). It follows from the ribbon shape above.
+- **Theme hues.** The measured video uses a lavender month palette; the comparison ran with the user's persisted
+  Green theme. Only brightness ratios are compared, not hue.

@@ -11,6 +11,12 @@
 #include <QImageReader>
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
+#include <QOpenGLFramebufferObject>
+#include <QTextStream>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QTime>
 #include <cmath>
 #include <algorithm>
 #ifdef Q_OS_WIN
@@ -85,24 +91,34 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(
     static const char* fragment=R"(#version 330 core
 in vec2 uv;out vec4 colour;uniform float seconds;uniform vec3 tint;uniform vec2 resolution;
 uniform sampler2D monthPalette;uniform bool useMonthPalette;uniform bool classic;
+uniform float dayLight; // 0 night .. 1 day; clock-driven curve measured from reference video (audit/VIDEO-REFERENCES.md)
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
-float wave(float x,float t){return .46+.055*sin(x*4.0-t)+.018*sin(x*7.0+t*.6);}
+// Ribbon crest as a fraction of height from the top, fitted to the reference: it rests near 0.42,
+// a swell crosses the screen left to right in ~8 s once every ~22.5 s and pushes the crest to ~0.62.
+float swell(float x,float s){return exp(-pow((x-(-.9+2.8*fract(s/22.5)))/.42,2.0));}
+float crestFromTop(float x,float s){return .42+.20*swell(x,s)-.05*swell(x+.55,s)+.018*sin(x*4.0-s*.12)+.012*sin(x*7.0+s*.07);}
+float wave(float x,float s){return 1.0-crestFromTop(x,s);} // uv.y runs bottom to top
 void main(){
-    vec2 p=uv;float t=seconds*.12;
-    vec3 c=mix(tint*.16,tint*.58,1.0-smoothstep(0.0,1.0,p.y));
-    if(useMonthPalette)c=texture(monthPalette,p).rgb;
-    c+=tint*.045*exp(-length((p-vec2(.42,.28))*vec2(.7,1.6))*2.0);
+    vec2 p=uv;float t=seconds*.12;float fromTop=1.0-p.y;
+    // Day: brightest at the top, darkest about halfway down, slightly lighter at the bottom.
+    // Night: the upper half falls to black and the remaining colour sits low (about a quarter of day).
+    float dayProfile=1.0-.28*smoothstep(0.0,.55,fromTop)+.08*smoothstep(.55,1.0,fromTop);
+    vec3 c=useMonthPalette?texture(monthPalette,p).rgb:tint*.62*dayProfile;
+    float nightProfile=.25*smoothstep(.42,.95,fromTop);
+    c*=mix(nightProfile,1.0,dayLight);
+    c+=tint*.045*dayLight*exp(-length((p-vec2(.42,.28))*vec2(.7,1.6))*2.0);
+    float ribbonLight=mix(.5,1.0,dayLight);
     for(int i=0;i<7;++i){
-        float k=float(i);float line=wave(p.x,t)+.019*sin(p.x*4.8+t+k*.50)+k*.0035;
+        float k=float(i);float line=wave(p.x,seconds)+.019*sin(p.x*4.8+t+k*.50)+k*.0035;
         float d=p.y-line;float w=.010+k*.0016;
         float ribbon=exp(-d*d/(w*w))*.075+exp(-d*d/.008)*.009;
-        c+=mix(tint,vec3(.92),.82)*ribbon;
+        c+=mix(tint,vec3(.92),mix(.55,.82,dayLight))*ribbon*ribbonLight; // night keeps the theme hue
     }
     vec2 grid=vec2(42.0,24.0);vec2 cell=floor(p*grid);
     if(!classic)for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){
         vec2 id=cell+vec2(x,y);float seed=hash(id);vec2 centre=(id+vec2(seed,hash(id+51.7)))/grid;
         centre.y+=.004*sin(t*1.8+seed*40.0);
-        float weight=exp(-pow((centre.y-wave(centre.x,t))/.16,2.0))*(1.0-.7*centre.x);
+        float weight=exp(-pow((centre.y-wave(centre.x,seconds))/.16,2.0))*(1.0-.7*centre.x)*ribbonLight;
         vec2 delta=(p-centre)*resolution;float radius=seed>.98?3.3:.50+seed*.65;
         c+=vec3(.90,.84,.66)*exp(-dot(delta,delta)/(radius*radius))*weight*(.20+.60*seed);
     }
@@ -119,31 +135,95 @@ void main(){
     }
     qInfo()<<"native renderer:"<<reinterpret_cast<const char*>(glGetString(GL_RENDERER));
 }
+// Background brightness by clock time, 0 = night, 1 = day. Keyframes are the top-band brightness of
+// the reference day-cycle video relative to 10:30-16:30 (audit/VIDEO-REFERENCES.md); linear between them.
+double View::dayLight(double hour) {
+    static const double keys[][2]={{0,0},{3,0},{4.5,.38},{6,.77},{7.5,.93},{9,.98},{10.5,1},{16.5,1},{18,.82},{19.5,.24},{21,0},{24,0}};
+    hour=std::fmod(std::fmod(hour,24.)+24.,24.);
+    for(size_t i=1;i<std::size(keys);++i)
+        if(hour<=keys[i][0])return keys[i-1][1]+(keys[i][1]-keys[i-1][1])*(hour-keys[i-1][0])/(keys[i][0]-keys[i-1][0]);
+    return 0;
+}
+void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHeight) {
+    static const QVector3D colours[]={{.55f,.39f,.13f},{.12f,.36f,.68f},{.40f,.20f,.60f},{.62f,.17f,.18f},{.16f,.43f,.32f},{.48f,.50f,.54f}};
+    glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glDisable(GL_SCISSOR_TEST);
+    glViewport(0,0,pixelWidth,pixelHeight);
+    background_.bind();background_.setUniformValue("seconds",seconds);background_.setUniformValue("dayLight",light);
+    background_.setUniformValue("tint",colours[std::clamp(shell_.theme(),0,5)]);
+    background_.setUniformValue("resolution",QVector2D(float(pixelWidth),float(pixelHeight)));
+    background_.setUniformValue("monthPalette",0);background_.setUniformValue("useMonthPalette",shell_.theme()==0 && bool(monthTexture_));
+    background_.setUniformValue("classic",shell_.backgroundMode()==1);
+    if(monthTexture_)monthTexture_->bind(0);
+    glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);background_.release();
+    if(monthTexture_)monthTexture_->release(0);
+}
+bool View::measureReference(const QString& path) {
+    if(!glReady_)return false;
+    makeCurrent();
+    constexpr int W=1920,H=1080;
+    QOpenGLFramebufferObject fbo(W,H);
+    if(!fbo.isValid() || !fbo.bind()){doneCurrent();return false;}
+    QFile file(path);
+    if(!file.open(QIODevice::WriteOnly|QIODevice::Text)){fbo.release();doneCurrent();return false;}
+    QTextStream out(&file);
+    const auto hex=[](double r,double g,double b){return QString("%1%2%3").arg(int(r+.5),2,16,QChar('0')).arg(int(g+.5),2,16,QChar('0')).arg(int(b+.5),2,16,QChar('0'));};
+    out<<"# native background measured like audit/VIDEO-REFERENCES.md; theme "<<shell_.theme()<<", month palette "<<(shell_.theme()==0 && monthTexture_?"on":"off")<<"\n";
+    out<<"# clock  dayLight  bands 1-12 (hex RGB, top to bottom)  |  band luma relative to the 12:00 top band\n";
+    QVector<double> middayLuma;
+    const auto bands=[&](const QImage& image,QStringList& hexes,QVector<double>& luma){
+        for(int b=0;b<12;++b){double s[3]{};int n=0;
+            for(int y=b*H/12;y<(b+1)*H/12;y+=4)for(int x=0;x<W;x+=8){const QRgb p=image.pixel(x,y);s[0]+=qRed(p);s[1]+=qGreen(p);s[2]+=qBlue(p);++n;}
+            hexes<<hex(s[0]/n,s[1]/n,s[2]/n);luma<<(.2126*s[0]+.7152*s[1]+.0722*s[2])/n;}
+    };
+    { renderBackground(420.f,float(dayLight(12)),W,H);QStringList h;bands(fbo.toImage(),h,middayLuma); }
+    for(int step=0;step<16;++step) {
+        const double hour=step*1.5;const double light=dayLight(hour);
+        renderBackground(420.f,float(light),W,H);
+        QStringList h;QVector<double> luma;bands(fbo.toImage(),h,luma);
+        QStringList rel;for(double l:luma)rel<<QString::number(l/std::max(1.,middayLuma[0]),'f',2);
+        out<<QString("%1:%2").arg(int(hour),2,10,QChar('0')).arg(int(std::fmod(hour,1.)*60),2,10,QChar('0'))<<"  "<<QString::number(light,'f',2)<<"  "<<h.join(' ')<<"  |  "<<rel.join(' ')<<"\n";
+    }
+    // Background-only frames next to the statistics, for visual comparison with the reference video.
+    for(const auto& [hour,name]:std::initializer_list<std::pair<double,const char*>>{{12.,"midday"},{22.5,"night"},{19.5,"dusk"}}) {
+        renderBackground(141.f,float(dayLight(hour)),W,H);
+        fbo.toImage().save(QFileInfo(path).dir().filePath(QString("video-reference-%1.png").arg(name)));
+    }
+    out<<"# ribbon crest, fraction of height from the top, 8 columns, 40 s at 1 s steps (midday)\n";
+    for(int i=0;i<40;++i) {
+        renderBackground(float(120+i),float(dayLight(12)),W,H);const QImage image=fbo.toImage();
+        QStringList crest;
+        for(int k=0;k<8;++k){const int x0=(2*k+1)*W/16;QVector<double> prof(H);
+            for(int y=0;y<H;++y){double s=0;for(int x=x0-12;x<=x0+12;x+=3){const QRgb p=image.pixel(x,y);s+=qRed(p)+qGreen(p)+qBlue(p);}prof[y]=s;}
+            double best=-1;int by=0;
+            for(int y=std::max(10,int(H*.25));y<std::min(H-10,int(H*.9));++y){double s=0;for(int j=-10;j<=10;++j)s+=prof[y+j];if(s>best){best=s;by=y;}}
+            crest<<QString::number(double(by)/H,'f',3);}
+        out<<QString("%1s ").arg(i,2)<<crest.join(' ')<<"\n";
+    }
+    out<<"# ease-out: settle to 10% = time constant * ln(10)\n";
+    for(const auto& [name,tau]:std::initializer_list<std::pair<const char*,double>>{{"category",.120},{"item",.085},{"depth/entry",.110}})
+        out<<name<<": tau "<<int(tau*1000)<<" ms, settle "<<int(tau*std::log(10.)*1000)<<" ms ("<<QString::number(tau*std::log(10.)*60,'f',1)<<" frames at 60 fps)\n";
+    fbo.release();doneCurrent();
+    return out.status()==QTextStream::Ok;
+}
 void View::paintGL() {
     const qint64 now=clock_.elapsed();
     const double dt=std::min(.1,double(now-previous_)/1000.);previous_=now;
-    const double blend=1.-std::exp(-dt*18.);
-    categoryPosition_+=(shell_.category()-categoryPosition_)*blend;
-    categoryFade_*=std::exp(-dt*18.);if(categoryFade_<.001){categoryFade_=0;outgoing_.clear();}
-    depthPosition_+=(shell_.depth()-depthPosition_)*blend;
-    for(auto& column:columns_)column.position+=(column.selection-column.position)*blend;
+    // Ease-out approach rates from the 60 fps reference (audit/VIDEO-REFERENCES.md): category moves
+    // settle in ~180-280 ms, item moves in ~150-250 ms. Exponential time constants in seconds.
+    const double categoryBlend=1.-std::exp(-dt/.120),itemBlend=1.-std::exp(-dt/.085),depthBlend=1.-std::exp(-dt/.110);
+    categoryPosition_+=(shell_.category()-categoryPosition_)*categoryBlend;
+    categoryFade_*=std::exp(-dt/.120);if(categoryFade_<.001){categoryFade_=0;outgoing_.clear();}
+    depthPosition_+=(shell_.depth()-depthPosition_)*depthBlend;
+    for(auto& column:columns_)column.position+=(column.selection-column.position)*itemBlend;
     if(std::abs(depthPosition_-shell_.depth())<.001) {
         depthPosition_=shell_.depth();
         if(columns_.size()>shell_.depth()+1)columns_.resize(shell_.depth()+1);
     }
     glClearColor(.04f,.04f,.05f,1.f);glClear(GL_COLOR_BUFFER_BIT);
     if(glReady_) {
-        static const QVector3D colours[]={{.55f,.39f,.13f},{.12f,.36f,.68f},{.40f,.20f,.60f},{.62f,.17f,.18f},{.16f,.43f,.32f},{.48f,.50f,.54f}};
-        glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glDisable(GL_SCISSOR_TEST);
-        glViewport(0,0,int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
-        background_.bind();background_.setUniformValue("seconds",float(now)/1000.f);
-        background_.setUniformValue("tint",colours[std::clamp(shell_.theme(),0,5)]);
-        background_.setUniformValue("resolution",QVector2D(float(width()*devicePixelRatioF()),float(height()*devicePixelRatioF())));
-        background_.setUniformValue("monthPalette",0);background_.setUniformValue("useMonthPalette",shell_.theme()==0 && bool(monthTexture_));
-        background_.setUniformValue("classic",shell_.backgroundMode()==1);
-        if(monthTexture_)monthTexture_->bind(0);
-        glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);background_.release();
-        if(monthTexture_)monthTexture_->release(0);
+        const auto time=QTime::currentTime();
+        renderBackground(float(now)/1000.f,float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
+            int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
     }
     QPainter painter(this);painter.setRenderHint(QPainter::Antialiasing);painter.setRenderHint(QPainter::SmoothPixmapTransform);
     const double scale=std::min(width()/1920.,height()/1080.);
