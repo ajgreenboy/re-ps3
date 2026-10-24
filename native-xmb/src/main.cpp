@@ -4,6 +4,8 @@
 #include <QDir>
 #include <QMainWindow>
 #include <QSurfaceFormat>
+#include <QKeyEvent>
+#include <memory>
 #include <QSettings>
 #include "catalog.h"
 #include "rsx_program.h"
@@ -25,6 +27,7 @@ int main(int argc,char** argv) {
     parser.addOption({"data-dir","Writable native application data directory","directory"});
     parser.addOption({"inventory","Write the local XMBML definition inventory and exit","json-file"});
     parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
+    parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
     parser.addOption({"month-sheet","Write a local contact sheet of the qgl/lines month_bg day/night textures and exit","image-file"});
@@ -156,5 +159,28 @@ int main(int argc,char** argv) {
     QObject::connect(&shell,&xmb::Shell::requestQuit,&app,&QApplication::quit);
     QObject::connect(&shell,&xmb::Shell::changed,&window,[&]{if(shell.fullscreen()!=window.isFullScreen()){if(shell.fullscreen())window.showFullScreen();else window.showNormal();}});
     if(shell.fullscreen())window.showFullScreen();else window.show();
+    if(parser.isSet("script")) {
+        // Local verification: replay key presses and save framebuffer grabs at the window's real resolution, e.g.
+        // --script "full,wait,LEFT,DOWN,grab=C:/tmp/a.png,quit". One token every 300 ms.
+        auto tokens=std::make_shared<QStringList>(parser.value("script").split(','));
+        auto* timer=new QTimer(&app);timer->setInterval(300);
+        QObject::connect(timer,&QTimer::timeout,&app,[&app,&window,view,tokens,timer]{
+            if(tokens->isEmpty()){timer->stop();return;}
+            const QString token=tokens->takeFirst().trimmed();
+            static const QHash<QString,int> keys{{"LEFT",Qt::Key_Left},{"RIGHT",Qt::Key_Right},{"UP",Qt::Key_Up},{"DOWN",Qt::Key_Down},
+                {"ENTER",Qt::Key_Return},{"ESC",Qt::Key_Escape},{"PGUP",Qt::Key_PageUp},{"PGDN",Qt::Key_PageDown},{"BACKSPACE",Qt::Key_Backspace}};
+            if(token=="full")window.showFullScreen();
+            else if(token=="quit")app.quit();
+            else if(token.startsWith("grab=")) {
+                const auto image=view->grabFramebuffer();
+                qInfo().noquote()<<"script: grab"<<token.mid(5)<<image.size()<<(image.save(token.mid(5))?"saved":"FAILED");
+            } else if(token.startsWith("type=")) {
+                for(const QChar c:token.mid(5)){QKeyEvent event(QEvent::KeyPress,0,Qt::NoModifier,QString(c));QCoreApplication::sendEvent(view,&event);}
+            } else if(keys.contains(token)) {
+                QKeyEvent event(QEvent::KeyPress,keys[token],Qt::NoModifier);QCoreApplication::sendEvent(view,&event);
+            }
+        });
+        QTimer::singleShot(2500,timer,[timer]{timer->start();});
+    }
     return app.exec();
 }

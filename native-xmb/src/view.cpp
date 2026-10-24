@@ -482,10 +482,10 @@ void View::drawScene(QPainter& p) {
     // Soft white halo behind a label (the XMB's focused-item glow): the text drawn at low alpha in a ring of offsets.
     auto glow=[&](const QRectF& r,const QString& value,int size,double strength,int flags=Qt::AlignLeft|Qt::AlignVCenter){
         QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);p.setFont(f);
-        constexpr double radius=3.;
-        for(int k=0;k<8;++k) {
-            const double a=k*std::numbers::pi/4;
-            p.setPen(QColor(255,255,255,int(9*strength)));p.drawText(r.translated(std::cos(a)*radius,std::sin(a)*radius),flags,value);
+        // Reference (3x crop, 64 s video): a luminous halo ~5 px wide around the focused label.
+        for(const auto& [radius,alpha]:{std::pair{5.,7},std::pair{2.5,16}})for(int k=0;k<12;++k) {
+            const double a=k*std::numbers::pi/6;
+            p.setPen(QColor(235,245,255,int(alpha*strength)));p.drawText(r.translated(std::cos(a)*radius,std::sin(a)*radius),flags,value);
         }
     };
     if(shell_.backgroundMode()==2 && !wallpaperImage_.isNull()) {
