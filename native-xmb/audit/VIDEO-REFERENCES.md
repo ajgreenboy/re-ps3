@@ -223,3 +223,24 @@ shader gets 0 (full stripe period).
 | Swell crossing / cycle | ≈8 s / ≈22 s | ≈9 s / ≈21 s |
 
 The time scale (0.12 FFD time units per second) comes from the swell cycle. The plugin's own clock for `_Time` is not traced.
+
+## HDR pass (October 24, later)
+
+The original background (background shader, ribbon, particles) is now drawn into a float target and finished by
+HDR.mnu with the firmware's glutils programs (`src/hdr.cpp`). The UI layer stays outside it.
+
+- **ToneMap.fpo**: extended Reinhard `L(1 + L/white²)/(1 + L)`, with `L = colour × EXPOSURE`. The plugin stores its
+  frame already tone-mapped and recovers HDR with GlareSourcePre, which decodes as the exact inverse
+  `(c − 1 + √((1−c)² + 4Wc))/2W`. A float scene gives the same values without the round trip.
+- **GlareSourceNoTone.fpo**: exposed colour above GLARE THRESH, written to a 2^TEX SIZE (256) wide source with mips.
+- **Gaussian.vpo/.fpo**: 15-tap separable blur on each of up to TEX MAX MIP levels. Each channel uses its own radius
+  (GAUSSIAN RAD R/G/B, in texels of the level).
+- **AccGlare.fpo**: sums the levels, weight `GLARE SUM POW^level` normalised. This weighting is reconstructed: the
+  plugin code that sets `_Weight` sits behind a vtable I have not traced.
+- **ApplyGlare.fpo**: tone-mapped screen + glare × GLARE LEVEL. The plugin's own build composites with
+  ToneApplyDisplay (glare × weight − noise/8, which adds dither); ApplyGlare is the same sum without the dither.
+- Day and night HDR presets (night: EXPOSURE 1.41, GLARE LEVEL 1.33) are blended by NightDayBlend.
+
+Effect on the measurements: day band ratios are within 0.05 of the previous table. Night lower bands rise to 0.67
+of the midday top (reference ≈0.17), driven by the night exposure. This widens the existing month and palette gap and
+is not tuned away. Live rendering holds ~60 fps.

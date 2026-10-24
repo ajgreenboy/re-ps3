@@ -137,6 +137,7 @@ void main(){
     glGenVertexArrays(1,&vao_);
     initOriginalBackground();
     ribbon_.init(*this,assets_);
+    hdr_.init(*this,assets_);
     if(!monthImage_.isNull()) {
         monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
         monthTexture_->setMinificationFilter(QOpenGLTexture::Linear);monthTexture_->setMagnificationFilter(QOpenGLTexture::Linear);
@@ -158,13 +159,16 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     // Original colour theme: the firmware's own background shader and monthly palettes.
     const bool original=originalReady_ && (forceOriginal_ || (shell_.theme()==0 && shell_.backgroundMode()!=2));
     const bool originalRibbon=original && ribbon_.ready();
+    GLint target=0;glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
+    const bool hdr=original && hdr_.ready(); // the original background is drawn as HDR and tone mapped with glare
+    float nightDayBlend=1;
     if(original) {
-        GLint target=0;glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
+        const GLuint scene=hdr?hdr_.begin(*this,pixelWidth,pixelHeight):GLuint(target);
         const QDateTime when=backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime();
         if(when.date().month()!=texturesMonth_)loadMonthTextures(when.date().month());
-        const BackgroundTime time=backgroundTime(when);
+        const BackgroundTime time=backgroundTime(when);nightDayBlend=time.nightDayBlend;
         renderOriginalBackground(time,pixelWidth,pixelHeight);
-        if(originalRibbon)ribbon_.render(*this,seconds,time.nightDayBlend,pixelWidth,pixelHeight,GLuint(target));
+        if(originalRibbon)ribbon_.render(*this,seconds,time.nightDayBlend,pixelWidth,pixelHeight,scene);
     }
     glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);
     if(original){glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE);} else glDisable(GL_BLEND);
@@ -179,6 +183,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);background_.release();
     if(monthTexture_)monthTexture_->release(0);
     glDisable(GL_BLEND);
+    if(hdr)hdr_.finish(*this,nightDayBlend,GLuint(target));
 }
 // Inputs of qgl/lines back_colours0.fpo. Window values are the firmware's override/day BACKGROUND.mnu keys
 // (NIGHT2DAY 0-5.166 h, DAY2NIGHT 18.498-20.331 h, NIGHT WHIT BIAS 0.486). The plugin's exact mapping onto
