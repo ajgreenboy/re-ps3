@@ -271,3 +271,29 @@ They draw into the HDR scene, so the glare applies to them too.
   - `_FocusCurves.z` is 4, not SIZE ALIGN (13.19). SIZE ALIGN left far bokeh undarkened, and thousands of far
     discs summed into a white blob.
   - The life-bounds box and the per-life alpha (`sin(π·age)`) are also mine.
+
+## Background clock mapping, traced (October 24, later)
+
+custom_render_plugin's per-frame setter for back_colours0 (`FUN_00052ad8`) is now decoded. Its constants are at
+0x92e54–0x92e6c, and the preset hours are divided by 24 (0x91f6c). It takes the clock as a day fraction `t` and the
+month as a float in [0,12]:
+
+- `_NightTime = ((t − 0.5) mod 1) × 2400`: the night palette's clock is shifted 12 h and peaks at midnight.
+- `_MonthTime = frac(month) × 30`. The integer part picks this month's and next month's textures.
+- `_NightDayBlend = 1 + NIGHT BLEND × (s₁(1 − s₂) − 1)`, where s₁ and s₂ are smoothsteps over NIGHT2DAY and
+  DAY2NIGHT. It is 1 by day and 1 − 0.5 = 0.5 at night. Half the night image is the (dark) day half of the shader.
+- `_NightBrightness = NIGHT WHIT BIAS`.
+- `_DayTime = curve(t) × 2400` through `FUN_00052a28`, whose arguments the decompile lost. It is still fitted:
+  DAYSPREAD widens 06:00–18:00, and keyframes bring it to 0/2400 at midnight.
+
+A sweep confirmed that the day half of the shader reads only `_DayTime` and the night half only `_NightTime`. The
+ribbon, particle and HDR presets now blend on `(NightDayBlend − 0.5)/0.5`.
+
+| Top band (relative to midday) | Reference | Native |
+|---|---|---|
+| 00:00 / 03:00 | 0.00 / 0.00 | 0.07 / 0.02 |
+| 04:30 | 0.38 | 0.35 |
+| 06:00 / 18:00 | 0.75–0.85 / ≈0.8 | 0.81 / 0.80 |
+| 19:30 / 21:00 | 0.24 / 0.00 | 0.22 / 0.05 |
+
+The night lower bands are now 0.29–0.45 of the midday top (reference ≈0.11–0.27, different month), down from 0.67.
