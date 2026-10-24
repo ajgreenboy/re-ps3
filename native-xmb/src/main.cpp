@@ -78,14 +78,18 @@ int main(int argc,char** argv) {
     if(parser.isSet("dump-cg")) {
         // Local analysis only: the folder receives firmware-derived shader text and must stay out of Git.
         int failures=0;
-        for(const QString name:{"background","back_colours0","back_colours1","back_colours2","LinesController","LinesControllerQuin","LinesEdge","lines0","lines1","lines2","ffd_shader0","ffd_shader1","ffd_shader2","ffd_shader3","ffd_alpha_blend"})
+        for(const QString name:{"moyou/background","moyou/back_colours0","moyou/back_colours1","moyou/back_colours2","moyou/LinesController","moyou/LinesControllerQuin",
+                                "moyou/LinesEdge","moyou/lines0","moyou/lines1","moyou/lines2","moyou/ffd_shader0","moyou/ffd_shader1","moyou/ffd_shader2","moyou/ffd_shader3",
+                                "moyou/ffd_alpha_blend","glutils/Copy","glutils/GlareSource","glutils/GlareSourcePre","glutils/GlareSourceNoTone","glutils/Gaussian",
+                                "glutils/ApplyDisplay","glutils/ToneApplyDisplay","glutils/AccGlare","glutils/DoubleGaussian","glutils/GaussBloomAndBlur","glutils/BlurAcc",
+                                "glutils/BloomCone","glutils/ToneMap","glutils/ApplyGlare"})
             for(const QString ext:{"vpo","fpo"}) {
                 QByteArray bytes;
-                try { bytes=assets.qglFile("lines","lib/moyou/"+name+"."+ext); } catch(const std::exception&) { continue; } // not every program has both stages
+                try { bytes=assets.qglFile("lines","lib/"+name+"."+ext); } catch(const std::exception&) { continue; } // not every program has both stages
                 if(bytes.isEmpty())continue;
                 QString error;const auto program=xmb::CgProgram::load(bytes,&error);
                 if(!program.valid()){qCritical()<<name<<ext<<error;++failures;continue;}
-                QFile out(QDir(parser.value("dump-cg")).filePath(name+"."+ext+".glsl"));
+                QFile out(QDir(parser.value("dump-cg")).filePath(name.section('/',-1)+"."+ext+".glsl"));
                 if(!QDir().mkpath(parser.value("dump-cg")) || !out.open(QIODevice::WriteOnly|QIODevice::Text)){++failures;continue;}
                 QString header=QString("// %1.%2: %3 instructions\n").arg(name,ext).arg(program.instructionCount);
                 for(const auto& p:program.parameters)header+=QString("// param %1 :%2 res=%3 idx=%4 slots=%5 defaults=%6\n").arg(p.name,p.semantic).arg(p.resource).arg(p.resourceIndex)
