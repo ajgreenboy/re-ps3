@@ -10,6 +10,7 @@ qt_add_executable(re-ps3-native
     src/media_library.cpp src/media_library.h src/settings_menu.cpp
     src/interaction_audio.cpp src/interaction_audio.h
     src/profiles.cpp src/profiles.h
+    src/rsx_program.cpp src/rsx_program.h
     src/shell.cpp src/shell.h src/view.cpp src/view.h)
 target_link_libraries(re-ps3-native PRIVATE Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent)
 qt_add_executable(xmb-reference-frames src/reference_frames.cpp)

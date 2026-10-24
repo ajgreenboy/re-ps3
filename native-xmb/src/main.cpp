@@ -6,12 +6,16 @@
 #include <QSurfaceFormat>
 #include <QSettings>
 #include "catalog.h"
+#include "rsx_program.h"
 #include <QJsonDocument>
 #include <QFile>
 #include <QLoggingCategory>
 #include <QPainter>
 #include <QImageReader>
 #include <QTimer>
+#include <QTextLayout>
+#include <QRawFont>
+#include <QGlyphRun>
 
 int main(int argc,char** argv) {
     QSurfaceFormat format;format.setVersion(3,3);format.setProfile(QSurfaceFormat::CoreProfile);format.setSwapInterval(1);format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);
@@ -21,6 +25,8 @@ int main(int argc,char** argv) {
     parser.addOption({"data-dir","Writable native application data directory","directory"});
     parser.addOption({"inventory","Write the local XMBML definition inventory and exit","json-file"});
     parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
+    parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
+    parser.addOption({"dump-cg","Translate the original qgl/lines Cg programs to GLSL into a local folder and exit","directory"});
     parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});parser.process(app);
     if(!parser.isSet("dev-flash"))parser.showHelp(2);
     const QString data=parser.isSet("data-dir")?parser.value("data-dir"):QDir(QCoreApplication::applicationDirPath()).filePath("data");
@@ -46,6 +52,48 @@ int main(int argc,char** argv) {
         painter.end();
         if(!sheet.save(parser.value("icon-sheet"))){qCritical()<<"Cannot save icon sheet";return 2;}
         return assets.failedImages()?1:0;
+    }
+    if(parser.isSet("font-report")) {
+        QFile out(parser.value("font-report"));
+        if(!out.open(QIODevice::WriteOnly|QIODevice::Text)){qCritical()<<out.errorString();return 2;}
+        const QStringList samples{QString::fromUtf16(u"Saved Data Utility"),QString::fromUtf16(u"Paramètres réseau Ženska Ç ő ł"),
+            QString::fromUtf16(u"○ ✕ △ □  ←↑→↓ ©™"),
+            QString::fromUtf16(u"ゲーム 設定"),QString::fromUtf16(u"게임 설정"),QString::fromUtf16(u"游戏 设置")};
+        bool windowsFallback=false;
+        for(const auto& family:assets.fontFamilies()) {
+            out.write(QString("== %1\n").arg(family).toUtf8());
+            for(const auto& sample:samples) {
+                QFont font(family);font.setPixelSize(28);
+                QTextLayout layout(sample,font);layout.beginLayout();layout.createLine();layout.endLayout();
+                QStringList runs;
+                for(const auto& run:layout.glyphRuns()) {
+                    const QString used=run.rawFont().familyName();runs<<QString("%1 (%2 glyphs)").arg(used).arg(run.glyphIndexes().size());
+                    if(!used.startsWith("SCE-PS3"))windowsFallback=true;
+                }
+                out.write(QString("  %1  ->  %2\n").arg(sample,runs.join(" + ")).toUtf8());
+            }
+        }
+        return windowsFallback?1:0;
+    }
+    if(parser.isSet("dump-cg")) {
+        // Local analysis only: the folder receives firmware-derived shader text and must stay out of Git.
+        int failures=0;
+        for(const QString name:{"background","back_colours0","back_colours1","back_colours2","LinesController","LinesControllerQuin","LinesEdge","lines0","lines1","lines2","ffd_shader0","ffd_alpha_blend"})
+            for(const QString ext:{"vpo","fpo"}) {
+                QByteArray bytes;
+                try { bytes=assets.qglFile("lines","lib/moyou/"+name+"."+ext); } catch(const std::exception&) { continue; } // not every program has both stages
+                if(bytes.isEmpty())continue;
+                QString error;const auto program=xmb::CgProgram::load(bytes,&error);
+                if(!program.valid()){qCritical()<<name<<ext<<error;++failures;continue;}
+                QFile out(QDir(parser.value("dump-cg")).filePath(name+"."+ext+".glsl"));
+                if(!QDir().mkpath(parser.value("dump-cg")) || !out.open(QIODevice::WriteOnly|QIODevice::Text)){++failures;continue;}
+                QString header=QString("// %1.%2: %3 instructions\n").arg(name,ext).arg(program.instructionCount);
+                for(const auto& p:program.parameters)header+=QString("// param %1 :%2 res=%3 idx=%4 slots=%5 defaults=%6\n").arg(p.name,p.semantic).arg(p.resource).arg(p.resourceIndex)
+                    .arg([&]{QStringList l;for(int v:p.constantSlots)l<<QString::number(v);return l.join(',');}())
+                    .arg([&]{QStringList l;for(float v:p.defaults)l<<QString::number(v);return l.join(',');}());
+                out.write((header+program.glsl).toUtf8());
+            }
+        return failures?1:0;
     }
     xmb::Shell shell(data,assets);
     QSettings windowSettings(QDir(data).filePath("settings.ini"),QSettings::IniFormat);
