@@ -330,3 +330,13 @@ moved. Now:
 
 `--measure-reference` writes `video-reference-motion.png`, 16 frames 0.5 s apart (August, centre crop), for checking
 motion.
+
+**Live-client fixes (from screenshots of the running client).**
+- Every colour setting now renders the firmware background. Fixed colours pin a month palette:
+  Blue → August, Purple → June, Red → December, Green → May, Silver → January. Before, only "Original" did, so a
+  saved Green colour silently showed the old procedural renderer.
+- The ribbon is one band. The FFD field is evaluated with its second coordinate equal to the along coordinate, as the
+  plugin's 128×1 field target implies. Per-row values twisted the sheet into crossing strands. The sheet is also
+  tilted more edge-on (rise 0.12, depth 1.6) so the line shader's grazing-angle weighting keeps it visible.
+- Particles: about 400 alive, wider scatter, gain 2.0.
+- Item labels share one column per level (x 744 at the top level), regardless of icon shape.

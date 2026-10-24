@@ -21,7 +21,7 @@ constexpr float timeScale=.12f;      // FFD _Time per second: the travelling wav
 constexpr float latticeDepth=3.f;    // lattice plane distance (the plugin seeds its control grid at z = -3)
 constexpr float restY=.30f;          // view-space height of the field's zero line
 constexpr float fieldToY=-.60f;      // view-space height per field unit (negative: the swell pushes the crest down)
-constexpr float sheetRise=.22f,sheetDepth=1.1f; // the line sheet's extent across its width (height, depth)
+constexpr float sheetRise=.12f,sheetDepth=1.6f; // the line sheet's extent across its width (height, depth)
 constexpr float normalScale=1.5f;    // line weight: lines1.vpo scales by |n| / |position|
 
 std::unique_ptr<QOpenGLTexture> floatTexture(int width,int height,const std::vector<float>& rgba,QOpenGLTexture::Filter filter) {
@@ -72,10 +72,11 @@ void main(){
     if(!composite_.addShaderFromSourceCode(QOpenGLShader::Vertex,fullscreenVertex) || !composite_.addShaderFromSourceCode(QOpenGLShader::Fragment,composite) || !composite_.link()) {
         qWarning().noquote()<<"ribbon: composite failed:"<<composite_.log();return false;
     }
-    // _UVW: along the ribbon in .x, across it in .z, sampled at texel centres.
+    // _UVW: the plugin renders the field into a 128x1 target, so every line of the sheet shares one curve; .z (the
+    // field's second coordinate) is the along coordinate too. Per-row values would twist the sheet into crossing strands.
     std::vector<float> uvw(size_t(along_)*across_*4);
     for(int j=0;j<across_;++j)for(int i=0;i<along_;++i) {
-        float* p=&uvw[(size_t(j)*along_+i)*4];p[0]=float(i)/(along_-1);p[1]=0;p[2]=float(j)/(across_-1);p[3]=1;
+        float* p=&uvw[(size_t(j)*along_+i)*4];p[0]=float(i)/(along_-1);p[1]=0;p[2]=p[0];p[3]=1;
     }
     uvw_=floatTexture(along_,across_,uvw,QOpenGLTexture::Nearest);
     // _Stripes (FUN_0004bad0): row k of 4, x in [-.5,.5]: min(1, pow(1.01 - 4x^2, 20 (k/3)^3) * (k/6 + .5)).
