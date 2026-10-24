@@ -52,6 +52,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
 void View::syncColumns() {
     const int depth=shell_.depth();
     if(previousCategory_!=shell_.category()) {
+        particles_.nudge(shell_.category()>previousCategory_?1.f:-1.f); // PARTICLES_UI: the dust reacts to navigation
         outgoing_=columns_;outgoingCategory_=previousCategory_;categoryFade_=1.;columns_.clear();
         previousCategory_=shell_.category();
     }
@@ -325,6 +326,20 @@ bool View::measureReference(const QString& path) {
                 crest<<QString::number(ribbon_.crest()[j]+(ribbon_.crest()[j+1]-ribbon_.crest()[j])*(x-j),'f',3);}
         }
         out<<QString("%1s ").arg(i,2)<<crest.join(' ')<<"\n";
+    }
+    { // Motion contact sheet: 16 frames 0.5 s apart (August, so particles read against the background), centre crop.
+        constexpr int frames=16,columns=4,cropW=960,cropH=540,tileW=480,tileH=270;
+        QImage sheet(tileW*columns,tileH*(frames/columns),QImage::Format_RGB32);sheet.fill(Qt::black);
+        QPainter painter(&sheet);painter.setPen(Qt::white);
+        for(int k=0;k<frames;++k) {
+            backgroundOverride_=QDateTime(QDate(measureDate.year(),8,1),QTime(12,0));
+            renderBackground(float(300+k*.5),1.f,W,H);
+            const QImage crop=fbo.toImage().copy((W-cropW)/2,int(H*.12),cropW,cropH).scaled(tileW,tileH,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+            const QPoint at((k%columns)*tileW,(k/columns)*tileH);
+            painter.drawImage(at,crop);painter.drawText(at+QPoint(6,16),QString("t+%1 s").arg(k*.5,0,'f',1));
+        }
+        painter.end();
+        sheet.save(QFileInfo(path).dir().filePath("video-reference-motion.png"));
     }
     out<<"# ease-out: settle to 10% = time constant * ln(10)\n";
     for(const auto& [name,tau]:std::initializer_list<std::pair<const char*,double>>{{"category",.120},{"item",.085},{"depth/entry",.110}})

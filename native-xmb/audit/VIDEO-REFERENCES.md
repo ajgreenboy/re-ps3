@@ -316,3 +316,17 @@ the ribbon's x is quadratic in its parameter, so uniform-parameter emission had 
   for August, lavender to pink for June. back_colours0 reproduces them (see `video-reference-month-{02,06,08,12}.png`
   from `--measure-reference`). October and November are the two flattest palettes, which is why a late-October
   frame looks nearly uniform. `--month-sheet <png>` writes all 24 textures locally for inspection.
+
+**Particle motion (reworked).** The earlier simulation looked static. It scaled the Brownian kicks by DELTA TIME
+twice, so friction stopped every particle within about 0.5 s, and particles stayed fixed in space while the ribbon
+moved. Now:
+
+- Each particle rides the ribbon at an anchor (fraction along it) plus its own offset, so it moves with the wave.
+- The anchor flows slowly along the ribbon (up to 1.2% of its length per second, either way).
+- Velocities are in firmware units per second. BROWNIAN kicks each step against FRICTION, a steady ~0.23 u/s
+  wander per axis.
+- Category changes blow a gust against the navigation direction (PARTICLES_UI.mnu ICON WIND 11.39 × DPAD SCALE X).
+  It fades in about 0.4 s; the gust strength per unit is reconstructed.
+
+`--measure-reference` writes `video-reference-motion.png`, 16 frames 0.5 s apart (August, centre crop), for checking
+motion.
