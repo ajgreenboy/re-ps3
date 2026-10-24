@@ -4,6 +4,11 @@ Updated: October 23, 2026. Repository root: the existing XMB project.
 
 ## Start here
 
+The active direction changed to a native C++ recreation on October 23, evening.
+Start with [the native application handoff](../native-xmb/HANDOFF.md) and
+[its build instructions](../native-xmb/README.md). The documents below preserve
+the firmware-execution proof of concept as reference evidence.
+
 1. [Proof of concept: run, build, evidence](POC.md).
 2. [Phase 4: stability and visual fidelity](phases/04-stability-rendering.md) — active.
 3. [Phase 5: OS services and media](phases/05-services-media.md) — future phase.

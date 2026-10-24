@@ -2,6 +2,17 @@
 
 Recorded October 23, 2026 for the first GitHub source upload.
 
+## Active native application
+
+`native-xmb/` uses C++20, Visual Studio2022 Build Tools (MSVC19.44), Qt6.12.0
+MSVC64 Widgets/OpenGLWidgets/Multimedia, and the installed VS CMake/Ninja tools.
+`native-xmb/build.ps1` discovers the installed Qt kit or accepts `-QtRoot`.
+It deploys the Qt/FFmpeg runtime locally under ignored `out/native-xmb/`.
+Qt and FFmpeg retain their own distribution/license requirements; source control
+contains no SDK/runtime binaries. Assets load read-only from local firmware.
+
+## Firmware reference track
+
 | Dependency | Base revision | Local modifications |
 |---|---|---|
 | XenonRecomp (`hedge-dev/XenonRecomp`) | `ddd128bcca99fe8bfbb99bea583c972351fa6ace` | `xenon/xenonrecomp-current.patch` |

@@ -1,0 +1,91 @@
+# Native C++ XMB recreation
+
+This is the active application track following the user's October 23 direction
+change. It rebuilds XMB behavior as a native application. The older firmware
+runtime under `xmbrt/` remains a reference.
+
+The target is complete behavior and presentation coverage. Version 0.1 is the
+first application foundation, **not a completed XMB recreation**.
+
+## Build and run
+
+From the repository root, using the installed Visual Studio C++ tools and a Qt
+6.8+ MSVC kit with Widgets, OpenGLWidgets and Multimedia:
+
+```powershell
+& .\native-xmb\build.ps1
+& .\run-native-xmb.ps1
+```
+
+Pass `-QtRoot` to the build script for another installed Qt kit. Pass `-FlashRoot`
+to the launcher for another local `dev_flash`. The default launcher uses the
+existing sibling RPCS3 firmware directory. Build products and native settings are
+under `out/native-xmb/`. No firmware assets are copied into source control.
+
+Keyboard: arrows navigate, Enter activates, Escape or Backspace returns, F11 toggles full
+screen, Space pauses/resumes media. XInput D-pad and A/B share the same actions.
+
+## Application boundaries
+
+| Layer | Responsibility |
+|---|---|
+| `Assets` / `QrcArchive` | Read-only firmware font, RCO/GIM, QRC/DDS decoding, English strings; named image cache |
+| `catalog` | Bounded XMBML parsing, original file hashes and definition inventory |
+| `Shell` | Stable menu IDs, navigation state, settings, service actions |
+| `View` | OpenGL background, original icons/text, animation, keyboard/controller input |
+| Qt Multimedia | Host audio/video decoding and playback; video frames return to the view |
+| `main` | Composition, paths, desktop lifecycle |
+
+The renderer has no PPU, SPU, LV2, firmware callback or guest FIFO dependency.
+It redraws from application state. UI timing uses elapsed time rather than
+firmware frame pacing. Source assets remain read-only.
+
+## Original assets
+
+The native C++ asset reader supports PS3 big-endian RCO with plain or zlib tables,
+named plain/zlib image entries and the first frame of linear RGBA8888 and
+DXT1/DXT3/DXT5 GIM images. RGBA channels preserve original coverage; category icon
+materials tint RGB while keeping original alpha and full-colour PSN artwork.
+It loads the original Latin firmware font and caches decoded icons by container
+and resource name. Unknown formats are logged and remain missing; they are not
+silently treated as decoded resources. Other GIM formats, RCO animation/layout
+objects, model assets, other languages, VAG sounds and theme packages remain work.
+English strings support UTF-8/UTF-16BE/UTF-32BE tables; Settings currently binds
+16 entries to the original XMBML title/description keys. The inspected QGL normal
+maps supply seven main category silhouettes and fourteen Settings silhouettes.
+The native normal-map light is an approximation of the original material.
+
+Sony QGL archives support `QRCF` and zlib `QRCC`, including individually compressed
+files. DDS support covers 32-bit masked RGB(A) and DXT1/3/5 first mip levels. Source
+normal maps can be inspected locally without writing them into the repository:
+
+```powershell
+& .\out\native-xmb\re-ps3-native.exe --dev-flash <local-dev_flash> --icon-sheet .\out\native-xmb\icon-sheet.png
+```
+
+## Inventory original menu definitions
+
+```powershell
+& .\out\native-xmb\re-ps3-native.exe --dev-flash <local-dev_flash> --inventory .\out\native-xmb\xmbml-inventory.json
+```
+
+The current local firmware yields 28 documents,206 views,788 item/query
+definitions and445 attribute tables with zero parse errors. Literal query `&`
+characters are adapted in memory for Qt's strict XML parser. Original file hashes
+are recorded before adaptation; firmware files are never rewritten. The inventory
+retains unmapped status and selector/plugin references. Definitions are not proof
+that their services are implemented. The inventory is local derived output.
+
+Format research references: [RCOMage structures](https://github.com/kakaroto/RCOMage/blob/master/src/rcofile.h),
+[RCOMage reader](https://github.com/kakaroto/RCOMage/blob/master/src/rcoreader.c),
+[GIMSplit format investigation](https://github.com/adeyblue/GIMSplit/blob/master/Program.cs).
+The new reader is an independent implementation of the file layouts.
+
+The procedural background is a native renderer foundation. It is not yet a
+measured reproduction of the firmware wave's geometry, material or motion.
+The main category/menu catalog is currently curated from the reference. A complete
+XMBML/resource-driven catalog and localization are required before fidelity can
+be claimed.
+
+See [handoff](HANDOFF.md), [recorded reference findings](REFERENCE-2026-10-23.md)
+and [completion criteria](ISA.md).
