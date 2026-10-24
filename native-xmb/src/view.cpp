@@ -437,8 +437,18 @@ void View::drawImage(QPainter& p,const QString& container,const QString& texture
     }
     const auto& image=assets_.image(container,texture);
     if(image.isNull())return;
-    const QSizeF size=QSizeF(image.size()).scaled(rect.size(),Qt::KeepAspectRatio);
-    p.save();p.setOpacity(opacity);p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image);p.restore();
+    // Fit the visible (alpha) bounds, not the whole texture: RCO icons carry transparent padding, and fitting the
+    // padded image drew the glyphs at ~60% of the reference size.
+    const QString key=container+"/"+texture;
+    auto bounds=imageBounds_.value(key);
+    if(bounds.isNull()) {
+        const QImage argb=image.convertToFormat(QImage::Format_ARGB32);
+        for(int y=0;y<argb.height();++y){const auto* row=reinterpret_cast<const QRgb*>(argb.constScanLine(y));for(int x=0;x<argb.width();++x)if(qAlpha(row[x])>16)bounds=bounds.united(QRect(x,y,1,1));}
+        if(bounds.isNull())bounds=image.rect();
+        imageBounds_.insert(key,bounds);
+    }
+    const QSizeF size=QSizeF(bounds.size()).scaled(rect.size(),Qt::KeepAspectRatio);
+    p.save();p.setOpacity(opacity);p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);p.restore();
 }
 void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect) {
     const auto& original=assets_.image(category.container,category.texture);
