@@ -189,3 +189,37 @@ Remaining gaps: night lower bands are brighter than the reference (0.54 against 
 different month, and the ribbon/HDR passes are not ported); `_MonthTime` uses a first-guess fraction of the month;
 the ribbon is still procedural (next: `lines1` programs, geometry from `LINE1.mnu` and `spurs/moyou/spline/spline.elf`,
 `LinesController` compositing).
+
+## Original ribbon (October 24, later)
+
+The Original theme now draws the firmware ribbon (`src/ribbon.cpp`) instead of the procedural one. The procedural
+particles stay, following the new ribbon's crest.
+
+Taken from the firmware (`qgl/lines.qrc` and `custom_render_plugin`):
+
+- **The wave** is `lib/moyou/ffd_shader1.fpo` (LINE1.mnu `FFD SHADER 1`). It is rendered every frame into a float
+  target over (along, across) and read back, as the plugin does with its 128×1 target. With `a` along and `c` across
+  the ribbon it evaluates `x = 1.3a² + 0.2a − 0.15` and
+  `y = 0.24(1+tanh(a−½))(3+sin 2t)·sin(7.85a − 2.5t − 1.25)·e^(−10⁻⁴t) + ½sin(¼t) + e^(−50(a − 0.833(sin 0.1t + 0.2))²) + ⅛sin(t − 6.28c)`.
+- **The lines** are `lines1.vpo/.fpo` unmodified. The stripe coordinate is `fract(c·SPACING)`, about 400 lines across
+  the sheet, weighted by fresnel (`freslut1.tga`), BRIGHTNESS, an edge fade and `|n·e|/|p|`.
+- **Textures** come from the plugin's generators. Stripes (`FUN_0004bad0`): 4 rows of
+  `min(1, (1.01 − 4x²)^(20k³)·(k/2 + ½))`, mipmapped with MIPMAP BIAS as the LOD bias; without mips the stripes
+  alias into moiré. Encode (`FUN_0004b928`) splits `128v` into fraction/4 and integer/64, and LinesController
+  decodes it with `R/32 + G/2`. That is a linear sum, so a float target replaces it.
+- **Compositing** is LinesController's: background × colours 1/2 (white) plus line sum × the gradient of colours 3→4.
+  The pre-exposure/HDR glare chain is not ported.
+- Day and night presets are blended by NightDayBlend: BRIGHTNESS, FRESNEL, MIPMAP BIAS and SPACING.
+
+Reimplemented, not ported: the SPU side (`spurs/moyou/spline/spline.elf`: spring lattice, LENGTH/TENSION/DAMPING,
+POS/ANG camera, FFD SCALE/OFFSET). The sheet follows the field directly. Its placement, the field-to-screen scale and
+the time scale are fitted to the reference. THINNESS 1 is remapped by the plugin in code I have not traced; the
+shader gets 0 (full stripe period).
+
+| Ribbon crest (fraction from top, 40 s) | Reference | Native |
+|---|---|---|
+| Range | 0.26–0.65 | 0.26–0.68 |
+| Resting level | 0.40–0.45 | mean 0.41 |
+| Swell crossing / cycle | ≈8 s / ≈22 s | ≈9 s / ≈21 s |
+
+The time scale (0.12 FFD time units per second) comes from the swell cycle. The plugin's own clock for `_Time` is not traced.

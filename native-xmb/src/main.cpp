@@ -78,7 +78,7 @@ int main(int argc,char** argv) {
     if(parser.isSet("dump-cg")) {
         // Local analysis only: the folder receives firmware-derived shader text and must stay out of Git.
         int failures=0;
-        for(const QString name:{"background","back_colours0","back_colours1","back_colours2","LinesController","LinesControllerQuin","LinesEdge","lines0","lines1","lines2","ffd_shader0","ffd_alpha_blend"})
+        for(const QString name:{"background","back_colours0","back_colours1","back_colours2","LinesController","LinesControllerQuin","LinesEdge","lines0","lines1","lines2","ffd_shader0","ffd_shader1","ffd_shader2","ffd_shader3","ffd_alpha_blend"})
             for(const QString ext:{"vpo","fpo"}) {
                 QByteArray bytes;
                 try { bytes=assets.qglFile("lines","lib/moyou/"+name+"."+ext); } catch(const std::exception&) { continue; } // not every program has both stages
@@ -91,6 +91,7 @@ int main(int argc,char** argv) {
                 for(const auto& p:program.parameters)header+=QString("// param %1 :%2 res=%3 idx=%4 slots=%5 defaults=%6\n").arg(p.name,p.semantic).arg(p.resource).arg(p.resourceIndex)
                     .arg([&]{QStringList l;for(int v:p.constantSlots)l<<QString::number(v);return l.join(',');}())
                     .arg([&]{QStringList l;for(float v:p.defaults)l<<QString::number(v);return l.join(',');}());
+                for(int i=0;i<program.constants.size();++i){const auto& c=program.constants[i];header+=QString("// fc[%1] = %2 %3 %4 %5\n").arg(i).arg(c.x()).arg(c.y()).arg(c.z()).arg(c.w());}
                 out.write((header+program.glsl).toUtf8());
             }
         return failures?1:0;

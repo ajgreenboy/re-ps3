@@ -1,5 +1,6 @@
 #pragma once
 #include "assets.h"
+#include "ribbon.h"
 #include "rsx_program.h"
 #include "shell.h"
 #include <array>
@@ -67,6 +68,7 @@ private:
     bool originalReady_=false;
     CgProgram backColours_;
     std::array<std::unique_ptr<QOpenGLTexture>,4> monthTextures_; // tex0..3: day this/next month, night this/next month
+    Ribbon ribbon_;
     bool forceOriginal_=false;
     QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     void drawScene(QPainter& painter);
