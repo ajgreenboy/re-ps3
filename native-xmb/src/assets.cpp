@@ -77,6 +77,10 @@ Assets::Assets(QString flashRoot):root_(std::move(flashRoot)),font_("Segoe UI") 
     QHash<QString,QString> families;
     const QDir fontDir(QDir(root_).filePath("data/font"));
     for(const auto& file:fontDir.entryList({"SCE-PS3-*.TTF"},QDir::Files,QDir::Name)) {
+        // RD-L/R/B share one family name ("SCE-PS3 Rodin LATIN"); with the Light and italic faces registered, Qt's
+        // weight matching picked Light for normal text, which read thin next to the reference. The XMB draws Regular
+        // and Bold only.
+        if(file.contains("-L-") || file.contains("-LI-") || file.contains("-I-") || file.contains("-BI-"))continue;
         const int id=QFontDatabase::addApplicationFont(fontDir.filePath(file));
         const auto names=id>=0?QFontDatabase::applicationFontFamilies(id):QStringList{};
         if(names.isEmpty()){qWarning().noquote()<<"assets: font not loaded"<<file;continue;}
