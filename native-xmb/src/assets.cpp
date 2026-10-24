@@ -1,6 +1,7 @@
 #include "assets.h"
 #include <QDir>
 #include <QFile>
+#include <QFont>
 #include <QFontDatabase>
 #include <QLoggingCategory>
 #include <QtEndian>
@@ -70,15 +71,38 @@ QImage decodeBlocks(const QByteArray& bytes,quint64 pixels,quint64 end,int width
 }
 }
 Assets::Assets(QString flashRoot):root_(std::move(flashRoot)),font_("Segoe UI") {
-    const QString path=QDir(root_).filePath("data/font/SCE-PS3-RD-R-LATIN.TTF");
-    const int id=QFontDatabase::addApplicationFont(path);
-    if(id>=0 && !QFontDatabase::applicationFontFamilies(id).isEmpty()) font_=QFontDatabase::applicationFontFamilies(id).first();
-    fonts_.push_back(font_);
-    for(const auto& name:QStringList{"SCE-PS3-SR-R-LATIN.TTF","SCE-PS3-VR-R-LATIN.TTF"}) {
-        const int extra=QFontDatabase::addApplicationFont(QDir(root_).filePath("data/font/"+name));
-        fonts_.push_back(extra>=0 && !QFontDatabase::applicationFontFamilies(extra).isEmpty()?QFontDatabase::applicationFontFamilies(extra).first():font_);
+    // Register every firmware font (all weights and coverage sets), keyed by file stem, e.g. "RD-B-LATIN".
+    // Real bold/light/italic files then replace Qt's synthesised styles.
+    QHash<QString,QString> families;
+    const QDir fontDir(QDir(root_).filePath("data/font"));
+    for(const auto& file:fontDir.entryList({"SCE-PS3-*.TTF"},QDir::Files,QDir::Name)) {
+        const int id=QFontDatabase::addApplicationFont(fontDir.filePath(file));
+        const auto names=id>=0?QFontDatabase::applicationFontFamilies(id):QStringList{};
+        if(names.isEmpty()){qWarning().noquote()<<"assets: font not loaded"<<file;continue;}
+        families.insert(QString(file).remove("SCE-PS3-").remove(".TTF"),names.first());
     }
-    qInfo()<<"assets: font styles"<<fonts_;
+    const auto family=[&](const QString& stem){return families.value(stem);};
+    font_=family("RD-R-LATIN").isEmpty()?font_:family("RD-R-LATIN");
+    fonts_.push_back(font_);
+    for(const auto& stem:QStringList{"SR-R-LATIN","VR-R-LATIN"})fonts_.push_back(family(stem).isEmpty()?font_:family(stem));
+    // Glyphs a Latin family lacks fall back to the firmware's own coverage sets in the order XMB needs them
+    // (extended Latin, symbols, Japanese, Korean, Chinese), never to Windows fonts.
+    const QStringList cjk{family("NR-R-JPN"),family("CP-R-KANA"),family("YG-R-KOR"),family("DH-R-CGB")};
+    const QHash<QString,QStringList> chains{
+        {"RD",{family("RD-R-LATIN2"),family("NR-R-EXT")}},
+        {"SR",{family("SR-R-LATIN2"),family("SR-R-EXT"),family("SR-R-JPN")}},
+        {"VR",{family("VR-R-LATIN2"),family("NR-R-EXT")}},
+        {"MT",{family("RD-R-LATIN2"),family("NR-R-EXT")}},
+    };
+    for(auto it=chains.begin();it!=chains.end();++it) {
+        const QString primary=family(it.key()+"-R-LATIN");
+        if(primary.isEmpty())continue;
+        QStringList substitutes;
+        for(const auto& name:it.value()+cjk)if(!name.isEmpty() && name!=primary && !substitutes.contains(name))substitutes<<name;
+        QFont::insertSubstitutions(primary,substitutes);
+        qInfo().noquote()<<"assets: font"<<primary<<"falls back to"<<substitutes.join(", ");
+    }
+    qInfo()<<"assets: font styles"<<fonts_<<"("<<families.size()<<"firmware font files registered)";
     qInfo().noquote()<<"assets: local firmware"<<root_<<"font"<<font_;
 }
 Assets::Container Assets::readContainer(const QString& name) const {
