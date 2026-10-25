@@ -239,6 +239,41 @@ the bound textures once (`<file>.texN`). `work/coldboot-series-split.ts` splits 
 LinesController 368, particles_quads 1968). `build-rpcs3-cap.bat` builds the patched RPCS3 into `C:\dev\rpcs3-cap`
 next to the main build; copy dev_flash, dev_hdd0 and config there and run it with a scratch `--config`.
 
+## Menu motion (traced 2026-10-25)
+
+The cross bar is the paf widget class `PhXmBar`, inside vsh.elf's paf (around 0x3ab000–0x3b1000), not
+explore_plugin. Its focus moves (`FUN_003ad3bc` next, `FUN_003ad728` previous, on input event 0x11 keys 4/3) step
+the focus index (+0x2a8) and start widget animations of **200 ms** (DAT_0068f054). The XmBar animate calls pass
+acceleration mode **5**, and so does the exported wrapper paf_E8149213 used by explore_plugin. explore_plugin's own
+200 ms calls (65 of them) carry slot ids 0x10000NN; the mode is a separate argument.
+
+paf's animation setup (`FUN_003981ec`) converts the duration to n = int(ms × 0.001 × 60) frames and the rate to
+1/(n/60 × 0.999999). Its evaluator (`FUN_00398748`, mode in byte +0x23) is:
+
+| Mode | Curve |
+|---|---|
+| 1 | √t (ease-out) |
+| 2 | t² (ease-in) |
+| 3 | (sin(π(t − 0.5)) + 1)/2 |
+| 4 | per frame v = ((1 − v)k + v) × 1.0001, k from a 14-entry table (0.995 … 0.281), then 1/(3.775 + 0.217(n − 15)) |
+| 5 | per frame v = ((1 − v)k + v) × 1.000001, k = 0.9615, 0.78125, 0.637, 0.529 for n = 1–4, then 1/(2.2 + (n − 5)/3) |
+| other | t clamped to [0, 1] |
+
+Modes 4 and 5 step once per elapsed frame (paf's frames-per-tick global DAT_006fb1f4); a fraction above 0.05 blends
+one step into the state. When the snapped duration ends, the value is set to the target.
+
+For 200 ms, n = 12 and k = 0.2206: each frame leaves 77.9% of the remaining distance (0.779, 0.607, 0.474, 0.369,
+0.288, 0.224, 0.175, 0.136, 0.106, 0.083, 0.065), then the last 6.5% snaps on frame 12. This replaces the measured
+"25% per frame" exponential. The video's per-frame item steps had ratios 0.77, 0.73, 0.73, 0.73, 0.69, 0.64, which
+fit mode 5 at 200 ms better than mode 4 (0.68) or a constant 0.75.
+
+`View::PafEase` implements mode 5 exactly and drives the category, item, page/depth and column cross-fade moves.
+A new target restarts from the current value, as the reference shows. `XMB_MOTION_LOG=1` logs the focused
+column's position per frame; a native DOWN press follows the curve and ends at 200 ms.
+
+Not yet traced: whether the category row and page moves use the same 200 ms (assumed), the help-text delay, and
+held-key repeat acceleration.
+
 ## Category icon renderer (ported 2026-10-25)
 
 How it was resolved: the plugin's VMX packing code decompiles too poorly to read, so the values were taken from a real

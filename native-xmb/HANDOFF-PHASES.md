@@ -102,9 +102,12 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - Item icons: the firmware's icon glow/focus effect and the "PS" frame for game icons.
 
 ### Phase 4: motion and timing from firmware
-- Replace the measured ease with the explore_plugin animation code (it may be a per-frame lerp of 0.25; confirm).
-  Category/column/page transitions, the item-above-focus passage, the delay before help text appears (~0.5 s at
-  rest), info-bar clock updates, the scroll-acceleration rule for held keys.
+- Done 2026-10-25: the menu ease is paf's own. The cross bar is vsh.elf's `PhXmBar`; its focus moves are 200 ms
+  paf animations in acceleration mode 5, a per-frame ease with k = 0.2206 that lands on frame 12
+  (audit/PIPELINE.md "Menu motion"; `View::PafEase`).
+- Open: confirm that the category row and page moves use 200 ms too (assumed); the help-text delay (~0.5 s at rest);
+  info-bar clock updates; the held-key repeat and acceleration rule. The `PhXmBar` code around 0x3ab000–0x3b1000
+  in vsh.elf has the input handler (`FUN_003af01c`) to start from.
 
 ### Phase 5: remaining firmware renderers and states
 - Ribbon geometry from spline.elf is done. Next: particles from particles.elf exactly, including the wind response.
