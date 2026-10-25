@@ -5,6 +5,7 @@
 #include <QString>
 #include "qrc.h"
 #include <memory>
+#include <unordered_map>
 
 namespace xmb {
 // A read-only asset service. Firmware bytes stay in the user's local dev_flash.
@@ -26,7 +27,7 @@ public:
     QString hddRoot() const { return hddRoot_.isEmpty()?QDir(root_).absoluteFilePath("../dev_hdd0"):hddRoot_; }
     void setHddRoot(const QString& path) { hddRoot_=path; }
     int decodedImages() const { return decodedImages_; }
-    int failedImages() const { return images_.size()-decodedImages_; }
+    int failedImages() const { return int(images_.size())-decodedImages_; }
     // Uncompressed or RLE true-colour/grey TGA (qgl/lines LUTs and particle textures), top row first; null on error.
     static QImage decodeTga(const QByteArray& file);
     // Image names in an RCO container (local analysis).
@@ -38,7 +39,8 @@ private:
     QString root_, font_, hddRoot_;
     QStringList fonts_;
     QHash<QString,Container> containers_;
-    QHash<QString,QImage> images_;
+    // Node-based so the references image() hands out stay valid while later lookups insert (QHash may move values).
+    std::unordered_map<QString,QImage> images_;
     QHash<QString,QHash<QString,QString>> texts_;
     QHash<QString,std::shared_ptr<QrcArchive>> qrcs_;
     int decodedImages_=0;

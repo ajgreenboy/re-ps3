@@ -20,8 +20,46 @@
 #include <QTextLayout>
 #include <QRawFont>
 #include <QGlyphRun>
+#include <cstdio>
+#ifdef Q_OS_WIN
+#define NOMINMAX
+#include <windows.h>
+#include <dbghelp.h>
+#endif
+
+#ifdef Q_OS_WIN
+// Crash diagnosis: an unhandled exception writes its code and a symbolized stack (re-ps3-native.pdb next to the exe)
+// to XMB_LOG, or crash.log beside the executable.
+static LONG WINAPI writeCrashStack(EXCEPTION_POINTERS* info) {
+    const QString path=qEnvironmentVariableIsSet("XMB_LOG")?qEnvironmentVariable("XMB_LOG")
+        :QCoreApplication::applicationDirPath()+"/crash.log";
+    FILE* out=_wfopen(reinterpret_cast<const wchar_t*>(path.utf16()),L"a");
+    if(!out)return EXCEPTION_CONTINUE_SEARCH;
+    const HANDLE process=GetCurrentProcess(),thread=GetCurrentThread();
+    SymSetOptions(SYMOPT_LOAD_LINES|SYMOPT_UNDNAME);SymInitialize(process,nullptr,TRUE);
+    std::fprintf(out,"crash: exception 0x%08lx at %p\n",info->ExceptionRecord->ExceptionCode,info->ExceptionRecord->ExceptionAddress);
+    CONTEXT context=*info->ContextRecord;STACKFRAME64 frame{};
+    frame.AddrPC.Offset=context.Rip;frame.AddrFrame.Offset=context.Rbp;frame.AddrStack.Offset=context.Rsp;
+    frame.AddrPC.Mode=frame.AddrFrame.Mode=frame.AddrStack.Mode=AddrModeFlat;
+    for(int depth=0;depth<40 && StackWalk64(IMAGE_FILE_MACHINE_AMD64,process,thread,&frame,&context,nullptr,
+                                            SymFunctionTableAccess64,SymGetModuleBase64,nullptr);++depth) {
+        alignas(SYMBOL_INFO) char buffer[sizeof(SYMBOL_INFO)+256]{};auto* symbol=reinterpret_cast<SYMBOL_INFO*>(buffer);
+        symbol->SizeOfStruct=sizeof(SYMBOL_INFO);symbol->MaxNameLen=255;DWORD64 displacement=0;
+        IMAGEHLP_LINE64 line{};line.SizeOfStruct=sizeof(line);DWORD lineDisplacement=0;
+        const bool named=SymFromAddr(process,frame.AddrPC.Offset,&displacement,symbol);
+        const bool lined=SymGetLineFromAddr64(process,frame.AddrPC.Offset,&lineDisplacement,&line);
+        std::fprintf(out,"  #%02d %p %s%s%s:%lu\n",depth,reinterpret_cast<void*>(frame.AddrPC.Offset),named?symbol->Name:"?",
+                     lined?" ":"",lined?line.FileName:"",lined?line.LineNumber:0ul);
+    }
+    std::fclose(out);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
 
 int main(int argc,char** argv) {
+#ifdef Q_OS_WIN
+    SetUnhandledExceptionFilter(writeCrashStack);
+#endif
     // The Windows build has no console: XMB_LOG=<file> appends every Qt message to that file (local diagnosis).
     if(qEnvironmentVariableIsSet("XMB_LOG"))qInstallMessageHandler([](QtMsgType,const QMessageLogContext&,const QString& message){
         QFile file(qEnvironmentVariable("XMB_LOG"));if(file.open(QIODevice::Append|QIODevice::Text))file.write((message+'\n').toUtf8());
