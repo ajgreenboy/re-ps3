@@ -1,5 +1,121 @@
+diff --git a/rpcs3/Emu/Cell/SPUThread.cpp b/rpcs3/Emu/Cell/SPUThread.cpp
+index c226534a0..b330551d3 100644
+--- a/rpcs3/Emu/Cell/SPUThread.cpp
++++ b/rpcs3/Emu/Cell/SPUThread.cpp
+@@ -2128,6 +2128,69 @@ void spu_thread::do_dma_transfer(spu_thread* _this, const spu_mfc_cmd& args, u8*
+ 
+ 	const bool is_get = (args.cmd & ~(MFC_BARRIER_MASK | MFC_FENCE_MASK | MFC_START_MASK)) == MFC_GET_CMD;
+ 
++	// XMB reference capture (C:\dev\xmb; local change, not upstream). XMB_SPU_DUMP=<dir>: while the XMB ribbon job
++	// (spurs/moyou/spline/spline.elf, .SpuGUID at LS 0x3000) is resident, log every DMA (get/put, LS address,
++	// effective address, size) to dma.txt and save its bytes; plain get/put only, capped at 20000 transfers.
++	if (static const char* const spu_dump = std::getenv("XMB_SPU_DUMP"); spu_dump && ls)
++	{
++		static constexpr u8 guid[16] = {0x43,0x7f,0xf8,0x02,0x43,0x9f,0x72,0x82,0x43,0x5c,0x09,0x02,0x42,0x05,0x09,0x82};
++		static atomic_t<u32> logged = 0;
++		const u32 cmd = args.cmd & ~(MFC_BARRIER_MASK | MFC_FENCE_MASK | MFC_START_MASK);
++		// SPURS swaps the whole LS out and back each cycle (16 KB blocks to one save area): those are skipped.
++		const bool context_swap = args.eal >= 0x20424880 && args.eal < 0x20465000 && args.size >= 896;
++		// XMB_SPU_WATCH=<ea hex>:<size hex>: the first 4 puts from any SPU into that range also save the writer's whole
++		// local store (ls_watch_N.bin) and log the put, to identify the program producing that buffer.
++		static const auto watch = []() -> std::pair<u32, u32>
++		{
++			const char* spec = std::getenv("XMB_SPU_WATCH");
++			if (!spec) return {0, 0};
++			u32 ea = 0, size = 0;
++			std::sscanf(spec, "%x:%x", &ea, &size);
++			return {ea, size};
++		}();
++		static atomic_t<u32> watched = 0;
++		if (watch.second && !is_get && args.eal < watch.first + watch.second && args.eal + args.size > watch.first && watched < 4)
++		{
++			const u32 n = watched++;
++			if (FILE* f = std::fopen(fmt::format("%s/ls_watch_%u.bin", spu_dump, n).c_str(), "wb")) { std::fwrite(ls, 1, SPU_LS_SIZE, f); std::fclose(f); }
++			if (FILE* f = std::fopen(fmt::format("%s/watch.txt", spu_dump).c_str(), "a"))
++			{
++				std::fprintf(f, "%u put cmd 0x%02x lsa 0x%05x ea 0x%08x size %u spu %s\n", n, cmd, args.lsa & 0x3ffff, args.eal, args.size, _this ? _this->get_name().c_str() : "?");
++				std::fclose(f);
++			}
++		}
++		// XMB_SPU_DUMP_PUTS: also log large puts (>= 4 KB) from any SPU program, tagged with LS 0x3000 (its GUID).
++		static const bool any_puts = std::getenv("XMB_SPU_DUMP_PUTS") != nullptr;
++		if (any_puts && !is_get && args.size >= 4096 && !context_swap && logged < 20000)
++		{
++			u32 tag[4]; std::memcpy(tag, ls + 0x3000, 16);
++			if (FILE* f = std::fopen(fmt::format("%s/puts.txt", spu_dump).c_str(), "a"))
++			{
++				std::fprintf(f, "put lsa 0x%05x ea 0x%08x size %u guid %08x%08x%08x%08x\n", args.lsa & 0x3ffff, args.eal, args.size,
++					std::bit_cast<be_t<u32>>(tag[0]).value(), std::bit_cast<be_t<u32>>(tag[1]).value(), std::bit_cast<be_t<u32>>(tag[2]).value(), std::bit_cast<be_t<u32>>(tag[3]).value());
++				std::fclose(f);
++			}
++			logged++;
++		}
++		if (!context_swap && std::memcmp(ls + 0x3000, guid, 16) == 0 && logged < 20000)
++		{
++			const u32 n = logged++;
++			const u32 size = args.size, lsa = args.lsa & 0x3ffff;
++			if (FILE* f = std::fopen(fmt::format("%s/dma.txt", spu_dump).c_str(), "a"))
++			{
++				std::fprintf(f, "%u %s cmd 0x%02x lsa 0x%05x ea 0x%08x size %u tag %u\n", n, is_get ? "get" : "put", cmd, lsa, args.eal, size, args.tag);
++				std::fclose(f);
++			}
++			if (size && lsa + size <= SPU_LS_SIZE && vm::check_addr(args.eal, vm::page_readable, size))
++				if (FILE* f = std::fopen(fmt::format("%s/dma_%05u_%s.bin", spu_dump, n, is_get ? "get" : "put").c_str(), "wb"))
++				{
++					// a get's data is what main memory holds, a put's is what the job wrote to its local store
++					std::fwrite(is_get ? vm::_ptr<u8>(args.eal) : ls + lsa, 1, size, f);
++					std::fclose(f);
++				}
++		}
++	}
++
+ 	u32 eal = args.eal;
+ 	u32 lsa = args.lsa & 0x3ffff;
+ 
+@@ -3485,6 +3548,25 @@ bool spu_thread::do_list_transfer(spu_mfc_cmd& args)
+ 	return true;
+ }
+ 
++// XMB reference capture (local change): XMB_SPU_WATCH also covers atomic 128-byte stores (putllc/putlluc).
++static void xmb_watch_atomic(spu_thread& spu, const char* kind, u32 addr)
++{
++	static const char* const dir = std::getenv("XMB_SPU_DUMP");
++	static const auto watch = []() -> std::pair<u32, u32>
++	{
++		const char* spec = std::getenv("XMB_SPU_WATCH");
++		if (!spec) return {0, 0};
++		u32 ea = 0, size = 0;
++		std::sscanf(spec, "%x:%x", &ea, &size);
++		return {ea, size};
++	}();
++	static atomic_t<u32> hits = 0;
++	if (!dir || !watch.second || addr + 128 <= watch.first || addr >= watch.first + watch.second || hits >= 4) return;
++	const u32 n = hits++;
++	if (FILE* f = std::fopen(fmt::format("%s/ls_atomic_%u.bin", dir, n).c_str(), "wb")) { std::fwrite(spu._ptr<u8>(0), 1, SPU_LS_SIZE, f); std::fclose(f); }
++	if (FILE* f = std::fopen(fmt::format("%s/watch.txt", dir).c_str(), "a")) { std::fprintf(f, "%u %s ea 0x%08x pc 0x%05x spu %s\n", n, kind, addr, spu.pc, spu.get_name().c_str()); std::fclose(f); }
++}
++
+ bool spu_thread::do_putllc(const spu_mfc_cmd& args)
+ {
+ 	perf_meter<"PUTLLC-"_u64> perf0;
+@@ -3492,6 +3574,7 @@ bool spu_thread::do_putllc(const spu_mfc_cmd& args)
+ 
+ 	// Store conditionally
+ 	const u32 addr = args.eal & -128;
++	xmb_watch_atomic(*this, "putllc", addr);
+ 
+ 	if ([&]()
+ 	{
+@@ -3817,6 +3900,7 @@ void spu_thread::do_putlluc(const spu_mfc_cmd& args)
+ 	perf_meter<"PUTLLUC"_u64> perf0;
+ 
+ 	const u32 addr = args.eal & -128;
++	xmb_watch_atomic(*this, "putlluc", addr);
+ 
+ 	if (raddr && addr == raddr && g_cfg.core.spu_accurate_reservations)
+ 	{
 diff --git a/rpcs3/Emu/RSX/RSXThread.cpp b/rpcs3/Emu/RSX/RSXThread.cpp
-index 541da72ee..4dcb69499 100644
+index 541da72ee..24d837eaa 100644
 --- a/rpcs3/Emu/RSX/RSXThread.cpp
 +++ b/rpcs3/Emu/RSX/RSXThread.cpp
 @@ -2,6 +2,7 @@
@@ -10,7 +126,7 @@ index 541da72ee..4dcb69499 100644
  #include "Common/surface_store.h"
  #include "Core/RSXReservationLock.hpp"
  #include "Core/RSXEngLock.hpp"
-@@ -975,6 +976,71 @@ namespace rsx
+@@ -975,6 +976,101 @@ namespace rsx
  			capture::capture_draw_memory(this);
  		}
  
@@ -28,9 +144,19 @@ index 541da72ee..4dcb69499 100644
 +			auto& clause = method_registers.current_draw_clause;
 +			if (!wanted)
 +			{
-+				static std::unordered_set<u32> lengths;
-+				if (lengths.insert(length).second)
-+					if (FILE* f = std::fopen(fmt::format("%s/lengths.txt", vtx_dump).c_str(), "a")) { std::fprintf(f, "length %u command %u\n", length, static_cast<u32>(clause.command)); std::fclose(f); }
++				// one line per distinct (fragment length, colour target A/B addresses)
++				static std::unordered_set<u64> seen;
++				const u32 target_a = rsx::get_address(method_registers.surface_offset(0), method_registers.surface_dma(0));
++				const u32 target_b = rsx::get_address(method_registers.surface_offset(1), method_registers.surface_dma(1));
++				if (seen.insert(u64{length} << 40 ^ u64{target_a} << 8 ^ target_b).second)
++					if (FILE* f = std::fopen(fmt::format("%s/lengths.txt", vtx_dump).c_str(), "a"))
++					{
++						std::fprintf(f, "length %u command %u targets %u colour_a 0x%08x pitch %u colour_b 0x%08x pitch %u clip %ux%u format %u\n", length,
++							static_cast<u32>(clause.command), static_cast<u32>(method_registers.surface_color_target()), target_a, method_registers.surface_pitch(0),
++							target_b, method_registers.surface_pitch(1), method_registers.surface_clip_width(), method_registers.surface_clip_height(),
++							static_cast<u32>(method_registers.surface_color()));
++						std::fclose(f);
++					}
 +			}
 +			else if (length == wanted && dumped < 120 && (clause.command == draw_command::array || clause.command == draw_command::indexed))
 +			{
@@ -71,18 +197,38 @@ index 541da72ee..4dcb69499 100644
 +					const u32 vertex_base = get_vertex_offset_from_base(method_registers.vertex_data_base_offset(), array.offset() & 0x7fffffff);
 +					const u32 address = rsx::get_address(vertex_base, array.offset() >> 31);
 +					const u32 bytes = std::min<u32>(max_vertex, 65536) * array.stride();
-+					if (info) std::fprintf(info, "array %u size %u type %u stride %u vertices %u\n", a, array.size(), static_cast<u32>(array.type()), array.stride(), max_vertex);
++					if (info) std::fprintf(info, "array %u size %u type %u stride %u vertices %u address 0x%08x location %u\n", a, array.size(), static_cast<u32>(array.type()), array.stride(), max_vertex, address, array.offset() >> 31);
 +					if (bytes && vm::check_addr(address, vm::page_readable, bytes))
 +						if (FILE* f = std::fopen(fmt::format("%s.a%u", base, a).c_str(), "wb")) { std::fwrite(vm::_ptr<u8>(address), 1, bytes, f); std::fclose(f); }
 +				}
 +				if (info) std::fclose(info);
++				// XMB_VTX_DUMP_LOCAL: with the first dumped draw, also save RSX local memory (256 MB) to find where the
++				// vertex data was produced.
++				// XMB_VTX_PROTECT=<ea hex>:<size hex>: after the first dumped draw, make that range read-only so whatever
++				// writes it next faults and RPCS3's access-violation report names the writer (thread and PC).
++				if (dumped == 1)
++					if (const char* spec = std::getenv("XMB_VTX_PROTECT"))
++					{
++						u32 ea = 0, size = 0;
++						std::sscanf(spec, "%x:%x", &ea, &size);
++						if (size) vm::page_protect(ea, size, 0, 0, vm::page_writable);
++					}
++				if (dumped == 1 && std::getenv("XMB_VTX_DUMP_LOCAL"))
++					if (FILE* f = std::fopen(fmt::format("%s/rsx_local.bin", vtx_dump).c_str(), "wb"))
++					{
++						// 1 MB chunks; unmapped ones are written as zeros so offsets stay base-relative
++						static std::vector<u8> zeros(0x100000);
++						for (u32 chunk = 0xc0000000; chunk < 0xd0000000; chunk += 0x100000)
++							std::fwrite(vm::check_addr(chunk, vm::page_readable, 0x100000) ? vm::_ptr<u8>(chunk) : zeros.data(), 1, 0x100000, f);
++						std::fclose(f);
++					}
 +			}
 +		}
 +
  		in_begin_end = false;
  		m_frame_stats.draw_calls++;
  
-@@ -2397,6 +2463,49 @@ namespace rsx
+@@ -2397,6 +2493,49 @@ namespace rsx
  
  	void thread::get_current_fragment_program(const std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::fragment_textures_count>& sampler_descriptors)
  	{
