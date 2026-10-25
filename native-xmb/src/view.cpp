@@ -452,6 +452,7 @@ bool View::measureReference(const QString& path) {
 void View::paintGL() {
     const qint64 now=clock_.elapsed();
     const double dt=std::min(.1,double(now-previous_)/1000.);previous_=now;
+    const double renderSeconds=secondsOverride_>=0.?secondsOverride_:now/1000.; // fixed for A/B captures
     // One ease for every move, measured frame by frame on the 60 fps reference (audit/VIDEO-REFERENCES.md): category,
     // item and page moves and the column cross-fade all close 25% of the remaining distance per frame, i.e. an
     // exponential time constant of (1/60)/ln(4/3) = 58 ms, independent of the frame rate here.
@@ -480,7 +481,7 @@ void View::paintGL() {
     }
     if(glReady_) {
         const auto time=QTime::currentTime();
-        renderBackground(float(now)/1000.f,float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
+        renderBackground(float(renderSeconds),float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
             int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
         coldboot_.render(*this,int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()),defaultFramebufferObject());
     }
@@ -525,7 +526,7 @@ void View::paintGL() {
         QOpenGLFramebufferObject::blitFramebuffer(uiResolved_.get(),uiMsaa_.get());
     }
     // Category icons: the firmware glass shader, refracting the finished background (each cut before its own draw).
-    if(glReady_ && icons_.ready())icons_.render(*this,iconQueue_,now/1000.,presetBlend_,device.width(),device.height(),defaultFramebufferObject());
+    if(glReady_ && icons_.ready())icons_.render(*this,iconQueue_,renderSeconds,presetBlend_,device.width(),device.height(),defaultFramebufferObject());
     // Composite (premultiplied alpha) over the background in the widget's framebuffer.
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
     glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);

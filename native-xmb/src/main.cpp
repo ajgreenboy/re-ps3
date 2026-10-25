@@ -77,6 +77,7 @@ int main(int argc,char** argv) {
     parser.addOption({"no-intro","Start at the XMB without the cold-boot intro (also implied by --script, --background-clock and --measure-reference)"});
     parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
     parser.addOption({"background-clock","Fix background and icon-material time for reference captures (ISO date/time); UI clock stays live","date-time"});
+    parser.addOption({"render-clock","Fix the background/ribbon/particles/icon animation time in seconds for deterministic A/B captures","seconds"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
@@ -280,6 +281,11 @@ int main(int argc,char** argv) {
         const auto when=QDateTime::fromString(parser.value("background-clock"),Qt::ISODate);
         if(!when.isValid()){qCritical()<<"background-clock requires an ISO date/time";return 2;}
         view->setBackgroundClock(when);
+    }
+    if(parser.isSet("render-clock")) {
+        bool ok=false;const double seconds=parser.value("render-clock").toDouble(&ok);
+        if(!ok || seconds<0){qCritical()<<"render-clock requires a non-negative number of seconds";return 2;}
+        view->setRenderClock(seconds);
     }
     if(parser.isSet("measure-reference")) {
         window.show();
