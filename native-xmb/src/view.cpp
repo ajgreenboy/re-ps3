@@ -491,7 +491,9 @@ void View::paintGL() {
     if(rebuild) {
         uiSignature_=signature;
         uiMsaa_->bind();glViewport(0,0,pixels.width(),pixels.height());glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
-        textRenderer_.beginFrame(*this,pixels,std::min(device.width()/1920.,device.height()/1080.));
+        // Glyphs are rasterised for the layer's own scale (twice the window): at the window's scale they were
+        // magnified 2x by bilinear sampling before the 2x2 resolve, which left all text soft.
+        textRenderer_.beginFrame(*this,pixels,std::min(pixels.width()/1920.,pixels.height()/1080.),2);
         {
             QOpenGLPaintDevice paintDevice(pixels);
             QPainter ui(&paintDevice);
