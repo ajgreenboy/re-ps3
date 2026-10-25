@@ -159,6 +159,10 @@ void main(){colour=texture(layer,uv);})"; // premultiplied; linear filtering at 
 }
 // Background brightness by clock time, 0 = night, 1 = day. Keyframes are the top-band brightness of
 // the reference day-cycle video relative to 10:30-16:30 (audit/VIDEO-REFERENCES.md); linear between them.
+double View::itemIconSize(int,bool bullet,double focus) {
+    // Settings bullets in a page; every other icontex item is a category-column icon (no other level was captured).
+    return bullet?35.721+(85.05-35.721)*focus:77.616+(184.8-77.616)*focus;
+}
 double View::dayLight(double hour) {
     static const double keys[][2]={{0,0},{3,0},{4.5,.38},{6,.77},{7.5,.93},{9,.98},{10.5,1},{16.5,1},{18,.82},{19.5,.24},{21,0},{24,0}};
     hour=std::fmod(std::fmod(hour,24.)+24.,24.);
@@ -604,7 +608,7 @@ void View::drawScene(QPainter& p) {
             const auto& cat=categories[i];const double distance=i-categoryPosition_;
             const bool open=i==shell_.category();
             const double level0X=kColumnX+distance*200+10*std::clamp(distance,-1.,1.);
-            const double x=open || distance<0?level0X-childAmount*250:level0X+(kColumnX-40+distance*186-level0X)*childAmount;
+            const double x=open || distance<0?level0X-childAmount*262:level0X+(kColumnX-40+distance*186-level0X)*childAmount;
             const double focus=std::max(0.,1.-std::abs(distance));
             const double opacity=(open?1.:(1.-childAmount)+(distance>0?.1*childAmount:0.))*(shell_.message().isEmpty()?1.:.18);
             p.save();p.setOpacity(opacity);
@@ -663,11 +667,15 @@ void View::drawScene(QPainter& p) {
                 // The slot above focus passes above the category band. Mapping
                 // position continuously avoids hiding rows as they cross it.
                 const double row=distance*80+std::clamp(distance,0.,1.)*95
-                    -std::clamp(-distance,0.,1.)*(level==0?300:95);
-                const double y=505+row;
-                if(y<-100 || y>1050)continue;
+                    -std::clamp(-distance,0.,1.)*(level==0?305:95);
                 const double focus=std::max(0.,1.-std::abs(distance));
-                const double iconX=kColumnX-behind*(100+150*focus)+ahead*250+offset;
+                // A column behind an open page (RPCS3 capture): its unfocused rows move back to camera distance 2857.2,
+                // so they shrink toward the screen centre (scale 2700/2857.2) and the gap below focus closes by 15;
+                // the focused row stays at 2700 and steps 262 px left, the others 110 px.
+                const double depth=behind*(1.-focus);
+                const double y=540+(505+row-540-15*depth*std::clamp(distance,0.,1.))*(1.-.055*depth);
+                if(y<-100 || y>1050)continue;
+                const double iconX=kColumnX-behind*(110+152*focus)+ahead*250+offset;
                 // Reference (RPCS3 4.x video): square icons ~60 px, ~105 px when focused; utility folders are icons too.
                 // Only media thumbnails (album art) keep a wide tile.
                 // Setting rows carry the small round settings bullet: 18 px, 39 px focused (reference 95 s).
@@ -676,7 +684,14 @@ void View::drawScene(QPainter& p) {
                 const bool tile=entry.texture.contains("album") || entry.container=="file"; // ICON0 thumbnails are wide
                 const double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
                 const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
-                drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
+                // icontex items are glass icons like the categories: the firmware draws them with the same shader at
+                // brightness 1, behind an open page 0.247 (focused row 0.698) (RPCS3 capture, audit/PIPELINE.md);
+                // everything else is RCO or file artwork.
+                if(entry.container=="qgl/icontex" && icons_.ready() && !tile) {
+                    const double brightness=1.-behind*(1.-(.247+.451*focus));
+                    iconQueue_.push_back({entry.texture,{iconX,y},itemIconSize(level,bullet,focus),brightness,columnAlpha,2700+157.2*depth});
+                }
+                else drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
                 p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus)));
                 // One label column per level, as on the PS3 (reference: icon centre +99 at the top level, +57 inside a page).
                 const double labelX=kColumnX+(level==0?(tile?173:99):57)+ahead*250+offset;

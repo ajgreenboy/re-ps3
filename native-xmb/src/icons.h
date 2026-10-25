@@ -32,6 +32,7 @@ public:
         double size=117.13;  // firmware units (= reference pixels at d 2700): 117.13 unfocused, 167.33 focused
         double brightness=.698;
         double opacity=1;
+        double distance=2700; // camera distance: 2700, or 2857.2 for a parent column behind an open page
     };
     bool init(QOpenGLFunctions_3_3_Core& gl,Assets& assets);
     bool ready() const { return ready_; }

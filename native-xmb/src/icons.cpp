@@ -188,7 +188,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         const GLuint normals=normalMap(gl,icon.normalMap);
         if(!normals || icon.opacity<=0)continue;
         const double ndcX=icon.centre.x()/960.-1,ndcY=1-icon.centre.y()/540.;
-        const double worldX=ndcX*kDistance/kScaleX,worldY=ndcY*kDistance/kScaleY;
+        const double distance=icon.distance,worldX=ndcX*distance/kScaleX,worldY=ndcY*distance/kScaleY;
         // 1. CookieCutter: the frame behind the icon, 128x128 reference px, into the background map.
         const double cx=offsetX+icon.centre.x()*scale,cy=pixelHeight-icon.centre.y()*scale,half=64*scale;
         gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
@@ -198,10 +198,10 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         gl.glViewport(GLint(offsetX),0,GLsizei(1920*scale),pixelHeight);
         vc[256]=QVector4D(float(kScaleX*icon.size),0,0,float(kScaleX*worldX));
         vc[257]=QVector4D(0,float(kScaleY*icon.size),0,float(kScaleY*worldY));
-        vc[258]=QVector4D(0,0,-1,float(kDistance-19.95));
-        vc[259]=QVector4D(0,0,-1,float(kDistance));
+        vc[258]=QVector4D(0,0,-1,float(distance-19.95));
+        vc[259]=QVector4D(0,0,-1,float(distance));
         vc[467]=QVector4D(float(ndcX),float(ndcY),0,0);
-        set("_Eye",{float(-worldX-400),float(-worldY),float(kDistance),float(icon.size)});
+        set("_Eye",{float(-worldX-400),float(-worldY),float(distance),float(icon.size)});
         set("_Ambiant",{value("AMB R",light),value("AMB G",light),value("AMB B",light),float(icon.brightness)});
         program_.bind();
         program_.setUniformValueArray("vc",vc.data(),int(vc.size()));program_.setUniformValueArray("fc",fc.constData(),fc.size());
