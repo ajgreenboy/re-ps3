@@ -94,6 +94,10 @@ Build logs establish compilation. Requested window observations establish specif
 
 ## Decisions
 
+- 2026-10-25: User directed work from Phase 2 onwards while another session completed the category shader port.
+  Text now uses a native-resolution GL atlas with Qt shaping/coverage; this does not close firmware rasterizer
+  parity. Recovered PAF/RCO evidence and open requirements are in audit/TEXT-RENDERER.md.
+
 - 2026-10-24: refined: original unnumbered criteria now have stable ISC IDs; the audit retains source, observed and unmeasured status separately.
 - 2026-10-24: full audit maps307 indexed topics and44 presentation requirements; catalog breadth does not establish complete runtime coverage.
 
@@ -118,6 +122,12 @@ Build logs establish compilation. Requested window observations establish specif
   criterion now: original icon fidelity remains open; the specific orientation correction has a native screenshot
 
 ## Verification
+
+2026-10-25 Phase 2: isolated Release build in out/native-phase2 succeeded. Scripted root, category transition
+and dialog captures rendered via the glyph atlas and exited zero. A lost-glyph regression was reproduced and
+corrected by resetting GL unpack skipped rows/pixels. Foreground Computer Use confirmed readable labels;
+one 960x540 foreground five-second report was 52.7 fps. Hidden-window observations are not performance evidence.
+Exact reference crops, rasterizer hinting/gamma and native glow parameters remain unverified.
 
 Native Release build: work/native-reference-build.txt. Session193245-983 loads
 the original font,44 images with no failures,166 English strings and14 resource

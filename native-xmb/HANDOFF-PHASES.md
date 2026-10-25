@@ -24,9 +24,9 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 |---|---|
 | Background, ribbon, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs. Ribbon geometry is fitted, not traced from spline.elf |
 | Particles | Firmware shaders; the motion is a CPU rebuild of the SPU particles.elf |
-| Category icons | **Qt approximation**. The firmware renderer is identified but not ported (phase 1) |
+| Category icons | Firmware glass shader port in commit 7250e1e; daytime inputs and reference parity remain open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | Qt drawing with firmware RCO textures and strings; layout, sizes, opacity and timing measured from the reference |
-| Text | Qt rasterising the firmware Rodin fonts; glyph rendering and glow are approximated (phase 2) |
+| Text | Native-resolution GL glyph atlas with Qt shaping/rasterization; firmware rasterizer parity and glow parameters remain open (phase 2) |
 | Motion | One measured ease (25%/frame at 60 fps, τ 58 ms); 150 px column cross-fade on category moves |
 | Host settings | System Information, network list, video/audio output and master volume read and write the real PC |
 
@@ -46,11 +46,27 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   Match against icon crops from the reference.
 
 ### Phase 2: text renderer
+- Active from 2026-10-25 at the user's direction. See `audit/TEXT-RENDERER.md` for the implementation, recovered
+  PAF coverage/style behavior, RCO Text offsets, local evidence paths and remaining uncertainties.
+- GL atlas now handles menu/subtitle/dialog/info/OSK text, with batched glyphs and separate coverage/halo.
+  Native size snaps at the viewport scale; resizing clears the caches. Qt shaping preserves fallback and bidi.
+  This is the renderer foundation, not a completed port of the PS3 rasterizer.
+- Build independently with `build.ps1 -OutputDirectory ../out/native-phase2` when running from native-xmb;
+  this avoids build-log/executable locks from simultaneous Phase 1 work. Scripted captures support `size=1920x1080`.
 - The firmware draws text through paf (libfont with FreeType-style rasterisation of `dev_flash/data/font` SCE-PS3 Rodin
   faces) and applies glow and shadow from RCO text attributes.
 - Work: find the glyph rasteriser settings (hinting, gamma, size snapping) and the glow/shadow parameters in
   paf/explore_plugin. Render glyphs into a GL atlas at native resolution instead of QPainter text. Compare with 3×
   crops of reference labels: focused, unfocused, subtitle and dialog text.
+
+### Material and background gaps reported by the user (2026-10-25)
+- `_ChangingColor` RGB and `_LuminanceParams` currently use a captured night state; daytime needs tracing or
+  corroboration. ICONS.mnu has different day/night GLASS values, so fixed night luminance coefficients cannot
+  establish daytime parity.
+- Open-column item icons still take the Qt path, including original RCO images. Route the appropriate firmware
+  material inputs through the item renderer after its asset/UV mapping is understood.
+- Background is visibly brighter than RPCS3 at the same hour, which also brightens unfocused icons through
+  `_BackgroundMap`. Trace scene/exposure/composition before compensating the icon colour. No correction verified yet.
 
 ### Phase 3: item, column and dialog drawing through the firmware's own layout
 - Most of the 2D XMB is explore_plugin/system_plugin driving paf widgets from RCO objects: positions, scales and

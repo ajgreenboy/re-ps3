@@ -1,0 +1,47 @@
+#pragma once
+#include <QColor>
+#include <QFont>
+#include <QHash>
+#include <QImage>
+#include <QOpenGLFunctions_3_3_Core>
+#include <QOpenGLShaderProgram>
+#include <QPainter>
+#include <QRawFont>
+#include <memory>
+#include <vector>
+
+namespace xmb {
+// Shaping stays with QTextLayout (including fallback faces and bidi); glyph coverage is
+// rasterised once at display resolution and uploaded to an atlas. Qt never paints the labels.
+// Rasterisation is still the host Qt font engine, not a claimed port of PS3 libfont.
+class TextRenderer {
+public:
+    bool init(QOpenGLFunctions_3_3_Core& gl);
+    void release(QOpenGLFunctions_3_3_Core& gl);
+    void beginFrame(QOpenGLFunctions_3_3_Core& gl,const QSize& target,qreal rasterScale);
+    bool ready() const { return ready_; }
+    void draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
+              const QString& text,const QFont& font,const QColor& colour,int flags,
+              qreal glow=0,bool shadow=true,bool ink=true);
+private:
+    struct Glyph { int page=-1; QRect atlas; QPoint bearing; };
+    struct Face { QRawFont font; QHash<quint32,Glyph> glyphs; };
+    struct Page { GLuint texture=0; int x=0,y=0,rowHeight=0; };
+    struct PlacedGlyph { int face=0; quint32 index=0; QPointF position; };
+    struct Layout { QVector<PlacedGlyph> glyphs; qreal height=0; quint64 used=0; };
+    struct Vertex { float x,y,u,v,left,top,right,bottom; };
+    int face(const QRawFont& font);
+    const Glyph& glyph(QOpenGLFunctions_3_3_Core& gl,int face,quint32 index);
+    Layout& layout(const QString& text,const QFont& font,qreal width,int flags);
+    QOpenGLShaderProgram program_;
+    GLuint vao_=0,vbo_=0;
+    bool ready_=false;
+    QSize target_;
+    qreal rasterScale_=1;
+    quint64 serial_=0;
+    std::vector<Face> faces_;
+    std::vector<Page> pages_;
+    QHash<QString,Layout> layouts_;
+    static constexpr int atlasSize=1024,maxPages=16,maxLayouts=512;
+};
+}

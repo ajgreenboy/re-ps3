@@ -81,9 +81,10 @@ void View::loadWallpaper() {
         return reader.read();
     }));
 }
-View::~View(){if(context()){makeCurrent();monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
+View::~View(){if(context()){makeCurrent();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
     if(!initializeOpenGLFunctions()){qCritical()<<"Native renderer requires OpenGL 3.3";return;}
+    textRenderer_.init(*this);
     static const char* vertex=R"(#version 330 core
 out vec2 uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);}
@@ -138,8 +139,8 @@ void main(){
     initOriginalBackground();
     ribbon_.init(*this,assets_);
     hdr_.init(*this,assets_);
-    static const char* compositeVertex=R"(#version 330 core
     icons_.init(*this,assets_);
+    static const char* compositeVertex=R"(#version 330 core
 out vec2 uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);})";
     static const char* compositeFragment=R"(#version 330 core
@@ -450,6 +451,7 @@ void View::paintGL() {
     if(rebuild) {
         uiSignature_=signature;
         uiMsaa_->bind();glViewport(0,0,pixels.width(),pixels.height());glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
+        textRenderer_.beginFrame(*this,pixels,std::min(device.width()/1920.,device.height()/1080.));
         {
             QOpenGLPaintDevice paintDevice(pixels);
             QPainter ui(&paintDevice);
@@ -536,10 +538,12 @@ void View::drawScene(QPainter& p) {
         return pairs>=2;
     }();
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
+        if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);textRenderer_.draw(*this,p,r,value,f,colour,flags);return;}
         QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferVerticalHinting);p.setFont(f);p.setPen(QColor(0,0,0,38));p.drawText(r.translated(1,1),flags,value);p.setPen(colour);p.drawText(r,flags,value);
     };
     // Soft white halo behind a label (the XMB's focused-item glow): the text drawn at low alpha in a ring of offsets.
     auto glow=[&](const QRectF& r,const QString& value,int size,double strength,int flags=Qt::AlignLeft|Qt::AlignVCenter){
+        if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);textRenderer_.draw(*this,p,r,value,f,Qt::white,flags,strength,false,false);return;}
         QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);p.setFont(f);
         // Reference (3x crop, 64 s video): a luminous halo ~5 px wide around the focused label.
         for(const auto& [radius,alpha]:{std::pair{5.,7},std::pair{2.5,16}})for(int k=0;k<12;++k) {
@@ -846,6 +850,7 @@ void View::oskPress() {
 }
 void View::drawOsk(QPainter& p) {
     const auto label=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignCenter,bool bold=false) {
+        if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);f.setBold(bold);textRenderer_.draw(*this,p,r,value,f,colour,flags,0,false);return;}
         QFont f(shell_.fontFamily());f.setPixelSize(size);f.setBold(bold);f.setHintingPreference(QFont::PreferVerticalHinting);p.setFont(f);p.setPen(colour);p.drawText(r,flags,value);
     };
     const auto key=[&](const QRectF& r,QColor top,QColor bottom,bool focused) {
