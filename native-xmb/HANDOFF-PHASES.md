@@ -109,7 +109,9 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   4 frames (66.7 ms), with no acceleration. The help text has no delay: it is drawn on the selected row from the frame
   the move starts. The category move fits the same 200 ms mode-5 ease. All three are implemented
   (audit/PIPELINE.md "Measured on the real XMB").
-- Open: page move (into or out of a column) durations, still assumed 200 ms; info-bar clock updates.
+- Done 2026-10-25: the page move is slower than the others. Captured in RPCS3, it fits paf mode 4 at 300 ms; this is a fit, not
+  yet traced to a call. `PafEase` has mode 4, and the depth move uses it.
+- Open: trace the page move's animate call in explore_plugin to confirm 300 ms and mode 4; info-bar clock updates.
 
 ### Phase 5: remaining firmware renderers and states
 - Ribbon geometry from spline.elf is done. Next: particles from particles.elf exactly, including the wind response.

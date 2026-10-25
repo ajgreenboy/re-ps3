@@ -56,20 +56,25 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
     connect(&timer_,&QTimer::timeout,this,[this]{pollController();update();});timer_.start();pad::start();
 }
-void View::PafEase::retarget(double target,double milliseconds) {
+void View::PafEase::retarget(double target,double milliseconds,int mode) {
     if(!started_){value=from_=to_=target;started_=true;return;}
     if(target==to_ && (running_ || value==target))return;
     // FUN_003981ec: the duration snaps to whole 60 Hz frames; k by frame count (DAT_0068eb04.. and the 1/(2.2+(n-5)/3) tail).
     const int frames=std::max(1,int(milliseconds*.001*60));
-    static constexpr double shortK[4]={.9615385,.78125,.6369426,.5291005};
-    k_=frames<=4?shortK[frames-1]:1./((frames-5)*.333333+2.2);
+    if(mode==4) { // a 14-entry table, then 1/(3.775+0.217(n-15)); each step grows by 1.0001
+        static constexpr double tableK[14]={.995,.905,.7905,.6873,.6042,.5376,.4843,.4396,.4016,.3704,.3431,.3195,.2990,.2809};
+        k_=frames<=14?tableK[frames-1]:1./(3.775+.217*(frames-15));growth_=1.0001;
+    } else {
+        static constexpr double shortK[4]={.9615385,.78125,.6369426,.5291005};
+        k_=frames<=4?shortK[frames-1]:1./((frames-5)*.333333+2.2);growth_=1.000001;
+    }
     duration_=frames/60.*.999999;
     from_=value;to_=target;progress_=0;elapsed_=0;running_=true;
 }
 void View::PafEase::advance(double seconds) {
     if(!running_)return;
-    // FUN_00398748 mode 5: per elapsed frame v = ((1-v) k + v) x 1.000001; a fractional frame above 0.05 is interpolated.
-    const auto step=[&](double v){return std::min(1.,((1.-v)*k_+v)*1.000001);};
+    // FUN_00398748 modes 4/5: per elapsed frame v = ((1-v) k + v) x growth; a fractional frame above 0.05 is interpolated.
+    const auto step=[&](double v){return std::min(1.,((1.-v)*k_+v)*growth_);};
     // paf takes this tick's frame count (DAT_006fb1f4): whole frames step, the fraction blends one step into the state.
     elapsed_+=seconds;
     const double frames=seconds*60;const int whole=int(frames);const double fraction=frames-whole;
@@ -487,15 +492,17 @@ void View::paintGL() {
     const qint64 now=clock_.elapsed();
     const double dt=std::min(.1,double(now-previous_)/1000.);previous_=now;
     const double renderSeconds=secondsOverride_>=0.?secondsOverride_:now/1000.; // fixed for A/B captures
-    // Every move is a firmware paf animation: 200 ms in accel mode 5 (PafEase), for the category, item and page moves
-    // and the column cross-fade (audit/PIPELINE.md "Menu motion").
+    // Every move is a firmware paf animation (PafEase): 200 ms in accel mode 5 for the category and item moves and the
+    // column cross-fade; the page (depth) move is slower, fitted to 300 ms in mode 4 (audit/PIPELINE.md "Menu motion").
     categoryEase_.retarget(shell_.category(),moveMilliseconds);categoryEase_.advance(dt);categoryPosition_=categoryEase_.value;
     if(!outgoing_.isEmpty()){fadeEase_.advance(dt);categoryFade_=fadeEase_.value;if(!fadeEase_.running()){categoryFade_=0;outgoing_.clear();}}
-    depthEase_.retarget(shell_.depth(),moveMilliseconds);depthEase_.advance(dt);depthPosition_=depthEase_.value;
+    depthEase_.retarget(shell_.depth(),pageMilliseconds,4);depthEase_.advance(dt);depthPosition_=depthEase_.value;
     for(auto& column:columns_){column.ease.retarget(column.selection,moveMilliseconds);column.ease.advance(dt);column.position=column.ease.value;}
-    // Local diagnosis: XMB_MOTION_LOG=1 logs the focused column's eased position each frame while it moves.
+    // Local diagnosis: XMB_MOTION_LOG=1 logs the focused column's and the depth's eased positions each frame while they move.
     if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && !columns_.isEmpty() && columns_.back().ease.running())
         qInfo().noquote()<<"motion:"<<now<<"ms position"<<QString::number(columns_.back().position,'f',4)<<"target"<<columns_.back().selection;
+    if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && depthEase_.running())
+        qInfo().noquote()<<"depth:"<<now<<"ms position"<<QString::number(depthPosition_,'f',4)<<"target"<<shell_.depth();
     if(std::abs(depthPosition_-shell_.depth())<.001) {
         depthPosition_=shell_.depth();
         if(columns_.size()>shell_.depth()+1)columns_.resize(shell_.depth()+1);

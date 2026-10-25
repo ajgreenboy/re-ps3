@@ -29,16 +29,18 @@ public:
     // FUN_003ad728; paf animation setup FUN_003981ec and evaluator FUN_00398748). Mode 5 closes a fixed fraction
     // k of the remaining distance every 60 Hz frame, k from a table by the duration in frames, and lands on the
     // target when the frame-snapped duration ends. A new target restarts the curve from the current value.
+    // Mode 4 is the same per-frame form with its own k table; the page (depth) move uses it (RPCS3 capture).
     struct PafEase {
         double value=0;
-        void retarget(double target,double milliseconds=200);
+        void retarget(double target,double milliseconds=200,int mode=5);
         void advance(double seconds);
         bool running() const { return running_; }
     private:
-        double from_=0,to_=0,progress_=1,elapsed_=0,duration_=0,k_=0;
+        double from_=0,to_=0,progress_=1,elapsed_=0,duration_=0,k_=0,growth_=1.000001;
         bool started_=false,running_=false;
     };
     static constexpr double moveMilliseconds=200;
+    static constexpr double pageMilliseconds=300;
     // Renders the background offscreen at reference times and writes the same statistics measured from the
     // reference videos (band colours by clock time, ribbon crest over 40 s). Returns false on GL failure.
     bool measureReference(const QString& path);

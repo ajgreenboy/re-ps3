@@ -1,14 +1,14 @@
 // Tracks how far the XMB's bright UI content (labels, icons) has scrolled in a timestamped capture of a key test
 // (frames <dir>/f_<ms>.png, as recorded from RPCS3): per frame, the profile of pixels above a threshold across a
 // region is cross-correlated with the previous frame's, and the sub-pixel shifts are summed. Prints "ms position".
-// Usage: bun motion-track.ts <dir> [vertical|horizontal] [x0 x1 y0 y1 as fractions] [threshold]
+// Usage: bun motion-track.ts <dir> [vertical|horizontal] [x0 x1 y0 y1 as fractions] [threshold] [max shift per frame, px]
 import { readdirSync } from "node:fs";
 import { decodePng } from "./ab-compare.ts";
 
 const [dir, axis = "vertical", ...rest] = process.argv.slice(2);
 const [x0, x1, y0, y1] = rest.length >= 4 ? rest.slice(0, 4).map(Number) : axis === "vertical" ? [0.33, 0.62, 0.22, 0.95] : [0.02, 0.98, 0.25, 0.42];
 const threshold = rest.length >= 5 ? Number(rest[4]) : 150;
-const maxShift = 40;
+const maxShift = rest.length >= 6 ? Number(rest[5]) : 40;
 
 function profile(path: string): Float64Array {
   const { w, h, rgba } = decodePng(path);
