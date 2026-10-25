@@ -38,6 +38,7 @@ public:
     int selectionAt(int depth) const;
     QString pageTitle() const { return pages_.isEmpty()?QString{}:pages_.last().title; }
     QString message() const { return message_; }
+    void setRenderer(const QString& renderer) { renderer_=renderer; }
     int theme() const { return preferences_.value("appearance/colour").toInt(); }
     QString fontFamily() const;
     QString valueText(const Entry& entry) const;
@@ -92,7 +93,7 @@ private:
     QVector<int> selections_;
     struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; };
     QVector<Page> pages_;
-    QString message_,mediaTitle_;
+    QString message_,mediaTitle_,renderer_;
     bool mediaOpen_=false;
     int category_=6;
     std::unique_ptr<QMediaPlayer> player_;

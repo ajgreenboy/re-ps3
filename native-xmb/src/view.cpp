@@ -152,7 +152,8 @@ void main(){colour=texture(layer,uv);})"; // premultiplied; linear filtering at 
         monthTexture_->setMinificationFilter(QOpenGLTexture::Linear);monthTexture_->setMagnificationFilter(QOpenGLTexture::Linear);
         monthTexture_->setWrapMode(QOpenGLTexture::ClampToEdge);
     }
-    qInfo()<<"native renderer:"<<reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+    const QString renderer=QString::fromLatin1(reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
+    qInfo()<<"native renderer:"<<renderer;shell_.setRenderer(renderer);
 }
 // Background brightness by clock time, 0 = night, 1 = day. Keyframes are the top-band brightness of
 // the reference day-cycle video relative to 10:30-16:30 (audit/VIDEO-REFERENCES.md); linear between them.

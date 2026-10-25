@@ -1,6 +1,7 @@
 #include "shell.h"
 #include "assets.h"
 #include "catalog.h"
+#include "host.h"
 #include <QAudioOutput>
 #include <QMediaPlayer>
 #include <QVideoSink>
@@ -213,13 +214,19 @@ void Shell::activate() {
     case Action::SettingChoices:openChoices(entry.setting,entry.title);break;
     case Action::SetSetting:
         if(entry.setting=="appearance/background" && entry.option.toInt()==2 && wallpaper().isEmpty()){emit requestWallpaper();break;}
+        if(entry.setting.startsWith("host/")) { // the computer's own settings, written straight to the host
+            const bool ok=entry.setting=="host/volume"?host::setMasterVolume(entry.option.toInt()):host::setMasterMuted(entry.option.toBool());
+            if(!ok)message_="The system volume could not be changed.";else if(!pages_.isEmpty())pages_.removeLast();
+            break;
+        }
         if(preferences_.setValue(entry.setting,entry.option) && !pages_.isEmpty())pages_.removeLast();break;
     case Action::EditName:emit requestSystemName(preferences_.value("system/name").toString());break;
     case Action::CreateUser:emit requestNewUser();break;
     case Action::SelectUser:profiles_.select(entry.value);break;
     case Action::Wallpaper:emit requestWallpaper();break;
     case Action::Information:
-        message_=entry.value.isEmpty()?"System Information\n\nNative XMB 0.2.0\n"+QSysInfo::prettyProductName()+"\n"+QSysInfo::currentCpuArchitecture():entry.value;break;
+        message_=entry.value=="host:network"?host::networkStatus([this](const QString& id,const QString& fallback){return assets_.text("sysconf_plugin",id,fallback);}):entry.value=="host:display"?host::displayOutput():entry.value=="host:audio"?host::audioOutput():
+            entry.value.isEmpty()?host::systemInformation(renderer_):entry.value;break;
     case Action::Library: {
         const auto path=preferences_.value("library/"+categories_[category_].id).toString();
         if(!path.isEmpty())openDirectory(path);else emit requestLibrary();break;

@@ -1,5 +1,7 @@
 #include "shell.h"
 #include "assets.h"
+#include "host.h"
+#include <cmath>
 #include <QTimeZone>
 #include <QDateTime>
 #include <QImageReader>
@@ -28,7 +30,7 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
         }();
         return zones;
     }
-    if(key=="audio/volume") {QVector<Choice> result;for(int i=0;i<=100;i+=10)result.push_back({QString::number(i)+"%",i});return result;}
+    if(key=="audio/volume" || key=="host/volume") {QVector<Choice> result;for(int i=0;i<=100;i+=10)result.push_back({QString::number(i)+"%",i});return result;}
     if(key=="photo/interval")return {{"5 seconds",5000},{"10 seconds",10000},{"15 seconds",15000},{"30 seconds",30000}};
     if(key=="photo/fit")return {{"Fit",0},{"Fill",1}};
     if(key=="power/idleMinutes")return {{"Off",0},{"15 minutes",15},{"30 minutes",30},{"1 hour",60},{"2 hours",120}};
@@ -76,10 +78,12 @@ void Shell::openSettings(const QString& id) {
             option("media",su("msg_update_media","Update via Storage Media"),{},{},Action::Unavailable)};
     } else if(id=="sound") {
         page.title=tr("msg_sound_setting","Sound Settings");
-        page.entries={option("sound_output_setting",tr("msg_sound_output_setting","Audio Output Settings"),tr("msg_sound_output_setting_explanation",{}),{},Action::Unavailable),
+        page.entries={option("sound_output_setting",tr("msg_sound_output_setting","Audio Output Settings"),tr("msg_sound_output_setting_explanation",{}),{},Action::Information,"host:audio"),
             option("audio_multi_output",tr("msg_audio_multi_output","Audio Multi-Output"),tr("msg_audio_multi_output_explanation",{}),{},Action::Unavailable),
-            option("volume","Volume","Sets the volume for media and menu sounds.","audio/volume"),
-            option("mute","Mute","Mutes native XMB audio.","audio/muted"),
+            option("system_volume","System Volume","Sets the master volume of this computer's playback device.","host/volume"),
+            option("system_mute","Mute","Mutes this computer's playback device.","host/muted"),
+            option("volume","XMB Volume","Sets the volume for media and menu sounds.","audio/volume"),
+            option("xmb_mute","XMB Mute","Mutes native XMB audio only.","audio/muted"),
             option("keytone","Key Tone","Plays the original XMB sounds during navigation.","audio/keyTone")};
     } else if(id=="music" || id=="video") {
         page.title=id=="music"?"Music Settings":"Video Settings";
@@ -92,7 +96,7 @@ void Shell::openSettings(const QString& id) {
             option("repeat","Repeat","Restarts a slideshow after the final photo.","media/repeat")};
     } else if(id=="display") {
         page.title=tr("msg_display_setting","Display Settings");
-        page.entries={option("display_output_setting",tr("msg_display_output_setting","Video Output Settings"),tr("msg_display_output_setting_explanation",{}),{},Action::Unavailable),
+        page.entries={option("display_output_setting",tr("msg_display_output_setting","Video Output Settings"),tr("msg_display_output_setting_explanation",{}),{},Action::Information,"host:display"),
             option("tvtype",tr("msg_tvtype","TV Type"),tr("msg_tvtype_explanation",{}),{},Action::Unavailable),
             option("fullscreen","Full Screen","Expands the native XMB window to fill the display.","display/fullscreen")};
     } else if(id=="power") {
@@ -125,16 +129,21 @@ void Shell::openSettings(const QString& id) {
         const auto& definition=pages[id];
         page.title=tr(definition.first,id);
         for(const auto& key:definition.second)page.entries.push_back(info(key,key));
+        if(id=="network")page.entries.insert(2,option("netlist_current",tr("msg_netlist_current","Settings and Connection Status List"),
+            tr("msg_netlist_current_explanation",{}),{},Action::Information,"host:network"));
     } else return;
     pages_.push_back(std::move(page));
 }
 void Shell::openChoices(const QString& key,const QString& title) {
     if(pages_.size()>=32)return;
     Page page;page.title=title;
+    // host/ keys are read from the computer each time (another app may have changed them), never stored.
+    const QVariant current=key=="host/volume"?QVariant(int(std::lround(host::masterVolume()/10.)*10)):
+        key=="host/muted"?QVariant(host::masterMuted()):preferences_.value(key);
     for(const auto& choice:choices(key,assets_)) {
         auto entry=option(key+"/"+QString::number(page.entries.size()),choice.title,{},key,Action::SetSetting);
         entry.option=choice.value;
-        if(preferences_.value(key)==choice.value)page.selection=int(page.entries.size());
+        if(current==choice.value)page.selection=int(page.entries.size());
         page.entries.push_back(std::move(entry));
     }
     pages_.push_back(std::move(page));
