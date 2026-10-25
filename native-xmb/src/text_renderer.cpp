@@ -37,7 +37,8 @@ QImage tileFor(const QImage& coverage,int pad,qreal sigma) {
 }
 }
 
-bool TextRenderer::init(QOpenGLFunctions_3_3_Core& gl) {
+bool TextRenderer::init(QOpenGLFunctions_3_3_Core& gl,const QString& fontDirectory) {
+    useFreeType_=raster_.configure(fontDirectory) && !qEnvironmentVariableIntValue("XMB_TEXT_QT");
     const char* vertex=R"(#version 330 core
 layout(location=0) in vec2 position;layout(location=1) in vec2 texcoord;layout(location=2) in vec4 bounds;
 uniform vec2 viewport;out vec2 uv;flat out vec4 tileBounds;
@@ -68,7 +69,8 @@ void main(){
     gl.glEnableVertexAttribArray(1);gl.glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(2*sizeof(float)));
     gl.glEnableVertexAttribArray(2);gl.glVertexAttribPointer(2,4,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(4*sizeof(float)));
     gl.glBindVertexArray(0);gl.glBindBuffer(GL_ARRAY_BUFFER,0);ready_=true;
-    qInfo()<<"text atlas: grayscale native-resolution coverage; vertical hinting; measured Gaussian halo";
+    qInfo()<<"text atlas:"<<(useFreeType_?raster_.version()+"; firmware flags 10 (no hinting/no bitmap)":QString("Qt coverage fallback; vertical hinting"))
+           <<"grayscale coverage; measured Gaussian halo";
     return true;
 }
 void TextRenderer::release(QOpenGLFunctions_3_3_Core& gl) {
@@ -89,13 +91,21 @@ void TextRenderer::beginFrame(QOpenGLFunctions_3_3_Core& gl,const QSize& target,
 }
 int TextRenderer::face(const QRawFont& font) {
     for(int i=0;i<int(faces_.size());++i)if(faces_[size_t(i)].font==font)return i;
-    faces_.push_back({font,{}});return int(faces_.size())-1;
+    faces_.push_back({font,{}});
+    const auto source=raster_.sourceFor(font);
+    qInfo()<<"text face:"<<font.familyName()<<font.styleName()<<font.pixelSize()<<"source"<<source;
+    if(useFreeType_ && source.isEmpty())qWarning()<<"text: unmatched font uses Qt coverage"<<font.familyName()<<font.styleName();
+    return int(faces_.size())-1;
 }
 const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int faceIndex,quint32 index) {
     auto& f=faces_[size_t(faceIndex)];const auto found=f.glyphs.constFind(index);
     if(found!=f.glyphs.cend())return *found;
     Glyph value;
-    const auto raw=f.font.alphaMapForGlyph(index,QRawFont::PixelAntialiasing);
+    // libfontFT.prx cellFontFT_65E27CB3 @ 0x6aa4 loads outlines with flags 10, then uses
+    // FT_Outline_Get_Bitmap. FT_RENDER_MODE_NORMAL uses FreeType's same grayscale outline rasterizer.
+    const auto raster=useFreeType_?raster_.rasterize(f.font,index,10):FontRaster::RasterGlyph{};
+    if(useFreeType_ && !raster.valid)qWarning()<<"text: Qt glyph coverage fallback"<<f.font.familyName()<<index;
+    const auto raw=raster.valid?raster.coverage:f.font.alphaMapForGlyph(index,QRawFont::PixelAntialiasing);
     if(raw.isNull())return f.glyphs.insert(index,value).value(); // spaces retain their shaped advance
     const int pad=std::max(2,int(std::ceil(haloRadius*rasterScale_))+2);
     QImage coverage(raw.size(),QImage::Format_Grayscale8);
@@ -123,7 +133,8 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
     }
     auto& p=pages_.back();value.page=int(pages_.size())-1;value.atlas={p.x,p.y,tile.width(),tile.height()};
     const auto bounds=f.font.boundingRect(index);
-    value.bearing={int(std::floor(bounds.left()))-pad,int(std::floor(bounds.top()))-pad};
+    value.bearing=raster.valid?raster.bearing-QPoint(pad,pad):
+        QPoint(int(std::floor(bounds.left()))-pad,int(std::floor(bounds.top()))-pad);
     gl.glBindTexture(GL_TEXTURE_2D,p.texture);gl.glPixelStorei(GL_UNPACK_ALIGNMENT,1);
     gl.glPixelStorei(GL_UNPACK_ROW_LENGTH,0);
     gl.glPixelStorei(GL_UNPACK_SKIP_PIXELS,0);gl.glPixelStorei(GL_UNPACK_SKIP_ROWS,0);
@@ -132,7 +143,8 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
     return f.glyphs.insert(index,value).value();
 }
 TextRenderer::Layout& TextRenderer::layout(const QString& text,const QFont& font,qreal width,int flags) {
-    const QString key=font.key()+QChar(0x1f)+QString::number(width,'f',3)+':'+QString::number(flags)+QChar(0x1f)+text;
+    const QString display=FontRaster::mapSymbols(text);
+    const QString key=font.key()+QChar(0x1f)+QString::number(width,'f',3)+':'+QString::number(flags)+QChar(0x1f)+display;
     auto found=layouts_.find(key);if(found!=layouts_.end()){found->used=++serial_;return *found;}
     if(layouts_.size()>=maxLayouts) {
         auto oldest=layouts_.begin();for(auto it=layouts_.begin();it!=layouts_.end();++it)if(it->used<oldest->used)oldest=it;
@@ -141,7 +153,7 @@ TextRenderer::Layout& TextRenderer::layout(const QString& text,const QFont& font
     Layout value;value.used=++serial_;
     // QTextLayout shapes complex scripts and chooses registered firmware fallback
     // faces. Do not index UTF-16 code units as if each were a glyph.
-    const auto paragraphs=text.split('\n');
+    const auto paragraphs=display.split('\n');
     for(const auto& paragraph:paragraphs) {
         QTextLayout shaped(paragraph,font);QTextOption option;
         option.setWrapMode(flags&Qt::TextWordWrap?QTextOption::WrapAtWordBoundaryOrAnywhere:QTextOption::NoWrap);
@@ -165,8 +177,10 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
                         qreal glow,bool shadow,bool ink) {
     if(!ready_ || text.isEmpty() || colour.alpha()==0 || painter.opacity()<=0)return;
     QFont font=requested;
+    if(font.styleName().isEmpty() && font.weight()==QFont::Normal && !font.italic())font.setStyleName("Regular");
     font.setPixelSize(std::max(1,int(std::lround(requested.pixelSize()*rasterScale_))));
-    font.setStyleStrategy(QFont::PreferAntialias);font.setHintingPreference(QFont::PreferVerticalHinting);
+    font.setStyleStrategy(QFont::PreferAntialias);
+    font.setHintingPreference(useFreeType_?QFont::PreferNoHinting:QFont::PreferVerticalHinting);
     auto& shaped=layout(text,font,rect.width()*rasterScale_,flags);
     qreal offset=0;if(flags&Qt::AlignVCenter)offset=(rect.height()*rasterScale_-shaped.height)/2;
     else if(flags&Qt::AlignBottom)offset=rect.height()*rasterScale_-shaped.height;

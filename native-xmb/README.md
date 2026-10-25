@@ -22,6 +22,10 @@ to the launcher for another local `dev_flash`. The default launcher uses the
 existing sibling RPCS3 firmware directory. Build products and native settings are
 under `out/native-xmb/`. No firmware assets are copied into source control.
 
+Font coverage also requires FreeType: CMake uses an installed FreeType package or the Qt SDK's bundled
+library/header targets. The recovered glyph-load settings and remaining parity work are in
+`audit/FONT-MATCHING.md`.
+
 Keyboard: arrows navigate, Enter activates, Escape or Backspace returns, F11 toggles full
 screen, Space pauses/resumes media. XInput D-pad and A/B share the same actions.
 

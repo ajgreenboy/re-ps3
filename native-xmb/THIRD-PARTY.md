@@ -1,5 +1,12 @@
 # Third-party code
 
+## FreeType
+
+The native text renderer links FreeType, using the installed system package or Qt SDK copy, under the
+FreeType License: https://freetype.org/license.html . No FreeType source is copied into this repository.
+
+Portions of this software are copyright © 2025 The FreeType Project (www.freetype.org). All rights reserved.
+
 ## MaXMB
 
 https://github.com/MaxiBono/MaXMB, MIT License. Components translated or adapted to C++:
