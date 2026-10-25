@@ -79,6 +79,24 @@ Local evidence exports: `text-string-refs.c`, `text-font-wrappers.c`, `text-font
 `text-family-map.c`, `text-ui-refs.c`. The REA MCP PPC route was unavailable; the installed Ghidra CLI
 provided the existing project's exports with `-readOnly -noanalysis`. No RPCS3 capture/input was used.
 
+## Label timing observed by MaXMB (2026-10-25)
+
+MaXMB (https://github.com/MaxiBono/MaXMB, MIT) draws its text with browser CSS: a bundled Rodin TTF with pinned
+vertical metrics, plus text-shadow glows. Neither its rasterisation nor its metrics apply here, because this renderer
+uses the firmware fonts. Its label rules record two behaviours its author observed on a console, and both are now
+implemented in `view.cpp`:
+
+- **Breathing glow.** The focused item's label glow cycles every 3.4 s (ease-in-out). It runs from a faint halo
+  (about 0.35 of the peak) to the full bloom, starting faint when the row takes focus. The peak stays the static
+  halo measured from the reference crop.
+- **Idle fade.** After 4 s on one row of Photo/Music/Video/Game/Network/PSN (top level), the other rows' titles
+  fade out over 0.8 s. They return when the focus moves.
+
+Neither is confirmed on our own references yet: the 19:35 recording and the 40-48 s timing clip never rest on a
+row. Native grabs at about 0.3 s, 1.8 s and 5.4 s after a move show the faint and full glow phases and the faded
+rows (the row below the focus reads 68.6 against a background of 69.0). The UI layer redraws when the glow phase
+(24 steps) or the fade (16 steps) changes. A capture resting on one row for 8 s or more would settle both.
+
 ## Build and capture workflow
 
 Use a separate output directory while Phase 1 work shares the checkout:
