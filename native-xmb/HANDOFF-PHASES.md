@@ -70,11 +70,15 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   excess is already in `back_colours0`'s scene, not the HDR tone map.
 - Matched against a live local RPCS3 frame (same firmware, same month, 00:37): native final night bands run ~3x
   brighter at the top and ~2x at the bottom (top/bottom luma ~10/47 vs RPCS3 ~3/23); the native night gradient rises
-  monotonically to the bottom while RPCS3 peaks at the ribbon and dips below it. All `BACKGROUND.mnu` inputs in
+  monotonically to the bottom while RPCS3 peaks at the ribbon and dips below it (a settled re-capture at 00:58 confirms
+  it: top luma ~1.3 vs native ~10, bottom ~21 vs ~47). All `BACKGROUND.mnu` inputs in
   `view.cpp` were checked against `override/day|night/BACKGROUND.mnu` and are exact (NIGHT BLEND 0.499947, DAYSPREAD
-  2.68038, NIGHT WHIT BIAS 0.486059, the NIGHT2DAY/DAY2NIGHT hours), the day/night DDS textures share one format, and
-  the day path matches — so the culprit is a subtle night-path translation issue in `back_colours0` (395-instr RSX
-  shader), not an input, the decoder, or exposure. No correction verified yet.
+  2.68038, NIGHT WHIT BIAS 0.486059, the NIGHT2DAY/DAY2NIGHT hours), the DXT day/night textures decode with the correct
+  5:6:5 expansion, and the day path matches. The `rsx_program.cpp` translator was also diffed against RPCS3's
+  `FragmentProgramDecompiler` and matches opcode-for-opcode (MIN/MAX/COS/SIN/LIT/LIF/EX2, source+destination precision
+  modifiers, and the destination-clamp exempt list); the only divergence is MAD (`a*b+c` vs RPCS3's `fma`), which is far
+  too small to explain a 2-8x gap. So the scene-level excess is not yet explained by translation, inputs, decode, or
+  exposure. No correction verified yet.
 
 ### Phase 3: item, column and dialog drawing through the firmware's own layout
 - Initial trace: system_plugin infobar/infotext and OSK templates mostly have zero/dynamic geometry. Do not
