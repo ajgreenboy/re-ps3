@@ -137,14 +137,17 @@ int main(int argc,char** argv) {
     if(parser.isSet("dump-cg")) {
         // Local analysis only: the folder receives firmware-derived shader text and must stay out of Git.
         int failures=0;
-        for(const QString name:{"moyou/background","moyou/back_colours0","moyou/back_colours1","moyou/back_colours2","moyou/LinesController","moyou/LinesControllerQuin",
+        for(const QString entry:{"moyou/background","moyou/back_colours0","moyou/back_colours1","moyou/back_colours2","moyou/LinesController","moyou/LinesControllerQuin",
                                 "moyou/LinesEdge","moyou/lines0","moyou/lines1","moyou/lines2","moyou/ffd_shader0","moyou/ffd_shader1","moyou/ffd_shader2","moyou/ffd_shader3",
                                 "moyou/ffd_alpha_blend","glutils/Copy","glutils/GlareSource","glutils/GlareSourcePre","glutils/GlareSourceNoTone","glutils/Gaussian",
                                 "glutils/ApplyDisplay","glutils/ToneApplyDisplay","glutils/AccGlare","glutils/DoubleGaussian","glutils/GaussBloomAndBlur","glutils/BlurAcc",
-                                "glutils/BloomCone","glutils/ToneMap","glutils/ApplyGlare","particles/particles_quads","particles/particles_second"})
+                                "glutils/BloomCone","glutils/ToneMap","glutils/ApplyGlare","particles/particles_quads","particles/particles_second",
+                                "icons:icons/quad","icons:icons/mask","icons:icons/icons_full_ss","icons:icons/icons_full_ss_no_shad","icons:icons/icons_cheap_ss",
+                                "icons:icons/icons_cheap_ss_no_shad","icons:icons/icons_no_ss","icons:icons/icons_no_ss_no_shad"})
             for(const QString ext:{"vpo","fpo"}) {
                 QByteArray bytes;
-                try { bytes=assets.qglFile("lines","lib/"+name+"."+ext); } catch(const std::exception&) { continue; } // not every program has both stages
+                const QString archive=entry.contains(':')?entry.section(':',0,0):QString("lines"),name=entry.section(':',-1);
+                try { bytes=assets.qglFile(archive,"lib/"+name+"."+ext); } catch(const std::exception&) { continue; } // not every program has both stages
                 if(bytes.isEmpty())continue;
                 QString error;const auto program=xmb::CgProgram::load(bytes,&error);
                 if(!program.valid()){qCritical()<<name<<ext<<error;++failures;continue;}
