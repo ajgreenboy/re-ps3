@@ -27,7 +27,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Particles | linkev/PlayStation-3-XMB's sparkle layer (point sprites, closed-form motion; not a firmware port); the boot's GLOBAL ALPHA fades them in |
 | Category icons | Original uses firmware glass; fixed colours use an opaque normal-map material to resolve dark interiors. See audit/CATEGORY-ICON-FIX.md; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | Qt drawing with firmware RCO textures and strings; layout, sizes, opacity and timing measured from the reference |
-| Text | GL glyph atlas, rasterised at the 2x UI layer's scale with glyph origins on whole pixels (soft-text bug fixed 2026-10-25); label glow breathes and idle labels fade (MaXMB observations, unconfirmed); firmware rasterizer parity open |
+| Text | Original font faces rasterized with FreeType and recovered load flags 10 into the 2x GL atlas; label glow/idle fade are MaXMB observations; PAF metrics, pixel phase and full parity remain open (audit/FONT-MATCHING.md) |
 | Motion | One measured ease (25%/frame at 60 fps, τ 58 ms); 150 px column cross-fade on category moves |
 | Cold boot | 4.93 intro ported: coldboot.raf scene and script, boot sound, anim_coldboot2 events, background boot presets; skippable, `--no-intro` (audit/PIPELINE.md "Cold boot") |
 | Themes | `.p3t` still background, icons and five menu-sound roles; RAF scenes and font/colour open |
@@ -55,6 +55,8 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   Match against icon crops from the reference.
 
 ### Phase 2: text renderer
+- Latest continuation: `audit/FONT-MATCHING.md`. Matched original faces now use FreeType with recovered
+  NO_HINTING|NO_BITMAP flags; source identity is checked by head+cmap tables. PAF metric/pixel parity remains open.
 - Active from 2026-10-25 at the user's direction. See `audit/TEXT-RENDERER.md` for the implementation, recovered
   PAF coverage/style behavior, RCO Text offsets, local evidence paths and remaining uncertainties.
 - GL atlas now handles menu/subtitle/dialog/info/OSK text, with batched glyphs and separate coverage/halo.

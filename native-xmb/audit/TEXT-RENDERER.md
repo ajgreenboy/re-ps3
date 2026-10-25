@@ -1,6 +1,7 @@
 # Phase 2 — native text renderer and firmware trace
 
-Updated 2026-10-25. The GL atlas foundation is implemented; pixel parity with PAF is still open.
+Updated 2026-10-25. The GL atlas and recovered FreeType glyph-load path are implemented; pixel parity with PAF is still open.
+See `FONT-MATCHING.md` for the latest bridge evidence, verification and next phase.
 
 ## Implementation
 
@@ -10,13 +11,14 @@ and a separate Gaussian halo to GL atlas pages. Consecutive glyphs on the same p
 order; the shader produces premultiplied coverage and halo after a separate whole-string shadow pass. Labels are drawn in the original scene
 order through QPainter native-paint boundaries, so dialogs still dim the elements behind them.
 
-Menu labels, captions, subtitles, dialog/information text and the OSK use the atlas. The existing Qt text path
-remains a fallback if shader initialization fails. It is not a port of PS3 libfont: QRawFont still uses the
-host Qt font engine. The temporary metrics used for elision and the OSK cursor also remain Qt metrics.
+Menu labels, captions, subtitles, dialog/information text and the OSK use the atlas. Original font faces now
+use FreeType outline coverage with recovered flags 10; head+cmap table identity selects the source file.
+Qt shaping and the temporary elision/cursor metrics remain; this is not a complete port of PS3 libfont.
+Qt coverage is a logged fallback for unmatched faces, and Qt text drawing remains a shader-failure fallback.
 
 Native pixel size is rounded from the logical font size and viewport scale. Resizing invalidates atlas and
-shaped-layout caches. Coverage is grayscale, with no added gamma curve. Vertical hinting is an explicit
-current choice, not a recovered firmware setting. The measured halo uses sigma 2.2 and a ~6-pixel radius at
+shaped-layout caches. Coverage is grayscale, with no added gamma curve. No hinting and no embedded bitmap
+are recovered firmware load settings, now used by FreeType. The measured halo uses sigma 2.2 and a ~6-pixel radius at
 1080p, separately from the glyph edge. Shadow uses a provisional one-scene-pixel right/down offset, black at
 20% alpha. The earlier direct use of RCO template values (X=4, Y=-5, grey RGB=.25, full alpha) produced a visible
 dark duplicate. Their runtime conversion remains unresolved. None of these values should be described as firmware defaults.
@@ -143,7 +145,7 @@ duplicate is absent in the after captures; the clock, long focused label, dim la
 Diagnostic artifacts are local under `out/native-reference/text-fix/`; captures retain the live UI clock, so
 before/after timestamps differ. This verifies the reported visual defect, not PS3 rasterizer pixel parity.
 
-1. Recover hinting/rasterizer flags and style-code-to-face mappings. Match focused/unfocused/subtitle/dialog
+1. Recover rasterizer version, subpixel transforms and style-code-to-face mappings. Match focused/unfocused/subtitle/dialog
    crops against the same reference state; readable native output alone does not prove pixel parity.
 2. Recover runtime glow/shadow overrides and coordinate scaling; implement RCO gradients and spacing.
 3. Reproduce max-coverage mask accumulation for overlapping glyphs without losing shaping/fallback faces.

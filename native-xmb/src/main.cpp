@@ -12,6 +12,7 @@
 #include "p3t.h"
 #include <QJsonDocument>
 #include <QFile>
+#include <QFileInfo>
 #include <QLoggingCategory>
 #include <QPainter>
 #include <QImageReader>
@@ -196,19 +197,25 @@ int main(int argc,char** argv) {
     if(parser.isSet("font-report")) {
         QFile out(parser.value("font-report"));
         if(!out.open(QIODevice::WriteOnly|QIODevice::Text)){qCritical()<<out.errorString();return 2;}
+        xmb::FontRaster raster;
+        if(!raster.configure(QDir(assets.root()).filePath("data/font"))){qCritical()<<"Cannot load firmware font faces";return 2;}
+        out.write((raster.version()+"; coverage flags=10; face identity=head+cmap\n").toUtf8());
         const QStringList samples{QString::fromUtf16(u"Saved Data Utility"),QString::fromUtf16(u"Paramètres réseau Ženska Ç ő ł"),
             QString::fromUtf16(u"○ ✕ △ □  ←↑→↓ ©™"),
+            QString::fromUtf16(u"\uf8fc \uf8fd \uf8fe \uf8ff"),QString::fromUtf16(u"AV To ff fi ffi e\u0301"),
             QString::fromUtf16(u"ゲーム 設定"),QString::fromUtf16(u"게임 설정"),QString::fromUtf16(u"游戏 设置")};
         bool windowsFallback=false;
         for(const auto& family:assets.fontFamilies()) {
             out.write(QString("== %1\n").arg(family).toUtf8());
             for(const auto& sample:samples) {
-                QFont font(family);font.setPixelSize(28);
-                QTextLayout layout(sample,font);layout.beginLayout();layout.createLine();layout.endLayout();
+                QFont font(family);font.setPixelSize(28);font.setStyleName("Regular");font.setHintingPreference(QFont::PreferNoHinting);
+                QTextLayout layout(xmb::FontRaster::mapSymbols(sample),font);layout.beginLayout();layout.createLine();layout.endLayout();
                 QStringList runs;
                 for(const auto& run:layout.glyphRuns()) {
-                    const QString used=run.rawFont().familyName();runs<<QString("%1 (%2 glyphs)").arg(used).arg(run.glyphIndexes().size());
-                    if(!used.startsWith("SCE-PS3"))windowsFallback=true;
+                    const auto raw=run.rawFont();const QString source=raster.sourceFor(raw);
+                    runs<<QString("%1 / %2 (%3 glyphs; %4)").arg(raw.familyName(),raw.styleName()).arg(run.glyphIndexes().size())
+                        .arg(source.isEmpty()?QString("UNMATCHED HOST FACE"):QFileInfo(source).fileName());
+                    if(source.isEmpty())windowsFallback=true;
                 }
                 out.write(QString("  %1  ->  %2\n").arg(sample,runs.join(" + ")).toUtf8());
             }

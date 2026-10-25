@@ -99,7 +99,7 @@ void View::loadWallpaper() {
 View::~View(){if(context()){makeCurrent();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
     if(!initializeOpenGLFunctions()){qCritical()<<"Native renderer requires OpenGL 3.3";return;}
-    textRenderer_.init(*this);
+    textRenderer_.init(*this,QDir(assets_.root()).filePath("data/font"));
     static const char* vertex=R"(#version 330 core
 out vec2 uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);}

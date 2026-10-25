@@ -9,14 +9,16 @@
 #include <QRawFont>
 #include <memory>
 #include <vector>
+#include "font_raster.h"
 
 namespace xmb {
 // Shaping stays with QTextLayout (including fallback faces and bidi); glyph coverage is
 // rasterised once at display resolution and uploaded to an atlas. Qt never paints the labels.
-// Rasterisation is still the host Qt font engine, not a claimed port of PS3 libfont.
+// Original faces use FreeType with the recovered firmware load flags. Qt still shapes text;
+// this is not a complete port of PS3 libfont/PAF metrics and composition.
 class TextRenderer {
 public:
-    bool init(QOpenGLFunctions_3_3_Core& gl);
+    bool init(QOpenGLFunctions_3_3_Core& gl,const QString& fontDirectory);
     void release(QOpenGLFunctions_3_3_Core& gl);
     // target: the layer's pixel size; rasterScale: layer pixels per 1920x1080 unit; pixelGrid: layer pixels per
     // output pixel (2 for the supersampled UI layer), the grid glyph origins snap to so stems stay on whole pixels.
@@ -36,6 +38,8 @@ private:
     const Glyph& glyph(QOpenGLFunctions_3_3_Core& gl,int face,quint32 index);
     Layout& layout(const QString& text,const QFont& font,qreal width,int flags);
     QOpenGLShaderProgram program_;
+    FontRaster raster_;
+    bool useFreeType_=false;
     GLuint vao_=0,vbo_=0;
     bool ready_=false;
     QSize target_;

@@ -94,6 +94,11 @@ Build logs establish compilation. Requested window observations establish specif
 
 ## Decisions
 
+- 2026-10-25: Recovered glyph-load flags 10 and grayscale outline rasterization from libfontFT.prx, and added
+  a FreeType backend matched to original font tables. Private control-symbol mappings remove the tested
+  cross glyph's host fallback. Exact PAF metrics/composition and rasterizer version remain open; see
+  audit/FONT-MATCHING.md. This does not close the full presentation-parity criteria.
+
 - 2026-10-25: Reproduced dark duplicate text in the live Green theme. Replaced unconverted RCO shadow offsets
   with a provisional subtle shadow and separated whole-string shadow/foreground passes. Runtime firmware
   shadow conversion and full rasterizer parity remain open; evidence is in audit/TEXT-RENDERER.md.
@@ -142,6 +147,11 @@ Build logs establish compilation. Requested window observations establish specif
   criterion now: original icon fidelity remains open; the specific orientation correction has a native screenshot
 
 ## Verification
+
+- 2026-10-25 font continuation: both native builds succeeded; exact-table face reports and scripted FreeType/Qt
+  captures exited zero. Live Computer Use confirmed the reopened default build, whose log identifies FreeType
+  2.14.2, flags 10 and original Rodin Regular files without coverage-fallback warnings. One offline reference
+  Game-label extent check is recorded in audit/FONT-MATCHING.md; full PAF pixel parity stays unverified.
 
 2026-10-25 continuation: default and isolated Release builds succeeded. Computer Use inspected the rebuilt
 Green-theme window with light opaque icons, left open. Five media GUI replays exited zero, covering automatic
