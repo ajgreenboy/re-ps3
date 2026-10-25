@@ -94,6 +94,12 @@ Build logs establish compilation. Requested window observations establish specif
 
 ## Decisions
 
+- 2026-10-25: Fixed-colour category icons use an opaque original-normal-map material after reproducing dark
+  interiors on Green. Original retains the firmware glass path. This resolves the reported appearance defect,
+  not the broader material-parity criterion; evidence and limits are in audit/CATEGORY-ICON-FIX.md.
+- 2026-10-25: Added an owned folder playback queue and photo viewport geometry using scoped lower-cost agents,
+  followed by parent integration. See audit/MEDIA-CONTINUATION.md for observed sequencing/error/zoom behavior.
+
 - 2026-10-25: The ribbon is ported from the firmware end to end (custom_render_plugin cloth, ffd_shader1 lattice,
   spline.elf sheet), with each stage checked against RPCS3 captures. The LINE1 preset schedule follows the plugin's
   clock keyframes and boot sequence. The boot blend curves are measured, because the qgl_base player is not traced.
@@ -132,6 +138,11 @@ Build logs establish compilation. Requested window observations establish specif
   criterion now: original icon fidelity remains open; the specific orientation correction has a native screenshot
 
 ## Verification
+
+2026-10-25 continuation: default and isolated Release builds succeeded. Computer Use inspected the rebuilt
+Green-theme window with light opaque icons, left open. Five media GUI replays exited zero, covering automatic
+advance with a bad file, shuffle/Repeat All, Repeat One, bounded all-invalid failure, and photo zoom/pan/reset.
+Physical-controller and sustained-media behavior, plus matched fixed-colour icon reference parity, remain open.
 
 2026-10-25 Ribbon: cloth boot frame 1.6e-7; one-step x about 1e-4; FFD lattice 5e-5..1.9e-4 over 83 s; spline FFD
 4.8e-4; sheet positions/normals 1e-5; boot preset schedule (SCALE2) within 2.2e-3. Native 1080p grabs match the

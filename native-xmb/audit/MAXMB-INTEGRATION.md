@@ -34,7 +34,8 @@ PS3 firmware fidelity.
 | Focus glow breathing / idle label fade | Already applied from MaXMB observations; still needs reference confirmation |
 | Theme interaction sounds | Implemented in this continuation, described below |
 | Dynamic P3T RAF/VSMX scenes | Still open; MaXMB's scene/render/VSMX modules are useful next sources |
-| Media queues, music playlists and photo zoom | Still open; adapt to the native media service and original controls |
+| Folder playback queues and photo zoom/pan | Implemented in the next continuation; see MEDIA-CONTINUATION.md |
+| Persistent music playlists and media database | Still open |
 | Local fabricated PSN/friend state | Excluded from this project's online behavior; no fabricated Sony session |
 
 The current ribbon uses the traced firmware path. MaXMB/linkev's reconstruction must not replace that verified
@@ -79,5 +80,5 @@ Logs: out/native-reference/theme-audio/playback.log and rejected-cursor.log.
 
 While reviewing, the other session committed background work as `7ef277a`; it is preserved separately.
 
-Next useful MaXMB adaptations: dynamic theme scene evaluation, owned media queues/playlists, and photo zoom.
+Next useful MaXMB adaptations: dynamic theme scene evaluation, persistent playlists and richer media controls.
 Agree on file ownership with the other active session before changing View or the main render pipeline.

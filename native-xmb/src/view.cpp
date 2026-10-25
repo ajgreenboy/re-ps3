@@ -41,7 +41,12 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     syncColumns();
     monthImage_=assets_.image("qgl/lines",QString("textures/month_bg/rgb/%1.dds").arg(QDateTime::currentDateTime().date().month(),2,10,QChar('0')));
     connect(&shell_,&Shell::changed,this,[this]{++uiRevision_;syncColumns();loadWallpaper();update();});
-    connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){mediaFrame_=frame;update();});
+    connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){
+        mediaFrame_=frame;
+        if(frame.isNull())photoViewport_={};
+        else if(shell_.photoOpen())photoViewport_.reset(frame.size(),{1920,1080},shell_.photoFill());
+        update();
+    });
     connect(&shell_,&Shell::requestLibrary,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,"Choose media folder");if(!path.isEmpty())shell_.chooseLibrary(path);});
     connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");if(!file.isEmpty())shell_.chooseWallpaper(file);});
     connect(&shell_,&Shell::requestTheme,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Theme",{},"PS3 Themes (*.p3t)");if(!file.isEmpty())shell_.chooseTheme(file);});
@@ -184,6 +189,8 @@ double View::dayLight(double hour) {
 void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHeight) {
     icons_.setClock(backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime());
     static const QVector3D colours[]={{.55f,.39f,.13f},{.12f,.36f,.68f},{.40f,.20f,.60f},{.62f,.17f,.18f},{.16f,.43f,.32f},{.48f,.50f,.54f}};
+    const int selectedColour=std::clamp(shell_.theme(),0,5);
+    icons_.setFixedTint(selectedColour?colours[selectedColour]:QVector3D{});
     // Original colour theme: the firmware's own background shader and monthly palettes.
     // The firmware background renders every colour setting (as on the PS3, a fixed colour is the same wave pinned to one
     // palette); only the wallpaper mode bypasses it.
@@ -199,10 +206,11 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         QDateTime when=backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime();
         // Fixed colours pin the month palette (day 1: that month's textures alone); the clock still drives day/night.
         static const int fixedMonth[]={0,8,6,12,5,1}; // Original, Blue, Purple, Red, Green, Silver
-        if(!backgroundOverride_.isValid() && shell_.theme()>0 && shell_.theme()<int(std::size(fixedMonth)))
+        if(shell_.theme()>0 && shell_.theme()<int(std::size(fixedMonth)))
             when=QDateTime(QDate(when.date().year(),fixedMonth[shell_.theme()],1),when.time());
         if(when.date().month()!=texturesMonth_)loadMonthTextures(when.date().month());
-        icons_.setClock(when); // use the same fixed-colour month and diagnostic clock as the sampled background
+        // Fixed colours select a background palette, not a different calendar for
+        // amb.bmp. Icon material retains the real/diagnostic date set above.
         BackgroundTime time=backgroundTime(when);
         time.alpha=backgroundAlpha_;
         constexpr float coldboot1NightBias=.513834f; // BACKGROUND.mnu NIGHT WHIT BIAS, override/coldboot1 (coldboot2 = day)
@@ -643,11 +651,15 @@ void View::drawScene(QPainter& p) {
         if(!mediaFrame_.isNull()) {
             p.fillRect(QRectF(0,0,1920,1080),Qt::black);
             const auto size=QSizeF(mediaFrame_.size()).scaled(QSizeF(1920,1080),shell_.photoOpen() && shell_.photoFill()?Qt::KeepAspectRatioByExpanding:Qt::KeepAspectRatio);
-            p.drawImage(QRectF(QPointF((1920-size.width())/2,(1080-size.height())/2),size),mediaFrame_);
+            p.save();p.setClipRect(QRectF(0,0,1920,1080));
+            p.drawImage(shell_.photoOpen() && photoViewport_.valid()?photoViewport_.imageRect():QRectF(QPointF((1920-size.width())/2,(1080-size.height())/2),size),mediaFrame_);
+            p.restore();
         }
         text({110,970,1500,50},shell_.mediaTitle(),27,Qt::white);
-        text({110,1020,1700,35},shell_.photoOpen()?QString("Circle  Back     Cross  ")+(shell_.slideshowActive()?"Pause Slideshow":"Start Slideshow")+"     Left / Right  Previous / Next     Up / Down  Rotate":"Circle  Back     Cross  Play / Pause     Left / Right  Seek",21,QColor(230,230,230));
+        text({110,1020,1700,35},shell_.photoOpen()?QString("Circle Back   Cross ")+(shell_.slideshowActive()?"Pause":"Slideshow")+"   L1/R1 or +/- Zoom   Square/0 Reset   Triangle/Q/E Rotate   Arrows Pan when zoomed   [/] Photo":"Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle   Triangle/R Repeat",21,QColor(230,230,230));
         if(shell_.busy())text({110,910,1000,45},"Loading…",26,Qt::white);
+        else if(!shell_.photoOpen())text({110,895,1700,36},shell_.mediaQueueSummary(),21,QColor(230,230,230));
+        else if(photoViewport_.valid())text({110,895,1700,36},QString("Zoom %1%").arg(photoViewport_.zoomPercent(),0,'f',0),21,QColor(230,230,230));
         if(!shell_.photoOpen() && shell_.mediaDuration()>0) {
             const double ratio=std::clamp(double(shell_.mediaPosition())/shell_.mediaDuration(),0.,1.);
             p.fillRect(QRectF(110,941,1700,4),QColor(255,255,255,60));p.fillRect(QRectF(110,941,1700*ratio,4),Qt::white);
@@ -845,6 +857,29 @@ void View::drawScene(QPainter& p) {
     }
     if(osk_.open)drawOsk(p);
 }
+void View::zoomPhoto(int direction) {
+    if(!shell_.photoOpen() || !photoViewport_.valid())return;
+    if(shell_.slideshowActive())shell_.togglePlayback();
+    if(photoViewport_.zoom(direction)) {
+        if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"photo viewport: zoom"<<photoViewport_.zoomPercent()<<photoViewport_.imageRect();
+        update();
+    }
+}
+void View::resetPhotoView() {
+    if(!shell_.photoOpen())return;
+    if(shell_.slideshowActive())shell_.togglePlayback();
+    photoViewport_.resetView();
+    if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"photo viewport: reset"<<photoViewport_.zoomPercent()<<photoViewport_.imageRect();
+    update();
+}
+void View::panPhoto(int dx,int dy) {
+    if(!shell_.photoOpen())return;
+    if(shell_.slideshowActive())shell_.togglePlayback();
+    if(photoViewport_.pan(dx,dy)) {
+        if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"photo viewport: pan"<<photoViewport_.imageRect();
+        update();
+    }
+}
 void View::keyPressEvent(QKeyEvent* e) {
     if(introRunning()){coldboot_.skip();e->accept();return;}
     if(osk_.open) { // the keyboard owns input: arrows move, Return presses the key (Ctrl+Return accepts), Esc cancels
@@ -858,12 +893,30 @@ void View::keyPressEvent(QKeyEvent* e) {
         }
         return;
     }
+    if(shell_.photoOpen() && shell_.message().isEmpty()) {
+        switch(e->key()) {
+        case Qt::Key_Plus:case Qt::Key_Equal:zoomPhoto(1);e->accept();return;
+        case Qt::Key_Minus:zoomPhoto(-1);e->accept();return;
+        case Qt::Key_0:resetPhotoView();e->accept();return;
+        case Qt::Key_Q:shell_.vertical(-1);e->accept();return;
+        case Qt::Key_E:shell_.vertical(1);e->accept();return;
+        case Qt::Key_Left:if(photoViewport_.canPan()){panPhoto(-1,0);e->accept();return;}break;
+        case Qt::Key_Right:if(photoViewport_.canPan()){panPhoto(1,0);e->accept();return;}break;
+        case Qt::Key_Up:if(photoViewport_.canPan()){panPhoto(0,-1);e->accept();return;}break;
+        case Qt::Key_Down:if(photoViewport_.canPan()){panPhoto(0,1);e->accept();return;}break;
+        default:break;
+        }
+    }
     switch(e->key()) {
     case Qt::Key_Left:shell_.horizontal(-1);break;case Qt::Key_Right:shell_.horizontal(1);break;
     case Qt::Key_Up:shell_.vertical(-1);break;case Qt::Key_Down:shell_.vertical(1);break;
     case Qt::Key_Return:case Qt::Key_Enter:shell_.activate();break;
     case Qt::Key_Escape:case Qt::Key_Backspace:shell_.back();break;
     case Qt::Key_Space:shell_.togglePlayback();break;
+    case Qt::Key_BracketLeft:shell_.skipMedia(-1);break;
+    case Qt::Key_BracketRight:shell_.skipMedia(1);break;
+    case Qt::Key_M:shell_.toggleMediaShuffle();break;
+    case Qt::Key_R:shell_.cycleMediaRepeat();break;
     case Qt::Key_PageUp:shell_.vertical(-10);break;case Qt::Key_PageDown:shell_.vertical(10);break;
     case Qt::Key_F5:shell_.refreshDirectory();break;
     case Qt::Key_F11:shell_.setFullscreen(!window()->isFullScreen());break;
@@ -895,11 +948,31 @@ void View::pollController() {
         if(edge&0x000f)repeatAt_=now+300;else if(movement&0x000f)repeatAt_=now+100;
         buttons_=buttons;return;
     }
+    if(shell_.photoOpen() && shell_.message().isEmpty()) {
+        if(photoViewport_.canPan()) {
+            if(movement&XINPUT_GAMEPAD_DPAD_LEFT)panPhoto(-1,0);if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)panPhoto(1,0);
+            if(movement&XINPUT_GAMEPAD_DPAD_UP)panPhoto(0,-1);if(movement&XINPUT_GAMEPAD_DPAD_DOWN)panPhoto(0,1);
+        } else {
+            if(movement&XINPUT_GAMEPAD_DPAD_LEFT)shell_.horizontal(-1);if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)shell_.horizontal(1);
+            if(movement&XINPUT_GAMEPAD_DPAD_UP)shell_.vertical(-1);if(movement&XINPUT_GAMEPAD_DPAD_DOWN)shell_.vertical(1);
+        }
+        if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)zoomPhoto(-1);if(edge&XINPUT_GAMEPAD_RIGHT_SHOULDER)zoomPhoto(1);
+        if(edge&XINPUT_GAMEPAD_X)resetPhotoView();if(edge&XINPUT_GAMEPAD_Y)shell_.vertical(1);
+        if(edge&XINPUT_GAMEPAD_A)shell_.activate();if(edge&XINPUT_GAMEPAD_B)shell_.back();
+        if(edge&0x000f)repeatAt_=now+300;else if(movement&0x000f)repeatAt_=now+100;
+        buttons_=buttons;return;
+    }
     if(movement&XINPUT_GAMEPAD_DPAD_LEFT)shell_.horizontal(-1);
     if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)shell_.horizontal(1);
     if(movement&XINPUT_GAMEPAD_DPAD_UP)shell_.vertical(-1);
     if(movement&XINPUT_GAMEPAD_DPAD_DOWN)shell_.vertical(1);
     if(edge&XINPUT_GAMEPAD_A)shell_.activate();if(edge&XINPUT_GAMEPAD_B)shell_.back();
+    if(shell_.mediaOpen()) {
+        if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)shell_.skipMedia(-1);
+        if(edge&XINPUT_GAMEPAD_RIGHT_SHOULDER)shell_.skipMedia(1);
+        if(edge&XINPUT_GAMEPAD_X)shell_.toggleMediaShuffle();
+        if(edge&XINPUT_GAMEPAD_Y)shell_.cycleMediaRepeat();
+    }
     if(edge&0x000f)repeatAt_=now+300;else if(movement&0x000f)repeatAt_=now+100;
     buttons_=buttons;
 #endif

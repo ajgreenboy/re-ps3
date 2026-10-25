@@ -7,6 +7,10 @@ Local inventory (`out/native-reference/qrc-inventory.txt`, not committed) lists 
 
 ## Layers, back to front
 
+Current category-material routing: Original retains the firmware glass port described below. Fixed colours
+use an opaque native normal-map material after the Green theme reproduced near-black interiors; see
+CATEGORY-ICON-FIX.md for the evidence and fidelity limits.
+
 | Layer | Firmware source | Native status |
 |---|---|---|
 | Background gradient | `lines.qrc` moyou/background, back_colours0 + month_bg textures, BACKGROUND.mnu; custom_render_plugin clock mapping | **Ported**: firmware Cg translated RSX→GLSL, inputs traced |

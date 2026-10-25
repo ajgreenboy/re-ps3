@@ -60,7 +60,9 @@ existing preset weight; selecting independent dawn/dusk/boot overrides and repro
 ## Reproduce and next work
 
 `--background-clock 2026-10-24T23:40:10` fixes background palette/preset and icon-material time for comparison;
-the visible UI clock remains the real PC clock. The same selected fixed-colour month is passed to both layers.
+the visible UI clock remains the real PC clock. Fixed colours select a background palette only; icon material
+uses the actual/diagnostic calendar. The previous implementation incorrectly substituted the background month
+into both layers. Fixed-colour rendering now has an opaque native path; see CATEGORY-ICON-FIX.md.
 Set `XMB_ICON_LOG_MATERIAL=1` with `XMB_LOG=<local log>` to record the first derived material values.
 
 Remaining user-reported requirements:

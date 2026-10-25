@@ -87,6 +87,9 @@ from its `USRDIR/EBOOT.BIN`. Both pieces follow MaXMB (MIT); see `THIRD-PARTY.md
 
 ## PS3 themes
 
+Fixed colour choices use light, opaque category materials with a subtle theme tint. Original retains the
+firmware glass shader. Details and remaining reference work are in `audit/CATEGORY-ICON-FIX.md`.
+
 Settings > Theme Settings > Select Theme opens a PS3 theme file (`.p3t`). The theme is read in memory (`src/p3t.cpp`,
 ported from MaXMB, MIT; see `THIRD-PARTY.md`) and nothing from it is written to disk:
 
