@@ -94,6 +94,11 @@ Build logs establish compilation. Requested window observations establish specif
 
 ## Decisions
 
+- 2026-10-25: Continued the recommended Phase 7 with named-state capture/scoring and explicit state guards.
+  Corrected PNG packed-row expansion and scripted arrows left held after the repeat change. Added in-memory
+  UI clock/focus-age overrides; normal host time and user preferences are unchanged. Evidence and remaining
+  fidelity limits are in audit/VERIFICATION-HARNESS.md.
+
 - 2026-10-25: Recovered glyph-load flags 10 and grayscale outline rasterization from libfontFT.prx, and added
   a FreeType backend matched to original font tables. Private control-symbol mappings remove the tested
   cross glyph's host fallback. Exact PAF metrics/composition and rasterizer version remain open; see
@@ -147,6 +152,11 @@ Build logs establish compilation. Requested window observations establish specif
   criterion now: original icon fidelity remains open; the specific orientation correction has a native screenshot
 
 ## Verification
+
+- 2026-10-25 Phase 7: 20/20 known PNG format/filter cases decode byte-exactly. Independent Game, Settings and
+  Game Settings page captures are pixel-identical at 960x540 with all capture clocks pinned. Threshold failure,
+  wrong-state, missing-reference and timeout paths return the documented failure codes. These probes do not
+  close the global firmware visual-parity criteria; see audit/VERIFICATION-HARNESS.md.
 
 - 2026-10-25 font continuation: both native builds succeeded; exact-table face reports and scripted FreeType/Qt
   captures exited zero. Live Computer Use confirmed the reopened default build, whose log identifies FreeType

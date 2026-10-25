@@ -536,7 +536,7 @@ void View::paintGL() {
     for(const auto& column:columns_)signature+=QString::number(column.position,'f',4)+' ';
     signature+=shell_.clockText()+shell_.message()+shell_.status();
     if(focusClock_.isValid()) { // the focused label's breathing glow and the idle label fade, in coarse steps
-        const double resting=double(focusClock_.elapsed());
+        const double resting=double(focusTime());
         signature+=QString::asprintf(" glow %d idle %d",int((.5-.5*std::cos(2*std::numbers::pi*resting/3400.))*24),int(std::clamp((resting-4000)/800.,0.,1.)*16));
     }
     if(osk_.open)signature+=QString::asprintf("osk %d %d %d %d %d %d ",osk_.row,osk_.column,osk_.cursor,osk_.shift,osk_.symbols,int((clock_.elapsed()/500)%2))+osk_.text;
@@ -808,7 +808,7 @@ void View::drawScene(QPainter& p) {
                 // whose clips never rest on a row): after 4 s on one row of Photo/Music/Video/Game/Network/PSN, the
                 // other rows' titles fade out over 0.8 s.
                 static const QSet<QString> idleCategories{"photo","music","video","game","network","psn"};
-                const qint64 resting=focusClock_.isValid()?focusClock_.elapsed():0;
+                const qint64 resting=focusTime();
                 const double idleFade=active && level==0 && idleCategories.contains(shell_.categories()[shell_.category()].id)?
                     std::clamp((resting-4000)/800.,0.,1.)*(1.-focus):0.;
                 p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus))*(1.-idleFade));

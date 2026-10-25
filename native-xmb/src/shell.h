@@ -7,6 +7,7 @@
 #include "profiles.h"
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QDateTime>
 #include <QVector>
 #include <QImage>
 #include <memory>
@@ -47,6 +48,8 @@ public:
     // Small line under a row (reference: the signed-in user's name under user-scoped items like Trophy Collection).
     QString subtitleText(const Entry& entry) const;
     QString clockText() const;
+    // Local capture override only; never changes or persists the host clock.
+    void setClockOverride(const QDateTime& when) { clockOverride_=when;emit changed(); }
     int backgroundMode() const { return preferences_.value("appearance/background").toInt(); }
     QString wallpaper() const { return preferences_.value("appearance/wallpaper").toString(); }
     // The PS3 theme in use (Theme Settings > Theme), decoded in memory from its .p3t: empty path = the system's own.
@@ -107,6 +110,7 @@ private:
     struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; };
     QVector<Page> pages_;
     QString message_,mediaTitle_,renderer_;
+    QDateTime clockOverride_;
     // Only the decoded pieces are kept (the .p3t itself is read again when the theme changes); nothing is written to disk.
     struct Theme { QString path,name; QImage background; QHash<QString,QImage> icons; };
     Theme theme_;

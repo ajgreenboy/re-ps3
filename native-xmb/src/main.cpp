@@ -79,6 +79,8 @@ int main(int argc,char** argv) {
     parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
     parser.addOption({"background-clock","Fix background and icon-material time for reference captures (ISO date/time); UI clock stays live","date-time"});
     parser.addOption({"render-clock","Fix the background/ribbon/particles/icon animation time in seconds for deterministic A/B captures","seconds"});
+    parser.addOption({"ui-clock","Fix the displayed UI date/time for local captures; never changes the host clock","date-time"});
+    parser.addOption({"focus-time","Fix focused-label age in milliseconds for glow/idle-fade captures","milliseconds"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
@@ -294,6 +296,16 @@ int main(int argc,char** argv) {
         if(!ok || seconds<0){qCritical()<<"render-clock requires a non-negative number of seconds";return 2;}
         view->setRenderClock(seconds);
     }
+    if(parser.isSet("ui-clock")) {
+        const auto when=QDateTime::fromString(parser.value("ui-clock"),Qt::ISODate);
+        if(!when.isValid()){qCritical()<<"ui-clock requires an ISO date/time";return 2;}
+        shell.setClockOverride(when);
+    }
+    if(parser.isSet("focus-time")) {
+        bool ok=false;const auto milliseconds=parser.value("focus-time").toLongLong(&ok);
+        if(!ok || milliseconds<0){qCritical()<<"focus-time requires non-negative integer milliseconds";return 2;}
+        view->setFocusTime(milliseconds);
+    }
     if(parser.isSet("measure-reference")) {
         window.show();
         QTimer::singleShot(1000,&app,[&]{
@@ -312,8 +324,12 @@ int main(int argc,char** argv) {
         // Local verification: replay key presses and save framebuffer grabs at the window's real resolution, e.g.
         // --script "full,wait,LEFT,DOWN,grab=C:/tmp/a.png,quit". One token every 300 ms.
         auto tokens=std::make_shared<QStringList>(parser.value("script").split(','));
+        const auto tap=[view](int key){
+            QKeyEvent press(QEvent::KeyPress,key,Qt::NoModifier);QCoreApplication::sendEvent(view,&press);
+            QKeyEvent release(QEvent::KeyRelease,key,Qt::NoModifier);QCoreApplication::sendEvent(view,&release);
+        };
         auto* timer=new QTimer(&app);timer->setInterval(300);
-        QObject::connect(timer,&QTimer::timeout,&app,[&app,&window,&shell,view,tokens,timer]{
+        QObject::connect(timer,&QTimer::timeout,&app,[&app,&window,&shell,view,tokens,timer,tap]{
             if(tokens->isEmpty()){timer->stop();return;}
             const QString token=tokens->takeFirst().trimmed();
             static const QHash<QString,int> keys{{"LEFT",Qt::Key_Left},{"RIGHT",Qt::Key_Right},{"UP",Qt::Key_Up},{"DOWN",Qt::Key_Down},
@@ -332,12 +348,18 @@ int main(int argc,char** argv) {
             else if(token.startsWith("grab=")) {
                 const auto image=view->grabFramebuffer();
                 qInfo().noquote()<<"script: grab"<<token.mid(5)<<image.size()<<(image.save(token.mid(5))?"saved":"FAILED");
+                const QJsonObject state{{"category",shell.categories()[shell.category()].id},
+                    {"categoryIndex",shell.category()},{"depth",shell.depth()},{"selection",shell.selection()},
+                    {"width",image.width()},{"height",image.height()},{"clock",shell.clockText()}};
+                QFile stateFile(token.mid(5)+".json");const auto bytes=QJsonDocument(state).toJson();
+                if(!stateFile.open(QIODevice::WriteOnly) || stateFile.write(bytes)!=bytes.size())qWarning()<<"script: state save FAILED"<<stateFile.errorString();
+                qInfo()<<"script: state"<<state;
             } else if(token.startsWith("burst=")) {
                 // 12 consecutive frames as fast as the window renders, kept in memory and saved afterwards as
                 // prefix_NN_<ms since the key>.png; "burst=prefix@LEFT" presses the key on the same tick.
                 const auto parts=token.mid(6).split('@');const QString prefix=parts[0];
                 auto started=std::make_shared<QElapsedTimer>();started->start();
-                if(parts.size()>1 && keys.contains(parts[1])){QKeyEvent event(QEvent::KeyPress,keys[parts[1]],Qt::NoModifier);QCoreApplication::sendEvent(view,&event);}
+                if(parts.size()>1 && keys.contains(parts[1]))tap(keys[parts[1]]);
                 auto* burst=new QTimer(&app);burst->setTimerType(Qt::PreciseTimer);burst->setInterval(12);
                 auto frames=std::make_shared<QVector<QPair<qint64,QImage>>>();
                 QObject::connect(burst,&QTimer::timeout,&app,[view,burst,frames,prefix,started]{
@@ -351,7 +373,7 @@ int main(int argc,char** argv) {
             } else if(token.startsWith("type=")) {
                 for(const QChar c:token.mid(5)){QKeyEvent event(QEvent::KeyPress,0,Qt::NoModifier,QString(c));QCoreApplication::sendEvent(view,&event);}
             } else if(keys.contains(token)) {
-                QKeyEvent event(QEvent::KeyPress,keys[token],Qt::NoModifier);QCoreApplication::sendEvent(view,&event);
+                tap(keys[token]);
             }
         });
         QTimer::singleShot(2500,timer,[timer]{timer->start();});

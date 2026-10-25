@@ -42,6 +42,10 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 
 ## Next steps (recommended order)
 
+Phase 7 continuation is in `audit/VERIFICATION-HARNESS.md`: named-state capture, expected-state guards,
+deterministic UI/focus controls and correct PNG scoring are now exercised. Matched firmware states and
+fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaround below from this Codex session.
+
 1. **Phase 7 harness first:** RPCS3 reference captures of named states plus `work/ab-shot.ts` scores, so every later
    change has a number.
 2. **Phase 4 leftovers:** trace the page move's animate call (explore_plugin; its 300 ms float constants are at
@@ -173,6 +177,11 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - PSN-dependent indicators stay off unless a real state exists; don't fake online features.
 
 ### Phase 7: verification harness
+- Latest: `audit/VERIFICATION-HARNESS.md`. `work/ab-scenarios.ts` adds isolated named captures, optional region
+  gates, hashes, state checks and failure reports. Game/Settings/Game Settings independently repeated pixel-exactly;
+  this verifies repeatability, not firmware fidelity. Scripted arrow taps now release keys after the repeat change.
+- `--ui-clock` pins the displayed clock and `--focus-time` pins label glow/idle fade; combine with the existing
+  background/render clocks. PNG scoring now handles RGB/grayscale packed rows correctly and rejects invalid crops.
 - Automated A/B: render named states with `--script` and compare them with frames extracted from the reference
   (PSNR/SSIM on crops). Add a threshold per layer so regressions are visible.
 - **Tooling landed (2026-10-25):** `--render-clock <seconds>` freezes the background/ribbon/particles/icon animation
