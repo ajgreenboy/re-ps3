@@ -59,13 +59,26 @@ void Shell::openSettings(const QString& id) {
             setting("date_fmt","Date Format","clock/dateFormat"),setting("time_fmt","Time Format","clock/hourFormat"),
             setting("timezone","Time Zone","clock/timeZone")};
     } else if(id=="system") {
+        // Order and labels as the firmware's System Settings (reference video 95 s); native-only entries keep their action.
+        const auto info=[&](const QString& key,const QString& fallback){return option(key,tr("msg_"+key,fallback),tr("msg_"+key+"_explanation",{}),{},Action::Unavailable);};
         page.title=tr("msg_console_setting","System Settings");
-        page.entries={option("name","System Name","Sets the name of this native XMB instance.","system/name",Action::EditName),
-            option("information","System Information",{}, {},Action::Information),
-            option("language","System Language","Additional original language resource tables are not implemented yet.",{},Action::Unavailable)};
+        page.entries={info("console_lang","System Language"),info("keyboardtype","Keyboard Type"),info("keyboard_input_mode","Keyboard Entry Method"),
+            option("name","System Name","Sets the name of this native XMB instance.","system/name",Action::EditName),
+            info("mediaserver_connection","Media Server Connection"),info("disc_utility","Format Utility"),info("backup_utility","Backup Utility"),
+            info("init_setting","Restore Default Settings"),info("init_console","Restore PS3™ System"),info("ex_os_install","Install Other OS"),
+            option("information",tr("msg_console_info","System Information"),tr("msg_console_info_explanation",{}),{},Action::Information),
+            info("aboutps3","About PlayStation®3 (PS3™)")};
+    } else if(id=="update") { // System Update (software_update_plugin)
+        const auto su=[&](const QString& key,const QString& fallback){return assets_.text("software_update_plugin",key,fallback);};
+        page.title=tr("msg_update","System Update");
+        page.entries={option("net",su("msg_update_net","Update via Internet"),{},{},Action::Information,
+                su("msg_update_net","Update via Internet")+"\n\nThe native XMB is updated with its own repository; there is no PS3 system software to download."),
+            option("media",su("msg_update_media","Update via Storage Media"),{},{},Action::Unavailable)};
     } else if(id=="sound") {
         page.title=tr("msg_sound_setting","Sound Settings");
-        page.entries={option("volume","Volume","Sets the volume for media and menu sounds.","audio/volume"),
+        page.entries={option("sound_output_setting",tr("msg_sound_output_setting","Audio Output Settings"),tr("msg_sound_output_setting_explanation",{}),{},Action::Unavailable),
+            option("audio_multi_output",tr("msg_audio_multi_output","Audio Multi-Output"),tr("msg_audio_multi_output_explanation",{}),{},Action::Unavailable),
+            option("volume","Volume","Sets the volume for media and menu sounds.","audio/volume"),
             option("mute","Mute","Mutes native XMB audio.","audio/muted"),
             option("keytone","Key Tone","Plays the original XMB sounds during navigation.","audio/keyTone")};
     } else if(id=="music" || id=="video") {
@@ -79,7 +92,9 @@ void Shell::openSettings(const QString& id) {
             option("repeat","Repeat","Restarts a slideshow after the final photo.","media/repeat")};
     } else if(id=="display") {
         page.title=tr("msg_display_setting","Display Settings");
-        page.entries={option("fullscreen","Full Screen","Expands the native XMB window to fill the display.","display/fullscreen")};
+        page.entries={option("display_output_setting",tr("msg_display_output_setting","Video Output Settings"),tr("msg_display_output_setting_explanation",{}),{},Action::Unavailable),
+            option("tvtype",tr("msg_tvtype","TV Type"),tr("msg_tvtype_explanation",{}),{},Action::Unavailable),
+            option("fullscreen","Full Screen","Expands the native XMB window to fill the display.","display/fullscreen")};
     } else if(id=="power") {
         page.title=tr("msg_power_saving_setting","Power Save Settings");
         page.entries={option("idle","System Auto-Off","Closes native XMB after inactivity. Media playback keeps it awake; the host computer remains running.","power/idleMinutes"),
