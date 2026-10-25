@@ -34,6 +34,33 @@ the draw is identified by lines1.fpo's 336-byte ucode). Each frame is a single i
   into a travelling scroll, which produces the strands crossing through each other. Our flat FFD-displaced 128x24
   sheet cannot produce this, which is why the wave looks wrong.
 
+**Who produces it (traced 2026-10-25).** The vertex buffer is in main memory at 0x20980000 (positions and normals
+interleaved, 32 bytes per vertex; texcoords sit in RSX local memory). It is not rendered by the GPU: no draw targets
+that address, and its bytes appear nowhere in RSX local memory. To find the writer, the buffer was made read-only
+after the first ribbon draw (`XMB_VTX_PROTECT`). The fault came from SPU thread `SceQglLinesCellSpursKernel0` at SPU
+pc 0x05824, a `wrch ch21` list-DMA site in spline.elf. (RPCS3 copies list elements on a fast path that skips
+`do_dma_transfer`, which is why the DMA log showed no puts.)
+
+Per frame the spline task gets:
+- 5776 bytes from 0x20401f00: a **19x19 control lattice** of float4 (x, y, z, 1), 19 per row with x falling from
+  about 5 to 0;
+- 64 bytes from 0x20401dc0: a **4x4 matrix**, the camera to clip space;
+- 8704 bytes from 0x20417680: 539 float4 of (0, -0.47, 0, 1) followed by the count 539;
+- 256 bytes from 0x200dda00: SPURS task data.
+
+The lattice and matrix are written by custom_render_plugin on the PPU; the task creation is FUN_00054c7c,
+"moyou/spline", with 0x3d400 bytes of local store.
+
+The code (`work/spu/disasm-elf.ts`, a disassembler generated from RPCS3's opcode table by
+`work/spu/gen-disasm.ts`) is an unoptimised vector-math library plus two compute functions:
+- func_45c0 loads a 4x4 patch of lattice rows (stride 304 bytes = 19 x 16), transposes it (func_44d0) and
+  accumulates `fma` against per-sample weight tables, which is bicubic patch evaluation;
+- func_3c68 does the per-vertex math through the vector helpers at 0x3ab0..0x3bf0.
+
+The large FP-free functions are the SPURS/DMA runtime. Next: capture matching input/output pairs (lattice + matrix →
+the vertex buffer of the same frame), port func_45c0/func_3c68 to C++ and verify them against those pairs, then trace
+the PPU-side lattice update.
+
 To match it exactly, the geometry has to come from spline.elf. It is 22 KB of SPU code (.text 0x3060..0x8728,
 .rodata 5 KB, .bss 19.5 KB) with no symbols, and Ghidra has no SPU module. Plan: write an SPU disassembler, trace the
 SPURS job's inputs (the parameters custom_render_plugin passes, time, LINE1.mnu) and outputs (DMA of positions and
