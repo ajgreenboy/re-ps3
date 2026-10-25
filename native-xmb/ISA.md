@@ -2,7 +2,7 @@
 task: Complete native C++ recreation of PS3 XMB
 phase: execute
 progress: in-progress
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 # Native XMB ideal state
@@ -94,6 +94,11 @@ Build logs establish compilation. Requested window observations establish specif
 
 ## Decisions
 
+- 2026-10-25: The ribbon is ported from the firmware end to end (custom_render_plugin cloth, ffd_shader1 lattice,
+  spline.elf sheet), with each stage checked against RPCS3 captures. The LINE1 preset schedule follows the plugin's
+  clock keyframes and boot sequence. The boot blend curves are measured, because the qgl_base player is not traced.
+  gameboot/welcome are not scheduled, since the native app has no game launch or first-time setup flow.
+
 - 2026-10-25: User directed work from Phase 2 onwards while another session completed the category shader port.
   Text now uses a native-resolution GL atlas with Qt shaping/coverage; this does not close firmware rasterizer
   parity. Recovered PAF/RCO evidence and open requirements are in audit/TEXT-RENDERER.md.
@@ -116,12 +121,21 @@ Build logs establish compilation. Requested window observations establish specif
 
 ## Changelog
 
+- 2026-10-25 | conjectured: the ribbon was a flat sheet displaced by ffd_shader1, placed on screen by fitted constants
+  refuted by: RPCS3 captures of the lines1 vertex buffer (a rolled 128x128 sheet written by SPU spline.elf)
+  learned: geometry comes from a PPU mass-spring cloth plus an SPU B-spline FFD; ffd_shader1 only deforms the lattice
+  criterion now: ribbon geometry is verified per stage against captures; the visual match is a side-by-side screenshot
+
 - 2026-10-24 | conjectured: directly painting QGL decoded rows preserved icon orientation
   refuted by: native controller grips pointed upward against the supplied VSH screenshot
   learned: icon texture coordinates need normalization at ingestion
   criterion now: original icon fidelity remains open; the specific orientation correction has a native screenshot
 
 ## Verification
+
+2026-10-25 Ribbon: cloth boot frame 1.6e-7; one-step x about 1e-4; FFD lattice 5e-5..1.9e-4 over 83 s; spline FFD
+4.8e-4; sheet positions/normals 1e-5; boot preset schedule (SCALE2) within 2.2e-3. Native 1080p grabs match the
+RPCS3 reference's band placement. A side-by-side boot recording against RPCS3 remains open.
 
 2026-10-25 Phase 2: isolated Release build in out/native-phase2 succeeded. Scripted root, category transition
 and dialog captures rendered via the glyph atlas and exited zero. A lost-glyph regression was reproduced and

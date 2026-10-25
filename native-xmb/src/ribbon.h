@@ -27,8 +27,8 @@ public:
     // Requires a current GL context. Returns false (and logs why) when the firmware programs are unavailable.
     bool init(QOpenGLFunctions_3_3_Core& gl,Assets& assets);
     bool ready() const { return ready_; }
-    // Adds the ribbon to targetFbo (additive). seconds: wall time; light: 0 night .. 1 day.
-    void render(QOpenGLFunctions_3_3_Core& gl,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo);
+    // Adds the ribbon to targetFbo (additive). seconds: wall time; dayFraction: local time of day, 0..1 from midnight.
+    void render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFraction,int pixelWidth,int pixelHeight,GLuint targetFbo);
     // Crest of the ribbon centre line as a fraction of screen height from the top, sampled left to right across
     // the screen after the last render (for the procedural particles and for measurement).
     const std::array<float,33>& crest() const { return crest_; }
@@ -55,7 +55,10 @@ private:
         void spring(int i,int j,float rest,float k);
     };
     bool ready_=false;
-    Preset day_,night_;
+    Preset coldboot1_,coldboot2_,night_,yoake_,day_,higure_,current_;
+    double bootSeconds_=0;Preset bootSnapshot_;bool snapshotTaken_=false;
+    Preset clockPreset(double dayFraction) const;
+    void advancePresets(double dt,double dayFraction);
     Cloth cloth_;
     double lastSeconds_=-1;
     CgProgram ffdCg_,linesVertexCg_,linesFragmentCg_;
