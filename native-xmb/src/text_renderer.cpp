@@ -45,17 +45,17 @@ void main(){uv=texcoord;tileBounds=bounds;gl_Position=vec4(position.x*2./viewpor
 )";
     const char* fragment=R"(#version 330 core
 in vec2 uv;flat in vec4 tileBounds;out vec4 result;uniform sampler2D atlas;uniform vec4 tint;
-uniform vec2 shadowOffset;uniform float glowStrength,shadowAlpha;uniform bool ink;uniform vec3 shadowColor;
+uniform vec2 shadowOffset;uniform float glowStrength,shadowAlpha;uniform bool ink,shadowPass;uniform vec3 shadowColor;
 void main(){
     vec2 coverage=texture(atlas,uv).rg;
     vec2 shadowUv=uv-shadowOffset;
     float inside=step(tileBounds.x,shadowUv.x)*step(tileBounds.y,shadowUv.y)*step(shadowUv.x,tileBounds.z)*step(shadowUv.y,tileBounds.w);
     float shadow=texture(atlas,shadowUv).r*inside*shadowAlpha*tint.a;
+    if(shadowPass){result=vec4(shadowColor*shadow,shadow);return;}
     float halo=clamp(coverage.g*glowStrength,0.,1.)*tint.a;
-    float alpha=halo+shadow*(1.-halo);
-    vec3 rgb=vec3(.922,.961,1.)*halo + shadowColor*shadow*(1.-halo);
+    vec3 rgb=vec3(.922,.961,1.)*halo;
     float fill=ink?coverage.r*tint.a:0.;
-    result=vec4(tint.rgb*fill+rgb*(1.-fill),fill+alpha*(1.-fill));
+    result=vec4(tint.rgb*fill+rgb*(1.-fill),fill+halo*(1.-fill));
 }
 )";
     if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) ||
@@ -183,22 +183,16 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
     program_.setUniformValue("viewport",QVector2D(target_.width(),target_.height()));program_.setUniformValue("atlas",0);
     program_.setUniformValue("tint",QVector4D(colour.redF(),colour.greenF(),colour.blueF(),opacity));
     program_.setUniformValue("glowStrength",float(std::clamp(glow,0.,1.)*1.5));
-    // RCO text templates (audit/TEXT-RENDERER.md): 1304/1305 use shadow X=4/Y=-5 and 1197 use shadow RGB=.25.
-    // The RCO's negative Y is the downward drop-shadow direction (its Y axis runs upward); the atlas v axis runs
-    // downward, so the shadow samples up-left and lands 4px right / 5px below the glyph.
-    program_.setUniformValue("shadowAlpha",shadow?1.f:0.f);
-    program_.setUniformValue("shadowColor",QVector3D(.25f,.25f,.25f));
+    // RCO template offsets (4,-5) are not measured screen pixels. Applying them directly made a dark duplicate
+    // behind every label. Keep a restrained one-scene-pixel shadow pending recovery of the runtime conversion.
+    program_.setUniformValue("shadowAlpha",.2f);
+    program_.setUniformValue("shadowColor",QVector3D(0,0,0));
     program_.setUniformValue("ink",ink);
-    program_.setUniformValue("shadowOffset",QVector2D(float(4*rasterScale_/atlasSize),float(5*rasterScale_/atlasSize)));
+    program_.setUniformValue("shadowOffset",QVector2D(float(rasterScale_/atlasSize),float(rasterScale_/atlasSize)));
     gl.glBindVertexArray(vao_);gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);
     gl.glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);
-    QVector<Vertex> vertices;int page=-1;
-    const auto flush=[&]{
-        if(vertices.isEmpty())return;
-        gl.glBindTexture(GL_TEXTURE_2D,pages_[size_t(page)].texture);
-        gl.glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(Vertex),vertices.constData(),GL_STREAM_DRAW);
-        gl.glDrawArrays(GL_TRIANGLES,0,GLsizei(vertices.size()));vertices.clear();
-    };
+    struct Batch {int page,first,count;};
+    QVector<Vertex> vertices;QVector<Batch> batches;
     // Batch consecutive glyphs on the same page without changing shaped order.
     for(const auto& placed:shaped.glyphs) {
         const auto& g=glyph(gl,placed.face,placed.index);if(g.page<0)continue;
@@ -210,11 +204,23 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
         const QPointF snap(std::round(origin.x()/pixelGrid_)*pixelGrid_-origin.x(),std::round(origin.y()/pixelGrid_)*pixelGrid_-origin.y());
         const QPointF tl=origin+snap,tr=transform.map(box.topRight())+snap,bl=transform.map(box.bottomLeft())+snap,br=transform.map(box.bottomRight())+snap;
         const float u=float(g.atlas.x())/atlasSize,v=float(g.atlas.y())/atlasSize,r=float(g.atlas.x()+g.atlas.width())/atlasSize,b=float(g.atlas.y()+g.atlas.height())/atlasSize;
-        if(page!=g.page){flush();page=g.page;}
+        if(batches.isEmpty() || batches.back().page!=g.page)batches.push_back({g.page,int(vertices.size()),0});
         const auto vertex=[&](const QPointF& p,float s,float t){return Vertex{float(p.x()),float(p.y()),s,t,u,v,r,b};};
         vertices<<vertex(tl,u,v)<<vertex(bl,u,b)<<vertex(tr,r,v)<<vertex(tr,r,v)<<vertex(bl,u,b)<<vertex(br,r,b);
+        batches.back().count+=6;
     }
-    flush();
+    gl.glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(Vertex),vertices.constData(),GL_STREAM_DRAW);
+    const auto drawPass=[&](bool isShadow){
+        program_.setUniformValue("shadowPass",isShadow);
+        for(const auto& batch:batches){
+            gl.glBindTexture(GL_TEXTURE_2D,pages_[size_t(batch.page)].texture);
+            gl.glDrawArrays(GL_TRIANGLES,batch.first,batch.count);
+        }
+    };
+    // Draw the whole string's shadow first, including across atlas pages. A later glyph's shadow must never
+    // cover an earlier glyph's foreground (especially with kerning, ligatures and combining marks).
+    if(shadow)drawPass(true);
+    drawPass(false);
     gl.glBindVertexArray(0);gl.glBindBuffer(GL_ARRAY_BUFFER,0);gl.glBindTexture(GL_TEXTURE_2D,0);program_.release();
     painter.endNativePainting();
 }

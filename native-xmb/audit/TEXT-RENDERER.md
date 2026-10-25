@@ -7,7 +7,7 @@ Updated 2026-10-25. The GL atlas foundation is implemented; pixel parity with PA
 `src/text_renderer.cpp` shapes text with QTextLayout, retains each run's actual QRawFont (including fallback
 faces), and caches grayscale glyph coverage at the display's native pixel size. It uploads padded coverage
 and a separate Gaussian halo to GL atlas pages. Consecutive glyphs on the same page are batched in shaped
-order; the shader produces premultiplied coverage, shadow and halo. Labels are drawn in the original scene
+order; the shader produces premultiplied coverage and halo after a separate whole-string shadow pass. Labels are drawn in the original scene
 order through QPainter native-paint boundaries, so dialogs still dim the elements behind them.
 
 Menu labels, captions, subtitles, dialog/information text and the OSK use the atlas. The existing Qt text path
@@ -17,9 +17,9 @@ host Qt font engine. The temporary metrics used for elision and the OSK cursor a
 Native pixel size is rounded from the logical font size and viewport scale. Resizing invalidates atlas and
 shaped-layout caches. Coverage is grayscale, with no added gamma curve. Vertical hinting is an explicit
 current choice, not a recovered firmware setting. The measured halo uses sigma 2.2 and a ~6-pixel radius at
-1080p, separately from the glyph edge. Shadow now uses the RCO text-template values (X=4, Y=-5, grey RGB=.25,
-full alpha) rather than the earlier measured 1-pixel/38-of-255; these are template values, not runtime-proven
-output offsets. None of these values should be described as firmware defaults.
+1080p, separately from the glyph edge. Shadow uses a provisional one-scene-pixel right/down offset, black at
+20% alpha. The earlier direct use of RCO template values (X=4, Y=-5, grey RGB=.25, full alpha) produced a visible
+dark duplicate. Their runtime conversion remains unresolved. None of these values should be described as firmware defaults.
 
 Bounds: sixteen 1024-square RGBA pages (64 MiB maximum), 512 shaped layouts, clearing at a frame boundary
 when full. Space glyphs retain their shaped advance without allocating a tile. Uploads reset alignment,
@@ -127,6 +127,21 @@ The follow-up run confirmed all four root/network/dialog/OSK grabs at 1920x1080 
 reports were 48.7 and 56.1 fps. Sustained 1080p frame pacing remains below the project's completion requirement.
 
 ## Remaining work
+
+### Visible shadow correction (2026-10-25)
+
+Computer Use reproduced heavy, offset dark text behind the clock and labels in the user's Green theme.
+The renderer had treated RCO template coordinates as final scene distances without evidence for that conversion.
+It also composited each glyph's shadow and foreground together, so a later glyph's shadow could overpaint an
+earlier glyph's foreground. The correction draws all shadow batches before all foreground batches, including
+strings spanning atlas pages, and uses the restrained provisional shadow described above. Firmware font
+selection, shaping, coverage rasterisation, hinting and focus halo are unchanged.
+
+Both the isolated and default native builds succeeded. Existing scripted replay produced before/after root
+captures at 1920x1080-requested and 960x540 window sizes, followed by a dialog and Friends column. The dark
+duplicate is absent in the after captures; the clock, long focused label, dim labels and dialog remain readable.
+Diagnostic artifacts are local under `out/native-reference/text-fix/`; captures retain the live UI clock, so
+before/after timestamps differ. This verifies the reported visual defect, not PS3 rasterizer pixel parity.
 
 1. Recover hinting/rasterizer flags and style-code-to-face mappings. Match focused/unfocused/subtitle/dialog
    crops against the same reference state; readable native output alone does not prove pixel parity.
