@@ -66,7 +66,11 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - Open-column item icons still take the Qt path, including original RCO images. Route the appropriate firmware
   material inputs through the item renderer after its asset/UV mapping is understood.
 - Background is visibly brighter than RPCS3 at the same hour, which also brightens unfocused icons through
-  `_BackgroundMap`. Trace scene/exposure/composition before compensating the icon colour. No correction verified yet.
+  `_BackgroundMap`. Traced with `XMB_BG_SCENE=<png>` (dumps the pre-tone-map HDR scene, first frame only): the
+  excess is already in `back_colours0`'s scene, not the HDR tone map. At 19:30 the native scene's lower bands rise
+  toward the bottom (luma ~44-58) while RPCS3's background sits lower there (~39-52, peaking at the ribbon). Suspects
+  are the night-palette inputs (`_NightTime`/`_NightBrightness`/`_MonthTime` or the night texture decode), not the
+  night exposure. No correction verified yet.
 
 ### Phase 3: item, column and dialog drawing through the firmware's own layout
 - Initial trace: system_plugin infobar/infotext and OSK templates mostly have zero/dynamic geometry. Do not
