@@ -21,6 +21,8 @@ public:
     View(Shell& shell,Assets& assets,QWidget* parent=nullptr);
     ~View() override;
     static double dayLight(double hour);
+    // Every XMB move closes 25% of the remaining distance per 60 fps frame (reference video): (1/60)/ln(4/3) s.
+    static constexpr double easeTau=0.05793;
     // Renders the background offscreen at reference times and writes the same statistics measured from the
     // reference videos (band colours by clock time, ribbon crest over 40 s). Returns false on GL failure.
     bool measureReference(const QString& path);

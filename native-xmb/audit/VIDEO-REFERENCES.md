@@ -340,3 +340,26 @@ motion.
   tilted more edge-on (rise 0.12, depth 1.6) so the line shader's grazing-angle weighting keeps it visible.
 - Particles: about 400 alive, wider scatter, gain 2.0.
 - Item labels share one column per level (x 744 at the top level), regardless of icon shape.
+
+**Navigation motion and ghosting (measured frame by frame at 60 fps).** Moves sampled at 1/60 s in nDL5YJt2aaA:
+the Network → Game category move (6.30–6.55 s), an item move up the Network column (5.43–5.62 s) and the page-back
+from Trophy Collection (9.30–9.67 s).
+
+- **One ease for everything.** Category labels, item rows and page moves all close about 25% of the remaining
+  distance per frame. For the item move the remaining distance per frame was 53, 41, 30, 22, 16, 11 and 7 px; for
+  the category label it was 151, 112, 84, 64 and 36 px. That is pos += 0.25 × (target − pos) at 60 fps, an
+  exponential time constant of (1/60)/ln(4/3) = 58 ms. Moves settle to 10% in about 133 ms. The earlier separate
+  constants (category 120 ms, item 85 ms, depth 110 ms) were too slow.
+- **Ghosting is a cross-over, not a slide.** On a category move the item column does not travel a whole icon step
+  (202 px). The old list slides about 150 px in the direction of travel while it fades, and the new list comes in
+  from about 150 px on the other side. For roughly 100 ms both are visible on top of each other. The old one is
+  ~50% at 50 ms and gone by ~180 ms, with the same 58 ms constant. The category name under the focused icon moves
+  with its icon and cross-fades the same way.
+- **Page back/forward** cross-fades the departing page in place while the parent column slides in, over the same ease.
+- `--script` gained `burst=<prefix>[@KEY]`: it presses KEY and keeps 12 frames about 12 ms apart in memory, saving
+  them as `<prefix>_NN_<ms>.png`. A burst of the same moves shows the same cross-over.
+
+**Info-bar indicators.** `xmb_plugin_normal` tex_indi_online (smiley), tex_indi_message, tex_indi_chat and
+tex_indi_plus (PS Plus), on the 24 px tex_indi_bg, appear next to the clock only for PSN state: signed in, unread
+messages, chat invitations, PS Plus. The native XMB has no PSN session, and an offline PS3 shows none of them, so
+they are not drawn rather than faking an online state.
