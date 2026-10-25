@@ -183,12 +183,13 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
     program_.setUniformValue("viewport",QVector2D(target_.width(),target_.height()));program_.setUniformValue("atlas",0);
     program_.setUniformValue("tint",QVector4D(colour.redF(),colour.greenF(),colour.blueF(),opacity));
     program_.setUniformValue("glowStrength",float(std::clamp(glow,0.,1.)*1.5));
-    // RCO text templates (audit/TEXT-RENDERER.md): 1304/1305 use shadow X=4, Y=-5 and 1197 use shadow RGB=.25.
-    // These are template values, not runtime-proven output offsets; the shadow colour is grey, not black.
+    // RCO text templates (audit/TEXT-RENDERER.md): 1304/1305 use shadow X=4/Y=-5 and 1197 use shadow RGB=.25.
+    // The RCO's negative Y is the downward drop-shadow direction (its Y axis runs upward); the atlas v axis runs
+    // downward, so the shadow samples up-left and lands 4px right / 5px below the glyph.
     program_.setUniformValue("shadowAlpha",shadow?1.f:0.f);
     program_.setUniformValue("shadowColor",QVector3D(.25f,.25f,.25f));
     program_.setUniformValue("ink",ink);
-    program_.setUniformValue("shadowOffset",QVector2D(float(4*rasterScale_/atlasSize),float(-5*rasterScale_/atlasSize)));
+    program_.setUniformValue("shadowOffset",QVector2D(float(4*rasterScale_/atlasSize),float(5*rasterScale_/atlasSize)));
     gl.glBindVertexArray(vao_);gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);
     gl.glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);
     QVector<Vertex> vertices;int page=-1;
