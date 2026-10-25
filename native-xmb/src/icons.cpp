@@ -25,6 +25,8 @@ GLuint IconRenderer::texture(QOpenGLFunctions_3_3_Core& gl,const QImage& image,b
     const QImage rgba=image.convertToFormat(QImage::Format_RGBA8888);
     GLuint id=0;gl.glGenTextures(1,&id);gl.glBindTexture(GL_TEXTURE_2D,id);
     gl.glPixelStorei(GL_UNPACK_ALIGNMENT,4);
+    gl.glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);
+    gl.glPixelStorei(GL_UNPACK_ROW_LENGTH,0);gl.glPixelStorei(GL_UNPACK_SKIP_PIXELS,0);gl.glPixelStorei(GL_UNPACK_SKIP_ROWS,0);
     gl.glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,rgba.width(),rgba.height(),0,GL_RGBA,GL_UNSIGNED_BYTE,rgba.constBits());
     if(mipmaps)gl.glGenerateMipmap(GL_TEXTURE_2D);
     gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,mipmaps?GL_LINEAR_MIPMAP_LINEAR:GL_LINEAR);
@@ -48,6 +50,23 @@ float IconRenderer::value(const QString& key,float light) const {
     return night+(day-night)*light;
 }
 
+QVector3D IconRenderer::changingColour(const QDateTime& when) const {
+    // FUN_000449b4 samples at (seconds/86400, season/12 + 1/24).
+    // FUN_0003f7b4 subtracts half a texel and wraps both axes. QImage
+    // decodes bottom-up BMP rows into the logical top-down palette required here.
+    const auto date=when.date();const auto time=when.time();
+    const double seconds=time.hour()*3600+time.minute()*60+time.second();
+    const int monthDays=date.month()==2?28:date.daysInMonth();
+    const double day=std::min(date.day()-1,monthDays-1);
+    const double x=seconds/86400.*ambientPalette_.width()-.5;
+    const double y=((date.month()-1)+(day/monthDays)+.5)/12.*ambientPalette_.height()-.5;
+    const int ix=int(std::floor(x)),iy=int(std::floor(y));
+    const auto wrap=[](int i,int n){return (i%n+n)%n;};
+    const auto colour=[&](int px,int py){const auto c=ambientPalette_.pixelColor(wrap(px,ambientPalette_.width()),wrap(py,ambientPalette_.height()));return QVector3D(c.redF(),c.greenF(),c.blueF());};
+    const float fx=float(x-ix),fy=float(y-iy);
+    return (colour(ix,iy)*(1-fx)+colour(ix+1,iy)*fx)*(1-fy)+(colour(ix,iy+1)*(1-fx)+colour(ix+1,iy+1)*fx)*fy;
+}
+
 bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     assets_=&assets;
     QString error;
@@ -56,8 +75,9 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
         if(vertexCg_.valid())fragmentCg_=CgProgram::load(assets.qglFile("icons","lib/icons/icons_no_ss_no_shad.fpo"),&error);
         day_=readMnu(assets.qglFile("icons","override/day/ICONS.mnu"));
         night_=readMnu(assets.qglFile("icons","override/night/ICONS.mnu"));
+        ambientPalette_=QImage::fromData(assets.qglFile("icons","widgets/other/amb.bmp"),"BMP");
     } catch(const std::exception& e) { error=e.what(); }
-    if(!vertexCg_.valid() || !fragmentCg_.valid() || night_.isEmpty()){qWarning().noquote()<<"icons: firmware programs unavailable:"<<error;return false;}
+    if(!vertexCg_.valid() || !fragmentCg_.valid() || night_.isEmpty() || ambientPalette_.size()!=QSize(16,12)){qWarning().noquote()<<"icons: firmware programs/palette unavailable:"<<error;return false;}
     // The program's alpha (envmap alpha x _Ambiant.w: 0.698 for unfocused icons) blends the icon over the frame; the
     // layout's fade (page depth, dialogs) scales it.
     QString fragment=fragmentCg_.glsl;
@@ -139,11 +159,25 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
     set("_RefractParams",{value("REFR R",light)*refract,value("REFR G",light)*refract,value("REFR B",light)*refract,value("REFR TWEAK",light)});
     set("_ParallaxAndGlow",{expose,expose!=0?1.f/expose:0.f,value("PAR BIAS",light),value("PAR SCL",light)});
     set("_EnvRot",{float(std::cos(envAngle)),float(std::sin(envAngle)),1,1});
-    // Captured at night (October, "Original" theme); the day values are not captured yet.
-    set("_ChangingColor",{0.809361f,0.699557f,0.353068f,value("TIME COLOR MIX",light)});
-    set("_LuminanceParams[0]",{0.544441f,1,-0.170123f,0});
-    set("_LuminanceParams[1]",{0.20443f,1,0.104857f,0});
-    set("_LuminanceParams[2]",{0.20443f,0.544441f,0,0});
+    const auto ambient=changingColour(clock_.isValid()?clock_:QDateTime::currentDateTime());
+    set("_ChangingColor",{ambient.x(),ambient.y(),ambient.z(),value("TIME COLOR MIX",light)});
+    // custom_render_plugin FUN_0003c584 packs a three-point Lagrange curve.
+    // GLASS scales its y values; the independent animated factor R+0x320 defaults
+    // to one. This reproduces the night capture and derives day from ICONS.mnu.
+    constexpr float x0=.20443f,x1=.544441f,x2=1.f;
+    const float glass=value("GLASS",light);
+    set("_LuminanceParams[0]",{x1,x2,-.736614f*glass/((x0-x1)*(x0-x2)),0});
+    set("_LuminanceParams[1]",{x0,x2,-.259981f*glass/((x1-x0)*(x1-x2)),0});
+    set("_LuminanceParams[2]",{x0,x1,0,0});
+    if(qEnvironmentVariableIsSet("XMB_ICON_LOG_MATERIAL")) {
+        static bool reported=false;
+        if(!reported) {
+            reported=true;
+            qInfo()<<"icons: derived material"<<clock_.toString(Qt::ISODate)<<"ChangingColor"<<ambient
+                   <<"TIME COLOR MIX"<<value("TIME COLOR MIX",light)<<"GLASS"<<glass
+                   <<"luminance coefficients"<<-.736614f*glass/((x0-x1)*(x0-x2))<<-.259981f*glass/((x1-x0)*(x1-x2));
+        }
+    }
     if(useCaptured)fc=captured;
     std::vector<QVector4D> vc(468);
     for(const auto& p:vertexCg_.parameters)if(p.resourceIndex>=0 && p.resourceIndex<468 && !p.defaults.isEmpty())

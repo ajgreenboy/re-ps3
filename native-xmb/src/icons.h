@@ -4,6 +4,8 @@
 #include <memory>
 #include <QHash>
 #include <QPointF>
+#include <QDateTime>
+#include <QVector3D>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 
@@ -20,7 +22,8 @@ namespace xmb {
 //   _RefractParams        = (REFR R, G, B x REFR SCL, REFR TWEAK);  _ParallaxAndGlow = (EXPOSE, 1/EXPOSE, PAR BIAS, PAR SCL)
 //   _EnvRot               = (cos a, sin a, 1, 1), a turning ~30 deg/s
 //   _Eye                  = (-X - 400, -Y, d, size): camera relative to the icon; d = 2700, ndc = (2.8125 X, 5 Y) / d
-//   _ChangingColor, _LuminanceParams: captured night values (day values not captured yet)
+//   _ChangingColor: repeat-bilinear amb.bmp sample at time of day and seasonal month fraction
+//   _LuminanceParams: Lagrange coefficients from firmware control points scaled by preset GLASS
 class IconRenderer {
 public:
     struct Icon {
@@ -32,6 +35,7 @@ public:
     };
     bool init(QOpenGLFunctions_3_3_Core& gl,Assets& assets);
     bool ready() const { return ready_; }
+    void setClock(const QDateTime& when) { clock_=when; }
     // Draws the icons onto targetFbo, cutting each one's background from that same framebuffer first.
     // light: 0 night .. 1 day (the background's NightDayBlend preset blend).
     void render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& icons,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo);
@@ -43,6 +47,9 @@ private:
     GLuint vao_=0,vbo_=0,diffuse_=0,environment_=0,cut_=0,cutFbo_=0;
     QHash<QString,GLuint> normalMaps_;
     QHash<QString,float> day_,night_;
+    QImage ambientPalette_;
+    QDateTime clock_;
+    QVector3D changingColour(const QDateTime& when) const;
     GLuint texture(QOpenGLFunctions_3_3_Core& gl,const QImage& image,bool mipmaps);
     GLuint normalMap(QOpenGLFunctions_3_3_Core& gl,const QString& name);
     float value(const QString& key,float light) const;

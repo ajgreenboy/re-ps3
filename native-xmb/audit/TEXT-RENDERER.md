@@ -95,6 +95,8 @@ zero missing images, and five-second frame reports of 46.7, 61.3 and 61.5 fps du
 This is not a 1080p performance or reference-parity result. A capture-helper bug then found was that `full`
 did not update the shell's fullscreen state, so navigation immediately restored the window; the token now
 uses the shell setting, and `size=` restores windowed state through the same setting.
+The follow-up run confirmed all four root/network/dialog/OSK grabs at 1920x1080 and exited zero; its five-second
+reports were 48.7 and 56.1 fps. Sustained 1080p frame pacing remains below the project's completion requirement.
 
 ## Remaining work
 
@@ -104,6 +106,6 @@ uses the shell setting, and `size=` restores windowed state through the same set
 3. Reproduce max-coverage mask accumulation for overlapping glyphs without losing shaping/fallback faces.
 4. Replace temporary Qt elision/cursor metrics once the firmware metric path is reproduced.
 
-The user also identified material issues that remain separate open requirements: daytime `_ChangingColor`
-and `_LuminanceParams`, item icons in the open column using the firmware material, and a background that is
-too bright relative to RPCS3 at the same hour. Correct background sampling before tuning unfocused icons.
+The user also identified material issues: clock inputs have since been traced and implemented (see
+ICON-MATERIAL-CLOCK.md); item icons in the open column and a background that is too bright relative to RPCS3
+remain open. Correct background sampling before tuning unfocused icons.

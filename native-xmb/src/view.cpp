@@ -167,6 +167,7 @@ double View::dayLight(double hour) {
     return 0;
 }
 void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHeight) {
+    icons_.setClock(backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime());
     static const QVector3D colours[]={{.55f,.39f,.13f},{.12f,.36f,.68f},{.40f,.20f,.60f},{.62f,.17f,.18f},{.16f,.43f,.32f},{.48f,.50f,.54f}};
     // Original colour theme: the firmware's own background shader and monthly palettes.
     // The firmware background renders every colour setting (as on the PS3, a fixed colour is the same wave pinned to one
@@ -185,7 +186,9 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         if(!backgroundOverride_.isValid() && shell_.theme()>0 && shell_.theme()<int(std::size(fixedMonth)))
             when=QDateTime(QDate(when.date().year(),fixedMonth[shell_.theme()],1),when.time());
         if(when.date().month()!=texturesMonth_)loadMonthTextures(when.date().month());
-        const BackgroundTime time=backgroundTime(when);presetBlend=std::clamp((time.nightDayBlend-.5f)/.5f,0.f,1.f); // NightDayBlend runs 0.5 (night) .. 1
+        icons_.setClock(when); // use the same fixed-colour month and diagnostic clock as the sampled background
+        const BackgroundTime time=backgroundTime(when);
+        presetBlend=float(std::clamp((time.nightDayBlend-(1.-kNightBlend))/kNightBlend,0.,1.));
         renderOriginalBackground(time,pixelWidth,pixelHeight);
         if(originalRibbon)ribbon_.render(*this,seconds,presetBlend,pixelWidth,pixelHeight,scene);
         if(originalParticles) {
@@ -206,8 +209,8 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);background_.release();
     if(monthTexture_)monthTexture_->release(0);
     glDisable(GL_BLEND);
-    if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),originalParticles?std::function<void(int,int)>([&](int w,int h){particles_.render(*this,presetBlend,w,h,true);}):std::function<void(int,int)>());
     presetBlend_=presetBlend;
+    if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),originalParticles?std::function<void(int,int)>([&](int w,int h){particles_.render(*this,presetBlend,w,h,true);}):std::function<void(int,int)>());
 }
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
 // as a day fraction t in [0,1] and the month as a float in [0,12] (constants at 0x92e54..0x92e6c, preset hours / 24
@@ -234,9 +237,8 @@ View::BackgroundTime View::backgroundTime(const QDateTime& when) {
     // NightDayBlend = 1 + NIGHT BLEND x (s1 (1 - s2) - 1), s1/s2 smoothsteps over NIGHT2DAY and DAY2NIGHT (hours / 24):
     // 1 by day, 1 - NIGHT BLEND (0.5) at night.
     const auto smooth=[](double a,double c,double x){if(x<a)return 0.;if(x>c)return 1.;const double f=(x-a)/(c-a);return f*f*(3.-2.*f);};
-    constexpr double nightBlend=.499947;
     const double s1=smooth(0./24,5.16611/24,t),s2=smooth(18.498/24,20.3312/24,t);
-    b.nightDayBlend=float(1.+nightBlend*(s1*(1.-s2)-1.));
+    b.nightDayBlend=float(1.+kNightBlend*(s1*(1.-s2)-1.));
     b.alpha=1.f;
     return b;
 }
@@ -461,10 +463,10 @@ void View::paintGL() {
         }
         QOpenGLFramebufferObject::blitFramebuffer(uiResolved_.get(),uiMsaa_.get());
     }
-    // Composite (premultiplied alpha) over the background in the widget's framebuffer.
-    glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
     // Category icons: the firmware glass shader, refracting the finished background (each cut before its own draw).
     if(glReady_ && icons_.ready())icons_.render(*this,iconQueue_,now/1000.,presetBlend_,device.width(),device.height(),defaultFramebufferObject());
+    // Composite (premultiplied alpha) over the background in the widget's framebuffer.
+    glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
     glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
     uiComposite_.bind();uiComposite_.setUniformValue("layer",0);
@@ -527,9 +529,9 @@ void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect)
     p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);
 }
 void View::drawScene(QPainter& p) {
+    iconQueue_.clear();
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
     // A message whose body is "Key: value" rows (System Information, connection status, outputs) is a PS3 information
-    iconQueue_.clear();
     // page, not a dialog (reference 92 s): no categories or clock behind it, a titled header and a two-column table.
     const bool infoPage=[&]{
         const auto lines=shell_.message().split('\n');

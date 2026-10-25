@@ -24,7 +24,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 |---|---|
 | Background, ribbon, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs. Ribbon geometry is fitted, not traced from spline.elf |
 | Particles | Firmware shaders; the motion is a CPU rebuild of the SPU particles.elf |
-| Category icons | Firmware glass shader port in commit 7250e1e; daytime inputs and reference parity remain open |
+| Category icons | Firmware glass shader port; clock/season RGB and preset luminance now derived from firmware; full parity remains open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | Qt drawing with firmware RCO textures and strings; layout, sizes, opacity and timing measured from the reference |
 | Text | Native-resolution GL glyph atlas with Qt shaping/rasterization; firmware rasterizer parity and glow parameters remain open (phase 2) |
 | Motion | One measured ease (25%/frame at 60 fps, τ 58 ms); 150 px column cross-fade on category moves |
@@ -60,15 +60,19 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   crops of reference labels: focused, unfocused, subtitle and dialog text.
 
 ### Material and background gaps reported by the user (2026-10-25)
-- `_ChangingColor` RGB and `_LuminanceParams` currently use a captured night state; daytime needs tracing or
-  corroboration. ICONS.mnu has different day/night GLASS values, so fixed night luminance coefficients cannot
-  establish daytime parity.
+- `_ChangingColor` now samples amb.bmp at firmware clock/season coordinates; `_LuminanceParams` now derives
+  from the control-point curve scaled by preset GLASS. Both reproduce the prior night capture numerically;
+  daytime capture parity is still pending. See `audit/ICON-MATERIAL-CLOCK.md` for proof and limitations.
 - Open-column item icons still take the Qt path, including original RCO images. Route the appropriate firmware
   material inputs through the item renderer after its asset/UV mapping is understood.
 - Background is visibly brighter than RPCS3 at the same hour, which also brightens unfocused icons through
   `_BackgroundMap`. Trace scene/exposure/composition before compensating the icon colour. No correction verified yet.
 
 ### Phase 3: item, column and dialog drawing through the firmware's own layout
+- Initial trace: system_plugin infobar/infotext and OSK templates mostly have zero/dynamic geometry. Do not
+  replace measured pixels with those zeros. `basic_plugins.prx` FUN_00007c7c owns infobar initialization;
+  its final configuration goes through vshcommon_28549FD0 and runtime PAF setters. Local read-only export:
+  `out/native-reference/phase3-infobar-init.c`. Exact geometry projection remains to trace.
 - Most of the 2D XMB is explore_plugin/system_plugin driving paf widgets from RCO objects: positions, scales and
   animations live in the RCO object trees (`rco-behavior` dump) and plugin code. The current values are measured
   from the video.

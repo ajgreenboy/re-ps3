@@ -35,6 +35,7 @@ int main(int argc,char** argv) {
     parser.addOption({"inventory","Write the local XMBML definition inventory and exit","json-file"});
     parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
     parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
+    parser.addOption({"background-clock","Fix background and icon-material time for reference captures (ISO date/time); UI clock stays live","date-time"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
@@ -201,6 +202,11 @@ int main(int argc,char** argv) {
     xmb::Shell shell(data,assets);
     QSettings windowSettings(QDir(data).filePath("settings.ini"),QSettings::IniFormat);
     QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);window.setCentralWidget(view);window.resize(960,540);
+    if(parser.isSet("background-clock")) {
+        const auto when=QDateTime::fromString(parser.value("background-clock"),Qt::ISODate);
+        if(!when.isValid()){qCritical()<<"background-clock requires an ISO date/time";return 2;}
+        view->setBackgroundClock(when);
+    }
     if(parser.isSet("measure-reference")) {
         window.show();
         QTimer::singleShot(1000,&app,[&]{
