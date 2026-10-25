@@ -12,6 +12,7 @@
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QOpenGLFramebufferObject>
+#include <QOpenGLPaintDevice>
 #include <QTextStream>
 #include <QFile>
 #include <QFileInfo>
@@ -37,7 +38,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     }
     syncColumns();
     monthImage_=assets_.image("qgl/lines",QString("textures/month_bg/rgb/%1.dds").arg(QDateTime::currentDateTime().date().month(),2,10,QChar('0')));
-    connect(&shell_,&Shell::changed,this,[this]{syncColumns();loadWallpaper();update();});
+    connect(&shell_,&Shell::changed,this,[this]{++uiRevision_;syncColumns();loadWallpaper();update();});
     connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){mediaFrame_=frame;update();});
     connect(&shell_,&Shell::requestLibrary,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,"Choose media folder");if(!path.isEmpty())shell_.chooseLibrary(path);});
     connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");if(!file.isEmpty())shell_.chooseWallpaper(file);});
@@ -137,6 +138,14 @@ void main(){
     initOriginalBackground();
     ribbon_.init(*this,assets_);
     hdr_.init(*this,assets_);
+    static const char* compositeVertex=R"(#version 330 core
+out vec2 uv;
+void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);})";
+    static const char* compositeFragment=R"(#version 330 core
+in vec2 uv;out vec4 colour;uniform sampler2D layer;
+void main(){colour=texture(layer,uv);})"; // premultiplied; linear filtering at half scale = 2x2 box filter
+    if(!uiComposite_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) || !uiComposite_.addShaderFromSourceCode(QOpenGLShader::Fragment,compositeFragment) || !uiComposite_.link())
+        qCritical().noquote()<<"UI composite shader failed:"<<uiComposite_.log();
     particles_.init(*this,assets_);
     if(!monthImage_.isNull()) {
         monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
@@ -414,21 +423,46 @@ void View::paintGL() {
         renderBackground(float(now)/1000.f,float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
             int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
     }
-    // The UI layer is drawn by Qt's raster engine at the window's real pixel size (antialiased, properly rasterised
-    // glyphs at any scale) and composited over the GL background in one draw. The GL paint engine renders scaled text
-    // unhinted and jagged.
-    const QSize pixels(int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
-    if(uiLayer_.size()!=pixels)uiLayer_=QImage(pixels,QImage::Format_ARGB32_Premultiplied);
-    uiLayer_.fill(Qt::transparent);
-    {
-        QPainter ui(&uiLayer_);
-        ui.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing|QPainter::SmoothPixmapTransform);
-        const double scale=std::min(pixels.width()/1920.,pixels.height()/1080.);
-        ui.translate((pixels.width()-1920*scale)/2,(pixels.height()-1080*scale)/2);ui.scale(scale,scale);drawScene(ui);
+    // UI layer on the GPU: Qt's OpenGL paint engine draws into a 4x multisampled framebuffer at twice the window size;
+    // it is resolved, then composited at half scale, where the bilinear fetch averages each 2x2 block. MSAA plus 2x
+    // supersampling gives smooth glyph and icon edges. The layer is redrawn only when something visible changed.
+    const QSize device(int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF())),pixels=device*2;
+    QString signature=QString::asprintf("%.4f %.4f %.4f %d %d %d ",categoryPosition_,depthPosition_,categoryFade_,shell_.category(),shell_.depth(),uiRevision_);
+    for(const auto& column:columns_)signature+=QString::number(column.position,'f',4)+' ';
+    signature+=shell_.clockText()+shell_.message()+shell_.status();
+    if(osk_.open)signature+=QString::asprintf("osk %d %d %d %d %d %d ",osk_.row,osk_.column,osk_.cursor,osk_.shift,osk_.symbols,int((clock_.elapsed()/500)%2))+osk_.text;
+    if(shell_.mediaOpen())signature+=QString::number(now); // media frames change every frame
+    bool rebuild=signature!=uiSignature_;
+    if(!uiMsaa_ || uiMsaa_->size()!=pixels) {
+        QOpenGLFramebufferObjectFormat msaa;msaa.setSamples(4);msaa.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+        uiMsaa_=std::make_unique<QOpenGLFramebufferObject>(pixels,msaa);
+        uiResolved_=std::make_unique<QOpenGLFramebufferObject>(pixels);
+        glBindTexture(GL_TEXTURE_2D,uiResolved_->texture());
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D,0);
+        rebuild=true;
     }
-    QPainter painter(this);painter.setRenderHint(QPainter::SmoothPixmapTransform);
-    painter.drawImage(QRectF(0,0,width(),height()),uiLayer_);
-    painter.end();
+    if(rebuild) {
+        uiSignature_=signature;
+        uiMsaa_->bind();glViewport(0,0,pixels.width(),pixels.height());glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
+        {
+            QOpenGLPaintDevice paintDevice(pixels);
+            QPainter ui(&paintDevice);
+            ui.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing|QPainter::SmoothPixmapTransform);
+            const double scale=std::min(pixels.width()/1920.,pixels.height()/1080.);
+            ui.translate((pixels.width()-1920*scale)/2,(pixels.height()-1080*scale)/2);ui.scale(scale,scale);drawScene(ui);
+        }
+        QOpenGLFramebufferObject::blitFramebuffer(uiResolved_.get(),uiMsaa_.get());
+    }
+    // Composite (premultiplied alpha) over the background in the widget's framebuffer.
+    glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
+    glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);
+    glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+    uiComposite_.bind();uiComposite_.setUniformValue("layer",0);
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,uiResolved_->texture());
+    glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D,0);uiComposite_.release();glDisable(GL_BLEND);
     ++frames_;if(now-reportAt_>=5000){qInfo()<<"native frames:"<<frames_*1000./double(now-reportAt_)<<"fps; decoded images"<<assets_.decodedImages()<<"missing images"<<assets_.failedImages();frames_=0;reportAt_=now;}
 }
 void View::drawImage(QPainter& p,const QString& container,const QString& texture,const QRectF& rect,qreal opacity) {
