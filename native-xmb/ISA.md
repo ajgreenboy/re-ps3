@@ -141,6 +141,6 @@ open until the specific behavior has been observed. Definition inventory is
 complete for28 local XMBML files; wider plugin/RCO coverage remains pending.
 
 Recording evidence and observed nested return are detailed in
-REFERENCE-2026-10-23.md and HANDOFF.md. QRC/DDS build and local70-map sheet
+HANDOFF.md. QRC/DDS build and local70-map sheet
 completed; Computer Use observed original Settings shapes and Theme → Color →
 Back restoring selection. The broad transition-parity criterion remains unchecked.

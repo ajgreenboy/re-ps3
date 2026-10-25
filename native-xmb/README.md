@@ -99,5 +99,4 @@ XMBML/resource-driven catalog and localization are required before fidelity can
 be claimed.
 
 See the [full feature/presentation audit and new handoff](audit/README.md),
-[handoff](HANDOFF.md), [recorded reference findings](REFERENCE-2026-10-23.md)
-and [completion criteria](ISA.md).
+[handoff](HANDOFF.md) and [completion criteria](ISA.md).

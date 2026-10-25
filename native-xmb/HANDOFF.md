@@ -63,7 +63,7 @@ These source implementations must be distinguished from observed behavior.
 
 - The user supplied a64.639-second VSH navigation recording. The native C++ file
   decoder extracted324 timestamped samples and contact sheets locally. See
-  [reference findings and future phases](REFERENCE-2026-10-23.md).
+  [measured reference values](audit/VIDEO-REFERENCES.md).
 - New bounded `QrcArchive` reads original QRCF/QRCC archives, including individual
   zlib entries. The DDS decoder reads the original128x128 icon normal maps.
   A local contact sheet confirms all70 numbered maps decode.
