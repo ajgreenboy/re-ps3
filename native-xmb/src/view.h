@@ -7,6 +7,7 @@
 #include "ribbon.h"
 #include "rsx_program.h"
 #include "shell.h"
+#include "photo_viewport.h"
 #include "text_renderer.h"
 #include <array>
 #include <functional>
@@ -62,6 +63,10 @@ private:
     int previousDepth_=0;
     void syncColumns();
     QImage mediaFrame_;
+    PhotoViewport photoViewport_;
+    void zoomPhoto(int direction);
+    void resetPhotoView();
+    void panPhoto(int dx,int dy);
     // GPU UI layer: 2x-sized 4x MSAA target, its resolve, and the premultiplied composite pass.
     std::unique_ptr<QOpenGLFramebufferObject> uiMsaa_,uiResolved_;
     QOpenGLShaderProgram uiComposite_;

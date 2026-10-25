@@ -36,6 +36,7 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
     if(key=="audio/volume" || key=="host/volume") {QVector<Choice> result;for(int i=0;i<=100;i+=10)result.push_back({QString::number(i)+"%",i});return result;}
     if(key=="photo/interval")return {{"5 seconds",5000},{"10 seconds",10000},{"15 seconds",15000},{"30 seconds",30000}};
     if(key=="photo/fit")return {{"Fit",0},{"Fill",1}};
+    if(key=="media/repeatMode")return {{"Off",0},{"Repeat One",1},{"Repeat All",2}};
     if(key=="power/idleMinutes")return {{"Off",0},{"15 minutes",15},{"30 minutes",30},{"1 hour",60},{"2 hours",120}};
     return {{"Off",false},{"On",true}};
 }
@@ -91,7 +92,8 @@ void Shell::openSettings(const QString& id) {
             option("keytone","Key Tone","Plays the current theme's menu sounds, with original XMB sounds as fallback.","audio/keyTone")};
     } else if(id=="music" || id=="video") {
         page.title=id=="music"?"Music Settings":"Video Settings";
-        page.entries={option("repeat","Repeat","Repeats the current media when playback reaches its end.","media/repeat"),
+        page.entries={option("repeat","Repeat","Stops at the end, repeats one file, or repeats the current folder queue.","media/repeatMode"),
+            option("shuffle","Shuffle","Plays every file in a random order before starting another cycle.","media/shuffle"),
             option("volume","Volume","Sets native media playback volume.","audio/volume")};
     } else if(id=="photo") {
         page.title="Photo Settings";
@@ -143,7 +145,7 @@ void Shell::openChoices(const QString& key,const QString& title) {
     Page page;page.title=title;
     // host/ keys are read from the computer each time (another app may have changed them), never stored.
     const QVariant current=key=="host/volume"?QVariant(int(std::lround(host::masterVolume()/10.)*10)):
-        key=="host/muted"?QVariant(host::masterMuted()):preferences_.value(key);
+        key=="host/muted"?QVariant(host::masterMuted()):key=="media/repeatMode"?QVariant(mediaRepeatMode()):preferences_.value(key);
     for(const auto& choice:choices(key,assets_)) {
         auto entry=option(key+"/"+QString::number(page.entries.size()),choice.title,{},key,Action::SetSetting);
         entry.option=choice.value;
@@ -157,6 +159,7 @@ void Shell::openChoices(const QString& key,const QString& title) {
     pages_.push_back(std::move(page));
 }
 QString Shell::valueText(const Entry& entry) const {
+    if(entry.setting=="media/repeatMode")return QStringList{"Off","Repeat One","Repeat All"}.value(mediaRepeatMode());
     if(entry.action==Action::SelectUser)return entry.value==profiles_.activeId()?QString(QChar(0x25cf)):QString{};
     if(entry.setting.isEmpty())return {};
     const auto value=preferences_.value(entry.setting);

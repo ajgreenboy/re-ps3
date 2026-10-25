@@ -14,6 +14,9 @@ https://github.com/MaxiBono/MaXMB, MIT License. Components translated or adapted
 - `src/interaction_audio.cpp` / `src/shell.cpp`: theme sound-role mapping and per-role fallback from
   `src/js/xmb.js` `_soundFiles` / `_applyThemeSounds` and `src/js/audio.js` `setThemeSounds`;
   native PCM validation, resampling and output use the existing C++ audio service.
+- `src/playback_queue.cpp` / shell playback lifecycle: shuffle cycles and bounded failed-file skipping adapt
+  `src/js/audio.js`'s queue methods. `src/photo_viewport.cpp` adapts fit/fill zoom stops, pan bounds and step
+  from `src/js/photoviewer.js`; native ownership, rendering and player integration are implemented in C++.
 
 ```
 MIT License

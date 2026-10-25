@@ -25,7 +25,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Background, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs |
 | Ribbon | Ported end to end (2026-10-25): plugin cloth, ffd_shader1 lattice, spline.elf FFD/camera/bicubic sheet, each stage matched to RPCS3 captures; LINE1 presets follow the plugin's clock keyframes and boot schedule (audit/PIPELINE.md "Ribbon port", "Ribbon presets") |
 | Particles | linkev/PlayStation-3-XMB's sparkle layer (point sprites, closed-form motion; not a firmware port); the boot's GLOBAL ALPHA fades them in |
-| Category icons | Firmware glass shader port; clock/season RGB and preset luminance derived from firmware; full parity open |
+| Category icons | Original uses firmware glass; fixed colours use an opaque normal-map material to resolve dark interiors. See audit/CATEGORY-ICON-FIX.md; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | Qt drawing with firmware RCO textures and strings; layout, sizes, opacity and timing measured from the reference |
 | Text | GL glyph atlas, rasterised at the 2x UI layer's scale with glyph origins on whole pixels (soft-text bug fixed 2026-10-25); label glow breathes and idle labels fade (MaXMB observations, unconfirmed); firmware rasterizer parity open |
 | Motion | One measured ease (25%/frame at 60 fps, τ 58 ms); 150 px column cross-fade on category moves |
@@ -123,6 +123,9 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 ### Phase 6: content and features
 - Remaining XMBML categories and items that are placeholders ("Unavailable"), driven by the firmware XML.
 - Media playback UI (photo/music/video controls from photoviewer/videoplayer/audioplayer RCOs).
+- Folder playback queues, repeat modes, shuffle, bounded failed-file skipping and photo zoom/pan/reset are now
+  implemented and observed in local replays (audit/MEDIA-CONTINUATION.md). Original player panels and broader
+  library/playlist semantics remain open.
 - PSN-dependent indicators stay off unless a real state exists; don't fake online features.
 
 ### Phase 7: verification harness

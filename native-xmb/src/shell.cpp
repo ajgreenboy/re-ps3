@@ -241,7 +241,13 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     });
     connect(&slideshow_,&QTimer::timeout,this,[this]{stepPhoto(1);});
     connect(player_.get(),&QMediaPlayer::mediaStatusChanged,this,[this](QMediaPlayer::MediaStatus status){
-        if(status==QMediaPlayer::EndOfMedia && mediaOpen_ && preferences_.value("media/repeat").toBool()){player_->setPosition(0);player_->play();}
+        if(mediaOpen_ && !photoOpen()) {
+            loading_=status==QMediaPlayer::LoadingMedia;
+            if(status==QMediaPlayer::EndOfMedia) {
+                const auto request=mediaRequest_;
+                QTimer::singleShot(0,this,[this,request]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(false);});
+            }
+        }
         emit changed();
     });
     connect(&idle_,&QTimer::timeout,this,[this]{
@@ -252,7 +258,12 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     if(!preferences_.error().isEmpty())message_=preferences_.error();
     if(!profiles_.error().isEmpty())message_=profiles_.error();
     connect(video_.get(),&QVideoSink::videoFrameChanged,this,[this](const QVideoFrame& frame){emit mediaFrame(frame.toImage());});
-    connect(player_.get(),&QMediaPlayer::errorOccurred,this,[this](QMediaPlayer::Error,const QString& error){message_=error;emit changed();});
+    connect(player_.get(),&QMediaPlayer::positionChanged,this,[this](qint64 at){if(at>0)mediaFailures_=0;});
+    connect(player_.get(),&QMediaPlayer::errorOccurred,this,[this](QMediaPlayer::Error,const QString& error){
+        if(!mediaOpen_ || photoOpen())return;
+        const auto request=mediaRequest_;
+        QTimer::singleShot(0,this,[this,request,error]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(true,error);});
+    });
 }
 Shell::~Shell()=default;
 const QVector<Entry>& Shell::entries()const {return pages_.isEmpty()?categories_[category_].entries:pages_.last().entries;}
@@ -329,7 +340,7 @@ void Shell::back() {
     touch();
     if(!message_.isEmpty() || mediaOpen_ || !pages_.isEmpty())interactionAudio_.play(InteractionAudio::Cue::Back);
     if(!message_.isEmpty())message_.clear();
-    else if(mediaOpen_){++photoRequest_;slideshow_.stop();photo_={};player_->stop();player_->setSource({});mediaOpen_=false;loading_=false;emit mediaFrame({});}
+    else if(mediaOpen_){++photoRequest_;++mediaRequest_;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});}
     else if(!pages_.isEmpty()){library_.cancel();scanRequest_=0;loading_=false;status_.clear();pages_.removeLast();}
     emit changed();
 }
@@ -361,8 +372,75 @@ void Shell::openFile(const Entry& entry) {
             if(size.width()>3840 || size.height()>2160)reader.setScaledSize(size.scaled(3840,2160,Qt::KeepAspectRatio));
             return reader.read();
         }));
-    } else {emit mediaFrame({});player_->setSource(QUrl::fromLocalFile(entry.value));player_->play();}
+    } else {
+        QVector<PlaybackQueue::Item> queue;int selected=-1;
+        for(const auto& file:entries())if(file.action==Action::File) {
+            if(file.id==entry.id)selected=int(queue.size());
+            queue.push_back({file.value,file.title});
+        }
+        if(selected<0){selected=int(queue.size());queue.push_back({entry.value,entry.title});}
+        mediaQueue_.clear();mediaQueue_.setRepeat(static_cast<PlaybackQueue::Repeat>(mediaRepeatMode()));
+        mediaQueue_.setShuffle(preferences_.value("media/shuffle").toBool());mediaQueue_.reset(std::move(queue),selected);
+        mediaFailures_=0;startQueuedMedia();return;
+    }
     mediaOpen_=true;mediaTitle_=entry.title;
+}
+int Shell::mediaRepeatMode() const {
+    // Preserve the earlier Repeat-current preference until the user chooses a new mode.
+    if(!preferences_.contains("media/repeatMode") && preferences_.value("media/repeat").toBool())return 1;
+    return preferences_.value("media/repeatMode").toInt();
+}
+void Shell::startQueuedMedia() {
+    const auto* selected=mediaQueue_.current();if(!selected)return;
+    const auto item=*selected; // player callbacks must not invalidate the selected queue entry
+    ++mediaRequest_;mediaOpen_=true;mediaTitle_=item.title;loading_=true;status_.clear();
+    for(int i=0;i<entries().size();++i)if(entries()[i].action==Action::File && entries()[i].value==item.path){currentSelection()=i;break;}
+    emit mediaFrame({});
+    const auto source=QUrl::fromLocalFile(item.path);
+    if(player_->source()==source){loading_=false;player_->setPosition(0);}else player_->setSource(source);
+    player_->play();
+    if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: play"<<mediaQueue_.currentIndex()+1<<"of"<<mediaQueue_.items().size()<<item.title;
+    emit changed();
+}
+void Shell::advanceMedia(bool failed,const QString& error) {
+    if(mediaQueue_.empty())return;
+    if(failed) {
+        if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: rejected"<<mediaTitle_<<error;
+        if(++mediaFailures_>=mediaQueue_.items().size()) {
+            ++mediaRequest_;loading_=false;player_->stop();
+            message_="No playable files remain in this queue.\n\n"+error;status_="Playback stopped";emit changed();return;
+        }
+    } else mediaFailures_=0;
+    // Errors skip Repeat One; otherwise a broken file could retry forever.
+    const int next=mediaQueue_.next(!failed);
+    if(next<0) {
+        ++mediaRequest_;loading_=false;player_->stop();status_="End of queue";
+        if(failed)message_="This file could not be played.\n\n"+error;
+        if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: stopped at end";
+        emit changed();return;
+    }
+    startQueuedMedia();
+}
+void Shell::skipMedia(int direction) {
+    touch();if(!mediaOpen_ || !message_.isEmpty() || !direction)return;
+    if(photoOpen()){stepPhoto(direction<0?-1:1);return;}
+    const int next=direction<0?mediaQueue_.previous():mediaQueue_.next(false);
+    if(next>=0){mediaFailures_=0;startQueuedMedia();}
+}
+void Shell::cycleMediaRepeat() {
+    if(mediaOpen_ && !photoOpen() && message_.isEmpty())preferences_.setValue("media/repeatMode",(mediaRepeatMode()+1)%3);
+}
+void Shell::toggleMediaShuffle() {
+    if(mediaOpen_ && !photoOpen() && message_.isEmpty())preferences_.setValue("media/shuffle",!preferences_.value("media/shuffle").toBool());
+}
+QString Shell::mediaQueueSummary() const {
+    if(!mediaOpen_ || photoOpen() || mediaQueue_.empty())return {};
+    QString result=QString("Track %1 of %2").arg(mediaQueue_.currentIndex()+1).arg(mediaQueue_.items().size());
+    if(preferences_.value("media/shuffle").toBool())result+="  ·  Shuffle";
+    if(mediaRepeatMode()==1)result+="  ·  Repeat One";else if(mediaRepeatMode()==2)result+="  ·  Repeat All";
+    if(player_->playbackState()==QMediaPlayer::PausedState)result+="  ·  Paused";
+    if(!status_.isEmpty())result+="  ·  "+status_;
+    return result;
 }
 bool Shell::photoOpen()const{return mediaOpen_ && categories_[category_].id=="photo";}
 void Shell::showPhoto(){if(!photo_.isNull())emit mediaFrame(photo_.transformed(QTransform().rotate(photoRotation_)));}
@@ -378,7 +456,8 @@ void Shell::stepPhoto(int delta) {
 void Shell::togglePlayback(){
     touch();if(!mediaOpen_)return;
     if(photoOpen()){if(slideshow_.isActive())slideshow_.stop();else slideshow_.start(preferences_.value("photo/interval").toInt());emit changed();return;}
-    if(player_->playbackState()==QMediaPlayer::PlayingState)player_->pause();else if(!player_->source().isEmpty())player_->play();
+    if(player_->playbackState()==QMediaPlayer::PlayingState)player_->pause();else if(!player_->source().isEmpty()){status_.clear();if(player_->playbackState()==QMediaPlayer::StoppedState)player_->setPosition(0);player_->play();}
+    emit changed();
 }
 void Shell::touch(){activity_.restart();}
 void Shell::applyPreferences(){
@@ -386,6 +465,8 @@ void Shell::applyPreferences(){
     interactionAudio_.setEnabled(preferences_.value("audio/keyTone").toBool() && !preferences_.value("audio/muted").toBool());
     interactionAudio_.setVolume(preferences_.value("audio/volume").toInt()/100.f);
     if(slideshow_.isActive())slideshow_.setInterval(preferences_.value("photo/interval").toInt());
+    mediaQueue_.setRepeat(static_cast<PlaybackQueue::Repeat>(mediaRepeatMode()));
+    mediaQueue_.setShuffle(preferences_.value("media/shuffle").toBool());
     loadTheme();
 }
 void Shell::loadTheme() {

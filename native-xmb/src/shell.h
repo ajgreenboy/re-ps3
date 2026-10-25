@@ -2,6 +2,7 @@
 #include <QObject>
 #include "preferences.h"
 #include "media_library.h"
+#include "playback_queue.h"
 #include "interaction_audio.h"
 #include "profiles.h"
 #include <QTimer>
@@ -62,6 +63,11 @@ public:
     qint64 mediaDuration() const;
     bool mediaOpen() const { return mediaOpen_; }
     QString mediaTitle() const { return mediaTitle_; }
+    QString mediaQueueSummary() const;
+    int mediaRepeatMode() const;
+    void skipMedia(int direction);
+    void cycleMediaRepeat();
+    void toggleMediaShuffle();
     void horizontal(int delta);
     void vertical(int delta);
     void activate();
@@ -106,6 +112,11 @@ private:
     Theme theme_;
     void loadTheme();
     bool mediaOpen_=false;
+    PlaybackQueue mediaQueue_;
+    quint64 mediaRequest_=0;
+    int mediaFailures_=0;
+    void startQueuedMedia();
+    void advanceMedia(bool failed,const QString& error={});
     int category_=6;
     std::unique_ptr<QMediaPlayer> player_;
     std::unique_ptr<QAudioOutput> audio_;

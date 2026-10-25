@@ -94,6 +94,27 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) || !program_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment) || !program_.link()) {
         qWarning().noquote()<<"icons: link failed:"<<program_.log();return false;
     }
+    // Fixed colours are a native palette selection. Their reconstructed
+    // background is not the firmware glass shader's captured input surface:
+    // refracting it produces near-black interiors. Use an opaque material with
+    // the original geometry/normal maps, and keep the firmware path for Original.
+    static const char* opaqueFragment=R"(#version 330 core
+in vec4 v_tc[10];out vec4 colour;
+uniform sampler2D tex0;uniform vec3 tint;uniform float brightness,opacity;
+void main(){
+    vec4 material=texture(tex0,v_tc[0].xy);
+    if(material.a<=0.)discard;
+    vec2 xy=material.rg*2.-1.;
+    vec3 normal=normalize(vec3(xy,sqrt(max(0.,1.-dot(xy,xy)))));
+    float diffuse=max(0.,dot(normal,normalize(vec3(-.35,.4,.85))));
+    float bevel=pow(1.-max(normal.z,0.),2.)*.10;
+    float light=(.58+.26*diffuse+bevel)*mix(.70,1.,clamp(brightness,0.,1.));
+    // Tint the surface, not its opacity; only shape coverage and page transitions fade.
+    colour=vec4(clamp(mix(vec3(1.),tint,.12)*light,0.,1.),material.a*opacity);
+})";
+    opaqueReady_=opaque_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) &&
+        opaque_.addShaderFromSourceCode(QOpenGLShader::Fragment,opaqueFragment) && opaque_.link();
+    if(!opaqueReady_)qWarning().noquote()<<"icons: opaque material unavailable:"<<opaque_.log();
     const QImage& diffuse=assets.image("qgl/icontex","dif");
     const QImage& environment=assets.image("qgl/icons","widgets/other/texenv.dds");
     if(diffuse.isNull() || environment.isNull()){qWarning()<<"icons: dif/texenv unavailable";return false;}
@@ -127,6 +148,9 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
 
 void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& icons,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo) {
     if(!ready_ || icons.isEmpty())return;
+    const bool opaque=opaqueReady_ && fixedTint_.lengthSquared()>0 &&
+        !qEnvironmentVariableIsSet("XMB_ICON_DEBUG") && !qEnvironmentVariableIsSet("XMB_ICON_UCODE") &&
+        !qEnvironmentVariableIntValue("XMB_ICON_FIRMWARE");
     const double scale=pixelHeight/1080.;
     const double offsetX=(pixelWidth-1920*scale)/2; // wider-than-16:9 windows centre the 1920-wide layout
     // Light directions from ICONS.mnu angles (degrees).
@@ -191,8 +215,10 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         const double distance=icon.distance,worldX=ndcX*distance/kScaleX,worldY=ndcY*distance/kScaleY;
         // 1. CookieCutter: the frame behind the icon, 128x128 reference px, into the background map.
         const double cx=offsetX+icon.centre.x()*scale,cy=pixelHeight-icon.centre.y()*scale,half=64*scale;
-        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
-        gl.glBlitFramebuffer(GLint(cx-half),GLint(cy-half),GLint(cx+half),GLint(cy+half),0,0,128,128,GL_COLOR_BUFFER_BIT,GL_LINEAR);
+        if(!opaque) {
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
+            gl.glBlitFramebuffer(GLint(cx-half),GLint(cy-half),GLint(cx+half),GLint(cy+half),0,0,128,128,GL_COLOR_BUFFER_BIT,GL_LINEAR);
+        }
         // 2. The icon quad.
         gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);
         gl.glViewport(GLint(offsetX),0,GLsizei(1920*scale),pixelHeight);
@@ -201,8 +227,28 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         vc[258]=QVector4D(0,0,-1,float(distance-19.95));
         vc[259]=QVector4D(0,0,-1,float(distance));
         vc[467]=QVector4D(float(ndcX),float(ndcY),0,0);
+        if(opaque) {
+            opaque_.bind();opaque_.setUniformValueArray("vc",vc.data(),int(vc.size()));
+            const float peak=std::max({fixedTint_.x(),fixedTint_.y(),fixedTint_.z()});
+            opaque_.setUniformValue("tint",fixedTint_/peak);opaque_.setUniformValue("brightness",float(icon.brightness));
+            opaque_.setUniformValue("opacity",float(icon.opacity));opaque_.setUniformValue("tex0",0);
+            gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,normals);
+            gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+            gl.glBindVertexArray(vao_);gl.glDrawArrays(GL_TRIANGLES,0,6);gl.glBindVertexArray(0);
+            gl.glDisable(GL_BLEND);opaque_.release();continue;
+        }
         set("_Eye",{float(-worldX-400),float(-worldY),float(distance),float(icon.size)});
         set("_Ambiant",{value("AMB R",light),value("AMB G",light),value("AMB B",light),float(icon.brightness)});
+        if(qEnvironmentVariableIsSet("XMB_ICON_LOG_CONSTANTS")) {
+            static bool reported=false;
+            if(!reported) {
+                reported=true;auto names=fragmentCg_.parameters.keys();names.sort();
+                for(const auto& name:names) {
+                    const auto& offsets=fragmentCg_.parameters[name].constantSlots;
+                    if(!offsets.isEmpty())qInfo()<<"icon constant"<<name<<fc.value(offsets.first());
+                }
+            }
+        }
         program_.bind();
         program_.setUniformValueArray("vc",vc.data(),int(vc.size()));program_.setUniformValueArray("fc",fc.constData(),fc.size());
         program_.setUniformValue("tex0",0);program_.setUniformValue("tex1",1);program_.setUniformValue("tex2",2);program_.setUniformValue("tex3",3);

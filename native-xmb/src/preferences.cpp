@@ -15,9 +15,10 @@ QVariant Preferences::defaultValue(const QString& key) {
        key=="clock/dateFormat" || key=="clock/hourFormat" || key=="photo/fit")return 0;
     if(key=="audio/volume")return 60;
     if(key=="photo/interval")return 5000;
+    if(key=="media/repeatMode")return 0;
     if(key=="audio/keyTone")return true;
     if(key=="power/idleMinutes")return 0;
-    if(key=="audio/muted" || key=="media/repeat" || key=="display/fullscreen")return false;
+    if(key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return false;
     if(key=="system/name")return QSysInfo::machineHostName().left(64);
     if(key=="clock/timeZone")return QString("System");
     if(key=="appearance/wallpaper" || key=="appearance/theme" || key.startsWith("library/"))return QString{};
@@ -33,8 +34,9 @@ bool Preferences::valid(const QString& key,const QVariant& value) {
     if(key=="clock/hourFormat" || key=="photo/fit")return integer(0,1);
     if(key=="audio/volume")return integer(0,100);
     if(key=="photo/interval")return integer(1000,60000);
+    if(key=="media/repeatMode")return integer(0,2);
     if(key=="power/idleMinutes")return integer(0,120);
-    if(key=="audio/keyTone" || key=="audio/muted" || key=="media/repeat" || key=="display/fullscreen")return value.metaType().id()==QMetaType::Bool;
+    if(key=="audio/keyTone" || key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return value.metaType().id()==QMetaType::Bool;
     if(value.metaType().id()!=QMetaType::QString)return false;
     const auto text=value.toString();
     if(text.contains(QChar(0)))return false;

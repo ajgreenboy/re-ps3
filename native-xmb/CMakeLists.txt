@@ -8,6 +8,8 @@ qt_add_executable(re-ps3-native
     src/main.cpp src/assets.cpp src/assets.h src/p3t.cpp src/p3t.h src/qrc.cpp src/qrc.h src/catalog.cpp src/catalog.h
     src/preferences.cpp src/preferences.h
     src/media_library.cpp src/media_library.h src/settings_menu.cpp
+    src/playback_queue.cpp src/playback_queue.h
+    src/photo_viewport.cpp src/photo_viewport.h
     src/interaction_audio.cpp src/interaction_audio.h
     src/text_renderer.cpp src/text_renderer.h
     src/profiles.cpp src/profiles.h

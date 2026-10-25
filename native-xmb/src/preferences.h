@@ -11,6 +11,7 @@ class Preferences final:public QObject {
 public:
     explicit Preferences(const QString& dataDirectory,QObject* parent=nullptr);
     QVariant value(const QString& key) const;
+    bool contains(const QString& key) const { return values_.contains(key); }
     bool setValue(const QString& key,const QVariant& value);
     bool setValues(const QVariantMap& values);
     QString path() const { return path_; }
