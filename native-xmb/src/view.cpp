@@ -469,7 +469,7 @@ void View::drawImage(QPainter& p,const QString& container,const QString& texture
     if(container=="qgl/icontex") {
         p.save();p.setOpacity(opacity);drawCategory(p,Category{texture,{},container,texture,{}},rect);p.restore();return;
     }
-    const auto& image=assets_.image(container,texture);
+    const auto& image=assets_.bestImage(container,texture);
     if(image.isNull())return;
     // Fit the visible (alpha) bounds, not the whole texture: RCO icons carry transparent padding, and fitting the
     // padded image drew the glyphs at ~60% of the reference size.
@@ -485,7 +485,7 @@ void View::drawImage(QPainter& p,const QString& container,const QString& texture
     p.save();p.setOpacity(opacity);p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);p.restore();
 }
 void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect) {
-    const auto& original=assets_.image(category.container,category.texture);
+    const auto& original=assets_.bestImage(category.container,category.texture);
     if(original.isNull())return;
     // Theme material changes RGB, never the coverage/alpha of the original icon.
     // Full-colour PSN artwork retains its original colours.

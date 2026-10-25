@@ -223,6 +223,31 @@ const QImage& Assets::image(const QString& container,const QString& name) {
     } catch(const std::exception& e) { qWarning().noquote()<<"assets:"<<key<<e.what(); }
     return images_.insert(key,std::move(image)).value();
 }
+const QImage& Assets::bestImage(const QString& container,const QString& name) {
+    const QImage& base=image(container,name);
+    if(container.startsWith("qgl/") || container=="file" || (!base.isNull() && std::max(base.width(),base.height())>=96))return base;
+    const QString key=container+"/"+name;
+    if(const auto it=bestContainer_.constFind(key);it!=bestContainer_.cend())return image(it.value(),name);
+    if(nameIndex_.isEmpty()) {
+        for(const auto& file:QDir(QDir(root_).filePath("vsh/resource")).entryInfoList({"*.rco"},QDir::Files,QDir::Name)) {
+            try { for(const auto& entry:readContainer(file.completeBaseName()).entries.keys())nameIndex_[entry].push_back(file.completeBaseName()); }
+            catch(const std::exception&) {}
+        }
+    }
+    QString best=container;qint64 bestArea=base.isNull()?0:qint64(base.width())*base.height();
+    const double aspect=base.isNull()?0:double(base.width())/base.height();
+    for(const auto& candidate:nameIndex_.value(name)) {
+        if(candidate==container)continue;
+        const QImage& other=image(candidate,name);
+        if(other.isNull())continue;
+        const double otherAspect=double(other.width())/other.height();
+        if(aspect>0 && std::abs(otherAspect/aspect-1.)>.1)continue; // same artwork keeps its shape
+        if(qint64(other.width())*other.height()>bestArea){bestArea=qint64(other.width())*other.height();best=candidate;}
+    }
+    if(best!=container)qInfo().noquote()<<"assets:"<<key<<base.size()<<"-> using"<<best<<image(best,name).size();
+    bestContainer_.insert(key,best);
+    return image(best,name);
+}
 QByteArray Assets::qglFile(const QString& archive,const QString& name) {
     if(!qrcs_.contains(archive)) {
         auto qrc=std::make_shared<QrcArchive>(QDir(root_).filePath("vsh/resource/qgl/"+archive+".qrc"));
