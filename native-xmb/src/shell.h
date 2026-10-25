@@ -15,7 +15,7 @@ class QVideoSink;
 
 namespace xmb {
 class Assets;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Information, Library, ChooseLibrary, File, Folder };
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Information, Library, ChooseLibrary, File, Folder, Launch };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -109,6 +109,9 @@ private:
     void showPhoto();
     void rebuildUsers();
     void addInstalledApps();
+    // RPCS3 next to dev_hdd0 (the emulator whose dev_flash/dev_hdd0 we read), or empty.
+    QString emulatorPath() const;
+    void launch(const Entry& entry);
     int& currentSelection() { return pages_.isEmpty()?selections_[category_]:pages_.last().selection; }
 };
 }

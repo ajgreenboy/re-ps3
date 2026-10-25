@@ -9,6 +9,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
+#include <QSet>
 #include <QSysInfo>
 #include <QUrl>
 #include <QImageReader>
@@ -45,27 +47,81 @@ QHash<QString,QString> readSfo(const QString& path) {
     return values;
 }
 }
+QString Shell::emulatorPath() const {
+    const QDir root(QDir(assets_.hddRoot()).absoluteFilePath(".."));
+    for(const QString& name:{QStringLiteral("rpcs3.exe"),QStringLiteral("rpcs3")})
+        if(const QFileInfo exe(root.filePath(name));exe.isFile())return exe.absoluteFilePath();
+    return {};
+}
 void Shell::addInstalledApps() {
     // Installed content in dev_hdd0/game (PARAM.SFO + ICON0.PNG), listed in the category its CATEGORY code belongs to,
     // as the firmware's category XMBML queries do (e.g. category_network.xml "gameDir"): games under Game, network
-    // applications such as Information Board or Life with PlayStation under Network.
+    // applications such as Information Board or Life with PlayStation under Network. Disc copies RPCS3 has in its
+    // game list (config/games.yml, "TITLE_ID: folder") join the Game column.
+    //
+    // A title with USRDIR/EBOOT.BIN starts in the RPCS3 that owns this dev_hdd0. Following MaXMB (MIT, src-tauri/src/
+    // ps3.rs): a title in RPCS3's list starts by Title ID ("%RPCS3_GAMEID%:<id>"), so RPCS3 uses its own licences and
+    // installed data; any other by its EBOOT.BIN, since RPCS3 refuses a bare game folder.
     static const QHash<QString,QString> categoryFor{{"HG","game"},{"DG","game"},{"1P","game"},{"2P","game"},{"MN","game"},{"PE","game"},
         {"CB","network"},{"WT","network"},{"AT","tv"},{"AV","video"},{"BV","video"},{"AM","music"},{"AP","photo"}};
-    const QDir games(QDir(assets_.hddRoot()).filePath("game"));
-    for(const auto& folder:games.entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)) {
-        const auto sfo=readSfo(QDir(folder.absoluteFilePath()).filePath("PARAM.SFO"));
-        const auto target=categoryFor.value(sfo.value("CATEGORY"));
-        if(target.isEmpty() || sfo.value("TITLE").isEmpty())continue;
-        for(auto& category:categories_) {
-            if(category.id!=target)continue;
-            const QString icon=QDir(folder.absoluteFilePath()).filePath("ICON0.PNG");
-            auto entry=item("app:"+folder.fileName(),sfo.value("TITLE"),QFileInfo::exists(icon)?icon:QString("game_tex_default_ps3"),
-                QFileInfo::exists(icon)?QString("file"):QString("explore_plugin_full"),Action::Information,
-                sfo.value("TITLE")+"\n\n"+sfo.value("TITLE_ID",folder.fileName())+"  "+sfo.value("APP_VER",sfo.value("VERSION"))+
-                "\nLaunching installed content is not available in the native recreation.");
-            category.entries.push_back(std::move(entry));
+    const bool emulator=!emulatorPath().isEmpty();
+    QHash<QString,QString> listed; // Title ID -> folder, from RPCS3's games.yml
+    {
+        const QDir root(QDir(assets_.hddRoot()).absoluteFilePath(".."));
+        for(const QString& name:{QStringLiteral("config/games.yml"),QStringLiteral("games.yml")}) {
+            QFile file(root.filePath(name));
+            if(!file.open(QIODevice::ReadOnly|QIODevice::Text))continue;
+            for(const auto& raw:QString::fromUtf8(file.readAll()).split('\n')) {
+                const int colon=raw.indexOf(':');
+                if(colon<=0)continue;
+                const QString id=raw.left(colon).trimmed().remove('"').remove('\'').toUpper();
+                QString path=raw.mid(colon+1).trimmed().remove('"').remove('\'');
+                if(id.isEmpty() || path.isEmpty())continue;
+                if(QDir::isRelativePath(path))path=root.filePath(path);
+                listed.insert(id,QDir::cleanPath(path));
+            }
+            break;
         }
     }
+    const auto add=[&](const QString& folder,const QString& content,bool discCopy) {
+        const auto sfo=readSfo(QDir(content).filePath("PARAM.SFO"));
+        const auto target=categoryFor.value(sfo.value("CATEGORY"));
+        if(target.isEmpty() || sfo.value("TITLE").isEmpty())return;
+        const QString id=sfo.value("TITLE_ID",QFileInfo(folder).fileName()).trimmed().toUpper();
+        const QString eboot=QDir(content).filePath("USRDIR/EBOOT.BIN");
+        const bool bootable=QFileInfo(eboot).isFile() || (discCopy && listed.contains(id));
+        for(auto& category:categories_) {
+            if(category.id!=target)continue;
+            const QString icon=QDir(content).filePath("ICON0.PNG");
+            const QString details=sfo.value("TITLE")+"\n\n"+id+"  "+sfo.value("APP_VER",sfo.value("VERSION"));
+            auto entry=item("app:"+id+":"+QFileInfo(folder).fileName(),sfo.value("TITLE"),QFileInfo::exists(icon)?icon:QString("game_tex_default_ps3"),
+                QFileInfo::exists(icon)?QString("file"):QString("explore_plugin_full"),Action::Information,
+                details+(emulator?"\nThis title has no EBOOT.BIN to start.":"\nNo RPCS3 executable was found next to dev_hdd0, so it cannot be started."));
+            if(emulator && bootable){entry.action=Action::Launch;entry.value=listed.contains(id)?"%RPCS3_GAMEID%:"+id:eboot;}
+            category.entries.push_back(std::move(entry));
+        }
+    };
+    const QDir games(QDir(assets_.hddRoot()).filePath("game"));
+    QSet<QString> seen;
+    for(const auto& folder:games.entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)) {
+        seen.insert(QDir::cleanPath(folder.absoluteFilePath()).toLower());
+        add(folder.absoluteFilePath(),folder.absoluteFilePath(),false);
+    }
+    for(auto it=listed.cbegin();it!=listed.cend();++it) {
+        QString folder=it.value();
+        if(folder.endsWith('/'))folder.chop(1);
+        if(seen.contains(folder.toLower()) || !QFileInfo(folder).isDir())continue;
+        seen.insert(folder.toLower());
+        const QString content=QFileInfo(QDir(folder).filePath("PS3_GAME/PARAM.SFO")).isFile()?QDir(folder).filePath("PS3_GAME"):folder;
+        add(folder,content,true);
+    }
+}
+void Shell::launch(const Entry& entry) {
+    const QString emulator=emulatorPath();
+    if(emulator.isEmpty() || !QProcess::startDetached(emulator,{"--no-gui",entry.value},QFileInfo(emulator).absolutePath())) {
+        message_=entry.title+"\n\nRPCS3 could not be started.";return;
+    }
+    qInfo().noquote()<<"launch:"<<emulator<<"--no-gui"<<entry.value;
 }
 Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(parent),
     assets_(assets),preferences_(dataDirectory),library_(),interactionAudio_(assets.root()),profiles_(dataDirectory),
@@ -236,6 +292,7 @@ void Shell::activate() {
     case Action::ChooseLibrary:emit requestLibrary();break;
     case Action::Folder:openDirectory(entry.value);break;
     case Action::File:openFile(entry);break;
+    case Action::Launch:launch(entry);break;
     case Action::Unavailable:message_=entry.title+"\n\nThis feature is not available in the native recreation yet.";break;
     }
     emit changed();

@@ -201,18 +201,19 @@ void main(){
     QOpenGLFramebufferObjectFormat fieldFormat;fieldFormat.setInternalTextureFormat(GL_RGBA32F);
     field_=std::make_unique<QOpenGLFramebufferObject>(128,1,fieldFormat);
     // The cloth's rest state: the plugin starts the boot ribbon from preset 1 (FUN_0004e624: positions at 0x97c18,
-    // velocities at 0x98d04, 361 x float3 each, read from the local decrypted plugin). Without it, the plugin's
-    // generic start (FUN_0004ec90: a flat 4x4 grid at z = -3) settled for a minute of simulated time.
+    // velocities at 0x98d04, 361 x float3 each, read from the local decrypted plugin). Without it, an approximation of
+    // that state settles for four minutes of simulated time: the tables form a tube (row 0 equals row 18, each column closes
+    // into a loop), columns LENGTH apart from the pinned edge at x = 0 and rows round a loop of the tables' y/z extent.
     const QByteArray plugin=assets.vshModule("custom_render_plugin.prx");
     const auto rest=elfFloats(plugin,0x97c18,points_*3),restVelocity=elfFloats(plugin,0x98d04,points_*3);
     const bool fromTables=rest.size()==size_t(points_*3) && restVelocity.size()==size_t(points_*3);
     for(int i=0;i<points_;++i) {
         const size_t k=size_t(i)*3;
-        cloth_.pos[size_t(i)]=fromTables?QVector4D(rest[k],rest[k+1],rest[k+2],1):QVector4D((float(i%side_)/(side_-1)-.5f)*4,(float(i/side_)/(side_-1)-.5f)*4,-3,1);
+        cloth_.pos[size_t(i)]=fromTables?QVector4D(rest[k],rest[k+1],rest[k+2],1):QVector4D(float(side_-1-i%side_)*day_.length,.35f+.55f*std::sin(2*pi*float(i/side_)/(side_-1)),.55f+.55f*std::cos(2*pi*float(i/side_)/(side_-1)),1);
         cloth_.vel[size_t(i)]=fromTables?QVector4D(restVelocity[k],restVelocity[k+1],restVelocity[k+2],0):QVector4D();
     }
     cloth_.prev=cloth_.pos;
-    if(!fromTables)for(int i=0;i<3600;++i)cloth_.step(day_);
+    if(!fromTables)for(int i=0;i<14400;++i)cloth_.step(day_); // the x extent crumples first, then recovers (cloth-sim.ts)
     // _Stripes (FUN_0004bad0): row k of 4, x in [-.5,.5]: min(1, pow(1.01 - 4x^2, 20 (k/3)^3) * (k/6 + .5)).
     constexpr int stripeWidth=512; // the plugin's width is a runtime global; 512 resolves the profile
     std::vector<float> stripes(size_t(stripeWidth)*4*4);
