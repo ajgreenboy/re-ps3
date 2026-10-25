@@ -106,7 +106,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 
   MaXMB's measured intro is from a 2007 console, with the PS mark and "PS3", so its curves are not the 4.93
   sequence. The RCO times are the reference.
-- Theme system: other colour themes, `.p3t` themes, wallpaper mode as the firmware composites it.
+- Theme system: other colour themes, wallpaper mode as the firmware composites it. `.p3t` themes: still background and icons are in (`src/p3t.cpp`, README "PS3 themes"); still open are their sound effects in the shell, dynamic RAF scenes, and the `font` / `color` selections.
 - Screen states: screensaver/dim, Power off, user login screen, notifications (tex_notification_*), the in-game
   XMB (xmb_ingame).
 

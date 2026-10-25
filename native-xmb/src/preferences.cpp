@@ -20,7 +20,7 @@ QVariant Preferences::defaultValue(const QString& key) {
     if(key=="audio/muted" || key=="media/repeat" || key=="display/fullscreen")return false;
     if(key=="system/name")return QSysInfo::machineHostName().left(64);
     if(key=="clock/timeZone")return QString("System");
-    if(key=="appearance/wallpaper" || key.startsWith("library/"))return QString{};
+    if(key=="appearance/wallpaper" || key=="appearance/theme" || key.startsWith("library/"))return QString{};
     return {};
 }
 bool Preferences::valid(const QString& key,const QVariant& value) {
@@ -40,7 +40,7 @@ bool Preferences::valid(const QString& key,const QVariant& value) {
     if(text.contains(QChar(0)))return false;
     if(key=="system/name")return !text.trimmed().isEmpty() && text.size()<=64 && !text.contains('\n') && !text.contains('\r');
     if(key=="clock/timeZone")return text=="System" || QTimeZone::isTimeZoneIdAvailable(text.toUtf8());
-    if(key=="appearance/wallpaper" || key=="library/photo" || key=="library/music" || key=="library/video")return text.size()<=32768;
+    if(key=="appearance/wallpaper" || key=="appearance/theme" || key=="library/photo" || key=="library/music" || key=="library/video")return text.size()<=32768;
     return false;
 }
 Preferences::Preferences(const QString& directory,QObject* parent):QObject(parent),path_(QDir(directory).filePath("preferences.json")) {

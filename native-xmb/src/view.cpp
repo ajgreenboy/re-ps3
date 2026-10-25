@@ -44,6 +44,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){mediaFrame_=frame;update();});
     connect(&shell_,&Shell::requestLibrary,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,"Choose media folder");if(!path.isEmpty())shell_.chooseLibrary(path);});
     connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");if(!file.isEmpty())shell_.chooseWallpaper(file);});
+    connect(&shell_,&Shell::requestTheme,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Theme",{},"PS3 Themes (*.p3t)");if(!file.isEmpty())shell_.chooseTheme(file);});
     connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){openOsk("System Name",value,[this](const QString& name){shell_.setSystemName(name);});});
     connect(&shell_,&Shell::requestNewUser,this,[this]{openOsk("Create New User",{},[this](const QString& name){shell_.createUser(name);});});
     loadWallpaper();
@@ -71,6 +72,11 @@ void View::syncColumns() {
 }
 void View::loadWallpaper() {
     if(shell_.backgroundMode()!=2)return;
+    // A PS3 theme's still background (decoded in memory by the shell) comes before the user's own wallpaper.
+    if(!shell_.themeBackground().isNull()) {
+        const auto key="p3t:"+shell_.themePath();if(key==wallpaperPath_)return;
+        wallpaperPath_=key;++wallpaperRequest_;wallpaperImage_=shell_.themeBackground();return;
+    }
     const auto path=shell_.wallpaper();if(path==wallpaperPath_)return;
     wallpaperPath_=path;wallpaperImage_={};const auto request=++wallpaperRequest_;
     if(path.isEmpty())return;
@@ -586,9 +592,11 @@ void View::drawScene(QPainter& p) {
         }
     };
     if(shell_.backgroundMode()==2 && !wallpaperImage_.isNull()) {
-        const auto size=QSizeF(wallpaperImage_.size()).scaled(QSizeF(1920,1080),Qt::KeepAspectRatioByExpanding);
-        p.drawImage(QRectF((1920-size.width())/2,(1080-size.height())/2,size.width(),size.height()),wallpaperImage_);
-        p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,35));
+        // Covers the whole window, not just the 16:9 scene, so the bars beside a letterboxed scene show the picture too.
+        const QRectF window=p.transform().inverted().mapRect(QRectF(0,0,p.device()->width(),p.device()->height())).united(QRectF(0,0,1920,1080));
+        const auto size=QSizeF(wallpaperImage_.size()).scaled(window.size(),Qt::KeepAspectRatioByExpanding);
+        p.drawImage(QRectF(window.center()-QPointF(size.width()/2,size.height()/2),size),wallpaperImage_);
+        p.fillRect(window,QColor(0,0,0,35));
     }
     if(shell_.mediaOpen()) {
         if(!mediaFrame_.isNull()) {
@@ -621,7 +629,12 @@ void View::drawScene(QPainter& p) {
             const double focus=std::max(0.,1.-std::abs(distance));
             const double opacity=(open?1.:(1.-childAmount)+(distance>0?.1*childAmount:0.))*(shell_.message().isEmpty()?1.:.18);
             p.save();p.setOpacity(opacity);
-            if(cat.container=="qgl/icontex" && icons_.ready())
+            if(const auto themed=shell_.themeIcon(cat.themeIcon);!themed.isNull()) {
+                // A PS3 theme's icon keeps its own colours and takes the quad of the firmware's glass icon.
+                const double size=117.13+50.2*focus;p.setOpacity(opacity*(.698+.302*focus));
+                p.drawImage(QRectF(x-size/2,290-10*focus-size/2,size,size),themed);
+            }
+            else if(cat.container=="qgl/icontex" && icons_.ready())
                 iconQueue_.push_back({cat.texture,{x,290-10*focus},117.13+50.2*focus,.698+.302*focus,opacity});
             else {const double size=76+focus*16;p.setOpacity(opacity*(.67+.33*focus));drawCategory(p,cat,{x-size/2,290-size/2,size,size});}
             if(i==shell_.category()){p.setOpacity((1.-childAmount)*(shell_.message().isEmpty()?1.:.18));text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
@@ -696,7 +709,11 @@ void View::drawScene(QPainter& p) {
                 // icontex items are glass icons like the categories: the firmware draws them with the same shader at
                 // brightness 1, behind an open page 0.247 (focused row 0.698) (RPCS3 capture, audit/PIPELINE.md);
                 // everything else is RCO or file artwork.
-                if(entry.container=="qgl/icontex" && icons_.ready() && !tile) {
+                if(const auto themed=shell_.themeIcon(entry.themeIcon);!themed.isNull()) { // a PS3 theme's icon, on the glass icon's quad
+                    const double quad=itemIconSize(level,bullet,focus);
+                    p.save();p.setOpacity(iconAlpha);p.drawImage(QRectF(iconX-quad/2,y-quad/2,quad,quad),themed);p.restore();
+                }
+                else if(entry.container=="qgl/icontex" && icons_.ready() && !tile) {
                     const double brightness=1.-behind*(1.-(.247+.451*focus));
                     iconQueue_.push_back({entry.texture,{iconX,y},itemIconSize(level,bullet,focus),brightness,columnAlpha,2700+157.2*depth});
                 }

@@ -1,6 +1,7 @@
 #include "shell.h"
 #include "assets.h"
 #include "host.h"
+#include "p3t.h"
 #include <cmath>
 #include <QTimeZone>
 #include <QDateTime>
@@ -14,6 +15,8 @@ struct Choice {QString title;QVariant value;};
 QVector<Choice> choices(const QString& key,Assets& assets) {
     const auto text=[&](const QString& id,const QString& fallback){return assets.text("sysconf_plugin",id,fallback);};
     if(key=="appearance/colour")return {{"Original",0},{"Blue",1},{"Purple",2},{"Red",3},{"Green",4},{"Silver",5}};
+    // The theme chosen with Select Theme joins this list in openChoices (it is read from the user's .p3t).
+    if(key=="appearance/theme")return {{text("msg_theme_default","Original"),QString{}}};
     if(key=="appearance/background")return {{text("msg_theme_default","Original"),0},{text("msg_theme_classic","Classic"),1},{"Wallpaper",2}};
     if(key=="appearance/font") {
         QVector<Choice> result;const auto families=assets.fontFamilies();
@@ -38,7 +41,7 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
 }
 Entry option(QString id,QString title,QString detail,QString setting,Action action=Action::SettingChoices,QString value={}) {
     Entry entry{std::move(id),std::move(title),std::move(detail),"qgl/icontex","23n",action,std::move(value)};
-    entry.setting=std::move(setting);return entry;
+    entry.setting=std::move(setting);entry.themeIcon="icon_setting_item";return entry;
 }
 }
 void Shell::openSettings(const QString& id) {
@@ -50,7 +53,8 @@ void Shell::openSettings(const QString& id) {
     Page page;
     if(id=="theme") {
         page.title=tr("msg_theme_settings","Theme Settings");
-        page.entries={option("theme",tr("msg_theme","Theme"),tr("msg_theme_explanation",{}),{},Action::Unavailable),
+        page.entries={option("theme",tr("msg_theme","Theme"),tr("msg_theme_explanation",{}),"appearance/theme"),
+            option("themefile","Select Theme","Opens a PS3 theme file (.p3t): its background and icons replace the system's.",{},Action::Theme),
             setting("color","Color","appearance/colour"),setting("background","Background","appearance/background"),
             option("wallpaper","Select Wallpaper","Selects a local image for the XMB background.",{},Action::Wallpaper),
             setting("font","Font","appearance/font")};
@@ -112,9 +116,9 @@ void Shell::openSettings(const QString& id) {
         const auto ft=[&](const QString& key,const QString& fallback){return assets_.text("explore_category_friend",key,fallback);};
         const auto none=ft("msg_error_no_msg","There are no messages.");
         page.title=ft("msg_msg_box","Message Box");
-        auto received=option("received",ft("msg_received_box","Received"),{},{},Action::Information,none);received.container="explore_category_friend";received.texture="item_tex_InBox";
-        auto sent=option("sent",ft("msg_sent_box","Sent"),{},{},Action::Information,none);sent.container="explore_category_friend";sent.texture="item_tex_OutBox";
-        auto create=option("create",ft("msg_new_msg","Create Message"),{},{},Action::Unavailable);create.container="explore_category_friend";create.texture="item_tex_NewMessage";
+        auto received=option("received",ft("msg_received_box","Received"),{},{},Action::Information,none);received.container="explore_category_friend";received.texture="item_tex_InBox";received.themeIcon="icon_mbox_received";
+        auto sent=option("sent",ft("msg_sent_box","Sent"),{},{},Action::Information,none);sent.container="explore_category_friend";sent.texture="item_tex_OutBox";sent.themeIcon="icon_mbox_sent";
+        auto create=option("create",ft("msg_new_msg","Create Message"),{},{},Action::Unavailable);create.container="explore_category_friend";create.texture="item_tex_NewMessage";create.themeIcon="icon_mbox_create";
         page.entries={received,sent,create};
     } else if(id=="chat" || id=="security" || id=="remote" || id=="print" || id=="network" || id=="game") {
         // Labels and explanations are the firmware's own (sysconf_plugin); the features behind them are not native yet.
@@ -146,6 +150,10 @@ void Shell::openChoices(const QString& key,const QString& title) {
         if(current==choice.value)page.selection=int(page.entries.size());
         page.entries.push_back(std::move(entry));
     }
+    if(key=="appearance/theme" && !theme_.path.isEmpty()) {
+        auto entry=option(key+"/"+QString::number(page.entries.size()),theme_.name.isEmpty()?QFileInfo(theme_.path).completeBaseName():theme_.name,{},key,Action::SetSetting);
+        entry.option=theme_.path;page.selection=int(page.entries.size());page.entries.push_back(std::move(entry));
+    }
     pages_.push_back(std::move(page));
 }
 QString Shell::valueText(const Entry& entry) const {
@@ -154,6 +162,7 @@ QString Shell::valueText(const Entry& entry) const {
     const auto value=preferences_.value(entry.setting);
     if(entry.action==Action::SetSetting)return value==entry.option?QString(QChar(0x25cf)):QString{};
     if(entry.setting=="system/name")return value.toString();
+    if(entry.setting=="appearance/theme" && !theme_.path.isEmpty())return theme_.name.isEmpty()?QFileInfo(theme_.path).completeBaseName():theme_.name;
     for(const auto& choice:choices(entry.setting,assets_))if(choice.value==value)return choice.title;
     return {};
 }
@@ -171,6 +180,13 @@ void Shell::chooseWallpaper(const QString& file) {
     QImageReader reader(file);
     if(!reader.canRead() || !reader.size().isValid()){message_="This image cannot be used as wallpaper.";emit changed();return;}
     preferences_.setValues({{"appearance/wallpaper",QFileInfo(file).absoluteFilePath()},{"appearance/background",2}});emit changed();
+}
+void Shell::chooseTheme(const QString& file) {
+    if(file.isEmpty())return;
+    QString error;
+    if(P3t::load(file,&error).isNull()){message_=QFileInfo(file).fileName()+"\n\n"+error;emit changed();return;}
+    // The theme's still background is shown through the wallpaper mode (View::loadWallpaper puts it before the user's own).
+    preferences_.setValues({{"appearance/theme",QFileInfo(file).absoluteFilePath()},{"appearance/background",2}});emit changed();
 }
 void Shell::setSystemName(const QString& name){preferences_.setValue("system/name",name.trimmed());emit changed();}
 void Shell::setFullscreen(bool enabled){preferences_.setValue("display/fullscreen",enabled);emit changed();}
