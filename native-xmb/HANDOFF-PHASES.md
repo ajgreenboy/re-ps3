@@ -68,17 +68,19 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - Background is visibly brighter than RPCS3 at the same hour, which also brightens unfocused icons through
   `_BackgroundMap`. Traced with `XMB_BG_SCENE=<png>` (dumps the pre-tone-map HDR scene, first frame only): the
   excess is already in `back_colours0`'s scene, not the HDR tone map.
-- Matched against a live local RPCS3 frame (same firmware, same month, 00:37): native final night bands run ~3x
-  brighter at the top and ~2x at the bottom (top/bottom luma ~10/47 vs RPCS3 ~3/23); the native night gradient rises
-  monotonically to the bottom while RPCS3 peaks at the ribbon and dips below it (a settled re-capture at 00:58 confirms
-  it: top luma ~1.3 vs native ~10, bottom ~21 vs ~47). All `BACKGROUND.mnu` inputs in
-  `view.cpp` were checked against `override/day|night/BACKGROUND.mnu` and are exact (NIGHT BLEND 0.499947, DAYSPREAD
-  2.68038, NIGHT WHIT BIAS 0.486059, the NIGHT2DAY/DAY2NIGHT hours), the DXT day/night textures decode with the correct
-  5:6:5 expansion, and the day path matches. The `rsx_program.cpp` translator was also diffed against RPCS3's
-  `FragmentProgramDecompiler` and matches opcode-for-opcode (MIN/MAX/COS/SIN/LIT/LIF/EX2, source+destination precision
-  modifiers, and the destination-clamp exempt list); the only divergence is MAD (`a*b+c` vs RPCS3's `fma`), which is far
-  too small to explain a 2-8x gap. So the scene-level excess is not yet explained by translation, inputs, decode, or
-  exposure. No correction verified yet.
+- Matched against a live local RPCS3 frame (same firmware, same month, 00:58, settled): native night scene top-band
+  luma ~5.9 vs RPCS3 final ~1.3 (and the scene→final tone map is ~1.83x, so RPCS3's raw scene is ~0.7 — an ~8x gap at
+  the top; ~2x at the bottom). The native night gradient rises monotonically to the bottom; RPCS3 peaks at the ribbon
+  and dips below it. Everything statically checkable has now been verified exact and is **not** the cause: the
+  `BACKGROUND.mnu` inputs (NIGHT BLEND 0.499947, DAYSPREAD 2.68038, NIGHT WHIT BIAS 0.486059, NIGHT2DAY/DAY2NIGHT
+  hours), the runtime uniforms (logged `_DayTime=0 _NightTime=1200 _MonthTime=23.2 _NightBrightness=0.486
+  _NightDayBlend=0.500` at midnight), the DDS decode (uncompressed BGRA, masks `0xff0000/0xff00/0xff/0xff000000`,
+  correct gold), and — decisively — the `back_colours0` GLSL itself, obtained from RPCS3's own OpenGL shader log and
+  diffed: it matches the native translator instruction-for-instruction (same constants, same ops; only MAD is `fma` in
+  RPCS3 vs `a*b+c` in native, ~86 sites, a ~0.01% effect, not 8x). `ToneMap.fpo` is also confirmed to be the extended
+  Reinhard `L(1+L/white²)/(1+L)`. So the night excess is **not** in the shader, its inputs, its uniforms, its textures,
+  or the tone map; the remaining suspect is a runtime constant/texture value that differs from the `.fpo` defaults, or
+  the scene-composition/glare passes. No correction verified yet.
 
 ### Phase 3: item, column and dialog drawing through the firmware's own layout
 - Initial trace: system_plugin infobar/infotext and OSK templates mostly have zero/dynamic geometry. Do not
