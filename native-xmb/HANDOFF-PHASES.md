@@ -105,9 +105,11 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - Done 2026-10-25: the menu ease is paf's own. The cross bar is vsh.elf's `PhXmBar`; its focus moves are 200 ms
   paf animations in acceleration mode 5, a per-frame ease with k = 0.2206 that lands on frame 12
   (audit/PIPELINE.md "Menu motion"; `View::PafEase`).
-- Open: confirm that the category row and page moves use 200 ms too (assumed); the help-text delay (~0.5 s at rest);
-  info-bar clock updates; the held-key repeat and acceleration rule. The `PhXmBar` code around 0x3ab000–0x3b1000
-  in vsh.elf has the input handler (`FUN_003af01c`) to start from.
+- Done 2026-10-25, measured on the real XMB in RPCS3: the held-key repeat is 300 ms to the first repeat, then every
+  4 frames (66.7 ms), with no acceleration. The help text has no delay: it is drawn on the selected row from the frame
+  the move starts. The category move fits the same 200 ms mode-5 ease. All three are implemented
+  (audit/PIPELINE.md "Measured on the real XMB").
+- Open: page move (into or out of a column) durations, still assumed 200 ms; info-bar clock updates.
 
 ### Phase 5: remaining firmware renderers and states
 - Ribbon geometry from spline.elf is done. Next: particles from particles.elf exactly, including the wind response.
