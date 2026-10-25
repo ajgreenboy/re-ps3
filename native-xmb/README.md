@@ -74,6 +74,16 @@ normal maps can be inspected locally without writing them into the repository:
 & .\out\native-xmb\re-ps3-native.exe --dev-flash <local-dev_flash> --icon-sheet .\out\native-xmb\icon-sheet.png
 ```
 
+## Controllers and installed titles
+
+Input comes from the keyboard, XInput pad 0, and PlayStation controllers read directly over HID: DualShock 3 (USB),
+DualShock 4 and DualSense (USB or Bluetooth). The left stick works as the D-pad. ✕ confirms and ○ goes back, as
+XInput's A and B do.
+
+Titles in `dev_hdd0/game`, and disc copies in RPCS3's `config/games.yml`, start in the RPCS3 that sits next to
+dev_hdd0 (`rpcs3.exe --no-gui`). A title RPCS3 lists starts by Title ID (`%RPCS3_GAMEID%:<id>`); any other starts
+from its `USRDIR/EBOOT.BIN`. Both pieces follow MaXMB (MIT); see `THIRD-PARTY.md`.
+
 ## Decrypted modules for the ribbon
 
 dev_flash holds the VSH modules encrypted (`*.sprx`). The ribbon cloth starts from rest tables inside

@@ -1,4 +1,5 @@
 #include "view.h"
+#include "pad.h"
 #include <QPainter>
 #include <QKeyEvent>
 #include <QDateTime>
@@ -46,7 +47,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&shell_,&Shell::requestNewUser,this,[this]{openOsk("Create New User",{},[this](const QString& name){shell_.createUser(name);});});
     loadWallpaper();
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
-    connect(&timer_,&QTimer::timeout,this,[this]{pollController();update();});timer_.start();
+    connect(&timer_,&QTimer::timeout,this,[this]{pollController();update();});timer_.start();pad::start();
 }
 void View::syncColumns() {
     const int depth=shell_.depth();
@@ -795,8 +796,15 @@ void View::keyPressEvent(QKeyEvent* e) {
 void View::pollController() {
 #ifdef Q_OS_WIN
     if(!isActiveWindow() || QApplication::activeModalWidget()){buttons_=0;return;}
-    XINPUT_STATE state{};if(XInputGetState(0,&state)!=ERROR_SUCCESS){buttons_=0;return;}
-    const auto buttons=state.Gamepad.wButtons;const auto edge=quint16(buttons&~buttons_);const auto now=clock_.elapsed();
+    // XInput pad 0 and any PlayStation controller over HID (pad.cpp), merged; the left stick doubles as the D-pad.
+    XINPUT_STATE state{};const bool xinput=XInputGetState(0,&state)==ERROR_SUCCESS;
+    pad::State hid;const bool playstation=pad::latest(hid);
+    if(!xinput && !playstation){buttons_=0;return;}
+    quint16 buttons=quint16((xinput?state.Gamepad.wButtons:0)|(playstation?hid.buttons:0));
+    const float lx=xinput?state.Gamepad.sThumbLX/32767.f:hid.lx,ly=xinput?-state.Gamepad.sThumbLY/32767.f:hid.ly; // +y down, as HID
+    if(lx<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_LEFT;if(lx>.5f)buttons|=XINPUT_GAMEPAD_DPAD_RIGHT;
+    if(ly<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_UP;if(ly>.5f)buttons|=XINPUT_GAMEPAD_DPAD_DOWN;
+    const auto edge=quint16(buttons&~buttons_);const auto now=clock_.elapsed();
     const bool repeat=now>=repeatAt_;
     const auto movement=quint16(edge|(repeat?buttons:0));
     if(osk_.open) { // ✕ press, ○ cancel, □ backspace, △ space, START accept (the PS3 keyboard's own bindings)
