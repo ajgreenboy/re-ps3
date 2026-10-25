@@ -24,11 +24,12 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 |---|---|
 | Background, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs |
 | Ribbon | Ported end to end (2026-10-25): plugin cloth, ffd_shader1 lattice, spline.elf FFD/camera/bicubic sheet, each stage matched to RPCS3 captures; LINE1 presets follow the plugin's clock keyframes and boot schedule (audit/PIPELINE.md "Ribbon port", "Ribbon presets") |
-| Particles | Firmware shaders; the motion is a CPU rebuild of the SPU particles.elf |
+| Particles | linkev/PlayStation-3-XMB's sparkle layer (point sprites, closed-form motion; not a firmware port); the boot's GLOBAL ALPHA fades them in |
 | Category icons | Firmware glass shader port; clock/season RGB and preset luminance derived from firmware; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | Qt drawing with firmware RCO textures and strings; layout, sizes, opacity and timing measured from the reference |
 | Text | GL glyph atlas, rasterised at the 2x UI layer's scale with glyph origins on whole pixels (soft-text bug fixed 2026-10-25); label glow breathes and idle labels fade (MaXMB observations, unconfirmed); firmware rasterizer parity open |
 | Motion | One measured ease (25%/frame at 60 fps, τ 58 ms); 150 px column cross-fade on category moves |
+| Cold boot | 4.93 intro ported: coldboot.raf scene and script, boot sound, anim_coldboot2 events, background boot presets; skippable, `--no-intro` (audit/PIPELINE.md "Cold boot") |
 | Themes | `.p3t` still background and icons (`src/p3t.cpp`); sounds, RAF scenes, font/colour open |
 | Input | Keyboard, XInput, and DualShock 3/4 / DualSense over HID (`src/pad.cpp`; HID untested without a controller) |
 | Installed titles | dev_hdd0 games and games.yml disc copies start in the RPCS3 next to dev_hdd0 (`--no-gui`) |
@@ -36,11 +37,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 
 ## In flight (2026-10-25)
 
-- **Boot intro:** a session ("Decode coldboot.raf and port the 4.93 boot intro") stopped at its usage limit with
-  uncommitted work in this tree: new `src/coldboot.cpp/.h`, plus edits to `hdr`, `particles`, `ribbon`, `view`,
-  `main.cpp` and `CMakeLists.txt`. Resume that session, or review and commit those files as one change. Do not
-  overwrite them from other work.
-- Third-party code (MaXMB, DeckyXMB) is credited in `THIRD-PARTY.md`.
+- Third-party code (MaXMB, DeckyXMB, linkev/PlayStation-3-XMB) is credited in `THIRD-PARTY.md`.
 
 ## Phases to 100%
 
