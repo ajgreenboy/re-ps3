@@ -6,6 +6,7 @@
 #include <QVideoSink>
 #include <QVideoFrame>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QSysInfo>
 #include <QUrl>
@@ -22,6 +23,48 @@ namespace {
 Entry item(QString id,QString title,QString texture,QString container="explore_plugin_full",Action action=Action::Unavailable,QString value={}) {
     return {std::move(id),std::move(title),{},std::move(container),std::move(texture),action,std::move(value)};
 }
+// PARAM.SFO (PSF): "\0PSF", version, key table offset @8, data table offset @12, entry count @16, then 16-byte
+// entries {u16 key offset, u16 format, u32 length, u32 max length, u32 data offset}; all little-endian.
+QHash<QString,QString> readSfo(const QString& path) {
+    QFile file(path);QHash<QString,QString> values;
+    if(!file.open(QIODevice::ReadOnly))return values;
+    const QByteArray d=file.readAll();
+    if(d.size()<20 || !d.startsWith(QByteArray("\0PSF",4)))return values;
+    const auto u16=[&](qsizetype at){return at+2<=d.size()?quint32(quint8(d[at])|quint8(d[at+1])<<8):0u;};
+    const auto u32=[&](qsizetype at){return at+4<=d.size()?quint32(u16(at)|u16(at+2)<<16):0u;};
+    const quint32 keys=u32(8),data=u32(12),count=std::min<quint32>(u32(16),256);
+    for(quint32 i=0;i<count;++i) {
+        const qsizetype e=20+qsizetype(i)*16;
+        const quint32 keyAt=keys+u16(e),format=u16(e+2),length=u32(e+4),dataAt=data+u32(e+12);
+        if(keyAt>=quint32(d.size()) || dataAt+length>quint32(d.size()))continue;
+        const QString key=QString::fromLatin1(d.constData()+keyAt);
+        if(format==0x0204 || format==0x0004)values.insert(key,QString::fromUtf8(d.constData()+dataAt,int(length)).remove(QChar(0)));
+        else if(format==0x0404)values.insert(key,QString::number(u32(dataAt)));
+    }
+    return values;
+}
+}
+void Shell::addInstalledApps() {
+    // Installed content in dev_hdd0/game (PARAM.SFO + ICON0.PNG), listed in the category its CATEGORY code belongs to,
+    // as the firmware's category XMBML queries do (e.g. category_network.xml "gameDir"): games under Game, network
+    // applications such as Information Board or Life with PlayStation under Network.
+    static const QHash<QString,QString> categoryFor{{"HG","game"},{"DG","game"},{"1P","game"},{"2P","game"},{"MN","game"},{"PE","game"},
+        {"CB","network"},{"WT","network"},{"AT","tv"},{"AV","video"},{"BV","video"},{"AM","music"},{"AP","photo"}};
+    const QDir games(QDir(assets_.hddRoot()).filePath("game"));
+    for(const auto& folder:games.entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)) {
+        const auto sfo=readSfo(QDir(folder.absoluteFilePath()).filePath("PARAM.SFO"));
+        const auto target=categoryFor.value(sfo.value("CATEGORY"));
+        if(target.isEmpty() || sfo.value("TITLE").isEmpty())continue;
+        for(auto& category:categories_) {
+            if(category.id!=target)continue;
+            const QString icon=QDir(folder.absoluteFilePath()).filePath("ICON0.PNG");
+            auto entry=item("app:"+folder.fileName(),sfo.value("TITLE"),QFileInfo::exists(icon)?icon:QString("game_tex_default_ps3"),
+                QFileInfo::exists(icon)?QString("file"):QString("explore_plugin_full"),Action::Information,
+                sfo.value("TITLE")+"\n\n"+sfo.value("TITLE_ID",folder.fileName())+"  "+sfo.value("APP_VER",sfo.value("VERSION"))+
+                "\nLaunching installed content is not available in the native recreation.");
+            category.entries.push_back(std::move(entry));
+        }
+    }
 }
 Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(parent),
     assets_(assets),preferences_(dataDirectory),library_(),interactionAudio_(assets.root()),profiles_(dataDirectory),
@@ -85,6 +128,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     }
     selections_.fill(0,categories_.size());
     rebuildUsers();
+    addInstalledApps();
     connect(&profiles_,&Profiles::changed,this,[this]{rebuildUsers();emit changed();});
     connect(&profiles_,&Profiles::failed,this,[this](const QString& error){message_=error;emit changed();});
     player_->setAudioOutput(audio_.get());player_->setVideoSink(video_.get());

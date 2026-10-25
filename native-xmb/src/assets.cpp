@@ -186,6 +186,12 @@ const QImage& Assets::image(const QString& container,const QString& name) {
     if(auto it=images_.constFind(key);it!=images_.cend())return it.value();
     QImage image;
     try {
+        if(container=="file") { // installed content (dev_hdd0 ICON0.PNG etc.), by absolute path
+            image=QImage(name);
+            if(image.isNull())throw std::runtime_error("image file could not be read");
+            ++decodedImages_;
+            return images_.insert(key,std::move(image)).value();
+        }
         if(container.startsWith("qgl/")) {
             image=decodeDds(qglFile(container.mid(4),name));
             // QGL icon maps use the original bottom-up texture coordinates.

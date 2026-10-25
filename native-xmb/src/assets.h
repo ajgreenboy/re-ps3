@@ -1,5 +1,6 @@
 #pragma once
 #include <QHash>
+#include <QDir>
 #include <QImage>
 #include <QString>
 #include "qrc.h"
@@ -17,6 +18,9 @@ public:
     QString fontFamily(int style) const { return fonts_.value(style,font_); }
     QStringList fontFamilies() const { return fonts_; }
     QString root() const { return root_; }
+    // dev_hdd0 next to dev_flash unless overridden (installed games and apps).
+    QString hddRoot() const { return hddRoot_.isEmpty()?QDir(root_).absoluteFilePath("../dev_hdd0"):hddRoot_; }
+    void setHddRoot(const QString& path) { hddRoot_=path; }
     int decodedImages() const { return decodedImages_; }
     int failedImages() const { return images_.size()-decodedImages_; }
     // Uncompressed or RLE true-colour/grey TGA (qgl/lines LUTs and particle textures), top row first; null on error.
@@ -27,7 +31,7 @@ public:
     QHash<QString,QString> allText(const QString& container) const { return readEnglish(readContainer(container)); }
 private:
     struct Container { QByteArray file, tables; quint32 labels=0, imageData=0; QHash<QString,quint32> entries; };
-    QString root_, font_;
+    QString root_, font_, hddRoot_;
     QStringList fonts_;
     QHash<QString,Container> containers_;
     QHash<QString,QImage> images_;

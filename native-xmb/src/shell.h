@@ -107,6 +107,7 @@ private:
     void stepPhoto(int delta);
     void showPhoto();
     void rebuildUsers();
+    void addInstalledApps();
     int& currentSelection() { return pages_.isEmpty()?selections_[category_]:pages_.last().selection; }
 };
 }

@@ -586,7 +586,7 @@ void View::drawScene(QPainter& p) {
                 // Reference (RPCS3 4.x video): square icons ~60 px, ~105 px when focused; utility folders are icons too.
                 // Only media thumbnails (album art) keep a wide tile.
                 const double size=level==0?60+focus*44:40+focus*16;
-                const bool tile=entry.texture.contains("album");
+                const bool tile=entry.texture.contains("album") || entry.container=="file"; // ICON0 thumbnails are wide
                 const double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
                 const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
                 drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
