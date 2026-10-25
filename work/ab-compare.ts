@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 // Minimal PNG reader (8-bit RGB/RGBA, non-interlaced) for the native --script and
 // RPCS3 screenshots. Enough for PSNR/SSIM; the whole point of Phase 7 is pass/fail
 // numbers, not a general image library.
-function decodePng(path: string): { w: number; h: number; rgba: Uint8Array } {
+export function decodePng(path: string): { w: number; h: number; rgba: Uint8Array } {
   const b = readFileSync(path);
   const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (sig.some((v, i) => b[i] !== v)) throw new Error(`${path}: not a PNG`);
@@ -66,7 +66,7 @@ function luma(rgba: Uint8Array, i: number) {
   return 0.2126 * rgba[i * 4] + 0.7152 * rgba[i * 4 + 1] + 0.0722 * rgba[i * 4 + 2];
 }
 
-function psnr(a: { w: number; h: number; rgba: Uint8Array }, b: typeof a, crop?: [number, number, number, number]) {
+export function psnr(a: { w: number; h: number; rgba: Uint8Array }, b: typeof a, crop?: [number, number, number, number]) {
   const [cx, cy, cw, ch] = crop ?? [0, 0, a.w, a.h];
   let se = 0, n = 0;
   for (let y = cy; y < cy + ch; y++) for (let x = cx; x < cx + cw; x++) {
@@ -81,7 +81,7 @@ function psnr(a: { w: number; h: number; rgba: Uint8Array }, b: typeof a, crop?:
 }
 
 // 8x8-window SSIM on luma, as the reference video comparisons elsewhere use.
-function ssim(a: { w: number; h: number; rgba: Uint8Array }, b: typeof a, crop?: [number, number, number, number]) {
+export function ssim(a: { w: number; h: number; rgba: Uint8Array }, b: typeof a, crop?: [number, number, number, number]) {
   const [cx, cy, cw, ch] = crop ?? [0, 0, a.w, a.h];
   const C1 = (0.01 * 255) ** 2, C2 = (0.03 * 255) ** 2;
   let sum = 0, n = 0;
@@ -101,18 +101,20 @@ function ssim(a: { w: number; h: number; rgba: Uint8Array }, b: typeof a, crop?:
   return n ? sum / n : 0;
 }
 
-const [refPath, nativePath, cropArg] = process.argv.slice(2);
-if (!refPath || !nativePath) {
-  console.error('usage: bun work/ab-compare.ts <ref.png> <native.png> [crop x,y,w,h]');
-  process.exit(2);
+if (import.meta.main) {
+  const [refPath, nativePath, cropArg] = process.argv.slice(2);
+  if (!refPath || !nativePath) {
+    console.error('usage: bun work/ab-compare.ts <ref.png> <native.png> [crop x,y,w,h]');
+    process.exit(2);
+  }
+  const ref = decodePng(refPath), native = decodePng(nativePath);
+  if (ref.w !== native.w || ref.h !== native.h) {
+    console.error(`dimension mismatch: ref ${ref.w}x${ref.h} vs native ${native.w}x${native.h}`);
+    process.exit(3);
+  }
+  const crop = cropArg ? cropArg.split(',').map(Number) as [number, number, number, number] : undefined;
+  const p = psnr(ref, native, crop), s = ssim(ref, native, crop);
+  console.log(`${refPath} vs ${nativePath}`);
+  console.log(`  size ${ref.w}x${ref.h}${crop ? ` crop ${crop.join(',')}` : ''}`);
+  console.log(`  PSNR ${p.toFixed(2)} dB  SSIM ${s.toFixed(4)}`);
 }
-const ref = decodePng(refPath), native = decodePng(nativePath);
-if (ref.w !== native.w || ref.h !== native.h) {
-  console.error(`dimension mismatch: ref ${ref.w}x${ref.h} vs native ${native.w}x${native.h}`);
-  process.exit(3);
-}
-const crop = cropArg ? cropArg.split(',').map(Number) as [number, number, number, number] : undefined;
-const p = psnr(ref, native, crop), s = ssim(ref, native, crop);
-console.log(`${refPath} vs ${nativePath}`);
-console.log(`  size ${ref.w}x${ref.h}${crop ? ` crop ${crop.join(',')}` : ''}`);
-console.log(`  PSNR ${p.toFixed(2)} dB  SSIM ${s.toFixed(4)}`);
