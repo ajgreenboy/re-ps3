@@ -30,11 +30,8 @@ public:
     // Adds the ribbon to targetFbo (additive). seconds: wall time; dayFraction: local time of day, 0..1 from midnight.
     void render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFraction,int pixelWidth,int pixelHeight,GLuint targetFbo);
     // Crest of the ribbon centre line as a fraction of screen height from the top, sampled left to right across
-    // the screen after the last render (for the procedural particles and for measurement).
+    // the screen after the last render (for the procedural background and for measurement).
     const std::array<float,33>& crest() const { return crest_; }
-    // The sheet's centre line left to right, placed in the particle camera's view space (fovy 71.846) so that it
-    // lands where the ribbon is drawn (the particle emitter).
-    const std::vector<QVector3D>& centreLine() const { return centreLine_; }
     // LINE1.mnu, the values the cloth and the spline task read.
     struct Preset {
         float damping=.0001f,length=.306001f,tension=.25f,timestep=2,perturbation=.0998587f,endY=.4f,endZ=.2f,ffdParam=-1.33509f;
@@ -81,7 +78,6 @@ private:
     std::array<QVector4D,points_> clipLattice_{};
     std::vector<float> vertices_;
     std::array<float,33> crest_{};
-    std::vector<QVector3D> centreLine_;
     void deformLattice(QOpenGLFunctions_3_3_Core& gl,const Preset& p);
     void splineSheet(const Preset& p,float aspect);
 };
