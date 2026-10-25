@@ -183,14 +183,14 @@ QImage Assets::decodeGim(const QByteArray& b) {
 }
 const QImage& Assets::image(const QString& container,const QString& name) {
     const QString key=container+"/"+name;
-    if(auto it=images_.constFind(key);it!=images_.cend())return it.value();
+    if(const auto it=images_.find(key);it!=images_.end())return it->second;
     QImage image;
     try {
         if(container=="file") { // installed content (dev_hdd0 ICON0.PNG etc.), by absolute path
             image=QImage(name);
             if(image.isNull())throw std::runtime_error("image file could not be read");
             ++decodedImages_;
-            return images_.insert(key,std::move(image)).value();
+            return images_.insert_or_assign(key,std::move(image)).first->second;
         }
         if(container.startsWith("qgl/")) {
             image=decodeDds(qglFile(container.mid(4),name));
@@ -201,7 +201,7 @@ const QImage& Assets::image(const QString& container,const QString& name) {
             if(image.isNull())throw std::runtime_error("DDS decoder returned no pixels");
             ++decodedImages_;
             qInfo().noquote()<<"assets: decoded"<<key<<image.size();
-            return images_.insert(key,std::move(image)).value();
+            return images_.insert_or_assign(key,std::move(image)).first->second;
         }
         if(!containers_.contains(container))containers_.insert(container,readContainer(container));
         const auto& c=containers_[container];
@@ -221,7 +221,7 @@ const QImage& Assets::image(const QString& container,const QString& name) {
         ++decodedImages_;
         qInfo().noquote()<<"assets: decoded"<<key<<image.size();
     } catch(const std::exception& e) { qWarning().noquote()<<"assets:"<<key<<e.what(); }
-    return images_.insert(key,std::move(image)).value();
+    return images_.insert_or_assign(key,std::move(image)).first->second;
 }
 const QImage& Assets::bestImage(const QString& container,const QString& name) {
     const QImage& base=image(container,name);
