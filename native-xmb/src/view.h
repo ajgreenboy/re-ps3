@@ -91,6 +91,9 @@ private:
     QVector<IconRenderer::Icon> iconQueue_; // category icons for the firmware renderer, rebuilt with the UI layer
     float presetBlend_=1;
     static constexpr double kColumnX=565; // focus column, 1080p px (firmware: camera 2700, eye x -5)
+    // Firmware quad size (1080p px) of an icontex item icon in a column (RPCS3 capture): level 0 77.616, focused 184.8;
+    // settings bullets inside a page from the page capture.
+    static double itemIconSize(int level,bool bullet,double focus);
     bool forceOriginal_=false;
     QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     void drawScene(QPainter& painter);

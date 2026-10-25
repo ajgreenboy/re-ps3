@@ -30,7 +30,13 @@ Findings, now in `icons.h`:
 - At 1920x1080 the firmware runs `icons_no_ss_no_shad` (SHADOW STREN is 0).
 - Camera distance is 2700; ndc = (2.8125 X, 5 Y) / d, so world units are 1080p pixels.
 - Quads are 117.13 px (unfocused) and 167.33 px (focused), with icons 200 px apart plus 10 px either side of focus.
-  The focus column is at x 565, y 290 (280 focused). Item icons in the open column use the same shader at 85.55 px.
+  The focus column is at x 565, y 290 (280 focused).
+- Item icons (captured by driving RPCS3: Settings, then a page; keyboard pad as Player 1 for the session). icontex
+  items use the same shader at brightness 1. In the open category column they are 77.616 units (focused 184.8) on the
+  same rows as the layout: screen y = 540 + `_Eye.y`, with focus at 505. Settings bullets inside a page are 35.721
+  units (focused 85.05). When a page opens, the parent column's unfocused rows move back to camera distance 2857.2 at
+  brightness 0.247, so they shrink toward the screen centre and the gap below focus closes by 15. Its focused row
+  stays at 2700 with brightness 0.698 and, with the category icon, steps to x 303.
 - `_Ambiant.w` is 0.698 for unfocused icons and 1 for focused ones. The program's alpha (envmap alpha × `_Ambiant.w`)
   blends the icon over the frame.
 - Light directions are (sin Z cos X, sin Z sin X, cos Z) of the LITn angles. `_EnvRot` turns about 30°/s.
