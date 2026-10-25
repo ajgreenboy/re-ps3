@@ -10,7 +10,7 @@ Local inventory (`out/native-reference/qrc-inventory.txt`, not committed) lists 
 | Layer | Firmware source | Native status |
 |---|---|---|
 | Background gradient | `lines.qrc` moyou/background, back_colours0 + month_bg textures, BACKGROUND.mnu; custom_render_plugin clock mapping | **Ported**: firmware Cg translated RSX→GLSL, inputs traced |
-| Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; FFD wave field from the SPU spline.elf | **Ported**: shaders firmware; geometry fitted to reference (spline.elf placement not traced) |
+| Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; geometry from the SPU spurs/moyou/spline/spline.elf | **Shaders ported; geometry wrong**: ours is a flat displaced 128x24 sheet, the firmware's is a rolled 128x128 sheet (see "Ribbon geometry") |
 | Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Partial**: shaders firmware; CPU simulation reconstructs the SPU job |
 | HDR tone map + glare | `lines.qrc` glutils ToneMap, GlareSource*, Gaussian, AccGlare, ApplyGlare, HDR.mnu | **Ported** |
 | Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n–70n normal maps + dif | **Ported** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo, the variant the firmware runs at 1080p; uniforms from ICONS.mnu by the packing read from an RPCS3 capture; matches RPCS3's frame side by side |
@@ -19,6 +19,26 @@ Local inventory (`out/native-reference/qrc-inventory.txt`, not committed) lists 
 
 `raf.qrc` (ubber shaders, ConeFilter), `rhm.qrc`, `canyon.qrc`/`earth.qrc` (visualiser themes) and `store.qrc` are
 outside the main XMB.
+
+## Ribbon geometry (captured 2026-10-25)
+
+The ribbon geometry was captured from RPCS3 with `XMB_VTX_DUMP` (patch: `rpcs3-rsx-capture.patch` at the repo root;
+the draw is identified by lines1.fpo's 336-byte ucode). Each frame is a single indexed draw:
+
+- 35,306 big-endian u32 indices form triangle strips with primitive restart (1016 strips of 32–34 indices), over
+  16,384 vertices: a 128x128 grid where vertex = row*128 + column, and strips pair row r with row r+1.
+- Array 0 holds float4 positions (stride 32) that are already in clip space: lines1.vpo passes `in_0` straight to
+  `gl_Position`, with w ≈ 8. Array 9 holds float4 normals (stride 32), array 8 float2 coordinates (stride 8).
+- The camera and projection are applied by the SPU; there is no matrix in the vertex constants.
+- The shape: rows run the full width of the screen, while each column closes into an ellipse. The sheet is rolled
+  into a travelling scroll, which produces the strands crossing through each other. Our flat FFD-displaced 128x24
+  sheet cannot produce this, which is why the wave looks wrong.
+
+To match it exactly, the geometry has to come from spline.elf. It is 22 KB of SPU code (.text 0x3060..0x8728,
+.rodata 5 KB, .bss 19.5 KB) with no symbols, and Ghidra has no SPU module. Plan: write an SPU disassembler, trace the
+SPURS job's inputs (the parameters custom_render_plugin passes, time, LINE1.mnu) and outputs (DMA of positions and
+normals), then either port the simulation to C++ or run the original code in a small embedded SPU interpreter.
+Verify against frames captured from RPCS3 at the same time.
 
 ## Category icon renderer (ported 2026-10-25)
 
