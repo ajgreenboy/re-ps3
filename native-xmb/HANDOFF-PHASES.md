@@ -28,7 +28,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Category icons | Original uses firmware glass; fixed colours use an opaque normal-map material to resolve dark interiors. See audit/CATEGORY-ICON-FIX.md; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | Qt drawing with firmware RCO textures and strings; layout, sizes, opacity and timing measured from the reference |
 | Text | Original font faces rasterized with FreeType and recovered load flags 10 into the 2x GL atlas; label glow/idle fade are MaXMB observations; PAF metrics, pixel phase and full parity remain open (audit/FONT-MATCHING.md) |
-| Motion | One measured ease (25%/frame at 60 fps, τ 58 ms); 150 px column cross-fade on category moves |
+| Motion | paf's own eases (`View::PafEase`): category, item and cross-fade moves are 200 ms mode 5 (traced in vsh.elf PhXmBar); the page move is 300 ms mode 4 (fitted from RPCS3, not traced). Held-key repeat 300 ms then 66.7 ms; help text drawn on the selection with no delay (audit/PIPELINE.md "Menu motion") |
 | Cold boot | 4.93 intro ported: coldboot.raf scene and script, boot sound, anim_coldboot2 events, background boot presets; skippable, `--no-intro` (audit/PIPELINE.md "Cold boot") |
 | Themes | `.p3t` still background, icons and five menu-sound roles; RAF scenes and font/colour open |
 | Input | Keyboard, XInput, and DualShock 3/4 / DualSense over HID (`src/pad.cpp`; HID untested without a controller) |
@@ -38,6 +38,39 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 ## In flight (2026-10-25)
 
 - Third-party code (MaXMB, DeckyXMB, linkev/PlayStation-3-XMB) is credited in `THIRD-PARTY.md`.
+- `src/icons.cpp` has an uncommitted change from another agent. Leave it alone unless you are that agent.
+
+## Next steps (recommended order)
+
+1. **Phase 7 harness first:** RPCS3 reference captures of named states plus `work/ab-shot.ts` scores, so every later
+   change has a number.
+2. **Phase 4 leftovers:** trace the page move's animate call (explore_plugin; its 300 ms float constants are at
+   DAT_00270674, DAT_002706c0, DAT_00270658, DAT_00270d30 and DAT_00271d0c) to confirm 300 ms in mode 4. The info-bar
+   clock update is also open.
+3. **Phase 5 particles:** port particles.elf. The current sparkles are linkev's, not the firmware's.
+4. **Phase 3 layout:** replace measured column, row and icon numbers with values traced from RCO objects and
+   explore_plugin.
+
+## Capturing the real XMB in RPCS3 (how-to, learned 2026-10-25)
+
+- Boot: `rpcs3.exe --no-gui --config <scratch yml> <dev_flash>shmodulesh.self`. Keep the scratch config outside
+  the repo and the RPCS3 folder. Never close an RPCS3 the user started.
+- Set **"Exclusive Fullscreen Mode: Disable"** in the scratch config. With exclusive fullscreen, desktop capture
+  (CopyFromScreen) returns one frozen frame while the title bar still shows 60 FPS. PrintWindow returns stale frames
+  under Vulkan, so use CopyFromScreen.
+- If the "Preloading cached shaders" overlay stalls for more than a minute, stop that RPCS3 and start it again.
+- Input: for vsh.self, `--input-config` is ignored, and RPCS3 uses the global
+  `config/input_configs/global/Default.yml` (the user's DualSense). Changing that file needs the user's approval
+  every time. Back it up and check its sha256 before and after: the original is
+  `e624da0d66a8e971173c39a69a1dc2c89ffe146d57bf2a03c2c8cfacb459ceee`. Restore it as soon as the capture is done.
+- With the Keyboard handler, arrows sent by `keybd_event` arrive, but **letter keys do not**. Map Cross and Circle
+  to `PgDown` and `PgUp` in the temporary Default.yml, and send those keys as extended keys.
+- Record by holding or tapping a key while capturing timestamped frames (about 55–118 a second). Analyse with
+  `bun work/motion-track.ts <dir> [vertical|horizontal] x0 x1 y0 y1 threshold maxShift` (scroll per frame) and
+  `bun work/region-luma.ts` (fades). The capture reads about 0.014 low per frame on known eases; allow for that
+  when fitting.
+- In the native app, `XMB_LOG=<file> XMB_MOTION_LOG=1` logs the column and depth eases each frame. Launch it with
+  `--dev-flash … --data-dir <scratch> --no-intro`. Without `--dev-flash` it prints usage and exits with code 2.
 
 ## Phases to 100%
 
