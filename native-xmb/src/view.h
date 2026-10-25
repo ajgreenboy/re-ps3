@@ -25,8 +25,20 @@ public:
     View(Shell& shell,Assets& assets,QWidget* parent=nullptr);
     ~View() override;
     static double dayLight(double hour);
-    // Every XMB move closes 25% of the remaining distance per 60 fps frame (reference video): (1/60)/ln(4/3) s.
-    static constexpr double easeTau=0.05793;
+    // The XMB's moves are paf animations: 200 ms in accel mode 5 (vsh.elf PhXmBar focus moves FUN_003ad3bc /
+    // FUN_003ad728; paf animation setup FUN_003981ec and evaluator FUN_00398748). Mode 5 closes a fixed fraction
+    // k of the remaining distance every 60 Hz frame, k from a table by the duration in frames, and lands on the
+    // target when the frame-snapped duration ends. A new target restarts the curve from the current value.
+    struct PafEase {
+        double value=0;
+        void retarget(double target,double milliseconds=200);
+        void advance(double seconds);
+        bool running() const { return running_; }
+    private:
+        double from_=0,to_=0,progress_=1,elapsed_=0,duration_=0,k_=0;
+        bool started_=false,running_=false;
+    };
+    static constexpr double moveMilliseconds=200;
     // Renders the background offscreen at reference times and writes the same statistics measured from the
     // reference videos (band colours by clock time, ribbon crest over 40 s). Returns false on GL failure.
     bool measureReference(const QString& path);
@@ -51,7 +63,8 @@ private:
     quint64 frames_=0;
     double categoryPosition_=6;
     int previousCategory_=6;
-    struct Column { QVector<Entry> entries; int selection=0; double position=0; };
+    struct Column { QVector<Entry> entries; int selection=0; double position=0; PafEase ease; };
+    PafEase categoryEase_,depthEase_,fadeEase_;
     QVector<Column> columns_;
     QVector<Column> outgoing_;
     int outgoingCategory_=6;

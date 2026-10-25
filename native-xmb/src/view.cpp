@@ -56,10 +56,33 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
     connect(&timer_,&QTimer::timeout,this,[this]{pollController();update();});timer_.start();pad::start();
 }
+void View::PafEase::retarget(double target,double milliseconds) {
+    if(!started_){value=from_=to_=target;started_=true;return;}
+    if(target==to_ && (running_ || value==target))return;
+    // FUN_003981ec: the duration snaps to whole 60 Hz frames; k by frame count (DAT_0068eb04.. and the 1/(2.2+(n-5)/3) tail).
+    const int frames=std::max(1,int(milliseconds*.001*60));
+    static constexpr double shortK[4]={.9615385,.78125,.6369426,.5291005};
+    k_=frames<=4?shortK[frames-1]:1./((frames-5)*.333333+2.2);
+    duration_=frames/60.*.999999;
+    from_=value;to_=target;progress_=0;elapsed_=0;running_=true;
+}
+void View::PafEase::advance(double seconds) {
+    if(!running_)return;
+    // FUN_00398748 mode 5: per elapsed frame v = ((1-v) k + v) x 1.000001; a fractional frame above 0.05 is interpolated.
+    const auto step=[&](double v){return std::min(1.,((1.-v)*k_+v)*1.000001);};
+    // paf takes this tick's frame count (DAT_006fb1f4): whole frames step, the fraction blends one step into the state.
+    elapsed_+=seconds;
+    const double frames=seconds*60;const int whole=int(frames);const double fraction=frames-whole;
+    for(int i=0;i<whole;++i)progress_=step(progress_);
+    if(fraction>.05)progress_+=(step(progress_)-progress_)*fraction;
+    if(elapsed_>=duration_){progress_=1;running_=false;}
+    value=from_+(to_-from_)*progress_;
+}
 void View::syncColumns() {
     const int depth=shell_.depth();
     if(previousCategory_!=shell_.category()) {
         outgoing_=columns_;outgoingCategory_=previousCategory_;categoryFade_=1.;columns_.clear();
+        fadeEase_=PafEase();fadeEase_.retarget(1);fadeEase_.retarget(0,moveMilliseconds); // the old column cross-fades out
         previousCategory_=shell_.category();
     }
     // Keep the departed child until the return animation finishes. The shell's
@@ -71,7 +94,7 @@ void View::syncColumns() {
         if(i>=columns_.size())columns_.push_back(Column{shell_.entriesAt(i),shell_.selectionAt(i),double(shell_.selectionAt(i))});
         else {columns_[i].entries=shell_.entriesAt(i);columns_[i].selection=shell_.selectionAt(i);}
     }
-    if(depth>previousDepth_)for(int i=previousDepth_+1;i<=depth;++i)columns_[i].position=columns_[i].selection;
+    if(depth>previousDepth_)for(int i=previousDepth_+1;i<=depth;++i){columns_[i].position=columns_[i].selection;columns_[i].ease=PafEase();}
     previousDepth_=depth;
 }
 void View::loadWallpaper() {
@@ -409,9 +432,11 @@ bool View::measureReference(const QString& path) {
         painter.end();
         sheet.save(QFileInfo(path).dir().filePath("video-reference-motion.png"));
     }
-    out<<"# ease-out: settle to 10% = time constant * ln(10)\n";
-    for(const auto& [name,tau]:std::initializer_list<std::pair<const char*,double>>{{"category",easeTau},{"item",easeTau},{"depth/entry",easeTau},{"column cross-fade",easeTau}})
-        out<<name<<": tau "<<int(tau*1000)<<" ms, settle "<<int(tau*std::log(10.)*1000)<<" ms ("<<QString::number(tau*std::log(10.)*60,'f',1)<<" frames at 60 fps)\n";
+    out<<"# moves: paf accel mode 5 over "<<moveMilliseconds<<" ms; remaining distance after each 60 Hz frame\n";
+    {
+        PafEase ease;ease.retarget(1);ease.retarget(0,moveMilliseconds);
+        for(int frame=1;frame<=13;++frame){ease.advance(1/60.);out<<QString::number(ease.value,'f',4)<<(frame<13?" ":"\n");}
+    }
     if(originalReady_) {
         // Firmware background shader on its own: every month's palette at noon, then a raw input sweep of
         // _DayTime = _NightTime (clock hours x100) x NightDayBlend, independent of the clock mapping above.
@@ -462,14 +487,15 @@ void View::paintGL() {
     const qint64 now=clock_.elapsed();
     const double dt=std::min(.1,double(now-previous_)/1000.);previous_=now;
     const double renderSeconds=secondsOverride_>=0.?secondsOverride_:now/1000.; // fixed for A/B captures
-    // One ease for every move, measured frame by frame on the 60 fps reference (audit/VIDEO-REFERENCES.md): category,
-    // item and page moves and the column cross-fade all close 25% of the remaining distance per frame, i.e. an
-    // exponential time constant of (1/60)/ln(4/3) = 58 ms, independent of the frame rate here.
-    const double blend=1.-std::exp(-dt/easeTau);
-    categoryPosition_+=(shell_.category()-categoryPosition_)*blend;
-    categoryFade_*=1.-blend;if(categoryFade_<.001){categoryFade_=0;outgoing_.clear();}
-    depthPosition_+=(shell_.depth()-depthPosition_)*blend;
-    for(auto& column:columns_)column.position+=(column.selection-column.position)*blend;
+    // Every move is a firmware paf animation: 200 ms in accel mode 5 (PafEase), for the category, item and page moves
+    // and the column cross-fade (audit/PIPELINE.md "Menu motion").
+    categoryEase_.retarget(shell_.category(),moveMilliseconds);categoryEase_.advance(dt);categoryPosition_=categoryEase_.value;
+    if(!outgoing_.isEmpty()){fadeEase_.advance(dt);categoryFade_=fadeEase_.value;if(!fadeEase_.running()){categoryFade_=0;outgoing_.clear();}}
+    depthEase_.retarget(shell_.depth(),moveMilliseconds);depthEase_.advance(dt);depthPosition_=depthEase_.value;
+    for(auto& column:columns_){column.ease.retarget(column.selection,moveMilliseconds);column.ease.advance(dt);column.position=column.ease.value;}
+    // Local diagnosis: XMB_MOTION_LOG=1 logs the focused column's eased position each frame while it moves.
+    if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && !columns_.isEmpty() && columns_.back().ease.running())
+        qInfo().noquote()<<"motion:"<<now<<"ms position"<<QString::number(columns_.back().position,'f',4)<<"target"<<columns_.back().selection;
     if(std::abs(depthPosition_-shell_.depth())<.001) {
         depthPosition_=shell_.depth();
         if(columns_.size()>shell_.depth()+1)columns_.resize(shell_.depth()+1);
