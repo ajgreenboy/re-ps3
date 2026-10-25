@@ -51,6 +51,8 @@ protected:
     void initializeGL() override;
     void paintGL() override;
     void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
 private:
     Shell& shell_;
     Assets& assets_;
@@ -96,6 +98,8 @@ private:
     QHash<QString,QRect> imageBounds_; // visible (alpha) bounds per RCO image
     quint16 buttons_=0;
     qint64 repeatAt_=0;
+    // Arrow keys held / pressed since the last poll, as D-pad bits: they repeat on the controller's firmware timing.
+    quint16 keyHeld_=0,keyPressed_=0;
     void pollController();
     void renderBackground(float seconds,float light,int pixelWidth,int pixelHeight);
     // Original firmware background: qgl/lines back_colours0.fpo with this/next month's day and night palettes.

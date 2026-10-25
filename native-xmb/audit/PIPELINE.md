@@ -271,8 +271,29 @@ fit mode 5 at 200 ms better than mode 4 (0.68) or a constant 0.75.
 A new target restarts from the current value, as the reference shows. `XMB_MOTION_LOG=1` logs the focused
 column's position per frame; a native DOWN press follows the curve and ends at 200 ms.
 
-Not yet traced: whether the category row and page moves use the same 200 ms (assumed), the help-text delay, and
-held-key repeat acceleration.
+### Measured on the real XMB (RPCS3, 2026-10-25)
+
+Recorded from the RPCS3 window with CopyFromScreen at about 118 captures a second (PrintWindow returns stale Vulkan
+frames), with a keyboard pad and the key driven by `keybd_event`. Analysis scripts: `work/motion-track.ts` (scroll
+of the bright UI content per frame) and `work/region-luma.ts` (mean luma of a region per frame).
+
+- **Held-key repeat.** DOWN held for 3 s in the Settings column: the first move starts 34 ms after the key goes down
+  (input latency), the second 300 ms (18 frames) after the first, then one move every 66.7 ms (4 frames): 1344, 1411,
+  1479 … 2144 ms. There is no acceleration over 14 repeats. Each repeat restarts the ease from the current position,
+  so the column trails the selection while the key is held. `View::pollController` repeats on this timing, counting
+  from the previous deadline so that its 16 ms poll does not stretch the interval. Arrow keys go through the same path
+  (OS auto-repeats are dropped). Native check: the first repeat at +302 ms, then a mean of 67.8 ms, landing on the
+  same item after 15 moves.
+- **Help text.** There is no delay. The description belongs to the selected row: it is drawn fully opaque from the
+  frame the move starts, including on every repeat, even while the selected row is still sliding toward the focus
+  slot (16 ms after a repeat, Chat Settings is below the slot with its description and Music Settings is still in
+  it). The native view used to wait for the eased focus to pass 0.95; it now draws the description on
+  `column.selection`.
+- **Category move.** A single RIGHT tap: motion starts 42 ms after the key, and the remaining distance falls by
+  0.765 per frame for the first 8 frames. That fits mode 5 with n = 11–12 (0.762 at 183 ms, 0.779 at 200 ms), so the
+  200 ms assumption stands. A small tail of motion afterwards comes from the icons' scale change, which the tracker
+  mixes in.
+- **Page moves** (into or out of a column) have not been measured; they are still assumed to be 200 ms.
 
 ## Category icon renderer (ported 2026-10-25)
 

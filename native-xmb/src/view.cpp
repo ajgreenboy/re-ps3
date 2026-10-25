@@ -821,7 +821,9 @@ void View::drawScene(QPainter& p) {
                 if(!value.isEmpty() && panelAmount<.5)text({1300+offset,y-25,440,50},value,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
                 const auto subtitle=shell_.subtitleText(entry);
                 if(!subtitle.isEmpty())text({labelX,y+20,1100,30},subtitle,17,QColor(230,230,230,int(235*alpha)),Qt::AlignLeft|Qt::AlignTop);
-                else if(focus>.95 && !entry.detail.isEmpty())text({labelX,y+24,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
+                // The help line belongs to the selection, not the eased position: on the real XMB it moves to the new
+                // row on the frame the move starts, fully opaque, including on every held-key repeat (RPCS3 capture).
+                else if(i==column.selection && !entry.detail.isEmpty())text({labelX,y+24,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
                 p.restore();
             }
             if(level>0 && columnAlpha>0 && panelAmount<.999) {
@@ -906,8 +908,21 @@ void View::panPhoto(int dx,int dy) {
         update();
     }
 }
+namespace {
+// D-pad bit (XInput layout) for an arrow key, else 0.
+quint16 arrowBit(int key) {
+    switch(key){case Qt::Key_Up:return 0x0001;case Qt::Key_Down:return 0x0002;case Qt::Key_Left:return 0x0004;case Qt::Key_Right:return 0x0008;default:return 0;}
+}
+}
 void View::keyPressEvent(QKeyEvent* e) {
     if(introRunning()){coldboot_.skip();e->accept();return;}
+#ifdef Q_OS_WIN
+    // Arrows go through pollController's repeat (the firmware's, not the OS's), so auto-repeats are dropped here.
+    if(const auto bit=arrowBit(e->key())) {
+        if(!e->isAutoRepeat()){keyHeld_|=bit;keyPressed_|=bit;}
+        e->accept();return;
+    }
+#endif
     if(osk_.open) { // the keyboard owns input: arrows move, Return presses the key (Ctrl+Return accepts), Esc cancels
         switch(e->key()) {
         case Qt::Key_Left:oskMove(-1,0);break;case Qt::Key_Right:oskMove(1,0);break;
@@ -950,20 +965,35 @@ void View::keyPressEvent(QKeyEvent* e) {
     }
     e->accept();
 }
+void View::keyReleaseEvent(QKeyEvent* e) {
+    if(const auto bit=arrowBit(e->key())){if(!e->isAutoRepeat())keyHeld_&=~bit;e->accept();return;}
+    QOpenGLWidget::keyReleaseEvent(e);
+}
+void View::focusOutEvent(QFocusEvent* e) {
+    keyHeld_=keyPressed_=0;
+    QOpenGLWidget::focusOutEvent(e);
+}
 void View::pollController() {
 #ifdef Q_OS_WIN
-    if(!isActiveWindow() || QApplication::activeModalWidget()){buttons_=0;return;}
+    if(!isActiveWindow() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;return;}
     // XInput pad 0 and any PlayStation controller over HID (pad.cpp), merged; the left stick doubles as the D-pad.
     XINPUT_STATE state{};const bool xinput=XInputGetState(0,&state)==ERROR_SUCCESS;
     pad::State hid;const bool playstation=pad::latest(hid);
-    if(!xinput && !playstation){buttons_=0;return;}
-    quint16 buttons=quint16((xinput?state.Gamepad.wButtons:0)|(playstation?hid.buttons:0));
-    const float lx=xinput?state.Gamepad.sThumbLX/32767.f:hid.lx,ly=xinput?-state.Gamepad.sThumbLY/32767.f:hid.ly; // +y down, as HID
-    if(lx<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_LEFT;if(lx>.5f)buttons|=XINPUT_GAMEPAD_DPAD_RIGHT;
-    if(ly<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_UP;if(ly>.5f)buttons|=XINPUT_GAMEPAD_DPAD_DOWN;
-    const auto edge=quint16(buttons&~buttons_);const auto now=clock_.elapsed();
+    quint16 buttons=quint16((xinput?state.Gamepad.wButtons:0)|(playstation?hid.buttons:0)|keyHeld_);
+    if(xinput || playstation) {
+        const float lx=xinput?state.Gamepad.sThumbLX/32767.f:hid.lx,ly=xinput?-state.Gamepad.sThumbLY/32767.f:hid.ly; // +y down, as HID
+        if(lx<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_LEFT;if(lx>.5f)buttons|=XINPUT_GAMEPAD_DPAD_RIGHT;
+        if(ly<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_UP;if(ly>.5f)buttons|=XINPUT_GAMEPAD_DPAD_DOWN;
+    }
+    // A key tapped between two polls still counts as a press.
+    const auto edge=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;const auto now=clock_.elapsed();
     if(introRunning()){if(edge)coldboot_.skip();buttons_=buttons;return;}
+    // Held-direction repeat as the real XMB does it (RPCS3 capture, 2026-10-25): the first move on the press, the
+    // second 300 ms (18 frames) later, then one every 4 frames (66.7 ms), with no acceleration however long it is held.
+    constexpr qint64 repeatDelay=300,repeatInterval=67;
     const bool repeat=now>=repeatAt_;
+    // Counted from the last deadline, not from this poll, so the 16 ms poll does not stretch the interval to 80 ms.
+    const qint64 nextRepeat=std::max(repeatAt_,now-repeatInterval)+repeatInterval;
     const auto movement=quint16(edge|(repeat?buttons:0));
     if(osk_.open) { // ✕ press, ○ cancel, □ backspace, △ space, START accept (the PS3 keyboard's own bindings)
         if(movement&XINPUT_GAMEPAD_DPAD_LEFT)oskMove(-1,0);if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)oskMove(1,0);
@@ -971,7 +1001,7 @@ void View::pollController() {
         if(edge&XINPUT_GAMEPAD_A)oskPress();if(edge&XINPUT_GAMEPAD_B)oskClose(false);
         if(edge&XINPUT_GAMEPAD_X)oskBackspace();if(edge&XINPUT_GAMEPAD_Y)oskInsert(" ");
         if(edge&XINPUT_GAMEPAD_START)oskClose(true);
-        if(edge&0x000f)repeatAt_=now+300;else if(movement&0x000f)repeatAt_=now+100;
+        if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
         buttons_=buttons;return;
     }
     if(shell_.photoOpen() && shell_.message().isEmpty()) {
@@ -985,7 +1015,7 @@ void View::pollController() {
         if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)zoomPhoto(-1);if(edge&XINPUT_GAMEPAD_RIGHT_SHOULDER)zoomPhoto(1);
         if(edge&XINPUT_GAMEPAD_X)resetPhotoView();if(edge&XINPUT_GAMEPAD_Y)shell_.vertical(1);
         if(edge&XINPUT_GAMEPAD_A)shell_.activate();if(edge&XINPUT_GAMEPAD_B)shell_.back();
-        if(edge&0x000f)repeatAt_=now+300;else if(movement&0x000f)repeatAt_=now+100;
+        if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
         buttons_=buttons;return;
     }
     if(movement&XINPUT_GAMEPAD_DPAD_LEFT)shell_.horizontal(-1);
@@ -999,7 +1029,7 @@ void View::pollController() {
         if(edge&XINPUT_GAMEPAD_X)shell_.toggleMediaShuffle();
         if(edge&XINPUT_GAMEPAD_Y)shell_.cycleMediaRepeat();
     }
-    if(edge&0x000f)repeatAt_=now+300;else if(movement&0x000f)repeatAt_=now+100;
+    if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
     buttons_=buttons;
 #endif
 }
