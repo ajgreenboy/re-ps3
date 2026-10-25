@@ -54,7 +54,6 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
 void View::syncColumns() {
     const int depth=shell_.depth();
     if(previousCategory_!=shell_.category()) {
-        particles_.nudge(shell_.category()>previousCategory_?1.f:-1.f); // PARTICLES_UI: the dust reacts to navigation
         outgoing_=columns_;outgoingCategory_=previousCategory_;categoryFade_=1.;columns_.clear();
         previousCategory_=shell_.category();
     }
@@ -159,7 +158,7 @@ in vec2 uv;out vec4 colour;uniform sampler2D layer;
 void main(){colour=texture(layer,uv);})"; // premultiplied; linear filtering at half scale = 2x2 box filter
     if(!uiComposite_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) || !uiComposite_.addShaderFromSourceCode(QOpenGLShader::Fragment,compositeFragment) || !uiComposite_.link())
         qCritical().noquote()<<"UI composite shader failed:"<<uiComposite_.log();
-    particles_.init(*this,assets_);
+    particles_.init(*this);
     if(introEnabled_)coldboot_.init(*this,assets_);
     if(!monthImage_.isNull()) {
         monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
@@ -212,10 +211,6 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         presetBlend=float(std::clamp((time.nightDayBlend-(1.-kNightBlend))/kNightBlend,0.,1.));
         renderOriginalBackground(time,pixelWidth,pixelHeight);
         if(originalRibbon)ribbon_.render(*this,seconds,when.time().msecsSinceStartOfDay()/86400000.,pixelWidth,pixelHeight,scene);
-        if(originalParticles) {
-            particles_.update(seconds,ribbon_.centreLine());
-            particles_.render(*this,presetBlend,pixelWidth,pixelHeight);
-        }
     }
     glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);
     if(original){glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE);} else glDisable(GL_BLEND);
@@ -249,7 +244,9 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         dump.save(QString::fromLocal8Bit(qgetenv("XMB_BG_SCENE")));
         }
     }
-    if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),originalParticles?std::function<void(int,int)>([&](int w,int h){particles_.render(*this,presetBlend,w,h,true);}):std::function<void(int,int)>());
+    if(hdr)hdr_.finish(*this,presetBlend,GLuint(target));
+    // Particles over the finished background (linkev/PlayStation-3-XMB's layering: background, wave, additive sparkles).
+    if(originalParticles){glBindFramebuffer(GL_FRAMEBUFFER,GLuint(target));particles_.render(*this,seconds,pixelWidth,pixelHeight);}
 }
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
 // as a day fraction t in [0,1] and the month as a float in [0,12] (constants at 0x92e54..0x92e6c, preset hours / 24

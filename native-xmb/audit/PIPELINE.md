@@ -11,7 +11,7 @@ Local inventory (`out/native-reference/qrc-inventory.txt`, not committed) lists 
 |---|---|---|
 | Background gradient | `lines.qrc` moyou/background, back_colours0 + month_bg textures, BACKGROUND.mnu; custom_render_plugin clock mapping | **Ported**: firmware Cg translated RSX→GLSL, inputs traced |
 | Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; cloth in custom_render_plugin; geometry from the SPU spurs/moyou/spline/spline.elf | **Ported** (`ribbon.cpp`): PPU cloth, ffd_shader1 deformation lattice, spline.elf FFD + camera + bicubic sheet, each stage checked against RPCS3 captures (see "Ribbon port"); LINE1 presets follow the plugin's clock keyframes and boot schedule (see "Ribbon presets") |
-| Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Partial**: shaders firmware; CPU simulation reconstructs the SPU job |
+| Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Replaced**: linkev/PlayStation-3-XMB's sparkle layer (`particles.cpp`, THIRD-PARTY.md): additive point sprites, closed-form motion from per-particle seeds, drawn over the finished background; not a firmware port (the earlier CPU reconstruction of particles.elf drifted and jumped with the ribbon's arc length). The boot's GLOBAL ALPHA still applies |
 | HDR tone map + glare | `lines.qrc` glutils ToneMap, GlareSource*, Gaussian, AccGlare, ApplyGlare, HDR.mnu | **Ported** |
 | Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n–70n normal maps + dif | **Ported** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo, the variant the firmware runs at 1080p; uniforms from ICONS.mnu by the packing read from an RPCS3 capture; matches RPCS3's frame side by side |
 | Item icons, labels, dialogs, info bar | explore_plugin / system_plugin via paf (RCO layouts and textures) | **Reconstructed**: RCO textures are the firmware's; positions, sizes and fades measured from the 60 fps reference |
@@ -219,7 +219,7 @@ sequence (`work/coldboot-region-means.ps1`).
   native port blends it with `Ribbon::bootWeights`; HDR.mnu coldboot1 (EXPOSURE 1.64, GLARE 1.74, THRESH 0.2) uses the
   same weights (not captured);
 - PARTICLES `_Transparency.y` (GLOBAL ALPHA) stays 0 until NormalBG2 and then follows the LINE1 stage-two curve to 1:
-  particles skip coldboot2;
+  particles skip coldboot2 (the native sparkle layer's opacity follows it);
 - LINE1 stage two now starts at NormalBG2 (4 s) when the intro drives the ribbon; RPCS3's 229 cloth steps at that point
   are boot stalls.
 

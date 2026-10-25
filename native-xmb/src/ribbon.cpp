@@ -14,7 +14,6 @@ constexpr float thinness=0.f;       // shader value; the presets say THINNESS 1,
 constexpr QVector3D colour3{.847347f,.846155f,.846448f},colour4{.92487f,.922603f,.922933f}; // BACKGROUND.mnu 3/4: line gradient
 // Camera of the spline task's matrix (captured at 0x20401dc0 and decomposed): fovy 53, near .1, far 1000.
 constexpr float cameraFovy=53.f,cameraNear=.1f,cameraFar=1000.f;
-constexpr float particleFovy=71.846f; // particles.cpp projection, for the emitter hand-off
 constexpr float pi=3.14159265358979f;
 
 QHash<QString,float> readMnu(const QByteArray& text) {
@@ -395,16 +394,7 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
     deformLattice(gl,p);
     const float aspect=float(pixelWidth)/float(pixelHeight);
     splineSheet(p,aspect);
-    // Centre line (row 64) for the particles and the crest measurement.
-    centreLine_.clear();
-    const float particleTan=std::tan(particleFovy*pi/360);
-    for(int c=0;c<grid_;++c) {
-        const float* v=&vertices_[(size_t(grid_/2)*grid_+c)*12];
-        if(v[3]<=0)continue;
-        // Same screen position and depth under the particle camera: view x = ndc.x * depth * tan(fovy/2) * aspect.
-        centreLine_.emplace_back(v[0]*particleTan*aspect,v[1]*particleTan,-v[3]);
-    }
-    std::sort(centreLine_.begin(),centreLine_.end(),[](const QVector3D& a,const QVector3D& b){return a.x()/-a.z()<b.x()/-b.z();});
+    // Crest of the centre line (row 64), for the procedural background and measurement.
     for(int k=0;k<int(crest_.size());++k) { // centre line, screen x -> fraction from the top
         const float sx=float(k)/(crest_.size()-1);float best=-1,bestDistance=1e9f;
         for(int c=0;c<grid_;++c) {
