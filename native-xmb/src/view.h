@@ -49,7 +49,11 @@ private:
     int previousDepth_=0;
     void syncColumns();
     QImage mediaFrame_;
-    QImage uiLayer_; // raster-drawn UI, composited over the GL background each frame
+    // GPU UI layer: 2x-sized 4x MSAA target, its resolve, and the premultiplied composite pass.
+    std::unique_ptr<QOpenGLFramebufferObject> uiMsaa_,uiResolved_;
+    QOpenGLShaderProgram uiComposite_;
+    QString uiSignature_; // what the layer currently shows; redrawn when it changes
+    int uiRevision_=0;    // bumped on every shell change
     QImage wallpaperImage_,monthImage_;
     QString wallpaperPath_;
     quint64 wallpaperRequest_=0;
