@@ -71,6 +71,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     player_(std::make_unique<QMediaPlayer>()),audio_(std::make_unique<QAudioOutput>()),video_(std::make_unique<QVideoSink>()) {
     QDir().mkpath(dataDirectory);
     const QString sys="explore_category_sysconf",full="explore_plugin_full";
+    const auto friendText=[&assets](const QString& id,const QString& fallback){return assets.text("explore_category_friend",id,fallback);};
     categories_={
         {"user","Users",full,"user_tex_load",{item("new-user","Create New User","item_tex_NewUser"),item("user","User","user_tex_login")}},
         {"settings","Settings","qgl/icontex","2n",{
@@ -98,7 +99,15 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("search","Internet Search","tex_kensaku","explore_category_network"),
             item("downloads","Download Management","tex_dl_manage","explore_category_network")}},
         {"psn","PlayStation Network",full,"tex_psn",{item("signin","Sign In","tex_Sign_In"),item("trophy","Trophy Collection","item_tex_trophy"),item("store","PlayStation Store","item_tex_ps_store")}},
-        {"friends","Friends","qgl/icontex","8n",{item("add","Add a Friend","item_tex_NewFriend"),item("chat","Start New Chat","item_tex_NewAvc"),item("players","Players Met","item_tex_Players")}}
+        {"friends","Friends","qgl/icontex","8n",{
+            // category_friend.xml: items, icons and titles are the firmware's (explore_category_friend); PSN-backed
+            // features answer with the firmware's own empty-state messages.
+            item("add",friendText("msg_friend_register","Add a Friend"),"item_tex_NewFriend","explore_category_friend"),
+            item("players",friendText("msg_play_with","Players Met"),"item_tex_Players","explore_category_friend",Action::Information,friendText("msg_error_no_player","No players were found.")),
+            item("chatroom",friendText("msg_text_chatroom","Chat Room (Text Only)"),"item_tex_ChatRoomText","explore_category_friend"),
+            item("chat",friendText("msg_start_new_chat2","Start New Chat"),"item_tex_NewAvc","explore_category_friend"),
+            item("messages",friendText("msg_msg_box","Message Box"),"item_tex_Messages","explore_category_friend",Action::SettingsPage,"messages"),
+            item("block",friendText("msg_ignore_list","Block List"),"item_tex_IgnoreList","explore_category_friend",Action::Information,friendText("msg_error_not_registered","No persons have been added."))}}
     };
     // Bind the current native settings projection to original XMBML resource
     // keys. Selector/plugin visibility and unmapped operations remain separate.

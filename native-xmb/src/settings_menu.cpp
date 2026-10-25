@@ -89,6 +89,14 @@ void Shell::openSettings(const QString& id) {
         page.entries={option("controller","Controller Settings","XInput D-pad, A and B control navigation when this window has focus.",{},Action::Information,
             "Controller Settings\n\nXInput controller 1\nD-pad: Navigate\nA: Enter\nB: Back\n\nKeyboard: Arrow keys, Enter, Backspace\nPage Up / Down: Move ten items"),
             option("bluetooth","Manage Bluetooth Devices","Native Bluetooth pairing is not implemented.",{},Action::Unavailable)};
+    } else if(id=="messages") { // Friends > Message Box (category_friend.xml)
+        const auto ft=[&](const QString& key,const QString& fallback){return assets_.text("explore_category_friend",key,fallback);};
+        const auto none=ft("msg_error_no_msg","There are no messages.");
+        page.title=ft("msg_msg_box","Message Box");
+        auto received=option("received",ft("msg_received_box","Received"),{},{},Action::Information,none);received.container="explore_category_friend";received.texture="item_tex_InBox";
+        auto sent=option("sent",ft("msg_sent_box","Sent"),{},{},Action::Information,none);sent.container="explore_category_friend";sent.texture="item_tex_OutBox";
+        auto create=option("create",ft("msg_new_msg","Create Message"),{},{},Action::Unavailable);create.container="explore_category_friend";create.texture="item_tex_NewMessage";
+        page.entries={received,sent,create};
     } else if(id=="chat" || id=="security" || id=="remote" || id=="print" || id=="network" || id=="game") {
         // Labels and explanations are the firmware's own (sysconf_plugin); the features behind them are not native yet.
         const auto info=[&](const QString& key,const QString& fallback){return option(key,tr("msg_"+key,fallback),tr("msg_"+key+"_explanation",{}),{},Action::Unavailable);};
