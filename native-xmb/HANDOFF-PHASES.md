@@ -126,6 +126,11 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 ### Phase 7: verification harness
 - Automated A/B: render named states with `--script` and compare them with frames extracted from the reference
   (PSNR/SSIM on crops). Add a threshold per layer so regressions are visible.
+- **Tooling landed (2026-10-25):** `--render-clock <seconds>` freezes the background/ribbon/particles/icon animation
+  time (so two scripted runs are bit-near identical, PSNR ~81 dB run-to-run), and `bun work/ab-compare.ts <ref.png>
+  <native.png> [crop x,y,w,h]` prints PSNR/SSIM (whole frame or a crop). First settled-root baseline against a live
+  RPCS3 capture at the matched day clock: whole frame **18.20 dB / 0.8388 SSIM**, category-icon row **20.13 dB /
+  0.9022**, top background **19.03 dB / 0.9248**. These are starting numbers, not thresholds yet.
 - A second reference: capture the same states from RPCS3 running the real XMB (same firmware) at 1080p. This is a
   pixel-exact target with no video compression.
 - Include a clip resting on one row for 8 s or more: it settles the breathing label glow and idle label fade, which
