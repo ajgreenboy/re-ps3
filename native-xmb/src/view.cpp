@@ -356,7 +356,7 @@ bool View::measureReference(const QString& path) {
         sheet.save(QFileInfo(path).dir().filePath("video-reference-motion.png"));
     }
     out<<"# ease-out: settle to 10% = time constant * ln(10)\n";
-    for(const auto& [name,tau]:std::initializer_list<std::pair<const char*,double>>{{"category",.120},{"item",.085},{"depth/entry",.110}})
+    for(const auto& [name,tau]:std::initializer_list<std::pair<const char*,double>>{{"category",easeTau},{"item",easeTau},{"depth/entry",easeTau},{"column cross-fade",easeTau}})
         out<<name<<": tau "<<int(tau*1000)<<" ms, settle "<<int(tau*std::log(10.)*1000)<<" ms ("<<QString::number(tau*std::log(10.)*60,'f',1)<<" frames at 60 fps)\n";
     if(originalReady_) {
         // Firmware background shader on its own: every month's palette at noon, then a raw input sweep of
@@ -407,13 +407,14 @@ bool View::measureReference(const QString& path) {
 void View::paintGL() {
     const qint64 now=clock_.elapsed();
     const double dt=std::min(.1,double(now-previous_)/1000.);previous_=now;
-    // Ease-out approach rates from the 60 fps reference (audit/VIDEO-REFERENCES.md): category moves
-    // settle in ~180-280 ms, item moves in ~150-250 ms. Exponential time constants in seconds.
-    const double categoryBlend=1.-std::exp(-dt/.120),itemBlend=1.-std::exp(-dt/.085),depthBlend=1.-std::exp(-dt/.110);
-    categoryPosition_+=(shell_.category()-categoryPosition_)*categoryBlend;
-    categoryFade_*=std::exp(-dt/.120);if(categoryFade_<.001){categoryFade_=0;outgoing_.clear();}
-    depthPosition_+=(shell_.depth()-depthPosition_)*depthBlend;
-    for(auto& column:columns_)column.position+=(column.selection-column.position)*itemBlend;
+    // One ease for every move, measured frame by frame on the 60 fps reference (audit/VIDEO-REFERENCES.md): category,
+    // item and page moves and the column cross-fade all close 25% of the remaining distance per frame, i.e. an
+    // exponential time constant of (1/60)/ln(4/3) = 58 ms, independent of the frame rate here.
+    const double blend=1.-std::exp(-dt/easeTau);
+    categoryPosition_+=(shell_.category()-categoryPosition_)*blend;
+    categoryFade_*=1.-blend;if(categoryFade_<.001){categoryFade_=0;outgoing_.clear();}
+    depthPosition_+=(shell_.depth()-depthPosition_)*blend;
+    for(auto& column:columns_)column.position+=(column.selection-column.position)*blend;
     if(std::abs(depthPosition_-shell_.depth())<.001) {
         depthPosition_=shell_.depth();
         if(columns_.size()>shell_.depth()+1)columns_.resize(shell_.depth()+1);
@@ -647,8 +648,10 @@ void View::drawScene(QPainter& p) {
         }
         };
         if(shell_.message().isEmpty()) { // behind a message dialog the item columns give way (reference 14.4 s)
-            if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*202,false);
-            drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*202,true);
+            // On a category move the item columns do not travel a whole icon step (202 px): the reference slides the old
+            // list ~150 px away while it fades and brings the new one in from ~150 px, crossing over each other.
+            if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*150,false);
+            drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*150,true);
         }
         if(!shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
         // Info bar (system_plugin tex_infobar: a translucent white band with a bright bottom edge) framing the clock in the

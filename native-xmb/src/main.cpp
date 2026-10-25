@@ -15,6 +15,7 @@
 #include <QPainter>
 #include <QImageReader>
 #include <QTimer>
+#include <QElapsedTimer>
 #include <QTextLayout>
 #include <QRawFont>
 #include <QGlyphRun>
@@ -190,6 +191,22 @@ int main(int argc,char** argv) {
             else if(token.startsWith("grab=")) {
                 const auto image=view->grabFramebuffer();
                 qInfo().noquote()<<"script: grab"<<token.mid(5)<<image.size()<<(image.save(token.mid(5))?"saved":"FAILED");
+            } else if(token.startsWith("burst=")) {
+                // 12 consecutive frames as fast as the window renders, kept in memory and saved afterwards as
+                // prefix_NN_<ms since the key>.png; "burst=prefix@LEFT" presses the key on the same tick.
+                const auto parts=token.mid(6).split('@');const QString prefix=parts[0];
+                auto started=std::make_shared<QElapsedTimer>();started->start();
+                if(parts.size()>1 && keys.contains(parts[1])){QKeyEvent event(QEvent::KeyPress,keys[parts[1]],Qt::NoModifier);QCoreApplication::sendEvent(view,&event);}
+                auto* burst=new QTimer(&app);burst->setTimerType(Qt::PreciseTimer);burst->setInterval(12);
+                auto frames=std::make_shared<QVector<QPair<qint64,QImage>>>();
+                QObject::connect(burst,&QTimer::timeout,&app,[view,burst,frames,prefix,started]{
+                    frames->push_back({started->elapsed(),view->grabFramebuffer()});
+                    if(frames->size()<12)return;
+                    burst->stop();burst->deleteLater();
+                    for(int i=0;i<frames->size();++i)
+                        (*frames)[i].second.save(prefix+QString("_%1_%2ms.png").arg(i,2,10,QChar(48)).arg((*frames)[i].first,4,10,QChar(48)));
+                });
+                burst->start();
             } else if(token.startsWith("type=")) {
                 for(const QChar c:token.mid(5)){QKeyEvent event(QEvent::KeyPress,0,Qt::NoModifier,QString(c));QCoreApplication::sendEvent(view,&event);}
             } else if(keys.contains(token)) {
