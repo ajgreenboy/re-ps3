@@ -1,4 +1,4 @@
-param([string]$QtRoot=$env:QTDIR)
+param([string]$QtRoot=$env:QTDIR,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 if(-not $QtRoot) {
@@ -13,7 +13,7 @@ if(-not $vs){throw 'Visual Studio C++ Build Tools are required.'}
 $vcvars=Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
 $cmake=Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 $ninja=Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
-$output=Join-Path $root 'out\native-xmb'
+$output=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}else{Join-Path $root 'out\native-xmb'}
 $configure='"'+$cmake+'" -S "'+$PSScriptRoot+'" -B "'+$output+'" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="'+$QtRoot+'" -DCMAKE_MAKE_PROGRAM="'+$ninja+'"'
 cmd /d /c ('call "'+$vcvars+'" >nul && '+$configure)
 if($LASTEXITCODE){throw 'Native CMake configuration failed.'}

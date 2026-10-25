@@ -220,12 +220,19 @@ int main(int argc,char** argv) {
         // --script "full,wait,LEFT,DOWN,grab=C:/tmp/a.png,quit". One token every 300 ms.
         auto tokens=std::make_shared<QStringList>(parser.value("script").split(','));
         auto* timer=new QTimer(&app);timer->setInterval(300);
-        QObject::connect(timer,&QTimer::timeout,&app,[&app,&window,view,tokens,timer]{
+        QObject::connect(timer,&QTimer::timeout,&app,[&app,&window,&shell,view,tokens,timer]{
             if(tokens->isEmpty()){timer->stop();return;}
             const QString token=tokens->takeFirst().trimmed();
             static const QHash<QString,int> keys{{"LEFT",Qt::Key_Left},{"RIGHT",Qt::Key_Right},{"UP",Qt::Key_Up},{"DOWN",Qt::Key_Down},
                 {"ENTER",Qt::Key_Return},{"ESC",Qt::Key_Escape},{"PGUP",Qt::Key_PageUp},{"PGDN",Qt::Key_PageDown},{"BACKSPACE",Qt::Key_Backspace}};
-            if(token=="full")window.showFullScreen();
+            if(token=="full")shell.setFullscreen(true);
+            else if(token.startsWith("size=")) {
+                const auto dimensions=token.mid(5).split('x');bool widthOk=false,heightOk=false;
+                const int w=dimensions.value(0).toInt(&widthOk),h=dimensions.value(1).toInt(&heightOk);
+                if(dimensions.size()==2 && widthOk && heightOk && w>=800 && h>=450 && w<=7680 && h<=4320) {
+                    shell.setFullscreen(false);window.showNormal();window.resize(w,h);
+                } else qWarning()<<"script: invalid size"<<token;
+            }
             else if(token=="quit")app.quit();
             else if(token.startsWith("grab=")) {
                 const auto image=view->grabFramebuffer();

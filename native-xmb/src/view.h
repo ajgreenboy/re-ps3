@@ -6,6 +6,7 @@
 #include "ribbon.h"
 #include "rsx_program.h"
 #include "shell.h"
+#include "text_renderer.h"
 #include <array>
 #include <functional>
 #include <QDateTime>
@@ -56,6 +57,7 @@ private:
     std::unique_ptr<QOpenGLFramebufferObject> uiMsaa_,uiResolved_;
     QOpenGLShaderProgram uiComposite_;
     QString uiSignature_; // what the layer currently shows; redrawn when it changes
+    TextRenderer textRenderer_;
     int uiRevision_=0;    // bumped on every shell change
     QImage wallpaperImage_,monthImage_;
     QString wallpaperPath_;
