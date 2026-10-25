@@ -1,28 +1,64 @@
 #include "ribbon.h"
+#include <algorithm>
 #include <cmath>
 #include <QDebug>
+#include <QFile>
 #include <QImage>
 #include <QMatrix4x4>
-#include <QVector3D>
+#include <QtEndian>
+#include <cstring>
 
 namespace xmb {
 namespace {
-// LINE1.mnu, override/day and override/night (qgl/lines.qrc). The ribbon's look comes from these.
 constexpr float thinness=0.f;       // shader value; the presets say THINNESS 1, which the plugin remaps (not traced): 0 = full stripe period
-constexpr float spacingDay=407.658f,spacingNight=408.298f;
-constexpr float brightnessDay=.701917f,brightnessNight=.9f;
-constexpr float fresnelDay=.638971f,fresnelNight=.52f;
-constexpr float mipmapBiasDay=1.86707f,mipmapBiasNight=1.75802f;
-constexpr float fovy=71.846f;                                        // BACKGROUND.mnu
 constexpr QVector3D colour3{.847347f,.846155f,.846448f},colour4{.92487f,.922603f,.922933f}; // BACKGROUND.mnu 3/4: line gradient
-constexpr float ffdScaleX=5.67726f;                                   // FFD SCALE1 X: field x (≈ -0.15..1.35) to lattice width
-// Fitted to the reference video (audit/VIDEO-REFERENCES.md, ribbon motion): the SPU lattice and camera are not ported.
-constexpr float timeScale=.12f;      // FFD _Time per second: the travelling wave sin(7.85a - 2.5t) brings a swell every ~21 s
-constexpr float latticeDepth=3.f;    // lattice plane distance (the plugin seeds its control grid at z = -3)
-constexpr float restY=.30f;          // view-space height of the field's zero line
-constexpr float fieldToY=-.60f;      // view-space height per field unit (negative: the swell pushes the crest down)
-constexpr float sheetRise=.12f,sheetDepth=1.6f; // the line sheet's extent across its width (height, depth)
-constexpr float normalScale=1.5f;    // line weight: lines1.vpo scales by |n| / |position|
+// Camera of the spline task's matrix (captured at 0x20401dc0 and decomposed): fovy 53, near .1, far 1000.
+constexpr float cameraFovy=53.f,cameraNear=.1f,cameraFar=1000.f;
+constexpr float particleFovy=71.846f; // particles.cpp projection, for the emitter hand-off
+constexpr float pi=3.14159265358979f;
+
+QHash<QString,float> readMnu(const QByteArray& text) {
+    QHash<QString,float> values;
+    for(const auto& raw:text.split('\n')) {
+        const auto parts=QString::fromLatin1(raw).trimmed().split(':');
+        if(parts.size()==3 && (parts[1]=="float" || parts[1]=="int"))values.insert(parts[0],parts[2].toFloat());
+    }
+    return values;
+}
+Ribbon::Preset readPreset(const QByteArray& text,Ribbon::Preset preset) {
+    const auto v=readMnu(text);
+    const auto get=[&](const char* name,float& out){if(v.contains(name))out=v.value(name);};
+    const auto get3=[&](const char* x,const char* y,const char* z,QVector3D& out){
+        if(v.contains(x) && v.contains(y) && v.contains(z))out=QVector3D(v.value(x),v.value(y),v.value(z));
+    };
+    get("DAMPING",preset.damping);get("LENGTH",preset.length);get("TENSION",preset.tension);get("TIMESTEP",preset.timestep);
+    get("PERTURBATION",preset.perturbation);get("END Y",preset.endY);get("END Z",preset.endZ);get("FFD PARAM 1",preset.ffdParam);
+    get3("FFD SCALE1 X","FFD SCALE1 Y","FFD SCALE1 Z",preset.scale1);get3("FFD SCALE2 X","FFD SCALE2 Y","FFD SCALE2 Z",preset.scale2);
+    get3("FFD OFFSET X","FFD OFFSET Y","FFD OFFSET Z",preset.offset);get3("POS X","POS Y","POS Z",preset.pos);get3("ANG X","ANG Y","ANG Z",preset.axis);
+    get("ANG ROT",preset.angle);get("SPACING",preset.spacing);get("BRIGHTNESS",preset.brightness);get("MIPMAP BIAS",preset.mipmapBias);get("FRESNEL",preset.fresnel);
+    return preset;
+}
+// Big-endian float table at a virtual address of a 64-bit PPU ELF (the decrypted plugin), or empty when out of range.
+std::vector<float> elfFloats(const QByteArray& elf,quint64 address,int count) {
+    if(elf.size()<0x40 || !elf.startsWith("\x7f" "ELF"))return {};
+    const auto u16=[&](qsizetype at){return qFromBigEndian<quint16>(elf.constData()+at);};
+    const auto u32=[&](qsizetype at){return qFromBigEndian<quint32>(elf.constData()+at);};
+    const auto u64=[&](qsizetype at){return qFromBigEndian<quint64>(elf.constData()+at);};
+    const quint64 phoff=u64(0x20);const int entry=u16(0x36),entries=u16(0x38);
+    for(int i=0;i<entries;++i) {
+        const qsizetype h=qsizetype(phoff)+qsizetype(i)*entry;
+        if(h+0x38>elf.size() || u32(h)!=1)continue;
+        const quint64 offset=u64(h+8),vaddr=u64(h+16),size=u64(h+32);
+        if(address<vaddr || address+quint64(count)*4>vaddr+size || offset+size>quint64(elf.size()))continue;
+        std::vector<float> out(static_cast<size_t>(count));
+        for(int k=0;k<count;++k){const quint32 bits=u32(qsizetype(offset+address-vaddr)+k*4);std::memcpy(&out[size_t(k)],&bits,4);}
+        return out;
+    }
+    return {};
+}
+// Uniform cubic B-spline basis and its derivative (spline.elf's matrix at LS 0xd5c0 and tables 0xd600/0xde00).
+std::array<float,4> basis(float t){return {(1-t)*(1-t)*(1-t)/6,(3*t*t*t-6*t*t+4)/6,(-3*t*t*t+3*t*t+3*t+1)/6,t*t*t/6};}
+std::array<float,4> basisDerivative(float t){return {-(1-t)*(1-t)/2,(3*t*t-4*t)/2,(-3*t*t+2*t+1)/2,t*t/2};}
 
 std::unique_ptr<QOpenGLTexture> floatTexture(int width,int height,const std::vector<float>& rgba,QOpenGLTexture::Filter filter) {
     auto texture=std::make_unique<QOpenGLTexture>(QOpenGLTexture::Target2D);
@@ -42,6 +78,72 @@ void main(){
     v_col0=v_col1=v_fog=vec4(0.);
     gl_Position=vec4(p*2.0-1.0,0.0,1.0);
 })";
+}
+
+Ribbon::Preset Ribbon::Preset::mix(const Preset& day,float t) const {
+    const auto m=[&](float a,float b){return a+(b-a)*t;};
+    Preset out;
+    out.damping=m(damping,day.damping);out.length=m(length,day.length);out.tension=m(tension,day.tension);out.timestep=m(timestep,day.timestep);
+    out.perturbation=m(perturbation,day.perturbation);out.endY=m(endY,day.endY);out.endZ=m(endZ,day.endZ);out.ffdParam=m(ffdParam,day.ffdParam);
+    out.scale1=scale1+(day.scale1-scale1)*t;out.scale2=scale2+(day.scale2-scale2)*t;out.offset=offset+(day.offset-offset)*t;
+    out.pos=pos+(day.pos-pos)*t;out.axis=axis+(day.axis-axis)*t;out.angle=m(angle,day.angle);
+    out.spacing=m(spacing,day.spacing);out.brightness=m(brightness,day.brightness);out.mipmapBias=m(mipmapBias,day.mipmapBias);out.fresnel=m(fresnel,day.fresnel);
+    return out;
+}
+
+// FUN_0004ab04: integer hash noise in (-1, 1], seeded by a counter (cloth +0x2d4) bumped before every call.
+float Ribbon::Cloth::random() {
+    ++seed;
+    quint32 n=quint32(seed<<13)^quint32(seed);
+    n=n*(n*n*15731u+789221u)+1376312589u;
+    return 1.f-float(n&0x7fffffffu)*9.313225746154785e-10f;
+}
+void Ribbon::Cloth::spring(int i,int j,float rest,float k) {
+    const QVector3D d=pos[size_t(j)].toVector3D()-pos[size_t(i)].toVector3D();
+    const float length=d.length();
+    if(length<=0)return;
+    const QVector4D force(d/length*((length-rest)*k),0);
+    vel[size_t(i)]+=force;vel[size_t(j)]-=force;
+}
+// FUN_0004bed0 + FUN_0004bce0: one fixed step. Spring impulses (structural to the left/upper neighbour, bending to
+// the second neighbour at 10x tension) and a random kick go straight into the velocities, then explicit Euler
+// with dt = TIMESTEP x 1e-4 and damping DAMPING x TIMESTEP. The last column is driven: x = 0, y and z follow
+// sin(11t) and cos(15t) with a per-row phase; every row's first point is pulled along +x.
+void Ribbon::Cloth::step(const Preset& p) {
+    prev=pos;
+    target+=p.timestep*1e-4f;
+    if(target>10)target=0;
+    const float k=p.tension,bend=p.tension*10;
+    for(int r=0;r<side_;++r)for(int c=0;c<side_;++c) {
+        const int i=r*side_+c;
+        if(c>=1)spring(i,i-1,p.length,k);
+        if(c>=2)spring(i,i-2,p.length*2,bend);
+        if(r>=1)spring(i,i-side_,p.length,k);
+        if(r>=2)spring(i,i-2*side_,p.length*2,bend);
+        const float x=random(),y=random(),z=random();
+        vel[size_t(i)]+=QVector4D(x,y,z,0)*p.perturbation;
+    }
+    const float dt=p.timestep*1e-4f,damping=p.damping*p.timestep;
+    for(int i=0;i<points_;++i){pos[size_t(i)]+=vel[size_t(i)]*dt;vel[size_t(i)]-=vel[size_t(i)]*damping;}
+    phase+=(target-phase)*.1f;
+    for(int r=0;r<side_;++r) {
+        const float t=float(r)/side_+phase;
+        vel[size_t(r*side_)]+=QVector4D(.02f*p.timestep,0,0,0);
+        const size_t end=size_t((r+1)*side_-1);
+        pos[end]=QVector4D(0,(std::sin(11*t)*.5f+.5f)*p.endY,(std::cos(15*t)+1)*.5f*p.endZ,1);
+        vel[end]=QVector4D();
+    }
+}
+
+// FUN_0004f814, after the steps: the drawn lattice is the previous and current states blended by the leftover step
+// fraction, its y and z scaled by 1.3 - cos(d pi/2) (1 - smoothstep(d/5)), d = x - FFD PARAM 1 (0.3 where d < 0).
+void Ribbon::Cloth::swell(const Preset& p) {
+    for(int i=0;i<points_;++i) {
+        const QVector4D l=prev[size_t(i)]*(1-acc)+pos[size_t(i)]*acc;
+        const float d=l.x()-p.ffdParam,s=std::clamp(d/5,0.f,1.f);
+        const float scale=1.3f-(d<0?1.f:std::cos(d*pi/2))*(1-s)*(1-s)*(1+2*s);
+        drawn[size_t(i)]=QVector4D(l.x(),l.y()*scale,l.z()*scale,1);
+    }
 }
 
 bool Ribbon::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
@@ -80,13 +182,32 @@ void main(){
     if(!composite_.addShaderFromSourceCode(QOpenGLShader::Vertex,fullscreenVertex) || !composite_.addShaderFromSourceCode(QOpenGLShader::Fragment,composite) || !composite_.link()) {
         qWarning().noquote()<<"ribbon: composite failed:"<<composite_.log();return false;
     }
-    // _UVW: the plugin renders the field into a 128x1 target, so every line of the sheet shares one curve; .z (the
-    // field's second coordinate) is the along coordinate too. Per-row values would twist the sheet into crossing strands.
-    std::vector<float> uvw(size_t(along_)*across_*4);
-    for(int j=0;j<across_;++j)for(int i=0;i<along_;++i) {
-        float* p=&uvw[(size_t(j)*along_+i)*4];p[0]=float(i)/(along_-1);p[1]=0;p[2]=p[0];p[3]=1;
+    // Presets: LINE1.mnu in override/night and override/day, blended by the caller's light.
+    const Preset defaults;
+    day_=readPreset(assets.qglFile("lines","override/day/LINE1.mnu"),defaults);
+    Preset nightDefaults=defaults;nightDefaults.spacing=408.298f;nightDefaults.brightness=.9f;nightDefaults.mipmapBias=1.75802f;
+    nightDefaults.fresnel=.52f;nightDefaults.perturbation=.1f;nightDefaults.angle=10;nightDefaults.scale2={3.2f,1.2f,3};nightDefaults.ffdParam=-1.83395f;
+    night_=readPreset(assets.qglFile("lines","override/night/LINE1.mnu"),nightDefaults);
+    // _UVW (FUN_000493c4): the 8x4x4 FFD node grid, (x/8, y/4, z/4, 0) at texel z*32 + y*8 + x; ffd_shader1 renders
+    // it into a 128x1 float target that the plugin reads back.
+    std::vector<float> uvw(128*4);
+    for(int z=0;z<4;++z)for(int y=0;y<4;++y)for(int x=0;x<8;++x){float* p=&uvw[size_t((z*32+y*8+x)*4)];p[0]=x*.125f;p[1]=y*.25f;p[2]=z*.25f;p[3]=0;}
+    uvw_=floatTexture(128,1,uvw,QOpenGLTexture::Nearest);
+    QOpenGLFramebufferObjectFormat fieldFormat;fieldFormat.setInternalTextureFormat(GL_RGBA32F);
+    field_=std::make_unique<QOpenGLFramebufferObject>(128,1,fieldFormat);
+    // The cloth's rest state: the plugin starts the boot ribbon from preset 1 (FUN_0004e624: positions at 0x97c18,
+    // velocities at 0x98d04, 361 x float3 each, read from the local decrypted plugin). Without it, the plugin's
+    // generic start (FUN_0004ec90: a flat 4x4 grid at z = -3) settled for a minute of simulated time.
+    const QByteArray plugin=assets.vshModule("custom_render_plugin.prx");
+    const auto rest=elfFloats(plugin,0x97c18,points_*3),restVelocity=elfFloats(plugin,0x98d04,points_*3);
+    const bool fromTables=rest.size()==size_t(points_*3) && restVelocity.size()==size_t(points_*3);
+    for(int i=0;i<points_;++i) {
+        const size_t k=size_t(i)*3;
+        cloth_.pos[size_t(i)]=fromTables?QVector4D(rest[k],rest[k+1],rest[k+2],1):QVector4D((float(i%side_)/(side_-1)-.5f)*4,(float(i/side_)/(side_-1)-.5f)*4,-3,1);
+        cloth_.vel[size_t(i)]=fromTables?QVector4D(restVelocity[k],restVelocity[k+1],restVelocity[k+2],0):QVector4D();
     }
-    uvw_=floatTexture(along_,across_,uvw,QOpenGLTexture::Nearest);
+    cloth_.prev=cloth_.pos;
+    if(!fromTables){const Preset settle=night_.mix(day_,1);for(int i=0;i<3600;++i)cloth_.step(settle);}
     // _Stripes (FUN_0004bad0): row k of 4, x in [-.5,.5]: min(1, pow(1.01 - 4x^2, 20 (k/3)^3) * (k/6 + .5)).
     constexpr int stripeWidth=512; // the plugin's width is a runtime global; 512 resolves the profile
     std::vector<float> stripes(size_t(stripeWidth)*4*4);
@@ -102,7 +223,7 @@ void main(){
     stripes_->allocateStorage();stripes_->setData(0,QOpenGLTexture::RGBA,QOpenGLTexture::Float32,stripes.data());
     stripes_->generateMipMaps();
     stripes_->setMinMagFilters(QOpenGLTexture::LinearMipMapLinear,QOpenGLTexture::Linear);
-    stripes_->setWrapMode(QOpenGLTexture::ClampToEdge);stripes_->setLevelofDetailBias(mipmapBiasDay);
+    stripes_->setWrapMode(QOpenGLTexture::ClampToEdge);stripes_->setLevelofDetailBias(day_.mipmapBias);
     // _Encode (FUN_0004b928) splits v*128 into fraction/4 and integer/64 so that LinesController can sum
     // RGBA8 additively (decode R/32 + G/2 = v). A float target needs no split: the identity ramp, capped at 1 as there.
     std::vector<float> encode(4096*4);
@@ -113,75 +234,139 @@ void main(){
     if(lut.isNull()){qWarning()<<"ribbon: freslut1.tga could not be decoded";return false;}
     fresLut_=std::make_unique<QOpenGLTexture>(lut); // RSX images are stored top row first
     fresLut_->setMinificationFilter(QOpenGLTexture::Linear);fresLut_->setMagnificationFilter(QOpenGLTexture::Linear);fresLut_->setWrapMode(QOpenGLTexture::ClampToEdge);
-    QOpenGLFramebufferObjectFormat fieldFormat;fieldFormat.setInternalTextureFormat(GL_RGBA32F);
-    field_=std::make_unique<QOpenGLFramebufferObject>(along_,across_,fieldFormat);
-    // Sheet: along_ x across_ vertices, attributes in_0 (position), in_8 (stripe coordinate, edge fade), in_9 (normal).
+    // Sheet: 128 x 128 vertices as spline.elf writes them (row r across the ribbon, column c along it), attributes
+    // in_0 (clip position), in_8 (r/127 and the edge fade, from local memory 0xc2bb4100) and in_9 (normal).
+    // The firmware draws 17-column triangle strips with restarts; a triangle list covers the same quads.
     std::vector<GLuint> indices;
-    for(int j=0;j+1<across_;++j)for(int i=0;i+1<along_;++i) {
-        const GLuint a=GLuint(j*along_+i),b=a+1,c=a+along_,d=c+1;
-        indices.insert(indices.end(),{a,b,c,b,d,c});
+    for(int r=0;r+1<grid_;++r)for(int c=0;c+1<grid_;++c) {
+        const GLuint a=GLuint(r*grid_+c),b=a+1,d=a+grid_,e=d+1;
+        indices.insert(indices.end(),{a,d,b,b,d,e});
     }
     indexCount_=GLsizei(indices.size());
+    vertices_.assign(size_t(grid_)*grid_*12,0.f);
+    for(int r=0;r<grid_;++r)for(int c=0;c<grid_;++c) {
+        // FUN_0004d190: min(1, (.5 - |.5 - s|) * 10) for both sheet coordinates, multiplied.
+        const float u=float(r)/(grid_-1),w=float(c)/(grid_-1);
+        float* v=&vertices_[(size_t(r)*grid_+c)*12];
+        v[4]=u;v[5]=std::min(1.f,(.5f-std::abs(.5f-w))*10.f)*std::min(1.f,(.5f-std::abs(.5f-u))*10.f);
+    }
     gl.glGenVertexArrays(1,&vao_);gl.glGenBuffers(1,&vbo_);gl.glGenBuffers(1,&ibo_);gl.glGenVertexArrays(1,&emptyVao_);
     gl.glBindVertexArray(vao_);
-    gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);gl.glBufferData(GL_ARRAY_BUFFER,GLsizeiptr(along_*across_*12*sizeof(float)),nullptr,GL_STREAM_DRAW);
+    gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);gl.glBufferData(GL_ARRAY_BUFFER,GLsizeiptr(vertices_.size()*sizeof(float)),nullptr,GL_STREAM_DRAW);
     gl.glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,ibo_);gl.glBufferData(GL_ELEMENT_ARRAY_BUFFER,GLsizeiptr(indices.size()*sizeof(GLuint)),indices.data(),GL_STATIC_DRAW);
     for(int location:{0,8,9}) {
         gl.glEnableVertexAttribArray(GLuint(location));
         gl.glVertexAttribPointer(GLuint(location),4,GL_FLOAT,GL_FALSE,12*sizeof(float),reinterpret_cast<void*>(size_t(location==0?0:location==8?4:8)*sizeof(float)));
     }
     gl.glBindVertexArray(0);
-    fieldPixels_.resize(size_t(along_)*across_*4);vertices_.resize(size_t(along_)*across_*12);
+    // Local verification: XMB_RIBBON_FFD_SWEEP=<file> writes the day deformation lattice for _Time 0..100 in 0.01
+    // steps (time, then 539 x xyz), to match against captured spline task inputs (work/spu/check-ffd-sweep.ts).
+    if(qEnvironmentVariableIsSet("XMB_RIBBON_FFD_SWEEP")) {
+        QFile out(qEnvironmentVariable("XMB_RIBBON_FFD_SWEEP"));
+        if(out.open(QIODevice::WriteOnly)) {
+            const float saved=cloth_.target;
+            for(int k=0;k<=10000;++k) {
+                cloth_.target=k*.001f;deformLattice(gl,day_);
+                QByteArray row=QByteArray::number(cloth_.target*10,'g',9);
+                for(const auto& d:deform_)row+=' '+QByteArray::number(d.x(),'g',9)+' '+QByteArray::number(d.y(),'g',9)+' '+QByteArray::number(d.z(),'g',9);
+                out.write(row+'\n');
+            }
+            cloth_.target=saved;
+        }
+    }
     ready_=true;
-    qInfo()<<"ribbon: ffd_shader1"<<ffdCg_.instructionCount<<"+ lines1"<<linesVertexCg_.instructionCount<<"/"<<linesFragmentCg_.instructionCount<<"instructions, FresLUT"<<lut.size();
+    qInfo()<<"ribbon: ffd_shader1"<<ffdCg_.instructionCount<<"+ lines1"<<linesVertexCg_.instructionCount<<"/"<<linesFragmentCg_.instructionCount
+           <<"instructions, FresLUT"<<lut.size()<<(fromTables?"cloth from plugin preset 1":"cloth from a settled flat grid (no --vsh-modules)");
     return true;
+}
+
+// FUN_0004a220 / FUN_00047b1c: ffd_shader1 over the node grid at _Time = 10 x the cloth's wave clock, read back,
+// scaled by FFD SCALE1 plus FFD OFFSET, and padded to 11x7x7 (index clamp(x-1,0,7), clamp(y-1,0,3), clamp(z-1,0,3)).
+void Ribbon::deformLattice(QOpenGLFunctions_3_3_Core& gl,const Preset& p) {
+    QVector<QVector4D> fc=ffdCg_.constants;
+    for(int slot:ffdCg_.parameters.value("_Time").constantSlots)if(slot<fc.size())fc[slot]=QVector4D(1,1,1,1)*(cloth_.target*10);
+    field_->bind();gl.glViewport(0,0,128,1);gl.glDisable(GL_BLEND);
+    ffd_.bind();ffd_.setUniformValueArray("fc",fc.constData(),fc.size());ffd_.setUniformValue("tex0",0);uvw_->bind(0);
+    gl.glBindVertexArray(emptyVao_);gl.glDrawArrays(GL_TRIANGLES,0,3);
+    gl.glReadPixels(0,0,128,1,GL_RGBA,GL_FLOAT,fieldPixels_.data());
+    uvw_->release(0);ffd_.release();
+    for(int z=0;z<7;++z)for(int y=0;y<7;++y)for(int x=0;x<11;++x) {
+        const int node=(std::clamp(z-1,0,3)*4+std::clamp(y-1,0,3))*8+std::clamp(x-1,0,7);
+        const float* f=&fieldPixels_[size_t(node)*4];
+        deform_[size_t(z*77+y*11+x)]=QVector4D(QVector3D(f[0],f[1],f[2])*p.scale1+p.offset,1);
+    }
+}
+
+// spline.elf: FFD of every cloth point (func_3c68), the camera (func_3bf0 with the matrix the plugin builds from
+// POS/ANG), then the uniform bicubic B-spline sheet (func_45c0): 16 x 16 patches of 8 x 8 samples at
+// t = k x 16/127, positions and normal = dP/dv x dP/du in clip space.
+void Ribbon::splineSheet(const Preset& p,float aspect) {
+    QMatrix4x4 rotation;rotation.rotate(p.angle,p.axis);
+    const float sy=1.f/std::tan(cameraFovy*pi/360),sx=sy/aspect;
+    const float za=(cameraFar+cameraNear)/(cameraNear-cameraFar),zb=2*cameraFar*cameraNear/(cameraNear-cameraFar);
+    const QVector3D eye=p.pos+QVector3D(0,0,-2);
+    for(int i=0;i<points_;++i) {
+        const QVector3D point=cloth_.lattice(i);
+        const QVector3D n=(point-p.offset)/p.scale1;
+        int cell[3];std::array<float,4> w[3];
+        for(int a=0;a<3;++a){const float s=std::clamp(n[a],0.f,.999f)*(a==0?8.f:4.f);cell[a]=int(s);w[a]=basis(s-float(cell[a]));}
+        QVector3D sum;
+        for(int a=0;a<4;++a)for(int b=0;b<4;++b)for(int c=0;c<4;++c)
+            sum+=deform_[size_t((cell[0]+a)+11*(cell[1]+b)+77*(cell[2]+c))].toVector3D()*(w[0][size_t(a)]*w[1][size_t(b)]*w[2][size_t(c)]);
+        const QVector3D view=rotation.map((n+sum)*p.scale2)+eye;
+        clipLattice_[size_t(i)]=QVector4D(view.x()*sx,view.y()*sy,view.z()*za+zb,-view.z());
+    }
+    std::array<int,grid_> segment{};std::array<std::array<float,4>,grid_> value{},slope{};
+    for(int k=0;k<grid_;++k){segment[size_t(k)]=k/8;const float t=float(k%8)*16/127.f;value[size_t(k)]=basis(t);slope[size_t(k)]=basisDerivative(t);}
+    for(int r=0;r<grid_;++r)for(int c=0;c<grid_;++c) {
+        QVector4D position,du,dv;
+        const auto &bv=value[size_t(r)],&dvw=slope[size_t(r)],&bu=value[size_t(c)],&duw=slope[size_t(c)];
+        for(int a=0;a<4;++a)for(int b=0;b<4;++b) {
+            const QVector4D& q=clipLattice_[size_t((segment[size_t(r)]+a)*side_+segment[size_t(c)]+b)];
+            position+=q*(bv[size_t(a)]*bu[size_t(b)]);du+=q*(bv[size_t(a)]*duw[size_t(b)]);dv+=q*(dvw[size_t(a)]*bu[size_t(b)]);
+        }
+        const QVector3D normal=QVector3D::crossProduct(dv.toVector3D(),du.toVector3D());
+        float* v=&vertices_[(size_t(r)*grid_+c)*12];
+        v[0]=position.x();v[1]=position.y();v[2]=position.z();v[3]=position.w();
+        v[8]=normal.x();v[9]=normal.y();v[10]=normal.z();v[11]=0;
+    }
 }
 
 void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo) {
     if(!ready_ || pixelWidth<=0 || pixelHeight<=0)return;
-    const auto mix=[&](float night,float day){return night+(day-night)*light;};
+    const Preset p=night_.mix(day_,light);
     gl.glDisable(GL_DEPTH_TEST);gl.glDisable(GL_SCISSOR_TEST);gl.glDisable(GL_CULL_FACE);
-    // 1. The wave field (firmware ffd_shader1) for every (along, across) sample, read back like the plugin does.
-    QVector<QVector4D> fc=ffdCg_.constants;
-    for(int slot:ffdCg_.parameters.value("_Time").constantSlots)if(slot<fc.size())fc[slot]=QVector4D(1,1,1,1)*float(seconds*timeScale);
-    field_->bind();gl.glViewport(0,0,along_,across_);gl.glDisable(GL_BLEND);
-    ffd_.bind();ffd_.setUniformValueArray("fc",fc.constData(),fc.size());ffd_.setUniformValue("tex0",0);uvw_->bind(0);
-    gl.glBindVertexArray(emptyVao_);gl.glDrawArrays(GL_TRIANGLES,0,3);
-    gl.glReadPixels(0,0,along_,across_,GL_RGBA,GL_FLOAT,fieldPixels_.data());
-    uvw_->release(0);ffd_.release();
-    // 2. The sheet in view space: x from the field's x across the lattice width, y from the field's height,
-    //    the across coordinate rising and receding so that the ~400 lines fan out in perspective.
+    // 1. The cloth (FUN_0004f814): 60 fixed steps per second, the drawn lattice interpolated between the last two.
+    const double dt=lastSeconds_<0?1.0/60:std::clamp(seconds-lastSeconds_,0.0,.25);
+    lastSeconds_=seconds;
+    cloth_.acc+=float(dt*60);
+    while(cloth_.acc>1){cloth_.step(p);cloth_.acc-=1;}
+    cloth_.swell(p);
+    // 2. The FFD lattice from ffd_shader1, 3. spline.elf's sheet.
+    deformLattice(gl,p);
     const float aspect=float(pixelWidth)/float(pixelHeight);
-    QMatrix4x4 projection;projection.perspective(fovy,aspect,.1f,100.f);
-    std::vector<QVector3D> positions(size_t(along_)*across_);
-    for(int j=0;j<across_;++j)for(int i=0;i<along_;++i) {
-        const float* f=&fieldPixels_[(size_t(j)*along_+i)*4];
-        const float c=float(j)/(across_-1)-.5f;
-        positions[size_t(j)*along_+i]=QVector3D((f[0]-.6f)*ffdScaleX,restY+fieldToY*f[1]+c*sheetRise,-latticeDepth-c*sheetDepth);
+    splineSheet(p,aspect);
+    // Centre line (row 64) for the particles and the crest measurement.
+    centreLine_.clear();
+    const float particleTan=std::tan(particleFovy*pi/360);
+    for(int c=0;c<grid_;++c) {
+        const float* v=&vertices_[(size_t(grid_/2)*grid_+c)*12];
+        if(v[3]<=0)continue;
+        // Same screen position and depth under the particle camera: view x = ndc.x * depth * tan(fovy/2) * aspect.
+        centreLine_.emplace_back(v[0]*particleTan*aspect,v[1]*particleTan,-v[3]);
     }
-    centreLine_.assign(positions.begin()+ptrdiff_t(across_/2)*along_,positions.begin()+ptrdiff_t(across_/2+1)*along_);
-    for(int j=0;j<across_;++j)for(int i=0;i<along_;++i) {
-        const auto at=[&](int x,int y){return positions[size_t(std::clamp(y,0,across_-1))*along_+std::clamp(x,0,along_-1)];};
-        const QVector3D p=at(i,j),normal=QVector3D::crossProduct(at(i+1,j)-at(i-1,j),at(i,j+1)-at(i,j-1)).normalized()*normalScale;
-        const QVector4D clip=projection*QVector4D(p,1);
-        const float a=float(i)/(along_-1),c=float(j)/(across_-1);
-        // Edge fade (FUN_0004d190): min(1, (.5 - |.5 - u|) * 10) along and across, multiplied.
-        const float fade=std::min(1.f,(.5f-std::abs(.5f-a))*10.f)*std::min(1.f,(.5f-std::abs(.5f-c))*10.f);
-        float* v=&vertices_[(size_t(j)*along_+i)*12];
-        v[0]=clip.x();v[1]=clip.y();v[2]=clip.z();v[3]=clip.w();
-        v[4]=c;v[5]=fade;v[6]=0;v[7]=0;
-        v[8]=normal.x();v[9]=normal.y();v[10]=normal.z();v[11]=0;
-    }
-    for(int k=0;k<int(crest_.size());++k) { // centre line of the sheet, screen x -> fraction from the top
+    std::sort(centreLine_.begin(),centreLine_.end(),[](const QVector3D& a,const QVector3D& b){return a.x()/-a.z()<b.x()/-b.z();});
+    for(int k=0;k<int(crest_.size());++k) { // centre line, screen x -> fraction from the top
         const float sx=float(k)/(crest_.size()-1);float best=-1,bestDistance=1e9f;
-        for(int i=0;i<along_;++i) {
-            const float* v=&vertices_[(size_t(across_/2)*along_+i)*12];
+        for(int c=0;c<grid_;++c) {
+            const float* v=&vertices_[(size_t(grid_/2)*grid_+c)*12];
+            if(v[3]<=0)continue;
             const float x=(v[0]/v[3]+1)*.5f,distance=std::abs(x-sx);
             if(distance<bestDistance){bestDistance=distance;best=(1-v[1]/v[3])*.5f;}
         }
-        crest_[k]=best;
+        crest_[size_t(k)]=best;
     }
-    // 3. lines1 into a float sum, additively (the firmware sums RGBA8 through _Encode).
+    // 4. lines1 into a float sum, additively (the firmware sums RGBA8 through _Encode).
     if(!sum_ || sum_->size()!=QSize(pixelWidth,pixelHeight)) {
         QOpenGLFramebufferObjectFormat format;format.setInternalTextureFormat(GL_RGBA16F);
         sum_=std::make_unique<QOpenGLFramebufferObject>(pixelWidth,pixelHeight,format);
@@ -189,23 +374,24 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,float light,int
     sum_->bind();gl.glViewport(0,0,pixelWidth,pixelHeight);gl.glClearColor(0,0,0,0);gl.glClear(GL_COLOR_BUFFER_BIT);
     gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_ONE,GL_ONE);
     std::vector<QVector4D> vc(468);
-    for(const auto& p:linesVertexCg_.parameters)if(p.resourceIndex>=0 && p.resourceIndex<468 && !p.defaults.isEmpty())
-        vc[p.resourceIndex]=QVector4D(p.defaults.value(0),p.defaults.value(1),p.defaults.value(2),p.defaults.value(3));
-    const auto setVc=[&](const char* name,float value){const auto it=linesVertexCg_.parameters.constFind(name);if(it!=linesVertexCg_.parameters.cend() && it->resourceIndex>=0 && it->resourceIndex<468)vc[it->resourceIndex]=QVector4D(value,value,value,value);};
-    setVc("_Fresnel",mix(fresnelNight,fresnelDay));setVc("_Brightness",mix(brightnessNight,brightnessDay));setVc("_MipmapBias",mix(mipmapBiasNight,mipmapBiasDay));
+    for(const auto& param:linesVertexCg_.parameters)if(param.resourceIndex>=0 && param.resourceIndex<468 && !param.defaults.isEmpty())
+        vc[size_t(param.resourceIndex)]=QVector4D(param.defaults.value(0),param.defaults.value(1),param.defaults.value(2),param.defaults.value(3));
+    const auto setVc=[&](const char* name,float value){const auto it=linesVertexCg_.parameters.constFind(name);if(it!=linesVertexCg_.parameters.cend() && it->resourceIndex>=0 && it->resourceIndex<468)vc[size_t(it->resourceIndex)]=QVector4D(value,value,value,value);};
+    setVc("_Fresnel",p.fresnel);setVc("_Brightness",p.brightness);setVc("_MipmapBias",p.mipmapBias);
     QVector<QVector4D> lfc=linesFragmentCg_.constants;
     const auto setFc=[&](const char* name,float value){for(int slot:linesFragmentCg_.parameters.value(name).constantSlots)if(slot<lfc.size())lfc[slot]=QVector4D(value,value,value,value);};
-    setFc("_Spacing",mix(spacingNight,spacingDay));setFc("_Thinness",thinness);
+    setFc("_Spacing",p.spacing);setFc("_Thinness",thinness);
     lines_.bind();
     lines_.setUniformValueArray("vc",vc.data(),int(vc.size()));lines_.setUniformValueArray("fc",lfc.constData(),lfc.size());
     lines_.setUniformValue("tex0",0);lines_.setUniformValue("tex1",1);lines_.setUniformValue("tex2",2);
+    stripes_->setLevelofDetailBias(p.mipmapBias);
     stripes_->bind(0);fresLut_->bind(1);encode_->bind(2);
     gl.glBindVertexArray(vao_);gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);
     gl.glBufferSubData(GL_ARRAY_BUFFER,0,GLsizeiptr(vertices_.size()*sizeof(float)),vertices_.data());
     gl.glDrawElements(GL_TRIANGLES,indexCount_,GL_UNSIGNED_INT,nullptr);
     gl.glBindVertexArray(0);
     encode_->release(2);fresLut_->release(1);stripes_->release(0);lines_.release();
-    // 4. Composite onto the target (LinesController: background + lines x gradient).
+    // 5. Composite onto the target (LinesController: background + lines x gradient).
     gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.glViewport(0,0,pixelWidth,pixelHeight);
     composite_.bind();composite_.setUniformValue("sum",0);composite_.setUniformValue("colour3",colour3);composite_.setUniformValue("colour4",colour4);
     gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,sum_->texture());

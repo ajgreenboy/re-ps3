@@ -26,6 +26,10 @@ public:
     // dev_hdd0 next to dev_flash unless overridden (installed games and apps).
     QString hddRoot() const { return hddRoot_.isEmpty()?QDir(root_).absoluteFilePath("../dev_hdd0"):hddRoot_; }
     void setHddRoot(const QString& path) { hddRoot_=path; }
+    // Directory of locally decrypted VSH modules (*.prx); dev_flash itself holds them encrypted (*.sprx).
+    void setModulesRoot(const QString& path) { modulesRoot_=path; }
+    // A decrypted module's bytes, or empty when no modules directory is set or the file is missing.
+    QByteArray vshModule(const QString& name) const;
     int decodedImages() const { return decodedImages_; }
     int failedImages() const { return int(images_.size())-decodedImages_; }
     // Uncompressed or RLE true-colour/grey TGA (qgl/lines LUTs and particle textures), top row first; null on error.
@@ -36,7 +40,7 @@ public:
     QHash<QString,QString> allText(const QString& container) const { return readEnglish(readContainer(container)); }
 private:
     struct Container { QByteArray file, tables; quint32 labels=0, imageData=0; QHash<QString,quint32> entries; };
-    QString root_, font_, hddRoot_;
+    QString root_, font_, hddRoot_, modulesRoot_;
     QStringList fonts_;
     QHash<QString,Container> containers_;
     // Node-based so the references image() hands out stay valid while later lookups insert (QHash may move values).

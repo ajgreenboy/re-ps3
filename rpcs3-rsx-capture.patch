@@ -1,5 +1,5 @@
 diff --git a/rpcs3/Emu/Cell/SPUThread.cpp b/rpcs3/Emu/Cell/SPUThread.cpp
-index c226534a0..b330551d3 100644
+index c226534a0..9e965dcd4 100644
 --- a/rpcs3/Emu/Cell/SPUThread.cpp
 +++ b/rpcs3/Emu/Cell/SPUThread.cpp
 @@ -2128,6 +2128,69 @@ void spu_thread::do_dma_transfer(spu_thread* _this, const spu_mfc_cmd& args, u8*
@@ -72,7 +72,43 @@ index c226534a0..b330551d3 100644
  	u32 eal = args.eal;
  	u32 lsa = args.lsa & 0x3ffff;
  
-@@ -3485,6 +3548,25 @@ bool spu_thread::do_list_transfer(spu_mfc_cmd& args)
+@@ -2958,6 +3021,35 @@ bool spu_thread::do_list_transfer(spu_mfc_cmd& args)
+ 	u32 arg_lsa = args.lsa & 0x3fff0;
+ 	u32 arg_size = args.size;
+ 
++	// XMB reference capture (local change): XMB_SPU_WATCH also covers list puts. The first 8 lists with an element in
++	// the watched range save the whole LS (ls_list_N.bin) and their elements (list_N.txt).
++	if (static const char* const dir = std::getenv("XMB_SPU_DUMP"); dir && !(args.cmd & MFC_GET_CMD))
++	{
++		static const auto watch = []() -> std::pair<u32, u32>
++		{
++			const char* spec = std::getenv("XMB_SPU_WATCH");
++			if (!spec) return {0, 0};
++			u32 ea = 0, size = 0;
++			std::sscanf(spec, "%x:%x", &ea, &size);
++			return {ea, size};
++		}();
++		static atomic_t<u32> lists = 0;
++		bool hit = false;
++		for (u32 i = 0; i < args.size / 8; ++i)
++			if (const u32 ea = item_ptr[i].ea; watch.second && ea < watch.first + watch.second && ea + item_ptr[i].ts > watch.first) hit = true;
++		if (hit && lists < 8)
++		{
++			const u32 n = lists++;
++			if (FILE* f = std::fopen(fmt::format("%s/ls_list_%u.bin", dir, n).c_str(), "wb")) { std::fwrite(ls, 1, SPU_LS_SIZE, f); std::fclose(f); }
++			if (FILE* f = std::fopen(fmt::format("%s/list_%u.txt", dir, n).c_str(), "w"))
++			{
++				std::fprintf(f, "cmd 0x%02x lsa 0x%05x list 0x%05x size %u pc 0x%05x\n", u32{args.cmd}, arg_lsa, args.eal & 0x3fff8, args.size, pc);
++				for (u32 i = 0; i < args.size / 8; ++i) std::fprintf(f, "ea 0x%08x size %u\n", u32{item_ptr[i].ea}, u32{item_ptr[i].ts});
++				std::fclose(f);
++			}
++		}
++	}
++
+ 	u8 optimization_compatible = transfer.cmd & (MFC_GET_CMD | MFC_PUT_CMD);
+ 
+ 	if (spu_log.trace || g_cfg.core.spu_accurate_dma || g_cfg.core.mfc_debug)
+@@ -3485,6 +3577,25 @@ bool spu_thread::do_list_transfer(spu_mfc_cmd& args)
  	return true;
  }
  
@@ -98,7 +134,7 @@ index c226534a0..b330551d3 100644
  bool spu_thread::do_putllc(const spu_mfc_cmd& args)
  {
  	perf_meter<"PUTLLC-"_u64> perf0;
-@@ -3492,6 +3574,7 @@ bool spu_thread::do_putllc(const spu_mfc_cmd& args)
+@@ -3492,6 +3603,7 @@ bool spu_thread::do_putllc(const spu_mfc_cmd& args)
  
  	// Store conditionally
  	const u32 addr = args.eal & -128;
@@ -106,7 +142,7 @@ index c226534a0..b330551d3 100644
  
  	if ([&]()
  	{
-@@ -3817,6 +3900,7 @@ void spu_thread::do_putlluc(const spu_mfc_cmd& args)
+@@ -3817,6 +3929,7 @@ void spu_thread::do_putlluc(const spu_mfc_cmd& args)
  	perf_meter<"PUTLLUC"_u64> perf0;
  
  	const u32 addr = args.eal & -128;
@@ -115,7 +151,7 @@ index c226534a0..b330551d3 100644
  	if (raddr && addr == raddr && g_cfg.core.spu_accurate_reservations)
  	{
 diff --git a/rpcs3/Emu/RSX/RSXThread.cpp b/rpcs3/Emu/RSX/RSXThread.cpp
-index 541da72ee..24d837eaa 100644
+index 541da72ee..80ca78939 100644
 --- a/rpcs3/Emu/RSX/RSXThread.cpp
 +++ b/rpcs3/Emu/RSX/RSXThread.cpp
 @@ -2,6 +2,7 @@
@@ -126,7 +162,7 @@ index 541da72ee..24d837eaa 100644
  #include "Common/surface_store.h"
  #include "Core/RSXReservationLock.hpp"
  #include "Core/RSXEngLock.hpp"
-@@ -975,6 +976,101 @@ namespace rsx
+@@ -975,6 +976,107 @@ namespace rsx
  			capture::capture_draw_memory(this);
  		}
  
@@ -204,6 +240,12 @@ index 541da72ee..24d837eaa 100644
 +				if (info) std::fclose(info);
 +				// XMB_VTX_DUMP_LOCAL: with the first dumped draw, also save RSX local memory (256 MB) to find where the
 +				// vertex data was produced.
++				// XMB_VTX_INPUTS: also save the spline task's inputs as they are in main memory at this draw (lattice
++				// 0x20401f00 5776, matrix 0x20401dc0 64, auxiliary 0x20417680 8704) to pair them with the vertex buffer.
++				if (std::getenv("XMB_VTX_INPUTS"))
++					for (const auto& [ext, ea, size] : {std::tuple{"lat", 0x20401f00u, 5776u}, std::tuple{"mat", 0x20401dc0u, 64u}, std::tuple{"aux", 0x20417680u, 8704u}})
++						if (vm::check_addr(ea, vm::page_readable, size))
++							if (FILE* f = std::fopen(fmt::format("%s.%s", base, ext).c_str(), "wb")) { std::fwrite(vm::_ptr<u8>(ea), 1, size, f); std::fclose(f); }
 +				// XMB_VTX_PROTECT=<ea hex>:<size hex>: after the first dumped draw, make that range read-only so whatever
 +				// writes it next faults and RPCS3's access-violation report names the writer (thread and PC).
 +				if (dumped == 1)
@@ -228,7 +270,7 @@ index 541da72ee..24d837eaa 100644
  		in_begin_end = false;
  		m_frame_stats.draw_calls++;
  
-@@ -2397,6 +2493,49 @@ namespace rsx
+@@ -2397,6 +2499,49 @@ namespace rsx
  
  	void thread::get_current_fragment_program(const std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::fragment_textures_count>& sampler_descriptors)
  	{
