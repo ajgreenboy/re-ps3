@@ -10,7 +10,7 @@ Local inventory (`out/native-reference/qrc-inventory.txt`, not committed) lists 
 | Layer | Firmware source | Native status |
 |---|---|---|
 | Background gradient | `lines.qrc` moyou/background, back_colours0 + month_bg textures, BACKGROUND.mnu; custom_render_plugin clock mapping | **Ported**: firmware Cg translated RSX→GLSL, inputs traced |
-| Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; cloth in custom_render_plugin; geometry from the SPU spurs/moyou/spline/spline.elf | **Ported** (`ribbon.cpp`): PPU cloth, ffd_shader1 deformation lattice, spline.elf FFD + camera + bicubic sheet, each stage checked against RPCS3 captures (see "Ribbon port"); boot preset transitions not yet |
+| Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; cloth in custom_render_plugin; geometry from the SPU spurs/moyou/spline/spline.elf | **Ported** (`ribbon.cpp`): PPU cloth, ffd_shader1 deformation lattice, spline.elf FFD + camera + bicubic sheet, each stage checked against RPCS3 captures (see "Ribbon port"); LINE1 presets follow the plugin's clock keyframes and boot schedule (see "Ribbon presets") |
 | Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Partial**: shaders firmware; CPU simulation reconstructs the SPU job |
 | HDR tone map + glare | `lines.qrc` glutils ToneMap, GlareSource*, Gaussian, AccGlare, ApplyGlare, HDR.mnu | **Ported** |
 | Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n–70n normal maps + dif | **Ported** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo, the variant the firmware runs at 1080p; uniforms from ICONS.mnu by the packing read from an RPCS3 capture; matches RPCS3's frame side by side |
@@ -117,8 +117,39 @@ The native app reads the rest tables from a local decrypted plugin (`--vsh-modul
 one, it settles the plugin's generic flat start (FUN_0004ec90) for a minute of simulated time. The vertex texcoords
 (in_8, from local memory 0xc2bb4100) are (row/127, edge fade), the fade being FUN_0004d190's.
 
-Open: the boot and transition presets (coldboot1/2, gameboot, welcome) and their blend timing. The steady state
-blends the day and night overrides by the clock.
+## Ribbon presets and boot transition (2026-10-25)
+
+The plugin registers every override set (FUN_000388b8) and blends to one with FUN_00039728(duration, layer,
+"override/<name>"). That call snapshots the current values and sets the target; the blending itself runs in the
+imported `qgl_base` animation player (qglbase.prx; the import stubs are resolved by `work/spu/prx-imports.ts`). The
+preset clock (+0xa20) advances by the same frame delta as the cloth (FUN_0003a06c, dt from import FUN_000865e0).
+
+**Clock keyframes (FUN_00011600, table at 0x9c98c).** Fraction of the day, preset:
+0 night, 1/24 night, 5/24 yoake, 7/24 yoake, 11/24 day, 13/24 day, 17/24 higure, 19/24 higure, 23/24 night,
+1 night. The blend between neighbours is linear, so the presets hold for two hours around 06:00, 12:00 and 18:00 and
+cross-fade over four hours in between.
+
+**Boot (plugin 0x11100, outside Ghidra's function list):**
+- coldboot1 with duration 0 (DAT_00091e24);
+- coldboot2 over 3 s (DAT_00091e1c);
+- the clock preset via FUN_00010900 with 7.5 s (DAT_00091e20).
+
+The curves were measured from the RPCS3 cold-boot capture (`lslist1`). The task data block carries FFD SCALE2 every
+frame, and the cloth's wave clock (fitted from the FFD lattice) shows exactly one cloth step per task run, so the
+samples are 1/60 s apart in the plugin's time:
+- frames 0 to 229 (3.82 s): value += (coldboot2 - value) x 0.01 per frame, exactly (1 - p = 0.99^n);
+- frames 229 to 397 (2.8 s): from the values reached to the clock preset, p = 1.4e-5 n^2 up to n = 112, then
+  steeper and flat at p = 1 by n = 168.
+
+The capture settles exactly on yoake's SCALE2 (3.2, 1.27473, 2.88939). It was taken at 05:42, inside the yoake
+hold, which confirms the keyframe table. `work/spu/check-presets.ts` replays ribbon.cpp's schedule against every
+frame: stage 1 is within 1e-4, and the worst error is 2.2e-3 at the stage-2 knee (0.6% of the range). The measured
+durations (3.82 s, 2.8 s) differ from the call arguments (3 s, 7.5 s). How qgl_base's player maps one to the other
+is not traced.
+
+gameboot1-5 run when a game launches (pages page_gameboot / anim_gameboot, 0xe950..0xf71c), and welcome_1/2 and
+music_1 run during first-time setup and music playback. The native app has none of those flows, so they are not
+scheduled.
 
 ## Category icon renderer (ported 2026-10-25)
 

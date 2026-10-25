@@ -195,7 +195,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         const BackgroundTime time=backgroundTime(when);
         presetBlend=float(std::clamp((time.nightDayBlend-(1.-kNightBlend))/kNightBlend,0.,1.));
         renderOriginalBackground(time,pixelWidth,pixelHeight);
-        if(originalRibbon)ribbon_.render(*this,seconds,presetBlend,pixelWidth,pixelHeight,scene);
+        if(originalRibbon)ribbon_.render(*this,seconds,when.time().msecsSinceStartOfDay()/86400000.,pixelWidth,pixelHeight,scene);
         if(originalParticles) {
             particles_.update(seconds,ribbon_.centreLine());
             particles_.render(*this,presetBlend,pixelWidth,pixelHeight);

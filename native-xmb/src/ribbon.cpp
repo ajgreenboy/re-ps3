@@ -182,12 +182,17 @@ void main(){
     if(!composite_.addShaderFromSourceCode(QOpenGLShader::Vertex,fullscreenVertex) || !composite_.addShaderFromSourceCode(QOpenGLShader::Fragment,composite) || !composite_.link()) {
         qWarning().noquote()<<"ribbon: composite failed:"<<composite_.log();return false;
     }
-    // Presets: LINE1.mnu in override/night and override/day, blended by the caller's light.
+    // Presets: LINE1.mnu of the overrides the plugin schedules (boot, then the clock keyframes). A missing file keeps
+    // the day values, or night's for night.
     const Preset defaults;
-    day_=readPreset(assets.qglFile("lines","override/day/LINE1.mnu"),defaults);
+    const auto preset=[&](const char* name,const Preset& fallback){return readPreset(assets.qglFile("lines",QString("override/%1/LINE1.mnu").arg(name)),fallback);};
+    day_=preset("day",defaults);
     Preset nightDefaults=defaults;nightDefaults.spacing=408.298f;nightDefaults.brightness=.9f;nightDefaults.mipmapBias=1.75802f;
     nightDefaults.fresnel=.52f;nightDefaults.perturbation=.1f;nightDefaults.angle=10;nightDefaults.scale2={3.2f,1.2f,3};nightDefaults.ffdParam=-1.83395f;
-    night_=readPreset(assets.qglFile("lines","override/night/LINE1.mnu"),nightDefaults);
+    night_=preset("night",nightDefaults);
+    yoake_=preset("yoake",day_);higure_=preset("higure",night_);
+    coldboot1_=preset("coldboot1",day_);coldboot2_=preset("coldboot2",day_);
+    current_=coldboot1_;
     // _UVW (FUN_000493c4): the 8x4x4 FFD node grid, (x/8, y/4, z/4, 0) at texel z*32 + y*8 + x; ffd_shader1 renders
     // it into a 128x1 float target that the plugin reads back.
     std::vector<float> uvw(128*4);
@@ -207,7 +212,7 @@ void main(){
         cloth_.vel[size_t(i)]=fromTables?QVector4D(restVelocity[k],restVelocity[k+1],restVelocity[k+2],0):QVector4D();
     }
     cloth_.prev=cloth_.pos;
-    if(!fromTables){const Preset settle=night_.mix(day_,1);for(int i=0;i<3600;++i)cloth_.step(settle);}
+    if(!fromTables)for(int i=0;i<3600;++i)cloth_.step(day_);
     // _Stripes (FUN_0004bad0): row k of 4, x in [-.5,.5]: min(1, pow(1.01 - 4x^2, 20 (k/3)^3) * (k/6 + .5)).
     constexpr int stripeWidth=512; // the plugin's width is a runtime global; 512 resolves the profile
     std::vector<float> stripes(size_t(stripeWidth)*4*4);
@@ -332,13 +337,53 @@ void Ribbon::splineSheet(const Preset& p,float aspect) {
     }
 }
 
-void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo) {
+// FUN_00011600: the clock keyframes at 0x9c98c, (fraction of the day, preset), blended linearly between neighbours:
+// night to 01:00, to yoake by 05:00, held to 07:00, to day by 11:00, held to 13:00, to higure by 17:00, held to
+// 19:00, to night by 23:00.
+Ribbon::Preset Ribbon::clockPreset(double dayFraction) const {
+    const struct { double at; const Preset* preset; } keys[]={{0,&night_},{1/24.,&night_},{5/24.,&yoake_},{7/24.,&yoake_},
+        {11/24.,&day_},{13/24.,&day_},{17/24.,&higure_},{19/24.,&higure_},{23/24.,&night_},{1,&night_}};
+    const double t=std::clamp(dayFraction,0.0,1.0);
+    for(size_t i=1;i<std::size(keys);++i)
+        if(t<keys[i].at)return keys[i-1].preset->mix(*keys[i].preset,float((t-keys[i-1].at)/(keys[i].at-keys[i-1].at)));
+    return night_;
+}
+
+// The boot schedule (plugin 0x11100): coldboot1 at once, coldboot2 over 3 s, then the clock preset over 7.5 s. The
+// blending runs in qgl_base's animation player; its curve here is measured from an RPCS3 cold boot (the spline task's
+// FFD SCALE2, one sample per cloth step, audit/PIPELINE.md "Ribbon presets"):
+//   coldboot1 -> coldboot2   value += (target - value) x 0.01 per 1/60 s, for 229 steps (3.82 s)
+//   -> clock preset          from the values reached: 1.4e-5 n^2 for n <= 112 steps, then a cubic Hermite to 1 at
+//                            n = 168 (2.8 s) with zero end slope
+// after which the LINE1 values follow the clock keyframes.
+void Ribbon::advancePresets(double dt,double dayFraction) {
+    constexpr double firstStage=229/60.,secondStage=168/60.;
+    bootSeconds_+=dt;
+    if(bootSeconds_<firstStage) {
+        current_=current_.mix(coldboot2_,float(1-std::pow(.99,dt*60)));
+        return;
+    }
+    const Preset clock=clockPreset(dayFraction);
+    if(!snapshotTaken_){bootSnapshot_=current_;snapshotTaken_=true;}
+    const double n=(bootSeconds_-firstStage)*60;
+    if(n>=secondStage*60){current_=clock;return;}
+    constexpr double knee=112,a=1.4e-5,kneeValue=a*knee*knee,kneeSlope=2*a*knee,span=168-knee;
+    double p=a*n*n;
+    if(n>knee) {
+        const double s=(n-knee)/span,s2=s*s,s3=s2*s;
+        p=(2*s3-3*s2+1)*kneeValue+(s3-2*s2+s)*span*kneeSlope+(-2*s3+3*s2);
+    }
+    current_=bootSnapshot_.mix(clock,float(p));
+}
+
+void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFraction,int pixelWidth,int pixelHeight,GLuint targetFbo) {
     if(!ready_ || pixelWidth<=0 || pixelHeight<=0)return;
-    const Preset p=night_.mix(day_,light);
     gl.glDisable(GL_DEPTH_TEST);gl.glDisable(GL_SCISSOR_TEST);gl.glDisable(GL_CULL_FACE);
     // 1. The cloth (FUN_0004f814): 60 fixed steps per second, the drawn lattice interpolated between the last two.
     const double dt=lastSeconds_<0?1.0/60:std::clamp(seconds-lastSeconds_,0.0,.25);
     lastSeconds_=seconds;
+    advancePresets(dt,dayFraction);
+    const Preset p=current_;
     cloth_.acc+=float(dt*60);
     while(cloth_.acc>1){cloth_.step(p);cloth_.acc-=1;}
     cloth_.swell(p);
