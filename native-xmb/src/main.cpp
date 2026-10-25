@@ -22,6 +22,10 @@
 #include <QGlyphRun>
 
 int main(int argc,char** argv) {
+    // The Windows build has no console: XMB_LOG=<file> appends every Qt message to that file (local diagnosis).
+    if(qEnvironmentVariableIsSet("XMB_LOG"))qInstallMessageHandler([](QtMsgType,const QMessageLogContext&,const QString& message){
+        QFile file(qEnvironmentVariable("XMB_LOG"));if(file.open(QIODevice::Append|QIODevice::Text))file.write((message+'\n').toUtf8());
+    });
     QSurfaceFormat format;format.setVersion(3,3);format.setProfile(QSurfaceFormat::CoreProfile);format.setSwapInterval(1);format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);app.setApplicationName("re-ps3-native");app.setApplicationVersion("0.2.0");QImageReader::setAllocationLimit(128);
     QCommandLineParser parser;parser.setApplicationDescription("Native C++ XMB recreation");parser.addHelpOption();parser.addVersionOption();

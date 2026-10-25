@@ -2,6 +2,7 @@
 #include "assets.h"
 #include "hdr.h"
 #include "particles.h"
+#include "icons.h"
 #include "ribbon.h"
 #include "rsx_program.h"
 #include "shell.h"
@@ -84,6 +85,10 @@ private:
     Particles particles_;
     bool forceOriginal_=false;
     QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
+    IconRenderer icons_;
+    QVector<IconRenderer::Icon> iconQueue_; // category icons for the firmware renderer, rebuilt with the UI layer
+    float presetBlend_=1;
+    static constexpr double kColumnX=565; // focus column, 1080p px (firmware: camera 2700, eye x -5)
     void drawScene(QPainter& painter);
     // PS3 on-screen keyboard (reference frame 64 s): 10x4 character grid, two function rows, prediction panel.
     struct Osk { bool open=false,shift=false,symbols=false; QString title,text; int row=0,column=0,cursor=0; std::function<void(QString)> done; };

@@ -139,6 +139,7 @@ void main(){
     ribbon_.init(*this,assets_);
     hdr_.init(*this,assets_);
     static const char* compositeVertex=R"(#version 330 core
+    icons_.init(*this,assets_);
 out vec2 uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);})";
     static const char* compositeFragment=R"(#version 330 core
@@ -205,6 +206,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     if(monthTexture_)monthTexture_->release(0);
     glDisable(GL_BLEND);
     if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),originalParticles?std::function<void(int,int)>([&](int w,int h){particles_.render(*this,presetBlend,w,h,true);}):std::function<void(int,int)>());
+    presetBlend_=presetBlend;
 }
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
 // as a day fraction t in [0,1] and the month as a float in [0,12] (constants at 0x92e54..0x92e6c, preset hours / 24
@@ -459,6 +461,8 @@ void View::paintGL() {
     }
     // Composite (premultiplied alpha) over the background in the widget's framebuffer.
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
+    // Category icons: the firmware glass shader, refracting the finished background (each cut before its own draw).
+    if(glReady_ && icons_.ready())icons_.render(*this,iconQueue_,now/1000.,presetBlend_,device.width(),device.height(),defaultFramebufferObject());
     glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
     uiComposite_.bind();uiComposite_.setUniformValue("layer",0);
@@ -523,6 +527,7 @@ void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect)
 void View::drawScene(QPainter& p) {
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
     // A message whose body is "Key: value" rows (System Information, connection status, outputs) is a PS3 information
+    iconQueue_.clear();
     // page, not a dialog (reference 92 s): no categories or clock behind it, a titled header and a two-column table.
     const bool infoPage=[&]{
         const auto lines=shell_.message().split('\n');
@@ -566,17 +571,21 @@ void View::drawScene(QPainter& p) {
         const auto& categories=shell_.categories();
         const double childAmount=std::clamp(depthPosition_,0.,1.);
         for(int i=0;i<categories.size();++i) {
-            // Reference (nDL5YJt2aaA 7.4 s / 95 s, 1080p): focus column at x 585, icons 195-197 px apart; unfocused icons
-            // ~0.67 of the focused opacity and smaller. Inside a page the open category steps 250 px left; the ones to its
-            // right stay faintly (~0.1) on a 186 px pitch from x 545, and the ones to its left leave.
+            // Firmware geometry (RPCS3 capture at 1920x1080, audit/PIPELINE.md): focus column at x 565, icons 200 px apart
+            // with 10 px more either side of the focused one, centres y 290 (focused 280); quads 117 px, focused 167 px;
+            // shader brightness 0.698 unfocused, 1 focused. Inside a page (reference 95 s) the open category steps 250 px
+            // left; the ones to its right stay faintly (~0.1) on a 186 px pitch, and the ones to its left leave.
             if(infoPage)break;
             const auto& cat=categories[i];const double distance=i-categoryPosition_;
             const bool open=i==shell_.category();
-            const double x=open || distance<0?585+distance*197-childAmount*250:585+distance*197+(545+distance*186-(585+distance*197))*childAmount;
-            const double focus=std::max(0.,1.-std::abs(distance));const double size=76+focus*16;
-            const double level0=.67+.33*focus,opacity=open?1.:level0*(1.-childAmount)+(distance>0?.1*childAmount:0.);
-            p.save();p.setOpacity(opacity*(shell_.message().isEmpty()?1.:.18));
-            drawCategory(p,cat,{x-size/2,290-size/2,size,size});
+            const double level0X=kColumnX+distance*200+10*std::clamp(distance,-1.,1.);
+            const double x=open || distance<0?level0X-childAmount*250:level0X+(kColumnX-40+distance*186-level0X)*childAmount;
+            const double focus=std::max(0.,1.-std::abs(distance));
+            const double opacity=(open?1.:(1.-childAmount)+(distance>0?.1*childAmount:0.))*(shell_.message().isEmpty()?1.:.18);
+            p.save();p.setOpacity(opacity);
+            if(cat.container=="qgl/icontex" && icons_.ready())
+                iconQueue_.push_back({cat.texture,{x,290-10*focus},117.13+50.2*focus,.698+.302*focus,opacity});
+            else {const double size=76+focus*16;p.setOpacity(opacity*(.67+.33*focus));drawCategory(p,cat,{x-size/2,290-size/2,size,size});}
             if(i==shell_.category()){p.setOpacity((1.-childAmount)*(shell_.message().isEmpty()?1.:.18));text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
         }
@@ -633,7 +642,7 @@ void View::drawScene(QPainter& p) {
                 const double y=505+row;
                 if(y<-100 || y>1050)continue;
                 const double focus=std::max(0.,1.-std::abs(distance));
-                const double iconX=585-behind*(100+150*focus)+ahead*250+offset;
+                const double iconX=kColumnX-behind*(100+150*focus)+ahead*250+offset;
                 // Reference (RPCS3 4.x video): square icons ~60 px, ~105 px when focused; utility folders are icons too.
                 // Only media thumbnails (album art) keep a wide tile.
                 // Setting rows carry the small round settings bullet: 18 px, 39 px focused (reference 95 s).
@@ -644,8 +653,8 @@ void View::drawScene(QPainter& p) {
                 const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
                 drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
                 p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus)));
-                // One label column per level, as on the PS3 (reference: x ~684 at the top level, ~642 inside a page).
-                const double labelX=(level==0?(tile?758:684):642)+ahead*250+offset;
+                // One label column per level, as on the PS3 (reference: icon centre +99 at the top level, +57 inside a page).
+                const double labelX=kColumnX+(level==0?(tile?173:99):57)+ahead*250+offset;
                 const double alpha=.72+.28*focus;
                 const auto value=active?shell_.valueText(entry):QString{};
                 QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(27);
@@ -660,7 +669,7 @@ void View::drawScene(QPainter& p) {
                 p.restore();
             }
             if(level>0 && columnAlpha>0 && panelAmount<.999) {
-                p.save();p.setOpacity(columnAlpha*(1.-behind));text({443+ahead*250,480,50,50},QString(QChar(0x2039)),42,Qt::white,Qt::AlignCenter);p.restore();
+                p.save();p.setOpacity(columnAlpha*(1.-behind));text({kColumnX-142+ahead*250,480,50,50},QString(QChar(0x2039)),42,Qt::white,Qt::AlignCenter);p.restore();
             }
         }
         };
