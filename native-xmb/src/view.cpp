@@ -160,6 +160,7 @@ void main(){colour=texture(layer,uv);})"; // premultiplied; linear filtering at 
     if(!uiComposite_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) || !uiComposite_.addShaderFromSourceCode(QOpenGLShader::Fragment,compositeFragment) || !uiComposite_.link())
         qCritical().noquote()<<"UI composite shader failed:"<<uiComposite_.log();
     particles_.init(*this,assets_);
+    if(introEnabled_)coldboot_.init(*this,assets_);
     if(!monthImage_.isNull()) {
         monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
         monthTexture_->setMinificationFilter(QOpenGLTexture::Linear);monthTexture_->setMagnificationFilter(QOpenGLTexture::Linear);
@@ -203,7 +204,11 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
             when=QDateTime(QDate(when.date().year(),fixedMonth[shell_.theme()],1),when.time());
         if(when.date().month()!=texturesMonth_)loadMonthTextures(when.date().month());
         icons_.setClock(when); // use the same fixed-colour month and diagnostic clock as the sampled background
-        const BackgroundTime time=backgroundTime(when);
+        BackgroundTime time=backgroundTime(when);
+        time.alpha=backgroundAlpha_;
+        constexpr float coldboot1NightBias=.513834f; // BACKGROUND.mnu NIGHT WHIT BIAS, override/coldboot1 (coldboot2 = day)
+        const float bootBias=coldboot1NightBias+(time.nightBrightness-coldboot1NightBias)*backgroundToColdboot2_;
+        time.nightBrightness=bootBias+(time.nightBrightness-bootBias)*backgroundToClock_;
         presetBlend=float(std::clamp((time.nightDayBlend-(1.-kNightBlend))/kNightBlend,0.,1.));
         renderOriginalBackground(time,pixelWidth,pixelHeight);
         if(originalRibbon)ribbon_.render(*this,seconds,when.time().msecsSinceStartOfDay()/86400000.,pixelWidth,pixelHeight,scene);
@@ -292,7 +297,11 @@ void main(){
     gl_Position=vec4(p*2.0-1.0,0.0,1.0);
 }
 )";
-    if(!original_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) || !original_.addShaderFromSourceCode(QOpenGLShader::Fragment,backColours_.glsl) || !original_.link()) {
+    // The firmware blends the program's output by its alpha (_Alpha) over the cleared scene: 1 except while the cold
+    // boot fades the background in.
+    QString fragment=backColours_.glsl;
+    fragment.replace("fragColor = r[0];","fragColor = vec4(r[0].rgb * r[0].a, r[0].a);");
+    if(!original_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) || !original_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment) || !original_.link()) {
         qWarning().noquote()<<"original background shader failed:"<<original_.log();return;
     }
     if(!loadMonthTextures(QDate::currentDate().month()))return;
@@ -459,11 +468,26 @@ void View::paintGL() {
         if(columns_.size()>shell_.depth()+1)columns_.resize(shell_.depth()+1);
     }
     glClearColor(.04f,.04f,.05f,1.f);glClear(GL_COLOR_BUFFER_BIT);
+    // Cold boot: the intro starts once its sound is decoded (or after 1.5 s without it); its clock drives the boot
+    // presets of every background layer (BootBG2 / NormalBG2, Ribbon::bootWeights) and hides the UI until ShowGUI.
+    if(coldboot_.ready()) {
+        if(coldboot_.seconds()==0 && (coldboot_.soundReady() || now>1500))coldboot_.start();
+        const double boot=coldboot_.seconds();
+        const auto weights=Ribbon::bootWeights(boot,Coldboot::normalBg);
+        ribbon_.setBootTime(boot,Coldboot::normalBg);
+        hdr_.setBoot(weights.toColdboot2,weights.toClock);
+        particles_.setGlobalAlpha(weights.toClock); // PARTICLES skips coldboot2: GLOBAL ALPHA 0 until NormalBG2 (RPCS3 capture)
+        const double fade=std::clamp(boot/7.5,0.,1.); // DAT_00091e20, the 7.5 s that BootBG2 passes with the clock preset
+        backgroundAlpha_=float(fade*fade*(3-2*fade));
+        backgroundToColdboot2_=weights.toColdboot2;backgroundToClock_=weights.toClock;
+    }
     if(glReady_) {
         const auto time=QTime::currentTime();
         renderBackground(float(now)/1000.f,float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
             int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
+        coldboot_.render(*this,int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()),defaultFramebufferObject());
     }
+    if(introRunning()){grabIntroFrame();++frames_;return;}
     // UI layer on the GPU: Qt's OpenGL paint engine draws into a 4x multisampled framebuffer at twice the window size;
     // it is resolved, then composited at half scale, where the bilinear fetch averages each 2x2 block. MSAA plus 2x
     // supersampling gives smooth glyph and icon edges. The layer is redrawn only when something visible changed.
@@ -513,7 +537,23 @@ void View::paintGL() {
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,uiResolved_->texture());
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D,0);uiComposite_.release();glDisable(GL_BLEND);
+    grabIntroFrame();
     ++frames_;if(now-reportAt_>=5000){qInfo()<<"native frames:"<<frames_*1000./double(now-reportAt_)<<"fps; decoded images"<<assets_.decodedImages()<<"missing images"<<assets_.failedImages();frames_=0;reportAt_=now;}
+}
+// Local verification: XMB_INTRO_GRAB=<dir>@<seconds>,<seconds>,... saves the frame (as drawn) the first time the
+// intro clock passes each time, as <dir>/intro_<intro seconds>.png.
+void View::grabIntroFrame() {
+    static const QString spec=qEnvironmentVariable("XMB_INTRO_GRAB");
+    if(spec.isEmpty() || !coldboot_.ready())return;
+    static QList<double> pending=[]{QList<double> times;for(const auto& t:spec.section('@',1).split(','))times<<t.toDouble();std::sort(times.begin(),times.end());return times;}();
+    const double boot=coldboot_.seconds();
+    if(pending.isEmpty() || boot<pending.first() || boot>1e8)return;
+    while(!pending.isEmpty() && boot>=pending.first())pending.removeFirst();
+    // grabFramebuffer() resolves the multisampled framebuffer; it paints again, so it runs after this frame.
+    QTimer::singleShot(0,this,[this,boot]{
+        QDir().mkpath(spec.section('@',0,0));
+        grabFramebuffer().save(QDir(spec.section('@',0,0)).filePath(QString("intro_%1.png").arg(boot,0,'f',3)));
+    });
 }
 void View::drawImage(QPainter& p,const QString& container,const QString& texture,const QRectF& rect,qreal opacity) {
     if(container=="qgl/icontex") {
@@ -807,6 +847,7 @@ void View::drawScene(QPainter& p) {
     if(osk_.open)drawOsk(p);
 }
 void View::keyPressEvent(QKeyEvent* e) {
+    if(introRunning()){coldboot_.skip();e->accept();return;}
     if(osk_.open) { // the keyboard owns input: arrows move, Return presses the key (Ctrl+Return accepts), Esc cancels
         switch(e->key()) {
         case Qt::Key_Left:oskMove(-1,0);break;case Qt::Key_Right:oskMove(1,0);break;
@@ -843,6 +884,7 @@ void View::pollController() {
     if(lx<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_LEFT;if(lx>.5f)buttons|=XINPUT_GAMEPAD_DPAD_RIGHT;
     if(ly<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_UP;if(ly>.5f)buttons|=XINPUT_GAMEPAD_DPAD_DOWN;
     const auto edge=quint16(buttons&~buttons_);const auto now=clock_.elapsed();
+    if(introRunning()){if(edge)coldboot_.skip();buttons_=buttons;return;}
     const bool repeat=now>=repeatAt_;
     const auto movement=quint16(edge|(repeat?buttons:0));
     if(osk_.open) { // ✕ press, ○ cancel, □ backspace, △ space, START accept (the PS3 keyboard's own bindings)

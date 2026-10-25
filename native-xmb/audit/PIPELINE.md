@@ -16,6 +16,7 @@ Local inventory (`out/native-reference/qrc-inventory.txt`, not committed) lists 
 | Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n–70n normal maps + dif | **Ported** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo, the variant the firmware runs at 1080p; uniforms from ICONS.mnu by the packing read from an RPCS3 capture; matches RPCS3's frame side by side |
 | Item icons, labels, dialogs, info bar | explore_plugin / system_plugin via paf (RCO layouts and textures) | **Reconstructed**: RCO textures are the firmware's; positions, sizes and fades measured from the 60 fps reference |
 | Text | paf font renderer with the RD-R/B (SCE-PS3 Rodin) faces from dev_flash/data/font | **Partial**: native-resolution GL glyph atlas, Qt shaping/rasterization; PAF coverage/style trace in TEXT-RENDERER.md; hinting and glow parity open |
+| Cold-boot intro | custom_render_plugin boot case + anim_coldboot2 events; raf.sprx playing vsh/resource/coldboot.raf (coldboot.jsx) with raf.qrc vert0/sce01; coldboot_stereo.ac3 | **Ported** (`coldboot.cpp`): RAF scene, script timeline, sound, event times, background boot presets; matches the RPCS3 capture (see "Cold boot") |
 
 `raf.qrc` (ubber shaders, ConeFilter), `rhm.qrc`, `canyon.qrc`/`earth.qrc` (visualiser themes) and `store.qrc` are
 outside the main XMB.
@@ -150,6 +151,89 @@ is not traced.
 gameboot1-5 run when a game launches (pages page_gameboot / anim_gameboot, 0xe950..0xf71c), and welcome_1/2 and
 music_1 run during first-time setup and music playback. The native app has none of those flows, so they are not
 scheduled.
+
+## Cold boot (ported 2026-10-25)
+
+The 4.93 intro is a RAF scene: the PS symbol, "PS3" and a "PlayStation 3" footer, lit by a moving point light. The
+RCO's tex_ps3logo / tex_scelogo ("PLAYSTATION 3", "Sony Interactive Entertainment") are not what shows: anim_coldboot2
+holds scelogo at alpha 0. `src/coldboot.cpp` plays the scene natively, `View` gates the UI and drives the background's
+boot presets from its clock, and any key or pad button skips it. `--no-intro` (and `--script`, `--background-clock`,
+`--measure-reference`) start at the XMB.
+
+**Plugin side.** custom_render_plugin's boot case (0x15a00, the routine at 0x11100's caller) opens page_coldboot,
+runs anim_coldboot2 on scelogo, loads raf.sprx and `vsh/resource/coldboot.raf` (FUN_000180c8), starts it on
+page_coldboot2's coldboot_ps3logo plane (FUN_00017fc8) and plays coldboot_stereo.ac3 (coldboot_multi.ac3 for a
+multichannel output), all in one call. The AC3 is 313 frames at 640 kbps (frmsizecod 36), 10.02 s.
+
+anim_coldboot2's FireEvent operands are offsets into the RCO event table (0xf84) whose `native:/` names the plugin
+resolves through the table at 0x9cbc0 (name, function descriptor):
+
+| Time | Event | Handler | Effect |
+|---|---|---|---|
+| 0 s | anim_coldboot_BootBG2 | 0x110dc | hides the GUI; LINE/BACKGROUND/HDR layers to override/coldboot1 (duration 0), then coldboot2 over 3 s (0x91e1c), then FUN_00010900 with 7.5 s (0x91e20) |
+| 4 s | anim_coldboot_NormalBG2 | 0x11b20 | clears the boot overrides on four layers and blends to the clock keyframes (FUN_00011600) over 7.5 s (0x91e34) |
+| 5.5 s | anim_coldboot_ShowGUI | 0x4110 | shows the GUI (in RPCS3 the photosensitive-epilepsy notice comes first, then the XMB) |
+| 10 s | anim_coldboot_Finished | 0x3c10 | closes page_coldboot |
+
+ICONS.mnu coldboot1-5 are only registered (FUN_000388b8); nothing schedules them in this flow.
+
+**coldboot.raf.** `_RAF`, u32 BE size, zlib. Inflated `RAFO`: u32 version, six (offset, size) sections: element
+tree, object names (u32 element offset + NUL string), keys, (empty), floats, file data. Elements are RCO-like
+(name key, attribute count, parent, previous, next, first/last child) with 16-byte attributes (key, type, a, b): 1 int,
+2 float, 3 key string, 5 float vector (index, count), 6 data (offset, size), 7 object id, 8 reference.
+`work/coldboot-raf-dump.ts` prints the tree and extracts the files:
+- six actors on one plane (logo, footer, blur, and SD copies), position (1.85, 0, 0), rotation (pi/2, 0, 0), scale
+  (1.28, .64, .64), uv scale (1, -1), effect sce01;
+- camera at (0, 0, 4) looking down -z, yfov 0.927 rad; a point light (attenuation (0, 1, 4)) and an ambient light (black);
+- plane.edge (Edge geometry: 16 vertices, a 4x4 grid over [-1, 1]^2, uv = ((x+1)/2, (1-z)/2); the compressed index
+  stream is not decoded, the grid is triangulated by uv), plane.skel (ES01, one joint);
+- six GTF textures, B8 linear (format 0xa1), 700x350 HD / 240x120 SD, ten mips at a constant pitch;
+- coldboot.jsx, VSMX bytecode (opcodes as RCOMage's vsmx.c numbers them; `work/coldboot-vsmx-decompile.ts`).
+
+The script: logo alpha 0 -> 1 over first_wait (1.5 s, linear); at 1.5 s the light moves from logo + (-3, .5, 0) to
+logo + (0, .5, 0), attenuation to (.1, .1, .1), colour to white over appear_duration (1.3 s); at 2.55 s blur alpha
+to 1 over 0.5 s, Bezier (.1, 0, .1, 1); at 3.3 s blur back to 0 (same curve) and footer to 1 (linear) over 0.5 s;
+at 4.3 s footer and logo to 0, light + (2.25, 1.5, 0), black, attenuation (0, 1, 4) over 1.2 s, Bezier (.8, 0, .8, 1).
+The scene ends at 5.5 s, the ShowGUI time. `System.resolution == 720` (the SD output width) selects the SD actors;
+the native port always uses HD. The timing constants are read from the VSMX at load.
+
+**Shaders and uniforms.** raf.qrc vert0.vpo + sce01.fpo, translated like the other programs. sce01: rgb = vertex
+colour, alpha = colour.a x tex x _Material[3].x x clamp(lit / 3), lit = (tex x diffuse x (warp(halfLambert^2) x light
+colour x kd + ambient) + specular) / (a0 + a1 d + a2 d^2). An RPCS3 capture of all 1902 sce01 draws of a cold boot
+(`XMB_FP_SERIES`, below) gives the packing: _SpotLight[i] = (light position i, attenuation i, -, specular 1),
+_LightingMisc[i] = (ambient i, -, light colour i, 1), _Material[0..2] = (1, 1, 0, .12), (1, .7, 6, 3), (1, 40, 0, 0),
+_Material[3].x = the actor's alpha; vc[256..259] MVP rows, vc[260..263] model rows, vc[466] uv (offset, scale), vc[467]
+eye. _DiffuseWarp is a 64x16 ramp (round(255 i / 63)) and _SpecularMap 32x32 white, both generated by raf.sprx.
+
+**Timing check.** `work/coldboot-series-timing.ts` inverts each captured track to its start time: light 1.478 s, blur
+2.562 s, blur-out and footer 3.311 s, fade 4.312 s, last logo draw 5.444 s, against the script's 1.5 / 2.55 / 3.3 /
+4.3 / 5.5 s. The ~20-40 ms spread is RPCS3's boot stalls (raf.sprx caps its time step, so the script clock falls behind
+host time while frames stall). The fade-out curve fits cubic-bezier(.8, 0, .8, 1) to 0.003 RMS. Natively, frames saved
+with `XMB_INTRO_GRAB` at the same script times match the RPCS3 frames (`work/coldboot-grab-burst.ps1`) in layout and
+sequence (`work/coldboot-region-means.ps1`).
+
+**Background layers during the boot** (captures of back_colours0 and particles_quads through a cold boot):
+- back_colours0 `_Alpha` = smoothstep(t / 7.5 s) from BootBG2 (0.00025 RMS). The program renders the 64x32
+  background texture and its alpha is applied there, so the native port premultiplies the output by it;
+- `_NightBrightness` goes from coldboot1 (.513834) to coldboot2 on the same 0.99-per-frame filter as LINE1, and the
+  native port blends it with `Ribbon::bootWeights`; HDR.mnu coldboot1 (EXPOSURE 1.64, GLARE 1.74, THRESH 0.2) uses the
+  same weights (not captured);
+- PARTICLES `_Transparency.y` (GLOBAL ALPHA) stays 0 until NormalBG2 and then follows the LINE1 stage-two curve to 1:
+  particles skip coldboot2;
+- LINE1 stage two now starts at NormalBG2 (4 s) when the intro drives the ribbon; RPCS3's 229 cloth steps at that point
+  are boot stalls.
+
+Open: RPCS3 composites the frame with LinesController and its pre-exposure LUTs (no ToneMap pass runs during the boot),
+so its background stays near black until ~2.2 s and ends darker (display level 67 vs 83 native in the same region).
+The native ToneMap path is a separate fidelity gap. Native draws the logo directly onto the frame; the firmware draws it
+on the coldboot_ps3logo plane. The epilepsy notice after ShowGUI is not ported.
+
+**Capture tooling.** `rpcs3-rsx-capture.patch` adds `XMB_FP_SERIES=<file>` / `XMB_SERIES_FP_LENGTH=<ucode bytes>`
+(0 lists lengths): one record per draw of that program with the patched ucode, vertex constants and texture units, and
+the bound textures once (`<file>.texN`). `work/coldboot-series-split.ts` splits a capture for
+`re-ps3-native --decode-fp`. `--dump-cg` prints each program's ucode size (sce01 1344, back_colours0 8608,
+LinesController 368, particles_quads 1968). `build-rpcs3-cap.bat` builds the patched RPCS3 into `C:\dev\rpcs3-cap`
+next to the main build; copy dev_flash, dev_hdd0 and config there and run it with a scratch `--config`.
 
 ## Category icon renderer (ported 2026-10-25)
 

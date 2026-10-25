@@ -8,6 +8,8 @@ namespace {
 struct Preset { float exposure,white,glareLevel,threshold,radius[3],sumPow; };
 constexpr Preset night{1.41f,.999878f,1.33f,.699812f,{1.1f,1.36f,1.5f},.5f};
 constexpr Preset day{1.05f,.899181f,1.10245f,.738857f,{1.23888f,1.43176f,1.55787f},.557478f};
+// override/coldboot1 (the boot's first preset; coldboot2 has day's values).
+constexpr Preset coldboot1{1.64f,1.f,1.74f,.2f,{1.23888f,1.43176f,1.55787f},.557478f};
 constexpr int texSize=8,texMaxMip=8; // TEX SIZE (glare source 2^8 wide), TEX MAX MIP
 const char* fullscreenVertex=R"(#version 330 core
 out vec4 v_col0, v_col1, v_fog;
@@ -86,10 +88,16 @@ GLuint Hdr::begin(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) 
 }
 
 void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint targetFbo,const std::function<void(int,int)>& extraGlare) {
-    const auto mix=[&](float n,float d){return n+(d-n)*nightDayBlend;};
-    const float exposure=mix(night.exposure,day.exposure),white=mix(night.white,day.white),glareLevel=mix(night.glareLevel,day.glareLevel);
-    const float threshold=mix(night.threshold,day.threshold),sumPow=mix(night.sumPow,day.sumPow);
-    const float radius[3]={mix(night.radius[0],day.radius[0]),mix(night.radius[1],day.radius[1]),mix(night.radius[2],day.radius[2])};
+    // The clock's night/day blend, reached from the boot presets (coldboot1 -> coldboot2 = day -> clock).
+    const auto mix=[&](float boot1,float n,float d){
+        const float boot=boot1+(d-boot1)*toColdboot2_;
+        return boot+(n+(d-n)*nightDayBlend-boot)*toClock_;
+    };
+    const float exposure=mix(coldboot1.exposure,night.exposure,day.exposure),white=mix(coldboot1.white,night.white,day.white);
+    const float glareLevel=mix(coldboot1.glareLevel,night.glareLevel,day.glareLevel),threshold=mix(coldboot1.threshold,night.threshold,day.threshold);
+    const float sumPow=mix(coldboot1.sumPow,night.sumPow,day.sumPow);
+    const float radius[3]={mix(coldboot1.radius[0],night.radius[0],day.radius[0]),mix(coldboot1.radius[1],night.radius[1],day.radius[1]),
+                           mix(coldboot1.radius[2],night.radius[2],day.radius[2])};
     gl.glDisable(GL_DEPTH_TEST);gl.glDisable(GL_SCISSOR_TEST);gl.glDisable(GL_BLEND);
     const auto fullscreen=[&](QOpenGLShaderProgram& program,const QVector<QVector4D>& fc) {
         program.setUniformValueArray("fc",fc.constData(),fc.size());

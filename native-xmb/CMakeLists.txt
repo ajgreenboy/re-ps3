@@ -11,7 +11,7 @@ qt_add_executable(re-ps3-native
     src/interaction_audio.cpp src/interaction_audio.h
     src/text_renderer.cpp src/text_renderer.h
     src/profiles.cpp src/profiles.h
-    src/rsx_program.cpp src/rsx_program.h src/ribbon.cpp src/ribbon.h src/hdr.cpp src/hdr.h src/icons.cpp src/icons.h src/particles.cpp src/particles.h
+    src/rsx_program.cpp src/rsx_program.h src/ribbon.cpp src/ribbon.h src/hdr.cpp src/hdr.h src/icons.cpp src/icons.h src/particles.cpp src/particles.h src/coldboot.cpp src/coldboot.h
     src/shell.cpp src/shell.h src/host.cpp src/host.h src/pad.cpp src/pad.h src/view.cpp src/view.h)
 target_link_libraries(re-ps3-native PRIVATE Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::Network)
 qt_add_executable(xmb-reference-frames src/reference_frames.cpp)

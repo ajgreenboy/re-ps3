@@ -111,16 +111,12 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   (`rpcs3-rsx-capture.patch`).
 - Ribbon presets: the measured boot durations (3.82 s, 2.8 s) differ from the plugin's call arguments (3 s, 7.5 s);
   qgl_base's animation player is not traced.
-- Boot: coldboot animation and sound (ICONS.mnu coldboot1–5 overrides, LINE/HDR boot presets); the "gameboot"
-  sequence when launching. LINE1's boot presets are done (audit/PIPELINE.md "Ribbon presets"). The 4.93 logo is
-  `custom_render_plugin.rco` tex_ps3logo ("PLAYSTATION 3") and tex_scelogo ("Sony Interactive Entertainment"):
-  - page_coldboot runs anim_coldboot2, which fires plugin events at 0, 4.0, 5.5 and 10 s and keeps scelogo at
-    alpha 0;
-  - page_coldboot2's coldboot_ps3logo goes with `vsh/resource/coldboot.raf` (an animation file, format not
-    decoded), plus coldboot_stereo.ac3.
-
-  MaXMB's measured intro is from a 2007 console, with the PS mark and "PS3", so its curves are not the 4.93
-  sequence. The RCO times are the reference.
+- Boot: the cold-boot intro is ported (`src/coldboot.cpp`, audit/PIPELINE.md "Cold boot"): coldboot.raf decoded
+  (RAF container, Edge plane, GTF textures, coldboot.jsx VSMX), drawn with raf.qrc vert0/sce01, the script's timeline,
+  coldboot_stereo.ac3 and anim_coldboot2's events (BootBG2 0 s, NormalBG2 4 s, ShowGUI 5.5 s, Finished 10 s), checked
+  against an RPCS3 capture. The logo is the RAF's PS symbol + "PS3" + "PlayStation 3"; the RCO's tex_ps3logo/tex_scelogo
+  stay at alpha 0. Open: the epilepsy notice after ShowGUI, the SD actors, the boot brightness curve of RPCS3's
+  LinesController/pre-exposure path, and the "gameboot" sequence when launching.
 - Theme system: other colour themes, wallpaper mode as the firmware composites it. `.p3t` themes: still background and icons are in (`src/p3t.cpp`, README "PS3 themes"); still open are their sound effects in the shell, dynamic RAF scenes, and the `font` / `color` selections.
 - Screen states: screensaver/dim, Power off, user login screen, notifications (tex_notification_*), the in-game
   XMB (xmb_ingame).

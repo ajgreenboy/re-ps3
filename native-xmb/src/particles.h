@@ -29,6 +29,8 @@ public:
     void render(QOpenGLFunctions_3_3_Core& gl,float light,int pixelWidth,int pixelHeight,bool glarePass=false);
     // Navigation gust (PARTICLES_UI.mnu ICON WIND / DPAD SCALE): direction -1 left, +1 right.
     void nudge(float direction);
+    // PARTICLES.mnu GLOBAL ALPHA: 0 in override/coldboot1, 1 in coldboot2 and the clock presets (the boot blends it).
+    void setGlobalAlpha(float alpha) { globalAlpha_=alpha; }
 private:
     // anchor: fraction along the ribbon the particle rides; offset: its position relative to that point.
     struct Particle { QVector3D position,offset,velocity; QQuaternion rotation; QVector3D spinAxis; float anchor=0,flow=0,spin=0,age=0,agingRate=0; };
@@ -42,6 +44,7 @@ private:
     GLuint vao_=0,vbo_=0,ibo_=0;
     std::vector<Particle> particles_;
     std::vector<float> vertices_;
+    float globalAlpha_=1;
     std::mt19937 random_{0x5053u};
     double simulated_=-1;
 };

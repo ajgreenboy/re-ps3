@@ -108,6 +108,13 @@ what a theme holds, write its element tree and decoded pictures and sounds to a 
 & .\out\native-xmb\re-ps3-native.exe --p3t-dump <theme.p3t>@<local-folder>
 ```
 
+## Cold-boot intro
+
+The app starts with the firmware's 4.93 cold-boot intro: coldboot.raf (the PS3 logo scene and its script) with
+coldboot_stereo.ac3, then the XMB at 5.5 s, as on the console. Any key or pad button skips it; `--no-intro` starts
+at the XMB (scripted and measurement runs skip it too). `XMB_INTRO_GRAB=<folder>@<seconds>,...` saves frames at
+those intro times for comparison with an RPCS3 capture (audit/PIPELINE.md "Cold boot").
+
 ## Decrypted modules for the ribbon
 
 dev_flash holds the VSH modules encrypted (`*.sprx`). The ribbon cloth starts from rest tables inside
