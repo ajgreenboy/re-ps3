@@ -77,8 +77,8 @@ void TextRenderer::release(QOpenGLFunctions_3_3_Core& gl) {
     if(vbo_)gl.glDeleteBuffers(1,&vbo_);if(vao_)gl.glDeleteVertexArrays(1,&vao_);
     vbo_=vao_=0;program_.removeAllShaders();ready_=false;
 }
-void TextRenderer::beginFrame(QOpenGLFunctions_3_3_Core& gl,const QSize& target,qreal rasterScale) {
-    target_=target;
+void TextRenderer::beginFrame(QOpenGLFunctions_3_3_Core& gl,const QSize& target,qreal rasterScale,int pixelGrid) {
+    target_=target;pixelGrid_=std::max(1,pixelGrid);
     rasterScale=std::max(.1,rasterScale);
     // Clear on resize/scale or a full atlas, at a frame boundary rather than
     // invalidating texture coordinates halfway through a shaped string.
@@ -204,7 +204,11 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
         const auto& g=glyph(gl,placed.face,placed.index);if(g.page<0)continue;
         const QPointF at=rect.topLeft()+QPointF((placed.position.x()+g.bearing.x())/rasterScale_,(placed.position.y()+offset+g.bearing.y())/rasterScale_);
         const QRectF box(at,QSizeF(g.atlas.size())/rasterScale_);
-        const QPointF tl=transform.map(box.topLeft()),tr=transform.map(box.topRight()),bl=transform.map(box.bottomLeft()),br=transform.map(box.bottomRight());
+        // Each glyph's origin snaps to whole output pixels (pixelGrid_ layer pixels), so a one-pixel stem does not
+        // straddle two output pixels after the 2x2 resolve.
+        const QPointF origin=transform.map(box.topLeft());
+        const QPointF snap(std::round(origin.x()/pixelGrid_)*pixelGrid_-origin.x(),std::round(origin.y()/pixelGrid_)*pixelGrid_-origin.y());
+        const QPointF tl=origin+snap,tr=transform.map(box.topRight())+snap,bl=transform.map(box.bottomLeft())+snap,br=transform.map(box.bottomRight())+snap;
         const float u=float(g.atlas.x())/atlasSize,v=float(g.atlas.y())/atlasSize,r=float(g.atlas.x()+g.atlas.width())/atlasSize,b=float(g.atlas.y()+g.atlas.height())/atlasSize;
         if(page!=g.page){flush();page=g.page;}
         const auto vertex=[&](const QPointF& p,float s,float t){return Vertex{float(p.x()),float(p.y()),s,t,u,v,r,b};};

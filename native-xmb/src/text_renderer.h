@@ -18,7 +18,9 @@ class TextRenderer {
 public:
     bool init(QOpenGLFunctions_3_3_Core& gl);
     void release(QOpenGLFunctions_3_3_Core& gl);
-    void beginFrame(QOpenGLFunctions_3_3_Core& gl,const QSize& target,qreal rasterScale);
+    // target: the layer's pixel size; rasterScale: layer pixels per 1920x1080 unit; pixelGrid: layer pixels per
+    // output pixel (2 for the supersampled UI layer), the grid glyph origins snap to so stems stay on whole pixels.
+    void beginFrame(QOpenGLFunctions_3_3_Core& gl,const QSize& target,qreal rasterScale,int pixelGrid=1);
     bool ready() const { return ready_; }
     void draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
               const QString& text,const QFont& font,const QColor& colour,int flags,
@@ -38,6 +40,7 @@ private:
     bool ready_=false;
     QSize target_;
     qreal rasterScale_=1;
+    int pixelGrid_=1;
     quint64 serial_=0;
     std::vector<Face> faces_;
     std::vector<Page> pages_;

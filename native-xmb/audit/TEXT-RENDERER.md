@@ -79,6 +79,15 @@ Local evidence exports: `text-string-refs.c`, `text-font-wrappers.c`, `text-font
 `text-family-map.c`, `text-ui-refs.c`. The REA MCP PPC route was unavailable; the installed Ghidra CLI
 provided the existing project's exports with `-readOnly -noanalysis`. No RPCS3 capture/input was used.
 
+## Rasterisation scale fix (2026-10-25)
+
+The UI layer is drawn at twice the window size and resolved with a 2x2 box filter. Glyphs, however, were rasterised
+for the window's own scale, so every glyph was magnified 2x by bilinear sampling before the resolve, and all text
+looked soft. They are now rasterised at the layer's scale, one texel per layer pixel. Each glyph's origin also snaps
+to whole window pixels (two layer pixels), so stems do not straddle two output pixels. On the clock and the "Game"
+label, peak horizontal edge contrast in a 1080p grab rose from 127 to 173. Atlas pages fill about four times faster;
+the 16 pages of 1024² still hold a full menu.
+
 ## Label timing observed by MaXMB (2026-10-25)
 
 MaXMB (https://github.com/MaxiBono/MaXMB, MIT) draws its text with browser CSS: a bundled Rodin TTF with pinned
