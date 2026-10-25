@@ -134,6 +134,8 @@ std::string translateVertex(const std::vector<quint32>& w,quint32& inputs,int& c
 // constant is followed by a 16-byte literal slot.
 quint32 fpWord(const QByteArray& u,int at) { const quint32 v=qFromBigEndian<quint32>(u.constData()+at);return (v<<16)|(v>>16); }
 
+// H and R registers are kept apart and H writes are rounded to fp16, as RPCS3's FragmentProgramDecompiler does (its
+// output for the XMB programs is the reference here).
 std::string translateFragment(const QByteArray& u,bool outputFromH0,bool depthReplace,std::map<int,int>& slotToConstant,QVector<QVector4D>& constants,quint32& samplers,int& count) {
     std::string body;std::vector<std::pair<int,std::string>> closers;int loopDepth=0;bool needs400=false;
     for(int pc=0;pc*16+16<=u.size();++pc) {
@@ -175,9 +177,18 @@ std::string translateFragment(const QByteArray& u,bool outputFromH0,bool depthRe
             default:r="vec4(0.)";break;
             }
             r+=swizzle4((s>>9)&3,(s>>11)&3,(s>>13)&3,(s>>15)&3);
+            // Source precision modifier (RPCS3 GetSRC): 1 fp16 range, 2 fixed12 [-2,2], 3 fixed9 [-1,1], 4 saturate;
+            // saturate applies before abs, the others after; negation last. An fp16 temp needs no fp16 clamp.
+            quint32 modifier=(prec>>(n*3))&7;
+            if(modifier==1 && (s&3)==0 && ((s>>8)&1))modifier=0;
+            const auto clampTo=[&](const std::string& v){
+                return modifier==1?"clamp16_("+v+")":modifier==2?"pclamp_("+v+", -2., 2.)":modifier==3?"pclamp_("+v+", -1., 1.)":
+                       modifier==4?"pclamp_("+v+", 0., 1.)":v;
+            };
+            if(modifier==4)r=clampTo(r);
             const bool abs=n==0?(s0w>>29)&1:(s>>18)&1;
             if(abs)r="abs("+r+")";
-            if(((prec>>(n*3))&7)==4)r="clamp("+r+", 0., 1.)";
+            if(modifier && modifier!=4)r=clampTo(r);
             if((s>>17)&1)r="-"+r;
             return "("+r+")";
         };
@@ -194,7 +205,15 @@ std::string translateFragment(const QByteArray& u,bool outputFromH0,bool depthRe
             case 5:value="("+value+") / 2.";break;case 6:value="("+value+") / 4.";break;case 7:value="("+value+") / 8.";break;
             default:break;
             }
-            if((dst>>31)&1)value="clamp("+value+", 0., 1.)";
+            // Destination precision (RPCS3 SetDst): saturate, else dst.prec 2 fixed12 / 3 fixed9 clamps (not for ops whose
+            // range is already bounded, nor a MOV of an fp16 temp into an fp16 register); fp16 destinations hold +-65504.
+            const quint32 dstPrec=(dst>>22)&3;const bool dstHalf=(dst>>7)&1;
+            const bool exempt=opcode==0x39 || opcode==0x09 || opcode==0x08 || opcode==0x22 || opcode==0x23 || opcode==0x36 ||
+                              opcode==0x10 || opcode==0x1E || opcode==0x3C || opcode==0x1D ||
+                              (opcode==0x01 && dstHalf && (s0w&3)==0 && ((s0w>>8)&1));
+            if((dst>>31)&1)value="pclamp_("+value+", 0., 1.)";
+            else if(dstPrec>=2 && !exempt)value="pclamp_("+value+(dstPrec==2?", -2., 2.)":", -1., 1.)");
+            if(dstHalf && !((dst>>31)&1))value="clamp16_("+value+")";
             const std::string ccDst="cc["+std::to_string((s0w>>30)&1)+"]";
             if((dst>>30)&1){if((dst>>8)&1)assign(body,ccDst,mask,value,cnd);return;}
             const std::string d=std::string(((dst>>7)&1)?"h[":"r[")+std::to_string((dst>>1)&0x3F)+"]";
@@ -263,10 +282,10 @@ std::string translateFragment(const QByteArray& u,bool outputFromH0,bool depthRe
         case 0x31:sample("bias");break;
         case 0x36:setDst(a+" - 2.0 * dot("+a+", "+b+") * "+b);break;
         case 0x38:setDst("vec4(dot("+a+".xy, "+b+".xy))");break;
-        case 0x39:setDst("vec4(normalize("+a+".xyz), 0.).xyzz");break;
+        case 0x39:setDst("vec4(nrm_("+a+".xyz), 0.).xyzz");break;
         case 0x3A:setDst(a+" / "+b+".x");break;
-        case 0x3B:setDst(a+" / sqrt("+b+".x)");break;
-        case 0x3C:setDst("lit_("+a+")");break;
+        case 0x3B:setDst("divsq_("+a+", "+b+".x)");break;
+        case 0x3C:setDst("lif_("+a+")");break; // LIF, not LIT: the RSX fragment unit has no full LIT
         case 0x3D:case 0x3E:break;
         case 0x40:if(loopDepth)body+="  if ("+anyCnd+") break;\n";break;
         case 0x42:{
@@ -289,11 +308,20 @@ std::string translateFragment(const QByteArray& u,bool outputFromH0,bool depthRe
         if(end)break;
     }
     for(auto& c:closers)body+=c.second;
-    std::string g=needs400?"#version 400 core\n":"#version 330 core\n";
+    (void)needs400;
+    std::string g="#version 420 core\n"; // packHalf2x16 for the fp16 rounding of H registers
     g+="in vec4 v_col0, v_col1, v_fog;\nin vec4 v_tc[10];\nlayout(location=0) out vec4 fragColor;\n";
     if(!constants.isEmpty())g+="uniform vec4 fc["+std::to_string(constants.size())+"];\n";
     for(int i=0;i<16;++i)if(samplers&(1u<<i))g+="uniform sampler2D tex"+std::to_string(i)+";\n";
-    g+="vec4 r[48]; vec4 h[96]; vec4 cc[2];\n";g+=kLit;
+    g+="vec4 r[48]; vec4 h[96]; vec4 cc[2];\n";
+    g+=kLit;
+    // RPCS3 precision_clamp (NaN reads as 0) and the fp16 range limit.
+    g+="vec4 pclamp_(vec4 x, float lo, float hi) { return clamp(mix(x, vec4(0.), isnan(x)), lo, hi); }\n"
+       "vec4 clamp16_(vec4 x) { return vec4(unpackHalf2x16(packHalf2x16(x.xy)), unpackHalf2x16(packHalf2x16(x.zw))); }\n"
+       // RPCS3 FragmentProgramDecompiler builtins: LIF, DIVSQ (a kept where it is 0), NRM of a zero vector.
+       "vec4 lif_(vec4 t) { return vec4(1., t.y, t.y > 0. ? exp2(t.w) : 0., 1.); }\n"
+       "vec4 divsq_(vec4 a, float b) { return mix(a, a / sqrt(abs(b)), greaterThan(abs(a), vec4(0.))); }\n"
+       "vec3 nrm_(vec3 x) { return length(x) > 0. ? normalize(x) : x; }\n";
     g+=std::string("void emit_() {\n  fragColor = ")+(outputFromH0?"h[0]":"r[0]")+";\n";
     if(depthReplace)g+=std::string("  gl_FragDepth = ")+(outputFromH0?"h[2].z":"r[1].z")+";\n";
     g+="}\nvoid main() {\n  for (int i = 0; i < 48; i++) r[i] = vec4(0.);\n  for (int i = 0; i < 96; i++) h[i] = vec4(0.);\n"
