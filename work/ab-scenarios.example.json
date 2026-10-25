@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "description": "Example only: replace reference filenames and clock inputs with matching capture metadata. No fidelity thresholds are implied.",
+  "defaults": {
+    "renderClock": "30",
+    "backgroundClock": "2026-10-25T10:00:00",
+    "uiClock": "2026-10-25T12:32:00",
+    "focusTime": 1700
+  },
+  "scenarios": [
+    {
+      "name": "game-root",
+      "reference": "game-root-1920x1080.png",
+      "tokens": ["full", "wait", "wait", "wait"],
+      "expect": { "category": "game", "depth": 0 },
+      "regions": [
+        { "name": "full-frame" }
+      ]
+    },
+    {
+      "name": "settings",
+      "reference": "settings-1920x1080.png",
+      "tokens": ["full", "LEFT", "LEFT", "LEFT", "LEFT", "LEFT", "wait", "wait", "wait"],
+      "expect": { "category": "settings", "depth": 0 },
+      "regions": [
+        { "name": "full-frame" }
+      ]
+    }
+  ]
+}

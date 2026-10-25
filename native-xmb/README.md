@@ -29,6 +29,10 @@ library/header targets. The recovered glyph-load settings and remaining parity w
 Keyboard: arrows navigate, Enter activates, Escape or Backspace returns, F11 toggles full
 screen, Space pauses/resumes media. XInput D-pad and A/B share the same actions.
 
+Local named-state captures and layer scoring: [verification harness](audit/VERIFICATION-HARNESS.md).
+The harness keeps user preferences separate, checks category/page state and reports failures; repeatable native
+captures are distinct from firmware-fidelity evidence.
+
 ## Application boundaries
 
 | Layer | Responsibility |

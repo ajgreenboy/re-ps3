@@ -47,6 +47,8 @@ public:
     void setBackgroundClock(const QDateTime& when) { backgroundOverride_=when;update(); }
     // Fixed animation time (seconds) for deterministic A/B captures; -1 follows the real clock.
     void setRenderClock(double seconds) { secondsOverride_=seconds;update(); }
+    // Diagnostic focus age for reproducible glow/idle-fade captures; navigation still animates normally.
+    void setFocusTime(qint64 milliseconds) { focusTimeOverride_=milliseconds;++uiRevision_;update(); }
     // The 4.93 cold-boot intro before the XMB (coldboot.h); off for measurement and scripted runs. Set before show.
     void setIntroEnabled(bool enabled) { introEnabled_=enabled; }
 protected:
@@ -75,6 +77,8 @@ private:
     double categoryFade_=0;
     // Time since the focused row (category, depth, selection) last changed: label glow phase and idle label fade.
     QElapsedTimer focusClock_;
+    qint64 focusTimeOverride_=-1;
+    qint64 focusTime() const { return focusTimeOverride_>=0?focusTimeOverride_:(focusClock_.isValid()?focusClock_.elapsed():0); }
     qint64 focusKey_=-1;
     double depthPosition_=0;
     int previousDepth_=0;
