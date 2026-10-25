@@ -10,7 +10,7 @@ Local inventory (`out/native-reference/qrc-inventory.txt`, not committed) lists 
 | Layer | Firmware source | Native status |
 |---|---|---|
 | Background gradient | `lines.qrc` moyou/background, back_colours0 + month_bg textures, BACKGROUND.mnu; custom_render_plugin clock mapping | **Ported**: firmware Cg translated RSX→GLSL, inputs traced |
-| Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; geometry from the SPU spurs/moyou/spline/spline.elf | **Shaders ported; geometry wrong**: ours is a flat displaced 128x24 sheet, the firmware's is a rolled 128x128 sheet (see "Ribbon geometry") |
+| Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; cloth in custom_render_plugin; geometry from the SPU spurs/moyou/spline/spline.elf | **Ported** (`ribbon.cpp`): PPU cloth, ffd_shader1 deformation lattice, spline.elf FFD + camera + bicubic sheet, each stage checked against RPCS3 captures (see "Ribbon port"); boot preset transitions not yet |
 | Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Partial**: shaders firmware; CPU simulation reconstructs the SPU job |
 | HDR tone map + glare | `lines.qrc` glutils ToneMap, GlareSource*, Gaussian, AccGlare, ApplyGlare, HDR.mnu | **Ported** |
 | Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n–70n normal maps + dif | **Ported** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo, the variant the firmware runs at 1080p; uniforms from ICONS.mnu by the packing read from an RPCS3 capture; matches RPCS3's frame side by side |
@@ -57,15 +57,68 @@ The code (`work/spu/disasm-elf.ts`, a disassembler generated from RPCS3's opcode
   accumulates `fma` against per-sample weight tables, which is bicubic patch evaluation;
 - func_3c68 does the per-vertex math through the vector helpers at 0x3ab0..0x3bf0.
 
-The large FP-free functions are the SPURS/DMA runtime. Next: capture matching input/output pairs (lattice + matrix →
-the vertex buffer of the same frame), port func_45c0/func_3c68 to C++ and verify them against those pairs, then trace
-the PPU-side lattice update.
+The large FP-free functions are the SPURS/DMA runtime.
 
-To match it exactly, the geometry has to come from spline.elf. It is 22 KB of SPU code (.text 0x3060..0x8728,
-.rodata 5 KB, .bss 19.5 KB) with no symbols, and Ghidra has no SPU module. Plan: write an SPU disassembler, trace the
-SPURS job's inputs (the parameters custom_render_plugin passes, time, LINE1.mnu) and outputs (DMA of positions and
-normals), then either port the simulation to C++ or run the original code in a small embedded SPU interpreter.
-Verify against frames captured from RPCS3 at the same time.
+## Ribbon port (2026-10-25)
+
+The whole chain is ported in `ribbon.cpp`. Each stage was checked against RPCS3 data: local-store snapshots taken at
+the spline task's output list puts (`XMB_SPU_WATCH`, `out/native-reference/lslist1`) and the per-frame DMA log of
+its inputs (5000 frames from boot). The scripts are in `work/spu/`.
+
+**spline.elf (SPU), per frame.** The task data block (0x200dda00) carries FFD SCALE1, SCALE2 and OFFSET from
+LINE1.mnu (stored to LS 0xd590/0xd5a0/0xd5b0). For every lattice point, func_3c68 computes:
+- n = (p - OFFSET) / SCALE1 (func_3440: frest + fi);
+- the cell from clamp(n, 0, .999) x (8, 4, 4), with cubic B-spline weights (basis matrix at LS 0xd5c0);
+- the sum over the 4x4x4 neighbourhood of the 11x7x7 deformation lattice, index x + 11y + 77z;
+- result (n + sum) x SCALE2. The unclamped n is kept, and only the cell lookup is clamped.
+
+Then func_3bf0 applies the camera as a row-vector product. func_45c0 evaluates 16x16 uniform bicubic patches at
+t = k x 16/127 (k = 0..7) in each direction, giving 128x128 clip positions. The normal is dP/dv x dP/du with
+w = 0, using derivative weights from LS 0xde00. `check-ffd.ts` matches the transformed lattice to 4.8e-4 (the
+frest/fi reciprocal), and `check-eval.ts` / `check-normal.ts` match the output tiles to about 1e-5.
+
+**The camera matrix** decomposes exactly into these parts:
+- view = R(ANG X/Y/Z axis, ANG ROT degrees) p + POS + (0, 0, -2);
+- a GL perspective with fovy 53, the viewport aspect, near 0.1 and far 1000. The matrix's translation column
+  divided by the projection scale gives POS X/Y exactly.
+
+**The deformation lattice (PPU).** FUN_000493c4 builds the `_UVW` texture: 128 texels holding the 8x4x4 node grid
+(x/8, y/4, z/4, 0) at texel z*32 + y*8 + x. FUN_0004a220 then:
+- renders ffd_shader1 into a 128x1 float target with _Time = 10 x the cloth's wave clock;
+- reads it back and scales it, field x SCALE1 + OFFSET (vmaddfp).
+
+FUN_00047b1c pads the result to 11x7x7 by index clamp(x-1, 0, 7), clamp(y-1, 0, 3), clamp(z-1, 0, 3). The first
+frame is constant (OFFSET), because the field has not been rendered yet. `check-ffd-sweep.ts` matches the native
+lattice (`XMB_RIBBON_FFD_SWEEP`) to every captured one within 5e-5..1.9e-4. The fitted _Time advances 1.0 per
+500 frames, as TIMESTEP 2 predicts.
+
+**The cloth (PPU custom_render_plugin).** It is a 19x19 mass-spring sheet in four buffers (current, previous,
+velocity, drawn), 60 fixed steps per second (FUN_0004f814). LINE1.mnu DAMPING, LENGTH, TENSION, TIMESTEP,
+PERTURBATION and END Y/Z drive it. Each step (FUN_0004bed0) runs:
+- current is copied to previous, and the wave clock advances by TIMESTEP x 1e-4 (wrapping to 0 past 10);
+- each point gets spring impulses (k = TENSION, rest LENGTH) to its left and upper neighbours, and bending impulses
+  (10 TENSION, rest 2 LENGTH) to the second neighbours. These go straight into the velocities, as does a random
+  kick of PERTURBATION x three draws of the hash noise FUN_0004ab04;
+- explicit Euler with dt = TIMESTEP x 1e-4, then vel -= vel x DAMPING x TIMESTEP;
+- FUN_0004bce0 eases the phase toward the clock by 0.1. Each row r's first point is pushed +x by 0.02 TIMESTEP, and
+  its last point is pinned with velocity zeroed at (0, (sin(11t)/2 + 1/2) END Y, (cos(15t) + 1)/2 END Z),
+  t = r/19 + phase.
+
+The drawn lattice blends previous and current by the leftover step fraction. Its y and z are scaled by
+1.3 - cos(d pi/2)(1 - smoothstep(d/5)), d = x - FFD PARAM 1. The import 0x87b50 is sin for mode 0 and cos for
+mode 1, fitted from the boot frame.
+
+The boot ribbon starts from preset 1 (FUN_0004e624: positions at 0x97c18, velocities at 0x98d04). That matches the
+first captured lattice to 1.6e-7, with the scale curve fitted at FFD PARAM 1 = -2 (coldboot1). `cloth-sim.ts`
+follows the boot frames to about 1e-4 in x per frame. The remaining gap is the boot preset blend (TIMESTEP fits
+3.69, between LINE1.mnu's 4 and coldboot1's 2), which is not ported.
+
+The native app reads the rest tables from a local decrypted plugin (`--vsh-modules`, never committed). Without
+one, it settles the plugin's generic flat start (FUN_0004ec90) for a minute of simulated time. The vertex texcoords
+(in_8, from local memory 0xc2bb4100) are (row/127, edge fade), the fade being FUN_0004d190's.
+
+Open: the boot and transition presets (coldboot1/2, gameboot, welcome) and their blend timing. The steady state
+blends the day and night overrides by the clock.
 
 ## Category icon renderer (ported 2026-10-25)
 

@@ -74,6 +74,17 @@ normal maps can be inspected locally without writing them into the repository:
 & .\out\native-xmb\re-ps3-native.exe --dev-flash <local-dev_flash> --icon-sheet .\out\native-xmb\icon-sheet.png
 ```
 
+## Decrypted modules for the ribbon
+
+dev_flash holds the VSH modules encrypted (`*.sprx`). The ribbon cloth starts from rest tables inside
+custom_render_plugin. To use them, pass a local directory of decrypted modules (`*.prx`):
+
+```powershell
+& .\out\native-xmb\re-ps3-native.exe --dev-flash <local-dev_flash> --vsh-modules <local-decrypted-vsh_module>
+```
+
+Without that directory, the cloth starts flat and settles. The modules stay local and are never committed.
+
 ## Inventory original menu definitions
 
 ```powershell

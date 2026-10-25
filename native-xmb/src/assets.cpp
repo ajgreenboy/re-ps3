@@ -256,6 +256,11 @@ QByteArray Assets::qglFile(const QString& archive,const QString& name) {
     }
     return qrcs_[archive]->file(name);
 }
+QByteArray Assets::vshModule(const QString& name) const {
+    if(modulesRoot_.isEmpty())return {};
+    QFile file(QDir(modulesRoot_).filePath(name));
+    return file.open(QIODevice::ReadOnly)?file.readAll():QByteArray();
+}
 QImage Assets::decodeDds(const QByteArray& bytes) {
     range(bytes,0,128);
     const auto le=[&](int at){return qFromLittleEndian<quint32>(bytes.constData()+at);};
