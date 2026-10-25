@@ -178,8 +178,9 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     GLint target=0;glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
     const bool hdr=original && hdr_.ready(); // the original background is drawn as HDR and tone mapped with glare
     float presetBlend=1; // day/night preset weight for ribbon, particles and HDR: 0 night .. 1 day
+    GLuint scene=GLuint(target);
     if(original) {
-        const GLuint scene=hdr?hdr_.begin(*this,pixelWidth,pixelHeight):GLuint(target);
+        scene=hdr?hdr_.begin(*this,pixelWidth,pixelHeight):GLuint(target);
         QDateTime when=backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime();
         // Fixed colours pin the month palette (day 1: that month's textures alone); the clock still drives day/night.
         static const int fixedMonth[]={0,8,6,12,5,1}; // Original, Blue, Purple, Red, Green, Silver
@@ -210,6 +211,24 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     if(monthTexture_)monthTexture_->release(0);
     glDisable(GL_BLEND);
     presetBlend_=presetBlend;
+    if(hdr && qEnvironmentVariableIsSet("XMB_BG_SCENE")) {
+        static bool dumped=false;
+        if(!dumped) { dumped=true;
+        // Trace the raw HDR scene (background + ribbon + particles) before tone mapping, so scene over-brightness
+        // can be told apart from the exposure/tone-map/glare passes. Values are clamped to [0,1] for the PNG;
+        // the background never exceeds one, so the dark-region levels are exact.
+        glBindFramebuffer(GL_FRAMEBUFFER,GLuint(scene));
+        QVector<GLfloat> px(pixelWidth*pixelHeight*4);
+        glReadPixels(0,0,pixelWidth,pixelHeight,GL_RGBA,GL_FLOAT,px.data());
+        QImage dump(pixelWidth,pixelHeight,QImage::Format_RGB32);
+        const auto c8=[](float v){return int(std::clamp(v,0.f,1.f)*255.f+.5f);};
+        for(int y=0;y<pixelHeight;++y)for(int x=0;x<pixelWidth;++x) {
+            const float* p=px.constData()+((pixelHeight-1-y)*pixelWidth+x)*4;
+            dump.setPixel(x,y,qRgb(c8(p[0]),c8(p[1]),c8(p[2])));
+        }
+        dump.save(QString::fromLocal8Bit(qgetenv("XMB_BG_SCENE")));
+        }
+    }
     if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),originalParticles?std::function<void(int,int)>([&](int w,int h){particles_.render(*this,presetBlend,w,h,true);}):std::function<void(int,int)>());
 }
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
