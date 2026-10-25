@@ -121,6 +121,52 @@ struct Clip {
     QByteArray pcm;
 };
 
+Clip themeWav(const QByteArray& wav) {
+    if(wav.size()<44 || wav.size()>8*1024*1024 || !wav.startsWith("RIFF") || wav.mid(8,4)!="WAVE")
+        throw std::runtime_error("Theme cue is not a bounded PCM WAV");
+    const auto u16=[&](qsizetype p){checkedRange(wav,quint64(p),2);return qFromLittleEndian<quint16>(wav.constData()+p);};
+    const auto u32=[&](qsizetype p){checkedRange(wav,quint64(p),4);return qFromLittleEndian<quint32>(wav.constData()+p);};
+    const quint64 end=quint64(u32(4))+8;
+    if(end>quint64(wav.size()) || end<12)throw std::runtime_error("Theme WAV length is invalid");
+    int channels=0,rate=0;qsizetype dataAt=0,dataBytes=0;
+    for(quint64 p=12;p<end;) {
+        if(end-p<8)throw std::runtime_error("Truncated theme WAV chunk");
+        const auto size=u32(qsizetype(p+4));const quint64 payload=p+8;
+        if(size>end-payload)throw std::runtime_error("Theme WAV chunk exceeds its RIFF container");
+        const auto id=wav.mid(qsizetype(p),4);
+        if(id=="fmt ") {
+            if(channels || size<16 || u16(qsizetype(payload))!=1 || u16(qsizetype(payload+14))!=16)
+                throw std::runtime_error("Theme cue must use signed 16-bit PCM");
+            channels=u16(qsizetype(payload+2));const quint32 hz=u32(qsizetype(payload+4));
+            if((channels!=1 && channels!=2) || hz<8000 || hz>192000 ||
+               u16(qsizetype(payload+12))!=channels*2 || u32(qsizetype(payload+8))!=hz*channels*2)
+                throw std::runtime_error("Unsupported theme cue channel layout or sample rate");
+            rate=int(hz);
+        } else if(id=="data") {
+            if(dataAt)throw std::runtime_error("Multiple theme WAV data chunks");
+            dataAt=qsizetype(payload);dataBytes=size;
+        }
+        p=payload+size+(size&1u);
+        if(p>end)throw std::runtime_error("Missing theme WAV chunk padding");
+    }
+    if(!channels || !dataAt || !dataBytes || dataBytes%(channels*2))throw std::runtime_error("Theme cue has no complete PCM frames");
+    const qsizetype frames=dataBytes/(channels*2);
+    if(frames>qsizetype(rate)*10)throw std::runtime_error("Theme cue exceeds ten seconds");
+    Clip clip;clip.format.setSampleRate(48000);clip.format.setChannelCount(2);clip.format.setSampleFormat(QAudioFormat::Int16);
+    const qsizetype outFrames=std::max<qsizetype>(1,(frames*48000+rate-1)/rate);
+    clip.pcm.resize(outFrames*4);
+    const auto sample=[&](qsizetype frame,int channel){return qFromLittleEndian<qint16>(wav.constData()+dataAt+(frame*channels+std::min(channel,channels-1))*2);};
+    for(qsizetype i=0;i<outFrames;++i) {
+        const double at=double(i)*rate/48000.;const qsizetype first=std::min(qsizetype(at),frames-1),next=std::min(first+1,frames-1);
+        const double fraction=at-std::floor(at);
+        for(int c=0;c<2;++c) {
+            const qint16 value=qint16(std::clamp(std::lround(sample(first,c)*(1-fraction)+sample(next,c)*fraction),-32768L,32767L));
+            std::memcpy(clip.pcm.data()+i*4+c*2,&value,2);
+        }
+    }
+    return clip;
+}
+
 Clip decodeClip(const QByteArray& file, const QByteArray& tree, quint64 extra,
                 quint32 soundBase, quint32 soundLength) {
     checkedRange(tree, extra, 28);
@@ -212,6 +258,7 @@ std::array<Clip, 4> loadClips(const QString& flashRoot) {
 
 struct InteractionAudio::Impl {
     std::array<Clip, 4> clips;
+    std::array<Clip, 6> theme;
     std::unique_ptr<QAudioSink> sink;
     QBuffer buffer;
     QElapsedTimer clock;
@@ -219,6 +266,13 @@ struct InteractionAudio::Impl {
     bool enabled = true;
     bool outputWarningLogged = false;
     float volume = 0.6f;
+
+    const Clip* selected(Cue cue) const {
+        auto index=size_t(cue);if(index>=theme.size())return nullptr;
+        if(!theme[index].pcm.isEmpty())return &theme[index];
+        if(cue==Cue::Accept)index=size_t(Cue::Confirm);
+        return index<clips.size() && !clips[index].pcm.isEmpty()?&clips[index]:nullptr;
+    }
 
     void stop() {
         if (sink) sink->stop();
@@ -236,8 +290,24 @@ InteractionAudio::InteractionAudio(QString flashRoot, QObject* parent)
 InteractionAudio::~InteractionAudio() { impl_->stop(); }
 
 bool InteractionAudio::available(Cue cue) const {
-    const auto index = size_t(cue);
-    return index < impl_->clips.size() && !impl_->clips[index].pcm.isEmpty();
+    return impl_->selected(cue)!=nullptr;
+}
+
+int InteractionAudio::setThemeSounds(const QHash<QString,QByteArray>& sounds) {
+    Q_ASSERT(QThread::currentThread()==thread());
+    // Role mapping/fallback follows MaXMB xmb.js _soundFiles/_applyThemeSounds
+    // and audio.js setThemeSounds (MIT); decoding/output remain native C++.
+    constexpr std::array<std::pair<const char*,Cue>,5> roles{{{"se_cursor",Cue::Move},{"se_decide",Cue::Confirm},
+        {"se_cancel",Cue::Back},{"se_optionmenu",Cue::Options},{"se_system_ok",Cue::Accept}}};
+    std::array<Clip,6> next;int count=0;
+    for(const auto& [id,cue]:roles) {
+        const auto found=sounds.constFind(QString::fromLatin1(id));if(found==sounds.cend())continue;
+        try {next[size_t(cue)]=themeWav(*found);++count;}
+        catch(const std::exception& error){qWarning().noquote()<<"interaction audio: rejected theme cue"<<id<<error.what();}
+    }
+    impl_->stop();impl_->lastMove=-1000;impl_->theme=std::move(next);
+    qInfo()<<"interaction audio: theme overrides"<<count;
+    return count;
 }
 
 void InteractionAudio::setEnabled(bool enabled) {
@@ -258,7 +328,7 @@ void InteractionAudio::play(Cue cue) {
     const auto now = impl_->clock.elapsed();
     if (cue == Cue::Move && now - impl_->lastMove < 45) return;
     if (cue == Cue::Move) impl_->lastMove = now;
-    const auto& clip = impl_->clips[size_t(cue)];
+    const auto& clip = *impl_->selected(cue);
     if (!impl_->sink || impl_->sink->format() != clip.format) {
         impl_->stop();
         impl_->sink.reset();
@@ -285,6 +355,8 @@ void InteractionAudio::play(Cue cue) {
         return;
     }
     impl_->sink->start(&impl_->buffer);
+    if(qEnvironmentVariableIsSet("XMB_AUDIO_TRACE"))qInfo()<<"interaction audio: play"<<int(cue)
+        <<(impl_->theme[size_t(cue)].pcm.isEmpty()?"system":"theme")<<clip.pcm.size()<<"PCM bytes";
 }
 
 }

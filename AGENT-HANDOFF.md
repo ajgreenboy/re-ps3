@@ -1,5 +1,9 @@
 # Agent handoff: PS3 XMB on Windows
 
+**Current routing (2026-10-25):** start at `native-xmb/HANDOFF-PHASES.md`, then
+`native-xmb/audit/PIPELINE.md`. The October 24 component inventory below is historical.
+`native-xmb/audit/MAXMB-INTEGRATION.md` records the latest handoff review and MaXMB reuse.
+
 Written October 24, 2026 for an agent picking this repository up cold. It orients you and points at the
 detailed documents; it does not replace them. When a linked document is newer than this file, the
 linked document wins.
@@ -21,7 +25,8 @@ are fine: behaviour and appearance should match the PS3, the internals do not ha
 
 ## 2. Start here, in this order
 
-1. `native-xmb/audit/HANDOFF.md`: the newest and most detailed handoff for the active track (Oct 24).
+1. `native-xmb/HANDOFF-PHASES.md`: current layer status, open phases and A/B baseline. Then read
+   `native-xmb/audit/HANDOFF.md` for the dated Oct 24 functional inventory.
    It covers what v0.2 contains, evidence, the input map, priorities and phases A to E.
 2. `native-xmb/ISA.md`: the completion checklist. An unchecked box stays open until the behaviour has
    actually been observed.

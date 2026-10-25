@@ -1,6 +1,8 @@
 # Native XMB recreation handoff
 
-**Current plan to an exact match:** [HANDOFF-PHASES.md](HANDOFF-PHASES.md) — state of every layer and the phases left (October 24).
+**Current plan to an exact match:** [HANDOFF-PHASES.md](HANDOFF-PHASES.md) — current state and remaining phases.
+See [MaXMB integration and handoff review](audit/MAXMB-INTEGRATION.md) for the October 25 continuation.
+The checkpoints below are historical; the procedural-wave descriptions no longer describe the current renderer.
 
 ## Active direction
 

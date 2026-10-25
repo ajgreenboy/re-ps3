@@ -232,7 +232,7 @@ QByteArray P3t::vagToWav(const QByteArray& left,const QByteArray& right) {
             for(int i=0;i<28;++i) {
                 const int nibble=i%2?b[2+i/2]>>4:b[2+i/2]&15;
                 const int raw=qint16(quint16(nibble<<12))>>4; // sign-extended, scaled to 12 bits
-                const double x=std::clamp(std::round(double((raw<<4)>>shift)+(s1*c[0]+s2*c[1])/64.),-32768.,32767.);
+                const double x=std::clamp(std::round(double((raw*16)>>shift)+(s1*c[0]+s2*c[1])/64.),-32768.,32767.);
                 out.push_back(qint16(x));s2=s1;s1=x;
             }
             if(b[1]==1)break; // last block, no loop

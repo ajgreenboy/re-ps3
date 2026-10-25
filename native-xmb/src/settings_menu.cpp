@@ -88,7 +88,7 @@ void Shell::openSettings(const QString& id) {
             option("system_mute","Mute","Mutes this computer's playback device.","host/muted"),
             option("volume","XMB Volume","Sets the volume for media and menu sounds.","audio/volume"),
             option("xmb_mute","XMB Mute","Mutes native XMB audio only.","audio/muted"),
-            option("keytone","Key Tone","Plays the original XMB sounds during navigation.","audio/keyTone")};
+            option("keytone","Key Tone","Plays the current theme's menu sounds, with original XMB sounds as fallback.","audio/keyTone")};
     } else if(id=="music" || id=="video") {
         page.title=id=="music"?"Music Settings":"Video Settings";
         page.entries={option("repeat","Repeat","Repeats the current media when playback reaches its end.","media/repeat"),

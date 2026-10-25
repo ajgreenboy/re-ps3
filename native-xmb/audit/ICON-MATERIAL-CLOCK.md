@@ -65,6 +65,10 @@ Set `XMB_ICON_LOG_MATERIAL=1` with `XMB_LOG=<local log>` to record the first der
 
 Remaining user-reported requirements:
 
+Status note, 2026-10-25: the brightness concern below is historical. HANDOFF-PHASES.md now records that the large
+night/day mismatch came from comparing different console hours. The remaining fitted day curve is being refined
+by another session; use the current phase handoff for that status, rather than applying an extra darkness gain.
+
 - The background is brighter than the RPCS3 reference at the same hour. Scene encoding, exposure, day curve,
   presets, palette orientation and tone-map composition need matched-state evidence. No arbitrary darkening
   multiplier was introduced. This also affects the icon refraction input.

@@ -30,7 +30,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Text | GL glyph atlas, rasterised at the 2x UI layer's scale with glyph origins on whole pixels (soft-text bug fixed 2026-10-25); label glow breathes and idle labels fade (MaXMB observations, unconfirmed); firmware rasterizer parity open |
 | Motion | One measured ease (25%/frame at 60 fps, τ 58 ms); 150 px column cross-fade on category moves |
 | Cold boot | 4.93 intro ported: coldboot.raf scene and script, boot sound, anim_coldboot2 events, background boot presets; skippable, `--no-intro` (audit/PIPELINE.md "Cold boot") |
-| Themes | `.p3t` still background and icons (`src/p3t.cpp`); sounds, RAF scenes, font/colour open |
+| Themes | `.p3t` still background, icons and five menu-sound roles; RAF scenes and font/colour open |
 | Input | Keyboard, XInput, and DualShock 3/4 / DualSense over HID (`src/pad.cpp`; HID untested without a controller) |
 | Installed titles | dev_hdd0 games and games.yml disc copies start in the RPCS3 next to dev_hdd0 (`--no-gui`) |
 | Host settings | System Information, network list, video/audio output and master volume read and write the real PC |
@@ -114,7 +114,9 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   against an RPCS3 capture. The logo is the RAF's PS symbol + "PS3" + "PlayStation 3"; the RCO's tex_ps3logo/tex_scelogo
   stay at alpha 0. Open: the epilepsy notice after ShowGUI, the SD actors, the boot brightness curve of RPCS3's
   LinesController/pre-exposure path, and the "gameboot" sequence when launching.
-- Theme system: other colour themes, wallpaper mode as the firmware composites it. `.p3t` themes: still background and icons are in (`src/p3t.cpp`, README "PS3 themes"); still open are their sound effects in the shell, dynamic RAF scenes, and the `font` / `color` selections.
+- Theme system: other colour themes, wallpaper mode as the firmware composites it. `.p3t` themes: still background,
+  icons and menu sounds are in (README "PS3 themes", audit/MAXMB-INTEGRATION.md). Sounds use MaXMB's five-role
+  mapping and per-role system fallback. Still open: dynamic RAF scenes and the `font` / `color` selections.
 - Screen states: screensaver/dim, Power off, user login screen, notifications (tex_notification_*), the in-game
   XMB (xmb_ingame).
 
