@@ -12,6 +12,10 @@ class Assets final {
 public:
     explicit Assets(QString flashRoot);
     const QImage& image(const QString& container, const QString& name);
+    // The largest copy of an RCO image: firmware ships many textures several times (e.g. tex_psn 46 px in
+    // explore_plugin_full, 128 px in xmb_plugin_normal). Small sources (<96 px) are swapped for the largest same-name,
+    // same-aspect copy in any RCO; the choice is cached.
+    const QImage& bestImage(const QString& container, const QString& name);
     QString text(const QString& container,const QString& name,const QString& fallback={});
     QByteArray qglFile(const QString& archive,const QString& name);
     QString fontFamily() const { return font_; }
@@ -38,6 +42,8 @@ private:
     QHash<QString,QHash<QString,QString>> texts_;
     QHash<QString,std::shared_ptr<QrcArchive>> qrcs_;
     int decodedImages_=0;
+    QHash<QString,QStringList> nameIndex_; // RCO image name -> containers holding it (built on first need)
+    QHash<QString,QString> bestContainer_; // container/name -> container with the largest copy
     Container readContainer(const QString& name) const;
     QHash<QString,QString> readEnglish(const Container& container) const;
     static QImage decodeGim(const QByteArray& bytes);
