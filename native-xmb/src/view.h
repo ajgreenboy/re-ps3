@@ -30,6 +30,8 @@ public:
     // reference videos (band colours by clock time, ribbon crest over 40 s). Returns false on GL failure.
     bool measureReference(const QString& path);
     void setBackgroundClock(const QDateTime& when) { backgroundOverride_=when;update(); }
+    // Fixed animation time (seconds) for deterministic A/B captures; -1 follows the real clock.
+    void setRenderClock(double seconds) { secondsOverride_=seconds;update(); }
     // The 4.93 cold-boot intro before the XMB (coldboot.h); off for measurement and scripted runs. Set before show.
     void setIntroEnabled(bool enabled) { introEnabled_=enabled; }
 protected:
@@ -109,6 +111,7 @@ private:
     static double itemIconSize(int level,bool bullet,double focus);
     bool forceOriginal_=false;
     QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
+    double secondsOverride_=-1;                                       // fixed animation time for A/B captures, -1 = now
     void drawScene(QPainter& painter);
     void grabIntroFrame();
     // PS3 on-screen keyboard (reference frame 64 s): 10x4 character grid, two function rows, prediction panel.
