@@ -224,9 +224,11 @@ void Shell::activate() {
     case Action::CreateUser:emit requestNewUser();break;
     case Action::SelectUser:profiles_.select(entry.value);break;
     case Action::Wallpaper:emit requestWallpaper();break;
-    case Action::Information:
-        message_=entry.value=="host:network"?host::networkStatus([this](const QString& id,const QString& fallback){return assets_.text("sysconf_plugin",id,fallback);}):entry.value=="host:display"?host::displayOutput():entry.value=="host:audio"?host::audioOutput():
-            entry.value.isEmpty()?host::systemInformation(renderer_):entry.value;break;
+    case Action::Information: {
+        const host::Label label=[this](const QString& id,const QString& fallback){return assets_.text("sysconf_plugin",id,fallback);};
+        message_=entry.value=="host:network"?host::networkStatus(label):entry.value=="host:display"?host::displayOutput():entry.value=="host:audio"?host::audioOutput():
+            entry.value.isEmpty()?host::systemInformation(renderer_,label):entry.value;break;
+    }
     case Action::Library: {
         const auto path=preferences_.value("library/"+categories_[category_].id).toString();
         if(!path.isEmpty())openDirectory(path);else emit requestLibrary();break;

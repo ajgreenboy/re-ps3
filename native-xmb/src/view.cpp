@@ -522,6 +522,14 @@ void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect)
 }
 void View::drawScene(QPainter& p) {
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
+    // A message whose body is "Key: value" rows (System Information, connection status, outputs) is a PS3 information
+    // page, not a dialog (reference 92 s): no categories or clock behind it, a titled header and a two-column table.
+    const bool infoPage=[&]{
+        const auto lines=shell_.message().split('\n');
+        if(lines.size()<4 || !lines[1].isEmpty())return false;
+        int pairs=0;for(int i=2;i<lines.size();++i)if(lines[i].contains(": "))++pairs;
+        return pairs>=2;
+    }();
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
         QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferVerticalHinting);p.setFont(f);p.setPen(QColor(0,0,0,38));p.drawText(r.translated(1,1),flags,value);p.setPen(colour);p.drawText(r,flags,value);
     };
@@ -558,9 +566,16 @@ void View::drawScene(QPainter& p) {
         const auto& categories=shell_.categories();
         const double childAmount=std::clamp(depthPosition_,0.,1.);
         for(int i=0;i<categories.size();++i) {
-            const auto& cat=categories[i];const double distance=i-categoryPosition_,x=560+distance*202-childAmount*250;
-            const double focus=std::max(0.,1.-std::abs(distance));const double size=82+focus*10; // reference: ~86 px, focus barely larger
-            p.save();p.setOpacity((i==shell_.category()?1.:1.-childAmount)*(shell_.message().isEmpty()?1.:.18));
+            // Reference (nDL5YJt2aaA 7.4 s / 95 s, 1080p): focus column at x 585, icons 195-197 px apart; unfocused icons
+            // ~0.67 of the focused opacity and smaller. Inside a page the open category steps 250 px left; the ones to its
+            // right stay faintly (~0.1) on a 186 px pitch from x 545, and the ones to its left leave.
+            if(infoPage)break;
+            const auto& cat=categories[i];const double distance=i-categoryPosition_;
+            const bool open=i==shell_.category();
+            const double x=open || distance<0?585+distance*197-childAmount*250:585+distance*197+(545+distance*186-(585+distance*197))*childAmount;
+            const double focus=std::max(0.,1.-std::abs(distance));const double size=76+focus*16;
+            const double level0=.67+.33*focus,opacity=open?1.:level0*(1.-childAmount)+(distance>0?.1*childAmount:0.);
+            p.save();p.setOpacity(opacity*(shell_.message().isEmpty()?1.:.18));
             drawCategory(p,cat,{x-size/2,290-size/2,size,size});
             if(i==shell_.category()){p.setOpacity((1.-childAmount)*(shell_.message().isEmpty()?1.:.18));text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
@@ -618,17 +633,19 @@ void View::drawScene(QPainter& p) {
                 const double y=505+row;
                 if(y<-100 || y>1050)continue;
                 const double focus=std::max(0.,1.-std::abs(distance));
-                const double iconX=560-behind*(100+150*focus)+ahead*250+offset;
+                const double iconX=585-behind*(100+150*focus)+ahead*250+offset;
                 // Reference (RPCS3 4.x video): square icons ~60 px, ~105 px when focused; utility folders are icons too.
                 // Only media thumbnails (album art) keep a wide tile.
-                const double size=level==0?60+focus*44:40+focus*16;
+                // Setting rows carry the small round settings bullet: 18 px, 39 px focused (reference 95 s).
+                const bool bullet=entry.container=="qgl/icontex" && entry.texture=="23n";
+                const double size=bullet?18+focus*21:level==0?60+focus*44:40+focus*16;
                 const bool tile=entry.texture.contains("album") || entry.container=="file"; // ICON0 thumbnails are wide
                 const double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
                 const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
                 drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
                 p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus)));
-                // One label column per level, as on the PS3 (reference: x ~669 at the top level, ~624 inside a page).
-                const double labelX=(level==0?(tile?744:670):624)+ahead*250+offset;
+                // One label column per level, as on the PS3 (reference: x ~684 at the top level, ~642 inside a page).
+                const double labelX=(level==0?(tile?758:684):642)+ahead*250+offset;
                 const double alpha=.72+.28*focus;
                 const auto value=active?shell_.valueText(entry):QString{};
                 QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(27);
@@ -643,7 +660,7 @@ void View::drawScene(QPainter& p) {
                 p.restore();
             }
             if(level>0 && columnAlpha>0 && panelAmount<.999) {
-                p.save();p.setOpacity(columnAlpha*(1.-behind));text({420+ahead*250,480,50,50},QString(QChar(0x2039)),42,Qt::white,Qt::AlignCenter);p.restore();
+                p.save();p.setOpacity(columnAlpha*(1.-behind));text({443+ahead*250,480,50,50},QString(QChar(0x2039)),42,Qt::white,Qt::AlignCenter);p.restore();
             }
         }
         };
@@ -656,10 +673,37 @@ void View::drawScene(QPainter& p) {
         if(!shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
         // Info bar (system_plugin tex_infobar: a translucent white band with a bright bottom edge) framing the clock in the
         // top-right corner; the clock's centre sits at y~104 as in the reference video.
-        p.drawImage(QRectF(1490,60,430,88),assets_.image("system_plugin","tex_infobar")); // stretched, as the 1x125 strip is meant
-        text({1240,82,550,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        if(!infoPage) {
+            p.drawImage(QRectF(1490,60,430,88),assets_.image("system_plugin","tex_infobar")); // stretched, as the 1x125 strip is meant
+            text({1240,82,550,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        }
     }
-    if(!shell_.message().isEmpty()) {
+    if(infoPage) {
+        // Reference 92 s (1080p): item icon ~36 px at x 125 and title at x 158 on y 176 above the rule at y 199; rows 40 px
+        // apart centred on y ~533, keys right-aligned to x 925 and values from x 961; "○ Back" at x ~1145, y 894.
+        auto lines=shell_.message().split('\n');const QString title=lines.takeFirst();lines.removeFirst();
+        int depth=shell_.depth();const Entry* source=nullptr;
+        if(!shell_.entriesAt(depth).isEmpty())source=&shell_.entriesAt(depth)[shell_.selectionAt(depth)];
+        if(source && source->texture=="23n" && depth>0)source=&shell_.entriesAt(depth-1)[shell_.selectionAt(depth-1)];
+        if(source)drawImage(p,source->container,source->texture,{107,158,36,36});
+        text({158,156,1200,40},title,22,Qt::white);
+        for(const double y:{199.,866.})p.drawImage(QRectF(0,y,1920,2),assets_.image("system_plugin","tex_msgdialog_bar"));
+        double height=0;for(const auto& line:lines)height+=line.isEmpty()?20:40;
+        double y=std::max(230.,533-height/2+20);
+        for(const auto& line:lines) {
+            if(line.isEmpty()){y+=20;continue;}
+            if(y>840)break;
+            const int split=line.indexOf(": ");
+            if(split<0)text({160,y-20,1600,40},line,22,QColor(235,235,235),Qt::AlignHCenter|Qt::AlignVCenter);
+            else {
+                text({125,y-20,800,40},line.left(split),22,QColor(235,235,235),Qt::AlignRight|Qt::AlignVCenter);
+                text({961,y-20,900,40},line.mid(split+2),22,QColor(235,235,235));
+            }
+            y+=40;
+        }
+        drawImage(p,"system_plugin","tex_circle",{1133,882,24,24});
+        text({1167,874,200,40},assets_.text("sysconf_plugin","msg_tool_button_behavior_back","Back"),21,QColor(235,235,235));
+    } else if(!shell_.message().isEmpty()) {
         // PS3 dialog (reference frames 14.4 s / 20.6 s): the XMB dims, two thin full-width rules at y~200 and y~880
         // frame the dialog, the text is centred in the upper part, and the button hint sits centred under the lower rule.
         p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,135));
@@ -749,7 +793,7 @@ constexpr double oskRowY[6]={434,488,542,596,650,704};
 QString View::oskCharacter(int row,int column) const {
     static const char* lower[4]={"1234567890","qwertyuiop","asdfghjkl'","zxcvbnm,.?"};
     static const char* upper[4]={"1234567890","QWERTYUIOP","ASDFGHJKL\"","ZXCVBNM;:!"};
-    static const char* symbols[4]={"!@#$%^&*()","-_=+[]{}\|","/<>`~;:\"'&","@#%*+-=_.,"};
+    static const char* symbols[4]={"!@#$%^&*()","-_=+[]{}\\|","/<>`~;:\"'&","@#%*+-=_.,"};
     const char* const* set=osk_.symbols?symbols:osk_.shift?upper:lower;
     return QString(QChar(set[row][column]));
 }
