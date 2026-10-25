@@ -1,0 +1,134 @@
+diff --git a/rpcs3/Emu/RSX/RSXThread.cpp b/rpcs3/Emu/RSX/RSXThread.cpp
+index 541da72ee..4dcb69499 100644
+--- a/rpcs3/Emu/RSX/RSXThread.cpp
++++ b/rpcs3/Emu/RSX/RSXThread.cpp
+@@ -2,6 +2,7 @@
+ #include "RSXThread.h"
+ 
+ #include "Capture/rsx_capture.h"
++#include "Common/BufferUtils.h"
+ #include "Common/surface_store.h"
+ #include "Core/RSXReservationLock.hpp"
+ #include "Core/RSXEngLock.hpp"
+@@ -975,6 +976,71 @@ namespace rsx
+ 			capture::capture_draw_memory(this);
+ 		}
+ 
++		// XMB reference capture (C:\dev\xmb; local change, not upstream). XMB_VTX_DUMP=<dir> writes, for 120 draws whose
++		// fragment ucode is XMB_VTX_FP_LENGTH bytes (default 336: the ribbon's lines1.fpo), the vertex constants, the
++		// draw ranges, the index buffer and every enabled vertex array from vertex 0 to the highest one used.
++		// XMB_VTX_FP_LENGTH=0 instead lists each distinct fragment ucode length once. Ranges are walked as
++		// capture_draw_memory does, while the clause is still valid.
++		if (static const char* const vtx_dump = std::getenv("XMB_VTX_DUMP"); vtx_dump)
++		{
++			static const u32 wanted = std::getenv("XMB_VTX_FP_LENGTH") ? static_cast<u32>(std::atoi(std::getenv("XMB_VTX_FP_LENGTH"))) : 336u;
++			static u32 dumped = 0;
++			const auto [program_offset, program_location] = method_registers.shader_program_address();
++			const u32 length = program_hash_util::fragment_program_utils::analyse_fragment_program(vm::base(rsx::get_address(program_offset, program_location))).program_ucode_length;
++			auto& clause = method_registers.current_draw_clause;
++			if (!wanted)
++			{
++				static std::unordered_set<u32> lengths;
++				if (lengths.insert(length).second)
++					if (FILE* f = std::fopen(fmt::format("%s/lengths.txt", vtx_dump).c_str(), "a")) { std::fprintf(f, "length %u command %u\n", length, static_cast<u32>(clause.command)); std::fclose(f); }
++			}
++			else if (length == wanted && dumped < 120 && (clause.command == draw_command::array || clause.command == draw_command::indexed))
++			{
++				++dumped;
++				const std::string base = fmt::format("%s/draw_%04u", vtx_dump, dumped);
++				if (FILE* f = std::fopen((base + ".vc").c_str(), "wb")) { std::fwrite(method_registers.transform_constants.data(), 1, sizeof(method_registers.transform_constants), f); std::fclose(f); }
++				FILE* info = std::fopen((base + ".txt").c_str(), "w");
++				u32 max_vertex = 0;
++				std::vector<u8> indices;
++				const bool indexed = clause.command == draw_command::indexed;
++				const u32 type_size = indexed ? get_index_type_size(method_registers.index_type()) : 0;
++				const u32 index_base = indexed ? (rsx::get_address(method_registers.index_array_address(), method_registers.index_array_location()) & (0 - type_size)) : 0;
++				if (info) std::fprintf(info, "command %u primitive %u index_size %u vertex_base_index %u\n", static_cast<u32>(clause.command), static_cast<u32>(clause.primitive), type_size, method_registers.vertex_data_base_index());
++				clause.begin();
++				do
++				{
++					const auto& range = clause.get_range();
++					if (info) std::fprintf(info, "range first %u count %u\n", range.first, range.count);
++					if (!indexed) { max_vertex = std::max(max_vertex, range.first + range.count); continue; }
++					const u32 address = index_base + range.first * type_size;
++					const u8* bytes = vm::_ptr<u8>(address);
++					indices.insert(indices.end(), bytes, bytes + range.count * type_size);
++					for (u32 i = 0; i < range.count; ++i)
++					{
++						// big-endian indices, relative to the vertex data base index
++						const u32 raw = type_size == 2 ? u32{vm::ptr<u16>::make(address)[i]} : u32{vm::ptr<u32>::make(address)[i]};
++						max_vertex = std::max(max_vertex, get_index_from_base(raw, method_registers.vertex_data_base_index()) + 1);
++					}
++				}
++				while (clause.next());
++				if (!indices.empty())
++					if (FILE* f = std::fopen((base + ".idx").c_str(), "wb")) { std::fwrite(indices.data(), 1, indices.size(), f); std::fclose(f); }
++				const u32 input_mask = method_registers.vertex_attrib_input_mask();
++				for (u8 a = 0; a < limits::vertex_count; ++a)
++				{
++					const auto& array = method_registers.vertex_arrays_info[a];
++					if (!(input_mask & (1 << a)) || !array.size()) continue;
++					const u32 vertex_base = get_vertex_offset_from_base(method_registers.vertex_data_base_offset(), array.offset() & 0x7fffffff);
++					const u32 address = rsx::get_address(vertex_base, array.offset() >> 31);
++					const u32 bytes = std::min<u32>(max_vertex, 65536) * array.stride();
++					if (info) std::fprintf(info, "array %u size %u type %u stride %u vertices %u\n", a, array.size(), static_cast<u32>(array.type()), array.stride(), max_vertex);
++					if (bytes && vm::check_addr(address, vm::page_readable, bytes))
++						if (FILE* f = std::fopen(fmt::format("%s.a%u", base, a).c_str(), "wb")) { std::fwrite(vm::_ptr<u8>(address), 1, bytes, f); std::fclose(f); }
++				}
++				if (info) std::fclose(info);
++			}
++		}
++
+ 		in_begin_end = false;
+ 		m_frame_stats.draw_calls++;
+ 
+@@ -2397,6 +2463,49 @@ namespace rsx
+ 
+ 	void thread::get_current_fragment_program(const std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::fragment_textures_count>& sampler_descriptors)
+ 	{
++		// XMB reference capture (C:\dev\xmb; local change, not upstream). XMB_FP_DUMP=<dir> writes every distinct
++		// fragment program of >= 2000 bytes as drawn: the ucode with the constants the Cg runtime patched into it, the
++		// vertex constants (transform_constants) and the enabled texture units. Capped at 600 programs.
++		if (static const char* const xmb_dump = std::getenv("XMB_FP_DUMP"); xmb_dump && current_fragment_program.valid && current_fragment_program.data.data_ptr)
++		{
++			static std::unordered_set<u64> seen;
++			static u32 count = 0;
++			static u32 calls = 0;
++			if ((++calls & 0x3ff) == 1)
++				if (FILE* f = std::fopen(fmt::format("%s/calls.txt", xmb_dump).c_str(), "a")) { std::fprintf(f, "call %u length %u captured %u\n", calls, current_fragment_program.ucode_length, count); std::fclose(f); }
++			const u32 length = current_fragment_program.ucode_length;
++			static std::unordered_map<u32, u32> per_length;
++			static std::unordered_map<u32, u64> last_capture;
++			const u64 now_ms = get_system_time() / 1000;
++			static std::unordered_map<u32, u64> burst_start;
++			if (now_ms - last_capture[length] > 2000) burst_start[length] = now_ms;
++			if (length >= 2000 && count < 8000 && per_length[length] < 2000 && (per_length[length] < 25 || now_ms - burst_start[length] < 20))
++			{
++				const u8* const ucode = static_cast<const u8*>(current_fragment_program.data.data_ptr);
++				u64 hash = 1469598103934665603ull;
++				for (u32 i = 0; i < length; ++i) { hash ^= ucode[i]; hash *= 1099511628211ull; }
++				if (seen.insert(hash).second && ++per_length[length] && (last_capture[length] = now_ms))
++				{
++					++count;
++					const std::string base = fmt::format("%s/fp_%04u_%016x", xmb_dump, count, hash);
++					if (FILE* f = std::fopen((base + ".ucode").c_str(), "wb")) { std::fwrite(ucode, 1, length, f); std::fclose(f); }
++					if (FILE* f = std::fopen((base + ".vc").c_str(), "wb")) { std::fwrite(REGS(m_ctx)->transform_constants.data(), 1, sizeof(REGS(m_ctx)->transform_constants), f); std::fclose(f); }
++					if (FILE* f = std::fopen((base + ".txt").c_str(), "w"))
++					{
++						std::fprintf(f, "ucode_length %u draw %u surface %ux%u\n", length, get_stats().draw_calls,
++							REGS(m_ctx)->surface_clip_width(), REGS(m_ctx)->surface_clip_height());
++						for (u32 i = 0; i < 16; ++i)
++						{
++							const auto& tex = REGS(m_ctx)->fragment_textures[i];
++							if (tex.enabled())
++								std::fprintf(f, "tex%u offset 0x%08x location %u format 0x%02x size %ux%u\n", i, tex.offset(), tex.location(), tex.format(), tex.width(), tex.height());
++						}
++						std::fclose(f);
++					}
++				}
++			}
++		}
++
+ 		if (!m_graphics_state.test(rsx::pipeline_state::fragment_program_dirty))
+ 		{
+ 			return;
