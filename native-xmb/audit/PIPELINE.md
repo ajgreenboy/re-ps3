@@ -293,7 +293,19 @@ of the bright UI content per frame) and `work/region-luma.ts` (mean luma of a re
   0.765 per frame for the first 8 frames. That fits mode 5 with n = 11–12 (0.762 at 183 ms, 0.779 at 200 ms), so the
   200 ms assumption stands. A small tail of motion afterwards comes from the icons' scale change, which the tracker
   mixes in.
-- **Page moves** (into or out of a column) have not been measured; they are still assumed to be 200 ms.
+- **Page move** (into a column's page and back; Settings → Game Settings, then back): the toolbox icon travels
+  261 px. Entering starts about 530 ms after the press, while the plugin loads the page; leaving starts after 34 ms.
+  Both directions follow the same curve. The remaining distance falls by 0.760 per frame, steadily, for 17 to 18
+  frames, and there is no snap at frame 12. So this is not the 200 ms mode-5 ease (0.779, with a 5% snap on frame 12).
+  This capture method reads about 0.014 below the model on moves whose timing is known (the category move: 0.765
+  against 0.779). The page move therefore fits mode 4 at 300 ms: n = 18, k = 1/(3.775 + 0.217 × 3) = 0.226, so
+  0.774 per frame, and the 1% left snaps on frame 18. explore_plugin holds several 300 ms float constants, but I
+  have not traced which call drives the page move, so the mode and duration are a fit, not a trace.
+  `View::PafEase` gained mode 4, and the depth ease uses it at 300 ms. Native check: `XMB_MOTION_LOG` shows the
+  depth position settling in 18 frames in each direction.
+- Capture notes: RPCS3's exclusive fullscreen leaves CopyFromScreen showing a frozen frame, so the scratch config
+  sets "Exclusive Fullscreen Mode: Disable". Letter keys did not reach RPCS3's keyboard pad when sent with
+  `keybd_event` (arrows did), so Cross and Circle were mapped to Page Down and Page Up for the test.
 
 ## Category icon renderer (ported 2026-10-25)
 
