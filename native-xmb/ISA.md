@@ -94,6 +94,10 @@ Build logs establish compilation. Requested window observations establish specif
 
 ## Decisions
 
+- 2026-10-25: Reproduced dark duplicate text in the live Green theme. Replaced unconverted RCO shadow offsets
+  with a provisional subtle shadow and separated whole-string shadow/foreground passes. Runtime firmware
+  shadow conversion and full rasterizer parity remain open; evidence is in audit/TEXT-RENDERER.md.
+
 - 2026-10-25: Fixed-colour category icons use an opaque original-normal-map material after reproducing dark
   interiors on Green. Original retains the firmware glass path. This resolves the reported appearance defect,
   not the broader material-parity criterion; evidence and limits are in audit/CATEGORY-ICON-FIX.md.

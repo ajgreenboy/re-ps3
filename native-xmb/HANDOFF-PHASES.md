@@ -60,6 +60,8 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - GL atlas now handles menu/subtitle/dialog/info/OSK text, with batched glyphs and separate coverage/halo.
   Native size snaps at the viewport scale; resizing clears the caches. Qt shaping preserves fallback and bidi.
   This is the renderer foundation, not a completed port of the PS3 rasterizer.
+- Corrected the visible dark duplicate behind labels/clock: a restrained provisional shadow replaces unconverted
+  RCO template offsets, and whole-string shadows render before foreground glyphs. See audit/TEXT-RENDERER.md.
 - Build independently with `build.ps1 -OutputDirectory ../out/native-phase2` when running from native-xmb;
   this avoids build-log/executable locks from simultaneous Phase 1 work. Scripted captures support `size=1920x1080`.
 - The firmware draws text through paf (libfont with FreeType-style rasterisation of `dev_flash/data/font` SCE-PS3 Rodin
