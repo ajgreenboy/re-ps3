@@ -17,8 +17,9 @@ host Qt font engine. The temporary metrics used for elision and the OSK cursor a
 Native pixel size is rounded from the logical font size and viewport scale. Resizing invalidates atlas and
 shaped-layout caches. Coverage is grayscale, with no added gamma curve. Vertical hinting is an explicit
 current choice, not a recovered firmware setting. The measured halo uses sigma 2.2 and a ~6-pixel radius at
-1080p, separately from the glyph edge. Shadow remains the previous measured 1-pixel offset/38-of-255 alpha.
-These values must not be described as firmware defaults.
+1080p, separately from the glyph edge. Shadow now uses the RCO text-template values (X=4, Y=-5, grey RGB=.25,
+full alpha) rather than the earlier measured 1-pixel/38-of-255; these are template values, not runtime-proven
+output offsets. None of these values should be described as firmware defaults.
 
 Bounds: sixteen 1024-square RGBA pages (64 MiB maximum), 512 shaped layouts, clearing at a frame boundary
 when full. Space glyphs retain their shaped advance without allocating a tile. Uploads reset alignment,

@@ -45,7 +45,7 @@ void main(){uv=texcoord;tileBounds=bounds;gl_Position=vec4(position.x*2./viewpor
 )";
     const char* fragment=R"(#version 330 core
 in vec2 uv;flat in vec4 tileBounds;out vec4 result;uniform sampler2D atlas;uniform vec4 tint;
-uniform vec2 shadowOffset;uniform float glowStrength,shadowAlpha;uniform bool ink;
+uniform vec2 shadowOffset;uniform float glowStrength,shadowAlpha;uniform bool ink;uniform vec3 shadowColor;
 void main(){
     vec2 coverage=texture(atlas,uv).rg;
     vec2 shadowUv=uv-shadowOffset;
@@ -53,7 +53,7 @@ void main(){
     float shadow=texture(atlas,shadowUv).r*inside*shadowAlpha*tint.a;
     float halo=clamp(coverage.g*glowStrength,0.,1.)*tint.a;
     float alpha=halo+shadow*(1.-halo);
-    vec3 rgb=vec3(.922,.961,1.)*halo;
+    vec3 rgb=vec3(.922,.961,1.)*halo + shadowColor*shadow*(1.-halo);
     float fill=ink?coverage.r*tint.a:0.;
     result=vec4(tint.rgb*fill+rgb*(1.-fill),fill+alpha*(1.-fill));
 }
@@ -183,8 +183,12 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
     program_.setUniformValue("viewport",QVector2D(target_.width(),target_.height()));program_.setUniformValue("atlas",0);
     program_.setUniformValue("tint",QVector4D(colour.redF(),colour.greenF(),colour.blueF(),opacity));
     program_.setUniformValue("glowStrength",float(std::clamp(glow,0.,1.)*1.5));
-    program_.setUniformValue("shadowAlpha",shadow?38.f/255.f:0.f);program_.setUniformValue("ink",ink);
-    program_.setUniformValue("shadowOffset",QVector2D(float(rasterScale_/atlasSize),float(rasterScale_/atlasSize)));
+    // RCO text templates (audit/TEXT-RENDERER.md): 1304/1305 use shadow X=4, Y=-5 and 1197 use shadow RGB=.25.
+    // These are template values, not runtime-proven output offsets; the shadow colour is grey, not black.
+    program_.setUniformValue("shadowAlpha",shadow?1.f:0.f);
+    program_.setUniformValue("shadowColor",QVector3D(.25f,.25f,.25f));
+    program_.setUniformValue("ink",ink);
+    program_.setUniformValue("shadowOffset",QVector2D(float(4*rasterScale_/atlasSize),float(-5*rasterScale_/atlasSize)));
     gl.glBindVertexArray(vao_);gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);
     gl.glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);
     QVector<Vertex> vertices;int page=-1;
