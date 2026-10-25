@@ -9,6 +9,7 @@
 #include <QSettings>
 #include "catalog.h"
 #include "rsx_program.h"
+#include "p3t.h"
 #include <QJsonDocument>
 #include <QFile>
 #include <QLoggingCategory>
@@ -82,7 +83,38 @@ int main(int argc,char** argv) {
     parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
     parser.addOption({"decode-fp","Decode RSX fragment-program captures (archive:lib/x.fpo@dir) into named parameter values and exit","spec"});
     parser.addOption({"dump-cg","Translate the original qgl/lines Cg programs to GLSL into a local folder and exit","directory"});
-    parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});parser.process(app);
+    parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});
+    parser.addOption({"p3t-dump","List a PS3 theme's elements and write its decoded pictures and sounds to a local folder (theme.p3t@directory) and exit","spec"});parser.process(app);
+    if(parser.isSet("p3t-dump")) { // local analysis only: theme-derived files, keep out of Git
+        const auto spec=parser.value("p3t-dump").split('@');
+        if(spec.size()!=2){qCritical()<<"use --p3t-dump theme.p3t@directory";return 2;}
+        QString error;const auto theme=xmb::P3t::load(spec[0],&error);
+        if(theme.isNull()){qCritical().noquote()<<error;return 2;}
+        const QDir out(spec[1]);QDir().mkpath(out.path());
+        QFile list(out.filePath("elements.txt"));
+        if(!list.open(QIODevice::WriteOnly|QIODevice::Text)){qCritical()<<list.errorString();return 2;}
+        QTextStream stream(&list);
+        for(const auto& element:theme.elements()) {
+            stream<<QString(element.depth*2,' ')<<element.name;
+            auto keys=element.attributes.keys();keys.sort();
+            for(const auto& key:keys) {
+                const auto& a=element.attributes[key];using Kind=xmb::P3t::Attribute::Kind;
+                stream<<" "<<key<<"="<<(a.kind==Kind::Int?QString::number(a.integer):a.kind==Kind::Float?QString::number(a.real):a.kind==Kind::String?'"'+a.text+'"':
+                    a.kind==Kind::File?QString("file[%1]").arg(a.size):QString("[%1 values]").arg(a.kind==Kind::Ints?a.integers.size():a.reals.size()));
+            }
+            stream<<"\n";
+        }
+        const auto background=theme.background(),preview=theme.preview();
+        if(!background.isNull())background.save(out.filePath("background.png"));
+        if(!preview.isNull())preview.save(out.filePath("preview.png"));
+        const auto icons=theme.icons();const auto sounds=theme.sounds();
+        QDir().mkpath(out.filePath("icons"));QDir().mkpath(out.filePath("sounds"));
+        for(auto it=icons.cbegin();it!=icons.cend();++it)it.value().save(out.filePath("icons/"+it.key()+".png"));
+        for(auto it=sounds.cbegin();it!=sounds.cend();++it){QFile wav(out.filePath("sounds/"+it.key()+".wav"));if(wav.open(QIODevice::WriteOnly))wav.write(it.value());}
+        qInfo().noquote()<<"p3t:"<<theme.name()<<"by"<<theme.author()<<"-"<<theme.elements().size()<<"elements, background"<<background.size()
+            <<(theme.dynamic()?"(dynamic)":"")<<","<<icons.size()<<"icons,"<<sounds.size()<<"sounds";
+        return 0;
+    }
     if(!parser.isSet("dev-flash"))parser.showHelp(2);
     const QString data=parser.isSet("data-dir")?parser.value("data-dir"):QDir(QCoreApplication::applicationDirPath()).filePath("data");
     if(parser.isSet("inventory")) {

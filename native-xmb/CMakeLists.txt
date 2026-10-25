@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets OpenGLWidgets Multimedia Concurrent Network)
 qt_add_executable(re-ps3-native
-    src/main.cpp src/assets.cpp src/assets.h src/qrc.cpp src/qrc.h src/catalog.cpp src/catalog.h
+    src/main.cpp src/assets.cpp src/assets.h src/p3t.cpp src/p3t.h src/qrc.cpp src/qrc.h src/catalog.cpp src/catalog.h
     src/preferences.cpp src/preferences.h
     src/media_library.cpp src/media_library.h src/settings_menu.cpp
     src/interaction_audio.cpp src/interaction_audio.h

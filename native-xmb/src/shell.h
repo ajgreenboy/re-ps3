@@ -15,15 +15,16 @@ class QVideoSink;
 
 namespace xmb {
 class Assets;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Information, Library, ChooseLibrary, File, Folder, Launch };
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
     QString value;
     QString setting;
     QVariant option;
+    QString themeIcon; // the PS3 theme (.p3t icontable) id that replaces this icon, e.g. "icon_game_setting"
 };
-struct Category { QString id,title,container,texture; QVector<Entry> entries; };
+struct Category { QString id,title,container,texture; QVector<Entry> entries; QString themeIcon; };
 class Shell final:public QObject {
     Q_OBJECT
 public:
@@ -47,6 +48,10 @@ public:
     QString clockText() const;
     int backgroundMode() const { return preferences_.value("appearance/background").toInt(); }
     QString wallpaper() const { return preferences_.value("appearance/wallpaper").toString(); }
+    // The PS3 theme in use (Theme Settings > Theme), decoded in memory from its .p3t: empty path = the system's own.
+    QString themePath() const { return theme_.path; }
+    const QImage& themeBackground() const { return theme_.background; }
+    QImage themeIcon(const QString& id) const { return id.isEmpty()?QImage{}:theme_.icons.value(id); }
     bool fullscreen() const { return preferences_.value("display/fullscreen").toBool(); }
     bool photoFill() const { return preferences_.value("photo/fit").toInt()==1; }
     bool photoOpen() const;
@@ -64,6 +69,7 @@ public:
     void chooseLibrary(const QString& folder);
     void togglePlayback();
     void chooseWallpaper(const QString& file);
+    void chooseTheme(const QString& file);
     void setSystemName(const QString& name);
     void setFullscreen(bool enabled);
     void refreshDirectory();
@@ -73,6 +79,7 @@ signals:
     void requestLibrary();
     void mediaFrame(const QImage& frame);
     void requestWallpaper();
+    void requestTheme();
     void requestSystemName(const QString& value);
     void requestQuit();
     void requestNewUser();
@@ -94,6 +101,10 @@ private:
     struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; };
     QVector<Page> pages_;
     QString message_,mediaTitle_,renderer_;
+    // Only the decoded pieces are kept (the .p3t itself is read again when the theme changes); nothing is written to disk.
+    struct Theme { QString path,name; QImage background; QHash<QString,QImage> icons; };
+    Theme theme_;
+    void loadTheme();
     bool mediaOpen_=false;
     int category_=6;
     std::unique_ptr<QMediaPlayer> player_;

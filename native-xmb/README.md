@@ -60,7 +60,8 @@ materials tint RGB while keeping original alpha and full-colour PSN artwork.
 It loads the original Latin firmware font and caches decoded icons by container
 and resource name. Unknown formats are logged and remain missing; they are not
 silently treated as decoded resources. Other GIM formats, RCO animation/layout
-objects, model assets, other languages, VAG sounds and theme packages remain work.
+objects, model assets, other languages and RCO VAG sounds remain work; theme packages are covered
+under PS3 themes below.
 English strings support UTF-8/UTF-16BE/UTF-32BE tables; Settings currently binds
 16 entries to the original XMBML title/description keys. The inspected QGL normal
 maps supply seven main category silhouettes and fourteen Settings silhouettes.
@@ -83,6 +84,29 @@ XInput's A and B do.
 Titles in `dev_hdd0/game`, and disc copies in RPCS3's `config/games.yml`, start in the RPCS3 that sits next to
 dev_hdd0 (`rpcs3.exe --no-gui`). A title RPCS3 lists starts by Title ID (`%RPCS3_GAMEID%:<id>`); any other starts
 from its `USRDIR/EBOOT.BIN`. Both pieces follow MaXMB (MIT); see `THIRD-PARTY.md`.
+
+## PS3 themes
+
+Settings > Theme Settings > Select Theme opens a PS3 theme file (`.p3t`). The theme is read in memory (`src/p3t.cpp`,
+ported from MaXMB, MIT; see `THIRD-PARTY.md`) and nothing from it is written to disk:
+
+- its still background (`bgimage` hd, else sd) becomes the background through the wallpaper mode, ahead of a
+  wallpaper of your own, and covers the whole window;
+- its icons (`icontable`, GIM) replace the category icons, the Settings, Users, Game, Network, PSN and Friends items
+  and the bullets inside settings pages, in their own colours, on the quads the firmware's glass icons take. Media
+  libraries and folders keep the system's pictures.
+
+Theme Settings > Theme lists Original and the chosen theme by its own name; going back to Original with no wallpaper
+of your own brings the original background back. The preference stores only the file's path.
+
+The reader also decodes the theme's sound effects (`setable`, VAG to WAV) and preview, but the shell does not play
+them yet. Dynamic themes' animated scenes (RAF) are listed, not drawn; their still background is used when there
+is one. The firmware's own theme (`dev_flash/vsh/resource/theme/01.p3t`, "Air Paint") is a full example. To see
+what a theme holds, write its element tree and decoded pictures and sounds to a local folder:
+
+```powershell
+& .\out\native-xmb\re-ps3-native.exe --p3t-dump <theme.p3t>@<local-folder>
+```
 
 ## Decrypted modules for the ribbon
 

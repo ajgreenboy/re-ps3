@@ -2,6 +2,7 @@
 #include "assets.h"
 #include "catalog.h"
 #include "host.h"
+#include "p3t.h"
 #include <QAudioOutput>
 #include <QMediaPlayer>
 #include <QVideoSink>
@@ -192,6 +193,26 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     for(auto& entry:categories_[1].entries)if(normalMaps.contains(entry.id)) {
         entry.container="qgl/icontex";entry.texture=QString::number(normalMaps[entry.id])+"n";
     }
+    // The icons a PS3 theme can replace, by its icontable ids (the firmware's own theme, dev_flash
+    // vsh/resource/theme/01.p3t, carries all of these). Media libraries and folders keep the system's pictures.
+    static const QHash<QString,QString> themeCategoryIcons{{"user","icon_user"},{"settings","icon_setting"},{"photo","icon_photo"},
+        {"music","icon_music"},{"video","icon_video"},{"tv","icon_tv"},{"game","icon_game"},{"network","icon_network"},{"friends","icon_friend"}};
+    static const QHash<QString,QString> themeEntryIcons{
+        {"settings/update","icon_update"},{"settings/game","icon_game_setting"},{"settings/video","icon_bdvd_setting"},
+        {"settings/music","icon_music_setting"},{"settings/chat","icon_chat_setting"},{"settings/system","icon_system_setting"},
+        {"settings/theme","icon_theme_setting"},{"settings/date","icon_datetime_setting"},{"settings/power","icon_powersave_setting"},
+        {"settings/device","icon_accessory"},{"settings/print","icon_printer_setting"},{"settings/display","icon_display_setting"},
+        {"settings/sound","icon_sound_setting"},{"settings/security","icon_security_setting"},{"settings/remote","icon_remoteplay_setting"},
+        {"settings/network","icon_network_setting"},{"music/options","icon_music_setting"},{"video/options","icon_bdvd_setting"},
+        {"game/data","icon_gamedata"},{"game/memory","icon_vmc"},{"game/ps3","icon_savedata"},{"game/psp","icon_savedata_minis"},
+        {"network/manual","icon_onlinemanual"},{"network/remote","icon_remoteplay"},{"network/browser","icon_browser"},
+        {"network/search","icon_inet_search"},{"network/downloads","icon_download"},{"psn/trophy","icon_trophy"},
+        {"friends/add","icon_addfriend"},{"friends/players","icon_playermet"},{"friends/chatroom","icon_chatroom_text"},
+        {"friends/chat","icon_chat"},{"friends/messages","icon_mbox"},{"friends/block","icon_blocklist"}};
+    for(auto& category:categories_) {
+        category.themeIcon=themeCategoryIcons.value(category.id);
+        for(auto& entry:category.entries)entry.themeIcon=themeEntryIcons.value(category.id+"/"+entry.id);
+    }
     selections_.fill(0,categories_.size());
     rebuildUsers();
     addInstalledApps();
@@ -269,7 +290,12 @@ void Shell::activate() {
     case Action::SettingsPage:openSettings(entry.value);break;
     case Action::SettingChoices:openChoices(entry.setting,entry.title);break;
     case Action::SetSetting:
-        if(entry.setting=="appearance/background" && entry.option.toInt()==2 && wallpaper().isEmpty()){emit requestWallpaper();break;}
+        if(entry.setting=="appearance/background" && entry.option.toInt()==2 && wallpaper().isEmpty() && theme_.background.isNull()){emit requestWallpaper();break;}
+        if(entry.setting=="appearance/theme" && entry.option.toString().isEmpty() && backgroundMode()==2 && wallpaper().isEmpty()) {
+            // Back to the system's theme with no wallpaper of the user's own: the original background returns.
+            if(preferences_.setValues({{"appearance/theme",QString{}},{"appearance/background",0}}) && !pages_.isEmpty())pages_.removeLast();
+            break;
+        }
         if(entry.setting.startsWith("host/")) { // the computer's own settings, written straight to the host
             const bool ok=entry.setting=="host/volume"?host::setMasterVolume(entry.option.toInt()):host::setMasterMuted(entry.option.toBool());
             if(!ok)message_="The system volume could not be changed.";else if(!pages_.isEmpty())pages_.removeLast();
@@ -280,6 +306,7 @@ void Shell::activate() {
     case Action::CreateUser:emit requestNewUser();break;
     case Action::SelectUser:profiles_.select(entry.value);break;
     case Action::Wallpaper:emit requestWallpaper();break;
+    case Action::Theme:emit requestTheme();break;
     case Action::Information: {
         const host::Label label=[this](const QString& id,const QString& fallback){return assets_.text("sysconf_plugin",id,fallback);};
         message_=entry.value=="host:network"?host::networkStatus(label):entry.value=="host:display"?host::displayOutput():entry.value=="host:audio"?host::audioOutput():
@@ -358,6 +385,18 @@ void Shell::applyPreferences(){
     interactionAudio_.setEnabled(preferences_.value("audio/keyTone").toBool() && !preferences_.value("audio/muted").toBool());
     interactionAudio_.setVolume(preferences_.value("audio/volume").toInt()/100.f);
     if(slideshow_.isActive())slideshow_.setInterval(preferences_.value("photo/interval").toInt());
+    loadTheme();
+}
+void Shell::loadTheme() {
+    const auto path=preferences_.value("appearance/theme").toString();
+    if(path==theme_.path)return;
+    theme_={};theme_.path=path; // a theme that can't be read stays chosen and shows the system's own pieces
+    if(path.isEmpty())return;
+    QString error;const auto p3t=P3t::load(path,&error);
+    if(p3t.isNull()){message_=QFileInfo(path).fileName()+"\n\n"+error;qWarning().noquote()<<"theme:"<<path<<error;return;}
+    theme_.name=p3t.name().isEmpty()?QFileInfo(path).completeBaseName():p3t.name();
+    theme_.background=p3t.background();theme_.icons=p3t.icons();
+    qInfo().noquote()<<"theme:"<<theme_.name<<"background"<<theme_.background.size()<<(p3t.dynamic()?"(its animated scene is not drawn)":"")<<"icons"<<theme_.icons.size();
 }
 qint64 Shell::mediaPosition()const{return player_->position();}
 qint64 Shell::mediaDuration()const{return player_->duration();}
@@ -370,8 +409,10 @@ void Shell::refreshDirectory(){
 void Shell::rebuildUsers(){
     auto& users=categories_[0].entries;
     users={item("new-user","Create New User","item_tex_NewUser","explore_plugin_full",Action::CreateUser)};
+    users[0].themeIcon="icon_newuser";
     for(const auto& profile:profiles_.profiles()) {
         users.push_back(item(profile.id,profile.name,"user_tex_login","explore_plugin_full",Action::SelectUser,profile.id));
+        users.last().themeIcon="icon_user";
         if(profile.id==profiles_.activeId())selections_[0]=int(users.size())-1;
     }
 }
