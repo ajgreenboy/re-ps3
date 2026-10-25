@@ -255,12 +255,13 @@ View::BackgroundTime View::backgroundTime(const QDateTime& when) {
     const auto clock=when.time();const double hour=clock.hour()+clock.minute()/60.+clock.second()/3600.,t=hour/24.;
     const auto date=when.date();
     BackgroundTime b;
-    // _DayTime: a day-curve of t (FUN_00052a28, whose arguments the decompile lost) x 2400. Only the day half of the
-    // shader reads it (dark below ~400 and above ~2000, peak at 1200). Fitted: DAYSPREAD (2.68038) widens 06:00-18:00
-    // around noon (16:30 still full, 18:00 ~80% in the reference); outside that the curve falls to 0 / 2400 at
-    // midnight through keyframes fitted to the reference (03:00 black, 04:30 ~40%, 19:30 ~25%, 21:00 black).
+    // _DayTime: a day-curve of t (FUN_00052a28 -> FUN_0004584c, whose arguments the decompile lost) x 2400. Only the
+    // day half of the shader reads it (dark below ~400 and above ~2000, peak at 1200). Fitted: DAYSPREAD (2.68038) was
+    // a linear spread 1200+(h-12)*100/DAYSPREAD, but that is too steep near noon — the firmware sets _DayTime 1168.77 at
+    // 10:00 (RPCS3 XMB_FP_DUMP), not the linear 1125. Fit a cosine 1200*cos(k*(h-12)) through that point
+    // (k = acos(1168.77/1200)/2), which also lands 06:00/18:00 at ~930 (~77% of midday, the reference's 75-85%).
     constexpr double daySpread=2.68038;
-    const auto spread=[&](double h){return 1200.+(h-12.)*100./daySpread;};
+    const auto spread=[&](double h){return 1200.*std::cos(.114216*(h-12.));};
     static const double keys[][2]={{0,0},{3,380},{4.5,800},{6,spread(6)},{18,spread(18)},{19.5,1650},{21,2030},{24,2400}};
     double day=spread(hour);
     if(hour<6 || hour>18)for(size_t i=1;i<std::size(keys);++i)if(hour<=keys[i][0]){day=keys[i-1][1]+(keys[i][1]-keys[i-1][1])*(hour-keys[i-1][0])/(keys[i][0]-keys[i-1][0]);break;}
