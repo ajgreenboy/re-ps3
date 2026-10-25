@@ -34,10 +34,9 @@ Close only the native executable before relinking. Preserve the RPCS3 reference
 session and the user's preferences. Build/launch logs are under ignored `work/`
 and `out/native-xmb/sessions/`.
 
-An unstaged deletion of the older `native-xmb/REFERENCE-2026-10-23.md` appeared
-during this session. It was not part of this implementation and has been left
-out of the checkpoint; its previous contents remain in Git. Resolve that working
-tree change separately rather than silently restoring or committing it.
+The older `native-xmb/REFERENCE-2026-10-23.md` was removed (its recording-derived
+values now live in `audit/VIDEO-REFERENCES.md`); the file's previous contents
+remain in Git history.
 
 ## What was added since commit876f94b
 
