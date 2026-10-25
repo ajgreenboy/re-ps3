@@ -99,8 +99,9 @@ ported from MaXMB, MIT; see `THIRD-PARTY.md`) and nothing from it is written to 
 Theme Settings > Theme lists Original and the chosen theme by its own name; going back to Original with no wallpaper
 of your own brings the original background back. The preference stores only the file's path.
 
-The reader also decodes the theme's sound effects (`setable`, VAG to WAV) and preview, but the shell does not play
-them yet. Dynamic themes' animated scenes (RAF) are listed, not drawn; their still background is used when there
+The theme's sound effects (`setable`, VAG to WAV) replace cursor/decide/cancel/option-menu/message-accept cues;
+missing or invalid cues fall back to the system's, and Original restores system sounds. Volume, mute and Key Tone
+apply to theme sounds too. Dynamic themes' animated scenes (RAF) are listed, not drawn; their still background is used when there
 is one. The firmware's own theme (`dev_flash/vsh/resource/theme/01.p3t`, "Air Paint") is a full example. To see
 what a theme holds, write its element tree and decoded pictures and sounds to a local folder:
 

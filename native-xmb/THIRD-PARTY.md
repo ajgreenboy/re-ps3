@@ -2,7 +2,7 @@
 
 ## MaXMB
 
-https://github.com/MaxiBono/MaXMB, MIT License. Three pieces were translated to C++:
+https://github.com/MaxiBono/MaXMB, MIT License. Components translated or adapted to C++:
 
 - `src/pad.cpp`: the DualShock 3, DualShock 4 and DualSense HID report layouts, the start-up feature reports and
   the controller watcher (from `src-tauri/src/hidpad.rs`).
@@ -11,6 +11,9 @@ https://github.com/MaxiBono/MaXMB, MIT License. Three pieces were translated to 
 - `src/p3t.cpp`: the PS3 theme (`.p3t`) reader: the element tree, packed zlib files, GIM images and VAG sounds
   (from `src-tauri/src/p3t.rs`); which icons a theme replaces follows `src/js/themes.js`. MaXMB credits
   DeckyXMB's `p3t.py` (Callum Bell, BSD 3-Clause) as the origin of its reader.
+- `src/interaction_audio.cpp` / `src/shell.cpp`: theme sound-role mapping and per-role fallback from
+  `src/js/xmb.js` `_soundFiles` / `_applyThemeSounds` and `src/js/audio.js` `setThemeSounds`;
+  native PCM validation, resampling and output use the existing C++ audio service.
 
 ```
 MIT License

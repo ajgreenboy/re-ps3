@@ -1,5 +1,9 @@
 # XMB recreation handoff — October 24, 2026
 
+**Historical functional inventory.** Current visual/implementation status is in
+[HANDOFF-PHASES.md](../HANDOFF-PHASES.md); the October 25 repo review and MaXMB work is in
+[MAXMB-INTEGRATION.md](MAXMB-INTEGRATION.md). Preserve the dated evidence below without treating it as current.
+
 ## Objective and latest user direction
 
 Build a complete native C++ recreation of PS3 XMB using the user's original local

@@ -1,5 +1,9 @@
 # Handoff: XMB native port
 
+**Current active track (2026-10-25):** native C++ recreation, documented in
+[native-xmb/HANDOFF-PHASES.md](native-xmb/HANDOFF-PHASES.md). This root file preserves the older firmware
+execution investigation; its phase numbers and runtime blockers do not describe the current native renderer.
+
 **Short PoC and phase handoffs:** start at [docs/README.md](docs/README.md).
 It links the current run/build instructions and Phase4/5/6 handoffs. This file keeps
 the detailed chronological investigation; its newest section3a takes precedence

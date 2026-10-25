@@ -281,11 +281,12 @@ void Shell::vertical(int delta) {
 }
 void Shell::activate() {
     touch();
-    if(!message_.isEmpty()){message_.clear();emit changed();return;}
+    if(!message_.isEmpty()){interactionAudio_.play(InteractionAudio::Cue::Accept);message_.clear();emit changed();return;}
     if(mediaOpen_){togglePlayback();return;}
     if(entries().isEmpty() || loading_)return;
     const auto entry=entries()[selection()];
-    interactionAudio_.play(entry.action==Action::Unavailable?InteractionAudio::Cue::Error:InteractionAudio::Cue::Confirm);
+    interactionAudio_.play(entry.action==Action::Unavailable?InteractionAudio::Cue::Error:
+        entry.action==Action::SettingChoices?InteractionAudio::Cue::Options:InteractionAudio::Cue::Confirm);
     switch(entry.action) {
     case Action::SettingsPage:openSettings(entry.value);break;
     case Action::SettingChoices:openChoices(entry.setting,entry.title);break;
@@ -391,11 +392,13 @@ void Shell::loadTheme() {
     const auto path=preferences_.value("appearance/theme").toString();
     if(path==theme_.path)return;
     theme_={};theme_.path=path; // a theme that can't be read stays chosen and shows the system's own pieces
+    interactionAudio_.setThemeSounds({}); // switching to Original or a failed theme clears previous overrides
     if(path.isEmpty())return;
     QString error;const auto p3t=P3t::load(path,&error);
     if(p3t.isNull()){message_=QFileInfo(path).fileName()+"\n\n"+error;qWarning().noquote()<<"theme:"<<path<<error;return;}
     theme_.name=p3t.name().isEmpty()?QFileInfo(path).completeBaseName():p3t.name();
     theme_.background=p3t.background();theme_.icons=p3t.icons();
+    interactionAudio_.setThemeSounds(p3t.sounds());
     qInfo().noquote()<<"theme:"<<theme_.name<<"background"<<theme_.background.size()<<(p3t.dynamic()?"(its animated scene is not drawn)":"")<<"icons"<<theme_.icons.size();
 }
 qint64 Shell::mediaPosition()const{return player_->position();}

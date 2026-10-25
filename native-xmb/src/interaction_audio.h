@@ -2,16 +2,18 @@
 
 #include <QObject>
 #include <QString>
+#include <QHash>
+#include <QByteArray>
 #include <memory>
 
 namespace xmb {
 
-// Loads only the user's original system_plugin.rco. No generated substitutes.
+// Original system_plugin.rco cues, optionally replaced by decoded local PS3 theme sounds.
 // Construct and call on the GUI thread; all firmware reads finish in construction.
 class InteractionAudio final : public QObject {
     Q_OBJECT
 public:
-    enum class Cue { Move, Confirm, Back, Error };
+    enum class Cue { Move, Confirm, Back, Error, Options, Accept };
     Q_ENUM(Cue)
 
     explicit InteractionAudio(QString flashRoot, QObject* parent = nullptr);
@@ -19,6 +21,9 @@ public:
     void play(Cue cue);
     void setEnabled(bool enabled);
     void setVolume(float volume);
+    // P3t::sounds(): se_cursor/decide/cancel/optionmenu/system_ok -> PCM WAV.
+    // Missing or rejected entries retain system cues; an empty map restores them all.
+    int setThemeSounds(const QHash<QString,QByteArray>& sounds);
     // Reports decoded source availability, not speaker/device audibility.
     bool available(Cue cue) const;
 

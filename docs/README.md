@@ -4,6 +4,9 @@ Updated: October 23, 2026. Repository root: the existing XMB project.
 
 ## Start here
 
+**Current native phase plan:** [HANDOFF-PHASES.md](../native-xmb/HANDOFF-PHASES.md).
+The Phase 4/5/6 documents in this folder are historical firmware-track handoffs, not the active native roadmap.
+
 The active direction changed to a native C++ recreation on October 23, evening.
 Start with [the native application handoff](../native-xmb/HANDOFF.md) and
 [its build instructions](../native-xmb/README.md). The documents below preserve
