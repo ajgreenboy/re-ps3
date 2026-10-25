@@ -65,22 +65,15 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   daytime capture parity is still pending. See `audit/ICON-MATERIAL-CLOCK.md` for proof and limitations.
 - Open-column item icons still take the Qt path, including original RCO images. Route the appropriate firmware
   material inputs through the item renderer after its asset/UV mapping is understood.
-- Background is visibly brighter than RPCS3 at the same hour, which also brightens unfocused icons through
-  `_BackgroundMap`. Traced with `XMB_BG_SCENE=<png>` (dumps the pre-tone-map HDR scene, first frame only): the
-  excess is already in `back_colours0`'s scene, not the HDR tone map.
-- Matched against a live local RPCS3 frame (same firmware, same month, 00:58, settled): native night scene top-band
-  luma ~5.9 vs RPCS3 final ~1.3 (and the scene→final tone map is ~1.83x, so RPCS3's raw scene is ~0.7 — an ~8x gap at
-  the top; ~2x at the bottom). The native night gradient rises monotonically to the bottom; RPCS3 peaks at the ribbon
-  and dips below it. Everything statically checkable has now been verified exact and is **not** the cause: the
-  `BACKGROUND.mnu` inputs (NIGHT BLEND 0.499947, DAYSPREAD 2.68038, NIGHT WHIT BIAS 0.486059, NIGHT2DAY/DAY2NIGHT
-  hours), the runtime uniforms (logged `_DayTime=0 _NightTime=1200 _MonthTime=23.2 _NightBrightness=0.486
-  _NightDayBlend=0.500` at midnight), the DDS decode (uncompressed BGRA, masks `0xff0000/0xff00/0xff/0xff000000`,
-  correct gold), and — decisively — the `back_colours0` GLSL itself, obtained from RPCS3's own OpenGL shader log and
-  diffed: it matches the native translator instruction-for-instruction (same constants, same ops; only MAD is `fma` in
-  RPCS3 vs `a*b+c` in native, ~86 sites, a ~0.01% effect, not 8x). `ToneMap.fpo` is also confirmed to be the extended
-  Reinhard `L(1+L/white²)/(1+L)`. So the night excess is **not** in the shader, its inputs, its uniforms, its textures,
-  or the tone map; the remaining suspect is a runtime constant/texture value that differs from the `.fpo` defaults, or
-  the scene-composition/glare passes. No correction verified yet.
+- **Resolved 2026-10-25: the "8x night brightness" was a clock-matching error, not a rendering bug.** The earlier
+  comparison used `--background-clock 00:00` (midnight) against an RPCS3 capture whose console clock was actually
+  **~10:00 daytime**. Dumping the real draw constants with RPCS3's `XMB_FP_DUMP` (`RSXThread.cpp` local patch) shows
+  `back_colours0` receives `_NightDayBlend=1.0` (full day), `_DayTime≈1168` (near noon), `_NightTime=2200` at draw time —
+  i.e. the console was in daytime, while the native was pinned to midnight. The native clock mapping itself is correct:
+  `_NightTime=fmod(t+0.5,1)*2400` reproduces the firmware's `2200` at `t=0.4167` (10:00). The native day background at
+  10:00 measures top-band luma ~102 (bright gold day), as expected. Remaining (separate, smaller) item: the native
+  `_DayTime` curve is the fitted approximation (`~1125` vs firmware `~1169` at 10:00, ~4%), already noted as fitted in
+  `VIDEO-REFERENCES.md`; the day path otherwise matches. No night-brightness correction is warranted.
 
 ### Phase 3: item, column and dialog drawing through the firmware's own layout
 - Initial trace: system_plugin infobar/infotext and OSK templates mostly have zero/dynamic geometry. Do not
