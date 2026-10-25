@@ -21,6 +21,7 @@
 #include <QTime>
 #include <cmath>
 #include <numbers>
+#include <QSet>
 #include <algorithm>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -58,6 +59,9 @@ void View::syncColumns() {
     }
     // Keep the departed child until the return animation finishes. The shell's
     // actual page stack and selections change immediately and remain canonical.
+    if(const qint64 key=(qint64(shell_.category())*64+depth)*65536+shell_.selectionAt(depth);key!=focusKey_ || !focusClock_.isValid()) {
+        focusKey_=key;focusClock_.restart();
+    }
     for(int i=0;i<=depth;++i) {
         if(i>=columns_.size())columns_.push_back(Column{shell_.entriesAt(i),shell_.selectionAt(i),double(shell_.selectionAt(i))});
         else {columns_[i].entries=shell_.entriesAt(i);columns_[i].selection=shell_.selectionAt(i);}
@@ -461,6 +465,10 @@ void View::paintGL() {
     QString signature=QString::asprintf("%.4f %.4f %.4f %d %d %d ",categoryPosition_,depthPosition_,categoryFade_,shell_.category(),shell_.depth(),uiRevision_);
     for(const auto& column:columns_)signature+=QString::number(column.position,'f',4)+' ';
     signature+=shell_.clockText()+shell_.message()+shell_.status();
+    if(focusClock_.isValid()) { // the focused label's breathing glow and the idle label fade, in coarse steps
+        const double resting=double(focusClock_.elapsed());
+        signature+=QString::asprintf(" glow %d idle %d",int((.5-.5*std::cos(2*std::numbers::pi*resting/3400.))*24),int(std::clamp((resting-4000)/800.,0.,1.)*16));
+    }
     if(osk_.open)signature+=QString::asprintf("osk %d %d %d %d %d %d ",osk_.row,osk_.column,osk_.cursor,osk_.shift,osk_.symbols,int((clock_.elapsed()/500)%2))+osk_.text;
     if(shell_.mediaOpen())signature+=QString::number(now); // media frames change every frame
     bool rebuild=signature!=uiSignature_;
@@ -693,7 +701,14 @@ void View::drawScene(QPainter& p) {
                     iconQueue_.push_back({entry.texture,{iconX,y},itemIconSize(level,bullet,focus),brightness,columnAlpha,2700+157.2*depth});
                 }
                 else drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
-                p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus)));
+                // Observed on the console by MaXMB (MIT, styles.css "labels-idle"; not yet confirmed on our references,
+                // whose clips never rest on a row): after 4 s on one row of Photo/Music/Video/Game/Network/PSN, the
+                // other rows' titles fade out over 0.8 s.
+                static const QSet<QString> idleCategories{"photo","music","video","game","network","psn"};
+                const qint64 resting=focusClock_.isValid()?focusClock_.elapsed():0;
+                const double idleFade=active && level==0 && idleCategories.contains(shell_.categories()[shell_.category()].id)?
+                    std::clamp((resting-4000)/800.,0.,1.)*(1.-focus):0.;
+                p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus))*(1.-idleFade));
                 // One label column per level, as on the PS3 (reference: icon centre +99 at the top level, +57 inside a page).
                 const double labelX=kColumnX+(level==0?(tile?173:99):57)+ahead*250+offset;
                 const double alpha=.72+.28*focus;
@@ -701,7 +716,11 @@ void View::drawScene(QPainter& p) {
                 QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(27);
                 const auto label=QFontMetrics(labelFont).elidedText(entry.title,Qt::ElideRight,value.isEmpty()?1050:640);
                 const QRectF labelRect(labelX,y-28,value.isEmpty()?1100.:650.,56);
-                if(focus>.5)glow(labelRect,label,27,(focus-.5)*2); // the focused label carries a soft white glow
+                // The focused label carries a soft white glow that breathes (MaXMB observation, styles.css xmbLabelGlow:
+                // 3.4 s ease-in-out from a faint halo, about 0.35 of the peak, to the full bloom, starting faint when
+                // the row takes focus). The peak is the static halo measured from the reference crop.
+                const double breath=.35+.65*(.5-.5*std::cos(2*std::numbers::pi*double(resting)/3400.));
+                if(focus>.5)glow(labelRect,label,27,(focus-.5)*2*breath);
                 text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
                 if(!value.isEmpty() && panelAmount<.5)text({1300+offset,y-25,440,50},value,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
                 const auto subtitle=shell_.subtitleText(entry);

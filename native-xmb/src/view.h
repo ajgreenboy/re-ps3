@@ -50,6 +50,9 @@ private:
     QVector<Column> outgoing_;
     int outgoingCategory_=6;
     double categoryFade_=0;
+    // Time since the focused row (category, depth, selection) last changed: label glow phase and idle label fade.
+    QElapsedTimer focusClock_;
+    qint64 focusKey_=-1;
     double depthPosition_=0;
     int previousDepth_=0;
     void syncColumns();
