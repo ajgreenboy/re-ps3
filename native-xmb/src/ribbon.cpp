@@ -353,28 +353,31 @@ Ribbon::Preset Ribbon::clockPreset(double dayFraction) const {
 // The boot schedule (plugin 0x11100): coldboot1 at once, coldboot2 over 3 s, then the clock preset over 7.5 s. The
 // blending runs in qgl_base's animation player; its curve here is measured from an RPCS3 cold boot (the spline task's
 // FFD SCALE2, one sample per cloth step, audit/PIPELINE.md "Ribbon presets"):
-//   coldboot1 -> coldboot2   value += (target - value) x 0.01 per 1/60 s, for 229 steps (3.82 s)
+//   coldboot1 -> coldboot2   value += (target - value) x 0.01 per 1/60 s until stage two
 //   -> clock preset          from the values reached: 1.4e-5 n^2 for n <= 112 steps, then a cubic Hermite to 1 at
 //                            n = 168 (2.8 s) with zero end slope
-// after which the LINE1 values follow the clock keyframes.
-void Ribbon::advancePresets(double dt,double dayFraction) {
-    constexpr double firstStage=229/60.,secondStage=168/60.;
-    bootSeconds_+=dt;
-    if(bootSeconds_<firstStage) {
-        current_=current_.mix(coldboot2_,float(1-std::pow(.99,dt*60)));
-        return;
-    }
-    const Preset clock=clockPreset(dayFraction);
-    if(!snapshotTaken_){bootSnapshot_=current_;snapshotTaken_=true;}
-    const double n=(bootSeconds_-firstStage)*60;
-    if(n>=secondStage*60){current_=clock;return;}
+// after which the LINE1 values follow the clock keyframes. Stage two is anim_coldboot2's NormalBG2 event (0x11b20, at
+// 4 s); RPCS3's cloth ran 229 steps by then (boot stalls), which is the ribbon's own default when no intro clock drives
+// it (setBootTime).
+Ribbon::BootWeights Ribbon::bootWeights(double t,double stageTwo) {
+    BootWeights w;
+    w.toColdboot2=float(1-std::pow(.99,std::min(t,stageTwo)*60));
+    const double n=std::max(0.,t-stageTwo)*60;
     constexpr double knee=112,a=1.4e-5,kneeValue=a*knee*knee,kneeSlope=2*a*knee,span=168-knee;
     double p=a*n*n;
-    if(n>knee) {
+    if(n>=168)p=1;
+    else if(n>knee) {
         const double s=(n-knee)/span,s2=s*s,s3=s2*s;
         p=(2*s3-3*s2+1)*kneeValue+(s3-2*s2+s)*span*kneeSlope+(-2*s3+3*s2);
     }
-    current_=bootSnapshot_.mix(clock,float(p));
+    w.toClock=float(p);
+    return w;
+}
+
+void Ribbon::advancePresets(double dt,double dayFraction) {
+    bootSeconds_=bootOverride_>=0?bootOverride_:bootSeconds_+dt;
+    const BootWeights w=bootWeights(bootSeconds_,stageTwo_);
+    current_=coldboot1_.mix(coldboot2_,w.toColdboot2).mix(clockPreset(dayFraction),w.toClock);
 }
 
 void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFraction,int pixelWidth,int pixelHeight,GLuint targetFbo) {

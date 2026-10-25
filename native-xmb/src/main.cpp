@@ -74,6 +74,7 @@ int main(int argc,char** argv) {
     parser.addOption({"data-dir","Writable native application data directory","directory"});
     parser.addOption({"inventory","Write the local XMBML definition inventory and exit","json-file"});
     parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
+    parser.addOption({"no-intro","Start at the XMB without the cold-boot intro (also implied by --script, --background-clock and --measure-reference)"});
     parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
     parser.addOption({"background-clock","Fix background and icon-material time for reference captures (ISO date/time); UI clock stays live","date-time"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
@@ -252,7 +253,7 @@ int main(int argc,char** argv) {
                                 "glutils/ApplyDisplay","glutils/ToneApplyDisplay","glutils/AccGlare","glutils/DoubleGaussian","glutils/GaussBloomAndBlur","glutils/BlurAcc",
                                 "glutils/BloomCone","glutils/ToneMap","glutils/ApplyGlare","particles/particles_quads","particles/particles_second",
                                 "icons:icons/quad","icons:icons/mask","icons:icons/icons_full_ss","icons:icons/icons_full_ss_no_shad","icons:icons/icons_cheap_ss",
-                                "icons:icons/icons_cheap_ss_no_shad","icons:icons/icons_no_ss","icons:icons/icons_no_ss_no_shad"})
+                                "icons:icons/icons_cheap_ss_no_shad","icons:icons/icons_no_ss","icons:icons/icons_no_ss_no_shad","raf:raf/vert0","raf:raf/sce01"})
             for(const QString ext:{"vpo","fpo"}) {
                 QByteArray bytes;
                 const QString archive=entry.contains(':')?entry.section(':',0,0):QString("lines"),name=entry.section(':',-1);
@@ -262,7 +263,7 @@ int main(int argc,char** argv) {
                 if(!program.valid()){qCritical()<<name<<ext<<error;++failures;continue;}
                 QFile out(QDir(parser.value("dump-cg")).filePath(name.section('/',-1)+"."+ext+".glsl"));
                 if(!QDir().mkpath(parser.value("dump-cg")) || !out.open(QIODevice::WriteOnly|QIODevice::Text)){++failures;continue;}
-                QString header=QString("// %1.%2: %3 instructions\n").arg(name,ext).arg(program.instructionCount);
+                QString header=QString("// %1.%2: %3 instructions, ucode %4 bytes\n").arg(name,ext).arg(program.instructionCount).arg(qFromBigEndian<quint32>(bytes.constData()+24));
                 for(const auto& p:program.parameters)header+=QString("// param %1 :%2 res=%3 idx=%4 slots=%5 defaults=%6\n").arg(p.name,p.semantic).arg(p.resource).arg(p.resourceIndex)
                     .arg([&]{QStringList l;for(int v:p.constantSlots)l<<QString::number(v);return l.join(',');}())
                     .arg([&]{QStringList l;for(float v:p.defaults)l<<QString::number(v);return l.join(',');}());
@@ -274,6 +275,7 @@ int main(int argc,char** argv) {
     xmb::Shell shell(data,assets);
     QSettings windowSettings(QDir(data).filePath("settings.ini"),QSettings::IniFormat);
     QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);window.setCentralWidget(view);window.resize(960,540);
+    view->setIntroEnabled(!parser.isSet("no-intro") && !parser.isSet("script") && !parser.isSet("background-clock") && !parser.isSet("measure-reference"));
     if(parser.isSet("background-clock")) {
         const auto when=QDateTime::fromString(parser.value("background-clock"),Qt::ISODate);
         if(!when.isValid()){qCritical()<<"background-clock requires an ISO date/time";return 2;}

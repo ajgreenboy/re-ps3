@@ -163,7 +163,7 @@ void Particles::render(QOpenGLFunctions_3_3_Core& gl,float light,int pixelWidth,
         for(int row=0;row<4;++row){vc[256+row]=projection.row(row);vc[260+row]=QVector4D();vc[260+row][row]=1;vc[264+row]=lightPack[row];}
         const auto setVc=[&](const char* name,const QVector4D& value){const auto it=pass.vertex.parameters.constFind(name);if(it!=pass.vertex.parameters.cend() && it->resourceIndex>=0 && it->resourceIndex<468)vc[it->resourceIndex]=value;};
         setVc("_ParticleSize",QVector4D(mix(sizeMiddleNight,sizeMiddleDay),sizeNear,sizeFar,0));
-        setVc("_Transparency",QVector4D(fresnel,globalAlpha,0,0));
+        setVc("_Transparency",QVector4D(fresnel,globalAlpha*globalAlpha_,0,0));
         setVc("_Focus",QVector4D(nearFocusDist,nearFocus,farFocus-mix(farFocusDistNight,farFocusDistDay),farFocus));
         setVc("_FocusCurves",QVector4D(nearFocusPow,farFocusPow,darknessAngle,0)); // SIZE ALIGN's role is not traced
         setVc("_FrontFacingQuaternion",QVector4D(0,0,0,1));

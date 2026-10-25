@@ -28,11 +28,14 @@ public:
     // extraGlare, when set, draws additively into the glare source (bound, viewport set) after the threshold pass,
     // so that it is blurred with the rest of the glare (the particles' particles_second halos).
     void finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint targetFbo,const std::function<void(int width,int height)>& extraGlare={});
+    // Cold boot: HDR.mnu coldboot1 -> coldboot2 -> the clock's night/day blend, by Ribbon::bootWeights.
+    void setBoot(float toColdboot2,float toClock) { toColdboot2_=toColdboot2;toClock_=toClock; }
 private:
     struct Pass { CgProgram cg; QOpenGLShaderProgram program; };
     bool load(Assets& assets,Pass& pass,const char* fragment,const char* vertexName=nullptr);
     void setFc(Pass& pass,QVector<QVector4D>& fc,const char* name,const QVector4D& value);
     bool ready_=false;
+    float toColdboot2_=1,toClock_=1;
     Pass toneMap_,glareSource_,gaussian_,accGlare_,applyGlare_;
     std::unique_ptr<QOpenGLFramebufferObject> scene_,toned_,source_,accumulated_;
     std::vector<std::unique_ptr<QOpenGLFramebufferObject>> blurX_,blurY_; // one pair per mip level

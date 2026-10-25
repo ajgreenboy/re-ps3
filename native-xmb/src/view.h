@@ -1,5 +1,6 @@
 #pragma once
 #include "assets.h"
+#include "coldboot.h"
 #include "hdr.h"
 #include "particles.h"
 #include "icons.h"
@@ -29,6 +30,8 @@ public:
     // reference videos (band colours by clock time, ribbon crest over 40 s). Returns false on GL failure.
     bool measureReference(const QString& path);
     void setBackgroundClock(const QDateTime& when) { backgroundOverride_=when;update(); }
+    // The 4.93 cold-boot intro before the XMB (coldboot.h); off for measurement and scripted runs. Set before show.
+    void setIntroEnabled(bool enabled) { introEnabled_=enabled; }
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -90,6 +93,13 @@ private:
     Ribbon ribbon_;
     Hdr hdr_;
     Particles particles_;
+    Coldboot coldboot_;
+    bool introEnabled_=true;
+    // Boot state of the background (RPCS3 capture of back_colours0 through a cold boot): _Alpha fades in as smoothstep
+    // over 7.5 s from BootBG2; NIGHT WHIT BIAS goes from coldboot1 to coldboot2 on the boot weights.
+    float backgroundAlpha_=1,backgroundToColdboot2_=1,backgroundToClock_=1;
+    // The intro is on screen (logo, no UI); any key or button skips it.
+    bool introRunning() const { return coldboot_.ready() && coldboot_.seconds()<Coldboot::showGui; }
     IconRenderer icons_;
     QVector<IconRenderer::Icon> iconQueue_; // category icons for the firmware renderer, rebuilt with the UI layer
     float presetBlend_=1;
@@ -100,6 +110,7 @@ private:
     bool forceOriginal_=false;
     QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     void drawScene(QPainter& painter);
+    void grabIntroFrame();
     // PS3 on-screen keyboard (reference frame 64 s): 10x4 character grid, two function rows, prediction panel.
     struct Osk { bool open=false,shift=false,symbols=false; QString title,text; int row=0,column=0,cursor=0; std::function<void(QString)> done; };
     Osk osk_;

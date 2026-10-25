@@ -151,7 +151,7 @@ index c226534a0..9e965dcd4 100644
  	if (raddr && addr == raddr && g_cfg.core.spu_accurate_reservations)
  	{
 diff --git a/rpcs3/Emu/RSX/RSXThread.cpp b/rpcs3/Emu/RSX/RSXThread.cpp
-index 541da72ee..80ca78939 100644
+index 541da72ee..03c6d5034 100644
 --- a/rpcs3/Emu/RSX/RSXThread.cpp
 +++ b/rpcs3/Emu/RSX/RSXThread.cpp
 @@ -2,6 +2,7 @@
@@ -162,10 +162,80 @@ index 541da72ee..80ca78939 100644
  #include "Common/surface_store.h"
  #include "Core/RSXReservationLock.hpp"
  #include "Core/RSXEngLock.hpp"
-@@ -975,6 +976,107 @@ namespace rsx
+@@ -975,6 +976,177 @@ namespace rsx
  			capture::capture_draw_memory(this);
  		}
  
++		// XMB reference capture (C:\dev\xmb; local change, not upstream). XMB_FP_SERIES=<file> appends one record per
++		// draw whose fragment ucode is XMB_SERIES_FP_LENGTH bytes (default 1344: raf.qrc sce01.fpo, the cold-boot logo):
++		// "XSER", vblank count, host time (us), draw index in the frame, ucode length, the ucode with its patched
++		// constants, vertex constants 256..263 and 466..467, the attribute 0..15 register values (16 bytes each),
++		// array 3's first 16 bytes, then for texture units 0..3: offset, width, height (0 when disabled). Capped at 400k.
++		if (static const char* const series = std::getenv("XMB_FP_SERIES"); series)
++		{
++			static const u32 wanted = std::getenv("XMB_SERIES_FP_LENGTH") ? static_cast<u32>(std::atoi(std::getenv("XMB_SERIES_FP_LENGTH"))) : 1344u;
++			static u32 records = 0;
++			static u64 last_vblank = ~0ull;
++			static u32 in_frame = 0;
++			const auto [program_offset, program_location] = method_registers.shader_program_address();
++			const u8* const ucode = static_cast<const u8*>(vm::base(rsx::get_address(program_offset, program_location)));
++			const u32 length = program_hash_util::fragment_program_utils::analyse_fragment_program(ucode).program_ucode_length;
++			if (!wanted)
++			{
++				static std::unordered_set<u32> lengths;
++				if (lengths.insert(length).second)
++					if (FILE* f = std::fopen(fmt::format("%s.lengths", series).c_str(), "a")) { std::fprintf(f, "length %u vblank %llu\n", length, static_cast<unsigned long long>(vblank_count.load())); std::fclose(f); }
++			}
++			else if (length == wanted && records < 400000)
++			{
++				const u64 vblank = vblank_count;
++				in_frame = vblank == last_vblank ? in_frame + 1 : 0;
++				last_vblank = vblank;
++				++records;
++				if (FILE* f = std::fopen(series, "ab"))
++				{
++					const u64 now = get_system_time();
++					const u32 head[] = {0x52455358u, static_cast<u32>(vblank), static_cast<u32>(now), static_cast<u32>(now >> 32), in_frame, length};
++					std::fwrite(head, 1, sizeof(head), f);
++					std::fwrite(ucode, 1, length, f);
++					std::fwrite(method_registers.transform_constants.data() + 256, 1, 8 * 16, f);
++					std::fwrite(method_registers.transform_constants.data() + 466, 1, 2 * 16, f);
++					for (u32 a = 0; a < 16; ++a) std::fwrite(method_registers.register_vertex_info[a].data.data(), 1, 16, f);
++					u8 first[16]{};
++					const auto& array = method_registers.vertex_arrays_info[3];
++					if (array.size())
++					{
++						const u32 address = rsx::get_address(get_vertex_offset_from_base(method_registers.vertex_data_base_offset(), array.offset() & 0x7fffffff), array.offset() >> 31);
++						if (vm::check_addr(address, vm::page_readable, 16)) std::memcpy(first, vm::_ptr<u8>(address), 16);
++					}
++					std::fwrite(first, 1, 16, f);
++					for (u32 i = 0; i < 4; ++i)
++					{
++						const auto& tex = method_registers.fragment_textures[i];
++						const u32 t[] = {tex.enabled() ? tex.offset() : 0u, tex.enabled() ? u32{tex.width()} : 0u, tex.enabled() ? u32{tex.height()} : 0u};
++						std::fwrite(t, 1, sizeof(t), f);
++					}
++					std::fclose(f);
++				}
++				// With the first record, the bound texture units' bytes: <file>.texN (pitch x height, or 4 x w x h when swizzled; <= 1 MB)
++				if (records == 1)
++					for (u32 i = 0; i < 4; ++i)
++					{
++						const auto& tex = method_registers.fragment_textures[i];
++						if (!tex.enabled()) continue;
++						const u32 address = rsx::get_address(tex.offset(), tex.location());
++						const u32 bytes = std::min<u32>(0x100000, std::max<u32>(tex.pitch() * tex.height(), 4u * tex.width() * tex.height()));
++						if (FILE* f = std::fopen(fmt::format("%s.tex%u", series, i).c_str(), "wb"))
++						{
++							const u32 info[] = {tex.format(), tex.width(), tex.height(), tex.pitch(), tex.remap(), u32{tex.get_exact_mipmap_count()}};
++							std::fwrite(info, 1, sizeof(info), f);
++							if (vm::check_addr(address, vm::page_readable, bytes)) std::fwrite(vm::_ptr<u8>(address), 1, bytes, f);
++							std::fclose(f);
++						}
++					}
++			}
++		}
++
 +		// XMB reference capture (C:\dev\xmb; local change, not upstream). XMB_VTX_DUMP=<dir> writes, for 120 draws whose
 +		// fragment ucode is XMB_VTX_FP_LENGTH bytes (default 336: the ribbon's lines1.fpo), the vertex constants, the
 +		// draw ranges, the index buffer and every enabled vertex array from vertex 0 to the highest one used.
@@ -270,7 +340,7 @@ index 541da72ee..80ca78939 100644
  		in_begin_end = false;
  		m_frame_stats.draw_calls++;
  
-@@ -2397,6 +2499,49 @@ namespace rsx
+@@ -2397,6 +2569,49 @@ namespace rsx
  
  	void thread::get_current_fragment_program(const std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::fragment_textures_count>& sampler_descriptors)
  	{

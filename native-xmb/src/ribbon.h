@@ -43,6 +43,15 @@ public:
         float angle=18.1208f,spacing=407.658f,brightness=.701917f,mipmapBias=1.86707f,fresnel=.638971f;
         Preset mix(const Preset& day,float t) const;
     };
+    // The boot preset schedule as two weights at boot time t: toColdboot2 (coldboot1 -> coldboot2, the 0.99-per-frame
+    // filter until stageTwo) and toClock (from the values reached to the clock preset, the eased 2.8 s move). The
+    // other layers' coldboot overrides (BACKGROUND, HDR, PARTICLES) follow the same two calls (plugin 0x110dc,
+    // 0x11b20), so they use these weights too.
+    struct BootWeights { float toColdboot2=1,toClock=1; };
+    static BootWeights bootWeights(double t,double stageTwo);
+    // Drives the schedule from the cold-boot intro's clock (NormalBG2 at stageTwo seconds) instead of the ribbon's own
+    // frame time, whose stage two starts after 229 cloth steps (the RPCS3 measurement, audit/PIPELINE.md).
+    void setBootTime(double seconds,double stageTwo) { bootOverride_=seconds;stageTwo_=stageTwo; }
 private:
     static constexpr int side_=19,points_=side_*side_,grid_=128;
     struct Cloth {
@@ -56,7 +65,7 @@ private:
     };
     bool ready_=false;
     Preset coldboot1_,coldboot2_,night_,yoake_,day_,higure_,current_;
-    double bootSeconds_=0;Preset bootSnapshot_;bool snapshotTaken_=false;
+    double bootSeconds_=0,bootOverride_=-1,stageTwo_=229/60.;
     Preset clockPreset(double dayFraction) const;
     void advancePresets(double dt,double dayFraction);
     Cloth cloth_;
