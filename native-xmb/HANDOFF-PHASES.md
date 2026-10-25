@@ -22,17 +22,29 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 
 | Layer | State |
 |---|---|
-| Background, ribbon, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs. Ribbon geometry is fitted, not traced from spline.elf |
+| Background, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs |
+| Ribbon | Ported end to end (2026-10-25): plugin cloth, ffd_shader1 lattice, spline.elf FFD/camera/bicubic sheet, each stage matched to RPCS3 captures; LINE1 presets follow the plugin's clock keyframes and boot schedule (audit/PIPELINE.md "Ribbon port", "Ribbon presets") |
 | Particles | Firmware shaders; the motion is a CPU rebuild of the SPU particles.elf |
-| Category icons | Firmware glass shader port; clock/season RGB and preset luminance now derived from firmware; full parity remains open |
+| Category icons | Firmware glass shader port; clock/season RGB and preset luminance derived from firmware; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | Qt drawing with firmware RCO textures and strings; layout, sizes, opacity and timing measured from the reference |
-| Text | Native-resolution GL glyph atlas with Qt shaping/rasterization; firmware rasterizer parity and glow parameters remain open (phase 2) |
+| Text | GL glyph atlas, rasterised at the 2x UI layer's scale with glyph origins on whole pixels (soft-text bug fixed 2026-10-25); label glow breathes and idle labels fade (MaXMB observations, unconfirmed); firmware rasterizer parity open |
 | Motion | One measured ease (25%/frame at 60 fps, τ 58 ms); 150 px column cross-fade on category moves |
+| Themes | `.p3t` still background and icons (`src/p3t.cpp`); sounds, RAF scenes, font/colour open |
+| Input | Keyboard, XInput, and DualShock 3/4 / DualSense over HID (`src/pad.cpp`; HID untested without a controller) |
+| Installed titles | dev_hdd0 games and games.yml disc copies start in the RPCS3 next to dev_hdd0 (`--no-gui`) |
 | Host settings | System Information, network list, video/audio output and master volume read and write the real PC |
+
+## In flight (2026-10-25)
+
+- **Boot intro:** a session ("Decode coldboot.raf and port the 4.93 boot intro") stopped at its usage limit with
+  uncommitted work in this tree: new `src/coldboot.cpp/.h`, plus edits to `hdr`, `particles`, `ribbon`, `view`,
+  `main.cpp` and `CMakeLists.txt`. Resume that session, or review and commit those files as one change. Do not
+  overwrite them from other work.
+- Third-party code (MaXMB, DeckyXMB) is credited in `THIRD-PARTY.md`.
 
 ## Phases to 100%
 
-### Phase 1: category icon renderer (in progress)
+### Phase 1: category icon renderer (done for category icons; item icons in the open column still Qt, see below)
 - Firmware: `icons.qrc` quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo, ICONS.mnu (+ day, night, yoake,
   higure, boot and music overrides), texenv.dds, amb.bmp, `icontex.qrc` normal maps and `dif`.
 - The uniform packing in custom_render_plugin is VMX code that Ghidra decompiles poorly (apply = FUN_000473b4, draw =
@@ -94,8 +106,11 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   rest), info-bar clock updates, the scroll-acceleration rule for held keys.
 
 ### Phase 5: remaining firmware renderers and states
-- Ribbon geometry from spline.elf (SPU) instead of fitted constants; particles from particles.elf exactly, including
-  the wind response.
+- Ribbon geometry from spline.elf is done. Next: particles from particles.elf exactly, including the wind response.
+  The same tools apply: `work/spu/` disassembler, the RPCS3 SPU DMA log, buffer watch and local-store snapshots
+  (`rpcs3-rsx-capture.patch`).
+- Ribbon presets: the measured boot durations (3.82 s, 2.8 s) differ from the plugin's call arguments (3 s, 7.5 s);
+  qgl_base's animation player is not traced.
 - Boot: coldboot animation and sound (ICONS.mnu coldboot1–5 overrides, LINE/HDR boot presets); the "gameboot"
   sequence when launching. LINE1's boot presets are done (audit/PIPELINE.md "Ribbon presets"). The 4.93 logo is
   `custom_render_plugin.rco` tex_ps3logo ("PLAYSTATION 3") and tex_scelogo ("Sony Interactive Entertainment"):
@@ -120,6 +135,9 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
   (PSNR/SSIM on crops). Add a threshold per layer so regressions are visible.
 - A second reference: capture the same states from RPCS3 running the real XMB (same firmware) at 1080p. This is a
   pixel-exact target with no video compression.
+- Include a clip resting on one row for 8 s or more: it settles the breathing label glow and idle label fade, which
+  are taken from MaXMB and not yet confirmed on our references (audit/TEXT-RENDERER.md).
+- Recommended as the next phase: every other phase then gets a pass/fail number.
 
 ## Useful entry points
 
