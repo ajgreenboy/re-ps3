@@ -42,7 +42,8 @@ Translator fixes found by diffing against RPCS3's own GLSL for this program (`Lo
 - Source and destination precision clamps (fixed12 ±2, fixed9 ±1, saturate), with NaN read as 0.
 - H registers are rounded to fp16. H and R are not aliased (RPCS3 keeps them apart).
 
-Still open: `_ChangingColor` and `_LuminanceParams` are the captured night values, so a day capture is needed. Item
+Clock inputs updated: `_ChangingColor` now samples amb.bmp and `_LuminanceParams` derives from GLASS; see
+`ICON-MATERIAL-CLOCK.md`. Daytime visual parity still needs a matched capture. Item
 icons in the open column still go through Qt. The background is brighter than RPCS3's at the same hour, which also
 lightens the refracted unfocused icons. Diagnosis: `XMB_ICON_UCODE=<capture>` runs on the firmware's captured
 constants; `XMB_ICON_DEBUG=0..4` shows a single input texture or the result.

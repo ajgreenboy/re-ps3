@@ -28,6 +28,7 @@ public:
     // Renders the background offscreen at reference times and writes the same statistics measured from the
     // reference videos (band colours by clock time, ribbon crest over 40 s). Returns false on GL failure.
     bool measureReference(const QString& path);
+    void setBackgroundClock(const QDateTime& when) { backgroundOverride_=when;update(); }
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -73,6 +74,7 @@ private:
     void renderBackground(float seconds,float light,int pixelWidth,int pixelHeight);
     // Original firmware background: qgl/lines back_colours0.fpo with this/next month's day and night palettes.
     struct BackgroundTime { float day=0,month=0,night=0,nightBrightness=0,nightDayBlend=1,alpha=1; };
+    static constexpr double kNightBlend=.499947;
     static BackgroundTime backgroundTime(const QDateTime& when);
     void initOriginalBackground();
     bool loadMonthTextures(int month);
@@ -85,12 +87,12 @@ private:
     Ribbon ribbon_;
     Hdr hdr_;
     Particles particles_;
-    bool forceOriginal_=false;
-    QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     IconRenderer icons_;
     QVector<IconRenderer::Icon> iconQueue_; // category icons for the firmware renderer, rebuilt with the UI layer
     float presetBlend_=1;
     static constexpr double kColumnX=565; // focus column, 1080p px (firmware: camera 2700, eye x -5)
+    bool forceOriginal_=false;
+    QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     void drawScene(QPainter& painter);
     // PS3 on-screen keyboard (reference frame 64 s): 10x4 character grid, two function rows, prediction panel.
     struct Osk { bool open=false,shift=false,symbols=false; QString title,text; int row=0,column=0,cursor=0; std::function<void(QString)> done; };
