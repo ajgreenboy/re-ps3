@@ -16,6 +16,7 @@
 #include <QImageReader>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QtEndian>
 #include <QTextLayout>
 #include <QRawFont>
 #include <QGlyphRun>
@@ -35,6 +36,7 @@ int main(int argc,char** argv) {
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
     parser.addOption({"month-sheet","Write a local contact sheet of the qgl/lines month_bg day/night textures and exit","image-file"});
     parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
+    parser.addOption({"decode-fp","Decode RSX fragment-program captures (archive:lib/x.fpo@dir) into named parameter values and exit","spec"});
     parser.addOption({"dump-cg","Translate the original qgl/lines Cg programs to GLSL into a local folder and exit","directory"});
     parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});parser.process(app);
     if(!parser.isSet("dev-flash"))parser.showHelp(2);
@@ -133,6 +135,36 @@ int main(int argc,char** argv) {
             }
         }
         return windowsFallback?1:0;
+    }
+    if(parser.isSet("decode-fp")) {
+        // Local analysis: "archive:lib/x.fpo@dir". Every <dir>/*.ucode the size of that program's microcode (an RSX
+        // capture, constants patched in by the Cg runtime) is put back into the .fpo and its named parameters' values
+        // are written to <same name>.params.txt.
+        const auto spec=parser.value("decode-fp").split('@');
+        if(spec.size()!=2 || !spec[0].contains(':')){qCritical()<<"use --decode-fp archive:lib/x.fpo@directory";return 2;}
+        QByteArray binary;
+        try { binary=assets.qglFile(spec[0].section(':',0,0),spec[0].section(':',1)); } catch(const std::exception& e){qCritical()<<e.what();return 2;}
+        const quint32 ucodeSize=qFromBigEndian<quint32>(binary.constData()+24),ucodeOffset=qFromBigEndian<quint32>(binary.constData()+28);
+        int decoded=0;
+        for(const auto& info:QDir(spec[1]).entryInfoList({"*.ucode"},QDir::Files,QDir::Name)) {
+            QFile in(info.filePath());if(!in.open(QIODevice::ReadOnly))continue;
+            const QByteArray ucode=in.readAll();if(quint32(ucode.size())!=ucodeSize)continue;
+            QByteArray patched=binary;patched.replace(int(ucodeOffset),int(ucodeSize),ucode);
+            QString error;const auto program=xmb::CgProgram::load(patched,&error);
+            const auto original=xmb::CgProgram::load(binary);
+            if(!program.valid() || program.instructionCount!=original.instructionCount)continue; // a different program of the same size
+            QFile out(info.path()+"/"+info.completeBaseName()+".params.txt");if(!out.open(QIODevice::WriteOnly|QIODevice::Text))continue;
+            QTextStream text(&out);
+            auto names=program.parameters.keys();names.sort();
+            for(const auto& name:names) {
+                const auto& p=program.parameters[name];if(p.constantSlots.isEmpty())continue;
+                const auto& c=program.constants[p.constantSlots.first()];
+                text<<name<<" = "<<c.x()<<" "<<c.y()<<" "<<c.z()<<" "<<c.w()<<"\n";
+            }
+            ++decoded;
+        }
+        qInfo()<<"decoded"<<decoded<<"captures of"<<spec[0];
+        return decoded?0:1;
     }
     if(parser.isSet("dump-cg")) {
         // Local analysis only: the folder receives firmware-derived shader text and must stay out of Git.
