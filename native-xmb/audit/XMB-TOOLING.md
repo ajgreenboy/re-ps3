@@ -119,12 +119,13 @@ All three are ordinary Game/Media column entries; none adds new window chrome, a
 reuses the installed-PKG row presentation (wide header art, title position, focus scale,
 column easing).
 
-### 1. Owned library + install (Game column)
+### 1. Owned library + install, and the in-XMB store (Game column)
 
-The primary surface described above. **Steam Store** remains available for browsing
-titles that are not owned yet: search (on-screen keyboard) or top sellers, then *Install
-in Steam* / *Store Page*. Rows already owned render with their owned state so the user is
-never told to buy something twice.
+The primary surface described above. A **Steam Store** row above the Not Installed folder
+opens a browse page of live top sellers (`SteamStore::topSellers`) with prices, and each row
+hands `steam://install/<id>` to Steam. Verified in a scripted run: page title `Steam Top
+Sellers`, 7 rows, prices such as `$69.99` and `$17.99 (-70%)`, every row `action=InstallSteam`.
+A free-text search page (on-screen keyboard) is the next step; nothing is bought inside the XMB.
 
 ### 2. Import Games and Apps
 
