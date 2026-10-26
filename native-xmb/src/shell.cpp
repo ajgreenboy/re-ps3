@@ -11,6 +11,7 @@
 #include <QDesktopServices>
 #include <QAudioOutput>
 #include <QMediaPlayer>
+#include <QMediaMetaData>
 #include <QVideoSink>
 #include <QVideoFrame>
 #include <QDir>
@@ -606,6 +607,21 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         if(mediaOpen_ && !photoOpen()) {
             loading_=status==QMediaPlayer::LoadingMedia;
             if(status==QMediaPlayer::EndOfMedia) {
+            // ISC-16 metadata: when a track loads, take its tags so the row stops showing a bare
+            // filename. Qt exposes them on the player only after the media is loaded.
+            if(status==QMediaPlayer::LoadedMedia) {
+                const auto tags=player_->metaData();
+                const auto title=tags.value(QMediaMetaData::Title).toString().trimmed();
+                const auto artist=tags.value(QMediaMetaData::ContributingArtist).toString().trimmed();
+                const auto album=tags.value(QMediaMetaData::AlbumTitle).toString().trimmed();
+                if(!title.isEmpty() || !artist.isEmpty()) {
+                    const QString label=title.isEmpty()?status_:title;
+                const auto tagged=mediaTags_.value(mediaQueue_.currentIndex());
+                if(!tagged.isEmpty() && mediaTitle_!=tagged)mediaTitle_=tagged;
+                    mediaTags_[mediaQueue_.currentIndex()]=artist.isEmpty()?label:label+" - "+artist;
+                    if(album.isEmpty())mediaAlbum_.clear(); else mediaAlbum_=album;
+                }
+            }
                 const auto request=mediaRequest_;
                 QTimer::singleShot(0,this,[this,request]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(false);});
             }
