@@ -107,6 +107,10 @@ family-shared, alongside the 10 installed titles inline). The earlier **Installe
 folder rows are gone. Opening **Not Installed** pushes an ordinary XMB page of rows; OK hands `steam://install/<id>`
 to Steam, which performs the download.
 
+A **Steam Store** row sits above the folder and opens a browse page of live top sellers with prices (public,
+keyless endpoint); its rows hand the same `steam://install/<id>` to Steam. Nothing is bought or downloaded inside
+the XMB - the store page only lists, and Steam owns purchase, download and launch.
+
 Two different local sources feed this without writing to Steam:
 
 - installed titles, from `libraryfolders.vdf` + `appmanifest_*.acf`;
