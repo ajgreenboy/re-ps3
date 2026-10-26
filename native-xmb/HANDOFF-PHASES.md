@@ -160,6 +160,10 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
 - Item icons: the firmware's icon glow/focus effect and the "PS" frame for game icons.
 
 ### Phase 4: motion and timing from firmware
+- Page-move duration and info-bar clock trace: [PAGE-MOVE.md](audit/PAGE-MOVE.md). The five explore_plugin constants are
+  exactly 300.0f but belong to content/dialog transitions; the XMB page move is paf PhXmBar in vsh.elf (0.3 s bar
+  duration), and 300 ms at mode 4 is the only model matching the measured 17-18 frame ramp. The info-bar clock is a
+  passive PhClock written through an exported setter at one-minute resolution; its periodic writer is still open.
 - Smoothness correction (2026-10-25): repaint requests follow Qt swap callbacks instead of the 16 ms input timer;
   cumulative sampling preserves the canonical ease at 60/120/240 Hz. Matched navigation at 1920x1000 improved
   from 62.58 to 236.96 swap callbacks/s (p95 gap 17.37 to 4.20 ms). These are callback measurements;
