@@ -119,6 +119,10 @@ library. The key is never written to preferences, reports, manifests or logs.
 The Friends column uses Steam too and needs the same key. **Open Steam Friends** also opens Steam's own friends
 window.
 
+Per-game artwork can be overridden with plain files under `<native-data>/artwork/`: `<appid>.png` for the wide row,
+`<appid>_icon.png` for the square icon and `<appid>_bg.png` for the background (`.jpg/.jpeg/.webp` also work). An
+override wins over the cached Steam header and the manifest icon; `XMB_STEAM_ARTWORK_LOG=1` logs which files are used.
+
 **Import Games and Apps** reads a versioned JSON manifest. The same tool is available without opening XMB:
 
 ```powershell

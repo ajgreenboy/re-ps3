@@ -15,6 +15,7 @@
 #include "steam_store.h"
 #include "steam_owned.h"
 #include "steam_collections.h"
+#include "steam_overrides.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <algorithm>
@@ -95,6 +96,7 @@ int main(int argc,char** argv) {
     parser.addOption({"steam-friends-report","Write Steam friends or an explicit connection error without opening a window","json-file"});
     parser.addOption({"steam-store-report","Query the public Steam store catalogue and write the rows as JSON without opening a window","json-file"});
     parser.addOption({"steam-store-query","Free-text store search for --steam-store-report (default: top sellers)","term"});
+    parser.addOption({"steam-artwork-report","List per-game artwork overrides under <data>/artwork and exit","json-file"});
     parser.addOption({"steam-library-report","Write this account's Steam library organised by its own collections (names, install/launch handoffs) without opening a window","json-file"});
     parser.addOption({"steam-collections-report","Write this account's Steam library collections and their app ids without opening a window","json-file"});
     parser.addOption({"owned-games-report","Write the games this Steam account owns, with an install/launch handoff each, without opening a window","json-file"});
@@ -166,6 +168,16 @@ int main(int argc,char** argv) {
         const auto id=qEnvironmentVariable("XMB_STEAM_ID",xmb::scanSteam().steamId);
         QTimer::singleShot(0,&app,[&friends,id]{friends.refresh(id);});
         return app.exec();
+    }
+    if(parser.isSet("steam-artwork-report")) {
+        const auto overrides=xmb::scanSteamArtworkOverrides(data);
+        QJsonArray rows;
+        for(const auto& entry:overrides)rows.push_back(QJsonObject{{"appId",entry.appId},{"row",entry.row},
+            {"icon",entry.icon},{"background",entry.background}});
+        QFile file(parser.value("steam-artwork-report"));
+        const auto bytes=QJsonDocument(QJsonObject{{"artwork",rows},{"count",rows.size()}}).toJson();
+        if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();return 2;}
+        return 0;
     }
     if(parser.isSet("steam-library-report")) {
         // Purchased games (Steam Web API, needs STEAM_WEB_API_KEY) grouped by the account's own

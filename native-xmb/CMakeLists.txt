@@ -20,7 +20,7 @@ qt_add_executable(re-ps3-native
     src/font_raster.cpp src/font_raster.h
     src/profiles.cpp src/profiles.h
     src/steam_library.cpp src/steam_library.h src/steam_friends.cpp src/steam_friends.h
-    src/steam_artwork.cpp src/steam_artwork.h src/steam_store.cpp src/steam_store.h src/steam_owned.cpp src/steam_owned.h src/steam_collections.cpp src/steam_collections.h
+    src/steam_artwork.cpp src/steam_artwork.h src/steam_store.cpp src/steam_store.h src/steam_owned.cpp src/steam_owned.h src/steam_collections.cpp src/steam_collections.h src/steam_overrides.cpp src/steam_overrides.h
     src/content_registry.cpp src/content_registry.h
     src/rsx_program.cpp src/rsx_program.h src/ribbon.cpp src/ribbon.h src/hdr.cpp src/hdr.h src/icons.cpp src/icons.h src/particles.cpp src/particles.h src/coldboot.cpp src/coldboot.h
     src/shell.cpp src/shell.h src/host.cpp src/host.h src/pad.cpp src/pad.h src/view.cpp src/view.h)
