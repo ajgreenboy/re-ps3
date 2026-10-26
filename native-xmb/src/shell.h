@@ -125,6 +125,8 @@ private:
     QVector<FamilyGame> familyGames_; // optional family-shared titles from <data>/family-shared.json
     SteamInstallation steamInstalled_; // last local Steam scan, for the library folders
     SteamStore steamStore_;          // public storefront browser (browse + install handoff)
+    QHash<int,QString> mediaTags_;   // per queue index, track tags read from the player
+    QString mediaAlbum_;             // album of the loaded track, when tagged
     QPointer<QProcess> game_;        // the launched title, kept so a return is observable
     QString gameTitle_;              // its title, for the return message
     bool ownedInFlight_=false;

@@ -584,3 +584,24 @@ DoF-sized, iridescent, spot-lit quads - pass 1 into the HDR scene, pass 2 into t
 `PARTICLES.mnu`. Today's `src/particles.cpp` is 2000 additive point sprites with no simulation, no lifetime,
 no quad, one pass, after tone mapping. None of the firmware simulation parameters depend on clock time or the
 ribbon; only the glare/DoF inputs follow the day-night preset.
+## Applied: the pool simulation is in src/particles.cpp
+
+The sparkle layer is replaced by the firmware-shaped simulation (same public API, plus `kCapacity`,
+`liveCount()`, `stepIndex()`):
+
+- fixed step 0.0088883 s, state a pure function of elapsed seconds and a fixed Park-Miller seed, so a
+  `--render-clock` frame is reproducible (canonical capture: PSNR Infinity, SSIM 1.0000);
+- spawn to the cap (1536) with the PARTICLES.mnu emission constants, mirror probability, cone, Brownian
+  kick, gravity, friction, age variance, quaternion spin, life envelope in `pos.w`, GLOBAL ALPHA uniform;
+- one 48-byte-stride VBO and one additive `glDrawElements` call, no per-frame allocation;
+- measured pool: 1529 live at t=30 s (audit band 1492 +/- 5%), 1526 after a 600 s run, zero non-finite.
+
+Deliberately still open (each needs a file outside particles.*): pass 1 belongs in the HDR scene before
+`Hdr::finish` and pass 2 in the glare source (today it is one pass drawn after tone mapping, with the
+radial halo folded into the quad), `proc_iridescent.tga` and the untraced `_Color`/`_Gamma`/spot packing,
+the fresnel/life-bounds/darkness alpha chain, and the true emission volume (violume is a uniform box, so
+dust does not cluster on the wave yet). Blending stays additive until qgl material mode 3 is resolved.
+
+Because the dust now lands where the reference frame has its own particles at a different phase, the
+`work/ab-layers.ts` capture baselines for frame / background / icon row / item label row were re-measured
+(see `revisionNote` in the thresholds file); the gate passes 6/6 against the new numbers.
