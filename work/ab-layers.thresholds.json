@@ -66,5 +66,80 @@
       "baseline": { "psnr": 13.3995, "ssim": 0.4973 },
       "captureBaseline": { "psnr": 17.1242, "ssim": 0.7046 }
     }
+  ],
+  "stateSelfBaseline": {
+    "psnrDb": 55.0,
+    "ssim": 0.9995,
+    "rationale": "Named states have no RPCS3 frame: their reference is the deterministic native render itself, so a fresh capture must reproduce that frame (self-baseline regression gate, not firmware fidelity). Two runs of every state are byte-identical on this machine (PSNR Infinity, SSIM 1.0000). 55 dB still catches any deterministic drawing change (one changed 255-level pixel already costs ~68 dB on a 1080p frame) while leaving room for GPU/driver shader noise; 0.9995 SSIM is the same margin. Refresh a reference deliberately after an intended rendering change with --states --save-reference."
+  },
+  "states": [
+    {
+      "name": "steam-game-root",
+      "description": "Game column root with the rebuilt Steam rows: installed titles inline, then Steam Store and Not Installed, then the dev_flash utilities.",
+      "reference": "out/native-reference/layers/steam-game-root.png",
+      "dataSeed": "out/native-reference/store/ui3-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
+      "waits": 8,
+      "settleWaits": 3,
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "catalogueHas": ["steam-store", "steam-folder-library"],
+        "steamRowsBeforeStore": true,
+        "folderDetailFormula": "owned-installed+familyShared",
+        "noStoreDump": true
+      },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "item column", "crop": [340, 380, 1080, 600] }
+      ]
+    },
+    {
+      "name": "steam-store-sections",
+      "description": "Steam Store page opened from the Game column: Top Sellers / New Releases / Specials. The sections page makes no store request, so it needs no network.",
+      "reference": "out/native-reference/layers/steam-store-sections.png",
+      "dataSeed": "out/native-reference/store/ui3-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
+      "waits": 8,
+      "settleWaits": 3,
+      "targetCatalogueId": "steam-store",
+      "pressEnter": true,
+      "expect": {
+        "category": "game",
+        "depth": 1,
+        "entryId": "store-section:top_sellers",
+        "entryTitle": "Top Sellers",
+        "entryCount": 3,
+        "noStoreDump": true
+      },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "sections", "crop": [440, 400, 640, 320] }
+      ]
+    },
+    {
+      "name": "steam-not-installed",
+      "description": "Not Installed folder page: owned-but-not-installed rows plus the seeded family-shared titles. Only the visible first rows are scored; the catalogue and folder dumps bound the row count.",
+      "reference": "out/native-reference/layers/steam-not-installed.png",
+      "dataSeed": "out/native-reference/store/ui3-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
+      "waits": 8,
+      "settleWaits": 3,
+      "targetCatalogueId": "steam-folder-library",
+      "pressEnter": true,
+      "expect": {
+        "category": "game",
+        "depth": 1,
+        "folderMode": "library",
+        "folderCountFormula": "owned-installed+familyShared",
+        "folderRowsPrefix": "steam:",
+        "folderRowsDetailContains": "Not installed",
+        "noStoreDump": true
+      },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "rows", "crop": [430, 420, 640, 560] }
+      ]
+    }
   ]
 }

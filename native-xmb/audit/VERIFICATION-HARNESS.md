@@ -135,10 +135,10 @@ with pinned clocks and an empty Steam root.
 
 | Layer | Crop (x,y,w,h) | Stored pair PSNR / SSIM | Canonical capture PSNR / SSIM |
 |---|---|---:|---:|
-| Whole frame | 0,0,1920,1080 | 18.20 / 0.8388 | 18.00 / 0.8278 |
-| Top background | 0,0,700,200 | 19.02 / 0.9251 | 20.25 / 0.9364 |
-| Category icon row | 0,240,1920,120 | 20.13 / 0.9022 | 21.08 / 0.8982 |
-| Item label row | 400,425,800,100 | 11.86 / 0.3791 | 11.85 / 0.3774 |
+| Whole frame | 0,0,1920,1080 | 18.20 / 0.8388 | 17.96 / 0.8171 |
+| Top background | 0,0,700,200 | 19.02 / 0.9251 | 20.20 / 0.9303 |
+| Category icon row | 0,240,1920,120 | 20.13 / 0.9022 | 20.99 / 0.8865 |
+| Item label row | 400,425,800,100 | 11.86 / 0.3791 | 11.93 / 0.3832 |
 | Clock text | 1570,80,260,50 | 10.33 / 0.3504 | 13.51 / 0.6131 |
 | Info bar | 1329,75,591,58 | 13.40 / 0.4973 | 17.12 / 0.7046 |
 
@@ -147,6 +147,65 @@ The capture recipe pins `--render-clock 30 --background-clock 2026-10-25T10:00:0
 so the Game column keeps the reference's pre-Steam dev_flash content. The stored-pair row reproduces the earlier
 whole-frame 18.20 dB / 0.8388 and category-row 20.13 dB / 0.9022 baselines; the older top-background 19.03 dB /
 0.9248 used an unrecorded crop and is re-measured here as 19.02 / 0.9251.
+
+## Named Steam/XMB states (2026-10-25)
+
+The new Steam pages have no RPCS3 capture, so each named state's reference is the deterministic native render of
+that same state. These are self-baseline regression gates: they catch drawing, layout and content changes, and they
+say nothing about firmware fidelity.
+
+```powershell
+# every gate in one command: stored pair + canonical capture + all named states
+bun work/ab-layers.ts --all
+
+# only the named states, or one of them
+bun work/ab-layers.ts --states
+bun work/ab-layers.ts --state steam-store-sections
+
+# recipes and machine-readable reports
+bun work/ab-layers.ts --list-states
+bun work/ab-layers.ts --states --json
+
+# deliberately refresh the references after an intended rendering change
+bun work/ab-layers.ts --states --save-reference
+```
+
+Exit 0 = all gates pass, 1 = a metric gate failed, 2 = a named-state dump assertion failed (the capture shows a
+different state than the recipe expects) or an input/runtime error.
+
+### Recipes and assertions
+
+One discovery capture of the Game column root reads the `XMB_DUMP_ENTRIES` catalogue dump to find each target's
+row index; the page recipes then script `DOWN` taps to that index and press ENTER. Every recipe copies its data
+directory from `out/native-reference/store/ui3-data` (preferences, profiles, settings, `family-shared.json`, cached
+Steam headers, artwork overrides), pins all clocks, and sets `XMB_STEAM_ARTWORK=0` so background artwork fetches
+cannot change a frame mid-capture. References and their state sidecars live under `out/native-reference/layers/`
+(gitignored local reference data, never committed).
+
+| State | Navigation and assertions | Regions |
+|---|---|---|
+| `steam-game-root` | Game column root, no input. Asserts depth 0; catalogue has `steam-store` and `steam-folder-library`; every row before `steam-store` is an inline `steam:*` title and their count equals `installedSteam`; the Not Installed detail equals owned - installed + familyShared (275). | whole frame; item column 340,380,1080,600 |
+| `steam-store-sections` | Select `steam-store` (index 10) and press ENTER. Asserts depth 1, `entryId=store-section:top_sellers`, title Top Sellers, 3 rows, and no `<dump>.store.json` (the sections page must make no store request). | whole frame; sections 440,400,640,320 |
+| `steam-not-installed` | Select `steam-folder-library` (index 11) and press ENTER. Asserts the `<dump>.folder.json` mode `library`, row count = owned - installed + 3 family-shared apps (275), every row `steam:*` with a "Not installed" detail, and the sidecar count equal to the folder count. | whole frame; rows 430,420,640,560 |
+
+### Determinism and measured numbers
+
+Each recipe was captured twice and the frames were byte-identical (PSNR Infinity, SSIM 1.0000), including the
+275-row folder page: cached artwork comes from the seed data and asynchronous fetches are disabled. The fixed gate
+is `PSNR >= 55 dB and SSIM >= 0.9995` against the stored reference. One changed 255-level pixel already costs about
+68 dB on a 1080p frame, so any deterministic drawing change fails while GPU/driver noise has room.
+
+| State | Captured state (observed) | Whole frame PSNR / SSIM | Content region PSNR / SSIM |
+|---|---|---:|---:|
+| `steam-game-root` | game, depth 0, selection 0, 21 rows | inf / 1.0000 | inf / 1.0000 |
+| `steam-store-sections` | game, depth 1, Top Sellers, 3 rows | inf / 1.0000 | inf / 1.0000 |
+| `steam-not-installed` | game, depth 1, folder 275 rows | inf / 1.0000 | inf / 1.0000 |
+
+Limits: the owned-games list comes from the existing Steam Web API key path, so a changed account or library makes
+the dump assertions fail loudly (exit 2) instead of scoring a different state; update recipe and reference
+deliberately then. The store *section content* pages (Top Sellers list and friends) are not covered because they
+need a live store request; only the network-free sections page is. State captures use the phase-2 executable by
+default; pass `--exe` for another build.
 
 ## Continuation
 
@@ -159,3 +218,6 @@ whole-frame 18.20 dB / 0.8388 and category-row 20.13 dB / 0.9022 baselines; the 
 5. `work/ab-layers.ts` now enforces per-layer regression budgets against the stored RPCS3 frame. It does not
    establish firmware fidelity while states are unmatched: replace each baseline deliberately when a matched
    reference state and a corrected layer are captured, and do not read a pass as visual parity.
+6. The named-state references under `out/native-reference/layers/` are native self-baselines. Add a matched RPCS3
+   reference for the Steam pages if one is ever captured, then replace the self-baseline gate with a fidelity gate
+   instead of widening the budget.
