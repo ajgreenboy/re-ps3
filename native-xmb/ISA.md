@@ -18,6 +18,9 @@ navigation, timing, sound, local services and lifecycle using original assets
 from the user's local firmware. Every visible operation has a real service or
 an explicitly recorded unavailable capability. Functional breadth, visual
 accuracy and responsiveness are separate completion requirements.
+The user also wants modern content backends behind that presentation: installed
+Steam games appear like installed PKGs, Friends comes from Steam, and imported
+games/service apps share extensible native tooling.
 
 ## Out of Scope
 
@@ -41,6 +44,7 @@ Firmware execution is preserved as a reference track. This native application do
 ## Goal
 
 Recreate the stock firmware4.93 XMB feature surface and presentation with native C++ services and original local assets. Completion requires evidence for original workflows and their conditional states, including timing and shading.
+Use Steam and imported content as explicitly identified native providers for the requested modern workflows, preserving installed-PKG presentation rather than introducing a separate launcher interface.
 
 ## Criteria
 
@@ -81,6 +85,18 @@ Recreate the stock firmware4.93 XMB feature surface and presentation with native
 - [ ] ISC-32: The user can distinguish the completed recreation from an early foundation in the documentation.
 - [ ] ISC-33: Anti: tracked deliverables contain no raw firmware or private console identity.
 - [ ] ISC-34: Antecedent: visual claims identify their reference firmware, theme and recording evidence.
+- [x] ISC-35: Installed Steam titles are discovered without including incomplete downloads or missing install directories in the disposable filtering probe.
+- [x] ISC-36: Steam games appear directly in Game using the installed-PKG image/title layout, without platform card chrome or the Steam subtitle.
+- [ ] ISC-37: A real Steam title launches and returns to XMB with a verified lifecycle.
+- [ ] ISC-38: A permitted live Steam account supplies real friends and presence in the Friends column.
+- [x] ISC-38.1: A manual friends refresh without credentials displays an explicit connection error.
+- [x] ISC-39: Reimporting a content manifest updates entries by ID without duplicates.
+- [x] ISC-39.1: An invalid app import leaves the existing registry byte-identical.
+- [x] ISC-40: An imported executable receives its structured argument array and produces the expected diagnostic marker.
+- [x] ISC-41: An imported Jellyfin URL appears as an app in the selected XMB category.
+- [ ] ISC-41.1: Jellyfin playback and authentication work within the native app.
+- [x] ISC-42: All six built-in colour captures have a focused icon-interior luma above 130 in the named probe.
+- [x] ISC-42.1: The same icon-interior RGB differs by at most one channel level between day and night captures for each built-in colour.
 
 ## Test Strategy
 
@@ -94,6 +110,7 @@ Build logs establish compilation. Requested window observations establish specif
 | Assets | Assets/QrcArchive | Original material, wave and complete resource semantics |
 | Native services | Preferences/Profiles/MediaLibrary/InteractionAudio | Complete original workflows and capability bindings |
 | Feature audit | audit/ | Per-feature state variants and missing reference evidence |
+| Content providers | SteamLibrary/SteamFriends/SteamArtwork/ContentRegistry | Verified Steam lifecycle, connected friends, custom game artwork editor and embedded media services |
 
 ## Decisions
 
@@ -144,6 +161,10 @@ Build logs establish compilation. Requested window observations establish specif
 
 - 2026-10-25 19:24: Prioritized the reported animation regression over pending info-bar work. Repaint requests now follow Qt swap callbacks; canonical elapsed-time easing avoids host-rate-dependent curves. Retained firmware durations and the existing 100 ms catch-up cap. Callback evidence closes only ISC-9.1/9.2/9.3; physical presentation and sustained workloads keep ISC-9 open. See audit/ANIMATION-SMOOTHNESS.md.
 
+- 2026-10-25: refined: user requested Steam-backed installed games and Friends, plus future import/service tooling. Added stable provider criteria ISC-35 onward. Steam games use the existing PKG presentation; service URLs use a shared versioned import registry. Explicitly retain open live-friends, real Steam launch/return and embedded Jellyfin criteria. Info-bar geometry/clock also continued from saved reference measurements. See audit/STEAM-INTEGRATION.md and audit/INFO-BAR.md.
+
+- 2026-10-25: User reported gray icons in fresh Original-profile screenshots and required correct rendering across all themes. Extended the opaque material to Original, deriving its tint from current/next firmware monthly palettes. Six day/night pairs and an Original wallpaper replay verify appearance invariants; full firmware material parity remains open.
+
 ## Changelog
 
 - 2026-10-25 | conjectured: the ribbon was a flat sheet displaced by ffd_shader1, placed on screen by fitted constants
@@ -162,6 +183,12 @@ Build logs establish compilation. Requested window observations establish specif
   criterion now: ISC-9.1/9.2/9.3 separate callback cadence, rate-invariant easing and settled visual guards from unverified physical presentation
 
 ## Verification
+
+- ISC-42/42.1: 2026-10-25 actual captures — all six focused-interior lumas are 178.49–201.93; maximum day/night channel difference is 0. Twelve captures and the Original wallpaper replay exit 0. See audit/CATEGORY-ICON-FIX.md for sample bounds and original RGB values.
+
+- ISC-35/36: 2026-10-25 actual discovery and visible replay — "Steam installed 10 imported apps 0 warnings 0"; metadata captures steam:2807960 and steam:202970. Disposable filter retains only steam:101; incomplete/missing/escaping cases are excluded. Capture review confirms direct PKG-style slots and no platform subtitle.
+- ISC-38.1: 2026-10-25 visible replay — manual refresh displays "Steam friends need a Steam Web API key". A live authenticated list remains unverified.
+- ISC-39/39.1/40/41: 2026-10-25 native CLI/replay probes — duplicate import stays at two entries; rejected javascript URL returns 2 with unchanged target SHA-256; imported-process diagnostic writes its marker; service capture selects "custom:jellyfin-probe". No Jellyfin server/player success is claimed.
 
 - ISC-9.1: 2026-10-25 bounded callback trace — corrected 1920x1000 report: "p95Ms": 4.1971 and "fps": 236.96217593232973 over 6000–10000 ms. Baseline p95 17.3672 ms; callback scope only.
 - ISC-9.2: 2026-10-25 actual native motion diagnostic — both modes' sampled positions agree across 60/120/240 Hz within 1e-12; retargeting preserves the current value and long advance reaches the target. Source/evidence paths in audit/ANIMATION-SMOOTHNESS.md.

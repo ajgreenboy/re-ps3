@@ -170,10 +170,14 @@ QString Shell::valueText(const Entry& entry) const {
     return {};
 }
 QString Shell::fontFamily()const{return assets_.fontFamily(preferences_.value("appearance/font").toInt());}
-QString Shell::clockText()const {
+QDateTime Shell::clockDateTime()const {
     const auto zone=preferences_.value("clock/timeZone").toString();
     auto now=clockOverride_.isValid()?clockOverride_:QDateTime::currentDateTime();
     if(zone!="System")now=now.toTimeZone(QTimeZone(zone.toUtf8()));
+    return now;
+}
+QString Shell::clockText()const {
+    const auto now=clockDateTime();
     const QString date=QStringList{"d/M","M/d","yyyy/M/d"}.value(preferences_.value("clock/dateFormat").toInt(),"d/M");
     const QString time=preferences_.value("clock/hourFormat").toInt()?"h:mm AP":"HH:mm";
     return now.toString(date+"  "+time);

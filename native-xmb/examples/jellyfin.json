@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "apps": [
+    {
+      "id": "jellyfin",
+      "title": "Jellyfin",
+      "kind": "web",
+      "category": "tv",
+      "url": "http://localhost:8096"
+    }
+  ]
+}

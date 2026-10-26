@@ -5,6 +5,9 @@
 #include "playback_queue.h"
 #include "interaction_audio.h"
 #include "profiles.h"
+#include "steam_friends.h"
+#include "content_registry.h"
+#include "steam_owned.h"
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QDateTime>
@@ -17,7 +20,8 @@ class QVideoSink;
 
 namespace xmb {
 class Assets;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch };
+class SteamArtwork;
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -25,6 +29,9 @@ struct Entry {
     QString setting;
     QVariant option;
     QString themeIcon; // the PS3 theme (.p3t icontable) id that replaces this icon, e.g. "icon_game_setting"
+    QImage artwork; // provider images decoded off the render thread
+    bool gameTile=false,friendRow=false;
+    int presenceState=0;
 };
 struct Category { QString id,title,container,texture; QVector<Entry> entries; QString themeIcon; };
 class Shell final:public QObject {
@@ -48,6 +55,7 @@ public:
     // Small line under a row (reference: the signed-in user's name under user-scoped items like Trophy Collection).
     QString subtitleText(const Entry& entry) const;
     QString clockText() const;
+    QDateTime clockDateTime() const;
     // Local capture override only; never changes or persists the host clock.
     void setClockOverride(const QDateTime& when) { clockOverride_=when;emit changed(); }
     int backgroundMode() const { return preferences_.value("appearance/background").toInt(); }
@@ -82,6 +90,8 @@ public:
     void setSystemName(const QString& name);
     void setFullscreen(bool enabled);
     void refreshDirectory();
+    void refreshContent();
+    void importApps(const QString& file);
     void createUser(const QString& name);
 signals:
     void changed();
@@ -92,12 +102,27 @@ signals:
     void requestSystemName(const QString& value);
     void requestQuit();
     void requestNewUser();
+    void requestImportApps();
 private:
     Assets& assets_;
     Preferences preferences_;
     MediaLibrary library_;
     InteractionAudio interactionAudio_;
     Profiles profiles_;
+    QString dataDirectory_,steamRoot_,steamId_;
+    QVector<ContentApp> contentApps_;
+    SteamFriends steamFriends_;
+    SteamOwned steamOwned_;
+    OwnedGameList ownedGames_;      // purchased titles from the Steam Web API (may be empty without a key)
+    std::unique_ptr<SteamArtwork> steamArtwork_;
+    QTimer steamRefresh_;
+    QElapsedTimer friendsAge_;
+    SteamFriendList steamFriendList_;
+    QString steamFriendsError_;
+    bool contentScanning_=false,contentLoaded_=false,contentRefreshPending_=false,friendsRefreshing_=false,showFriendsErrors_=false;
+    void rebuildFriends();
+    void refreshSteamFriends(bool showErrors=false,bool force=false);
+    void refreshOwnedGames();
     quint64 scanRequest_=0,photoRequest_=0;
     bool loading_=false;
     QString status_;
