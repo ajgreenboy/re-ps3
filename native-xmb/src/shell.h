@@ -9,6 +9,8 @@
 #include "content_registry.h"
 #include "steam_owned.h"
 #include "steam_collections.h"
+#include "steam_family.h"
+#include "steam_library.h"
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QDateTime>
@@ -22,7 +24,7 @@ class QVideoSink;
 namespace xmb {
 class Assets;
 class SteamArtwork;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -116,6 +118,9 @@ private:
     SteamOwned steamOwned_;
     OwnedGameList ownedGames_;      // purchased titles from the Steam Web API (may be empty without a key)
     SteamCollectionList collections_; // the account's own Steam library collections
+    SteamFamily family_;              // the Steam Families group this account belongs to
+    QVector<FamilyGame> familyGames_; // optional family-shared titles from <data>/family-shared.json
+    SteamInstallation steamInstalled_; // last local Steam scan, for the library folders
     bool ownedInFlight_=false;
     QString ownedSignature_;        // app ids + installed flags + collection ids, to skip unchanged rebuilds
     std::unique_ptr<SteamArtwork> steamArtwork_;
@@ -129,6 +134,8 @@ private:
     void refreshOwnedGames();
     bool stageOwnedForRefresh() const;
     QString collectionLabel(const QString& appId) const;
+    QVector<Entry> steamFolderEntries(const QString& mode) const;
+    void openSteamFolder(const QString& mode);
     quint64 scanRequest_=0,photoRequest_=0;
     bool loading_=false;
     QString status_;
