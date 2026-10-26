@@ -16,6 +16,7 @@
 #include "steam_owned.h"
 #include "steam_collections.h"
 #include "steam_overrides.h"
+#include "steam_family.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <algorithm>
@@ -96,6 +97,7 @@ int main(int argc,char** argv) {
     parser.addOption({"steam-friends-report","Write Steam friends or an explicit connection error without opening a window","json-file"});
     parser.addOption({"steam-store-report","Query the public Steam store catalogue and write the rows as JSON without opening a window","json-file"});
     parser.addOption({"steam-store-query","Free-text store search for --steam-store-report (default: top sellers)","term"});
+    parser.addOption({"steam-family-report","Write the local Steam Families membership and any family-shared list, then exit","json-file"});
     parser.addOption({"steam-artwork-report","List per-game artwork overrides under <data>/artwork and exit","json-file"});
     parser.addOption({"steam-library-report","Write this account's Steam library organised by its own collections (names, install/launch handoffs) without opening a window","json-file"});
     parser.addOption({"steam-collections-report","Write this account's Steam library collections and their app ids without opening a window","json-file"});
@@ -168,6 +170,20 @@ int main(int argc,char** argv) {
         const auto id=qEnvironmentVariable("XMB_STEAM_ID",xmb::scanSteam().steamId);
         QTimer::singleShot(0,&app,[&friends,id]{friends.refresh(id);});
         return app.exec();
+    }
+    if(parser.isSet("steam-family-report")) {
+        const auto family=xmb::scanSteamFamily(qEnvironmentVariable("XMB_STEAM_ID"));
+        QString familyError;
+        const auto shared=xmb::scanFamilySharedGames(data,&familyError);
+        QJsonArray members;for(const auto& member:family.memberAccountIds)members.push_back(member);
+        QJsonArray games;
+        for(const auto& game:shared)games.push_back(QJsonObject{{"appId",game.appId},{"title",game.title},
+            {"install",xmb::SteamOwned::installUrl(game.appId)}});
+        QFile file(parser.value("steam-family-report"));
+        const auto bytes=QJsonDocument(QJsonObject{{"valid",family.valid},{"groupId",family.groupId},{"name",family.name},
+            {"members",members},{"shared",games},{"sharedCount",games.size()},{"error",familyError}}).toJson();
+        if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();return 2;}
+        return 0;
     }
     if(parser.isSet("steam-artwork-report")) {
         const auto overrides=xmb::scanSteamArtworkOverrides(data);

@@ -17,6 +17,8 @@ instead of adding a second menu catalog.
 | Steam header artwork cache | `src/steam_artwork.*` | Done |
 | Browse the public storefront | `src/steam_store.*` | Done |
 | Per-game artwork overrides (ICON0/PIC1) | `src/steam_overrides.*` | Done |
+| Steam library folders (installed / not installed / family) | `src/shell.cpp` (`Action::SteamFolder`) | Done |
+| Steam Families membership + shared list | `src/steam_family.*` | Done (OAuth token still open) |
 
 ## Owned games: what the Game column shows
 
@@ -49,6 +51,47 @@ Note: two offline/public name sources were probed and dropped. Steam's local
 `appcache/appinfo.vdf` (version 41) stores member keys as indexes into a string table and
 its per-entry header layout is not fully understood yet; Valve also retired the keyless
 `ISteamApps/GetAppList` endpoint (404). The supported path is the Web API key.
+
+## Library folders
+
+The Game column groups Steam instead of listing it flat, so the column is three folder rows and then the
+original PS3 titles:
+
+| Row | Contents | Action on OK |
+|---|---|---|
+| Installed Games | the 10 locally installed titles | launch (`steam://rungameid/<id>`) |
+| Not Installed | the rest of the owned library (272 here) | install (`steam://install/<id>`) |
+| Family Shared | titles from `<data>/family-shared.json` (3 in the seeded run) | install |
+
+`Action::SteamFolder` pushes an ordinary XMB page (`Shell::Page`), so navigation, easing and Back are the same as
+every other page. Rows are built on demand; at most 64 cached thumbnails are decoded when a folder opens and the
+rest fall back to the firmware icon before the online header fetch fills them in.
+
+Verified with `XMB_DUMP_ENTRIES` (writes the catalogue, and `<dump>.folder.json` when a folder opens):
+
+- column: `Installed Games (10)`, `Not Installed (272)`, `Family Shared (3)`, then PS3 utilities;
+- Installed page: 10 rows, `action=LaunchSteam`, collection labels (`Multiplayer`, `Singleplayer`), cached artwork;
+- Not Installed page: 272 rows, `action=InstallSteam`, labels like `Hidden - Not installed`.
+
+## Steam Families
+
+Family-shared titles are licensed to another member, so `IPlayerService/GetOwnedGames` never returns them. Valve's
+`IFamilyGroupsService/GetSharedLibraryApps` and `GetFamilyGroupForUser` require an OAuth access token: called with a
+Web API key they answer **401 Unauthorized** (probed; recorded here rather than retried).
+
+What works without that token:
+
+- membership, read locally from `FamilyGroup` in `userdata/<accountid>/config/localconfig.vdf` - group id, name and
+  the member account ids (verified: group `9416`, 6 members);
+- an optional shared-titles list at `<data>/family-shared.json`, which fills the **Family Shared** folder and is
+  needed because no local file maps family app ids to names:
+
+```json
+{ "apps": [ { "id": 620, "title": "Portal 2" }, { "id": 400, "title": "Portal" } ] }
+```
+
+`--steam-family-report` prints membership plus the shared count. A real OAuth flow (device code or client login) is
+the remaining step for automatic family libraries; the HTTP layer and folder are already in place for it.
 
 ## Per-game artwork overrides
 
@@ -100,6 +143,8 @@ re-ps3-native.exe --steam-report            <json>   # installed titles
 re-ps3-native.exe --steam-collections-report <json>  # collections + member app ids
 re-ps3-native.exe --owned-games-report      <json>   # purchased titles (needs the key)
 re-ps3-native.exe --steam-library-report    <json>   # purchased titles grouped by collection
+re-ps3-native.exe --steam-family-report     <json>   # family group, members, shared list
+re-ps3-native.exe --steam-artwork-report    <json>   # per-game artwork overrides on disk
 re-ps3-native.exe --steam-store-report      <json> [--steam-store-query <term>]
 ```
 
@@ -108,6 +153,8 @@ Verification so far, on the local install:
 - collections: 13 groups read keylessly (Singleplayer 299, Multiplayer 210, Hidden 155,
   Canyon Dogshit 131, Lego 21, Valve 20, Fighting 19, Apps 10, Hype 8, HTPC 3,
   Favorites 1, ea/VR empty);
+- library folders: see "Library folders" above (10 / 272 / 3 rows opened as pages);
+- family: membership read for group `9416` with 6 members; shared list from JSON only;
 - owned/library reports with the key present: 282 purchased titles, 259 of them grouped into
   the 13 collections and 4 ungrouped; without a key they exit 2 with
   `Set STEAM_WEB_API_KEY to list the games this account owns.` and write no rows;

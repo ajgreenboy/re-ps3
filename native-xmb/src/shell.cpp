@@ -7,12 +7,15 @@
 #include "steam_artwork.h"
 #include "steam_collections.h"
 #include "steam_overrides.h"
+#include "steam_family.h"
 #include <QDesktopServices>
 #include <QAudioOutput>
 #include <QMediaPlayer>
 #include <QVideoSink>
 #include <QVideoFrame>
 #include <QDir>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
@@ -146,6 +149,62 @@ void Shell::refreshOwnedGames() {
     ownedInFlight_=true;
     steamOwned_.refresh(steamId_);
 }
+// Rows inside a Steam library folder. Built on demand so a 280-title library does not
+// cost anything until the folder is opened; only a bounded number of cached thumbnails
+// are decoded here.
+QVector<Entry> Shell::steamFolderEntries(const QString& mode) const {
+    QVector<Entry> rows;
+    const QString cache=QDir(dataDirectory_).filePath("cache/steam");
+    int decoded=0;
+    const auto add=[&](const QString& appId,const QString& title,const QString& detail,Action action) {
+        auto e=item("steam:"+appId,title,"game_tex_default_ps3","explore_plugin_full",action,appId);
+        e.gameTile=true;e.detail=detail;
+        if(decoded<64) {
+            QImageReader reader(SteamArtwork::cachePath(cache,appId));
+            if(reader.canRead()) {
+                const auto size=reader.size();
+                if(size.isValid() && size.width()<=16384 && size.height()<=16384) {
+                    reader.setScaledSize(size.scaled(512,288,Qt::KeepAspectRatio));
+                    const auto image=reader.read();
+                    if(!image.isNull()){e.artwork=image;++decoded;}
+                }
+            }
+        }
+        rows.push_back(std::move(e));
+    };
+    if(mode=="installed") {
+        for(const auto& game:steamInstalled_.games) {
+            const QString label=collectionLabel(game.appId);
+            add(game.appId,game.title,label.isEmpty()?QObject::tr("Installed"):label,Action::LaunchSteam);
+        }
+    } else if(mode=="library") {
+        for(const auto& game:ownedGames_) {
+            if(game.installed)continue;
+            const QString label=collectionLabel(game.appId);
+            add(game.appId,game.title,label.isEmpty()?QObject::tr("Not installed"):label+" - Not installed",Action::InstallSteam);
+        }
+    } else if(mode=="family") {
+        for(const auto& game:familyGames_)add(game.appId,game.title,QObject::tr("Family shared"),Action::InstallSteam);
+    }
+    return rows;
+}
+void Shell::openSteamFolder(const QString& mode) {
+    const QString title=mode=="installed"?QObject::tr("Installed Games")
+        :mode=="family"?QObject::tr("Family Shared"):QObject::tr("Not Installed");
+    Page page;page.title=title;page.entries=steamFolderEntries(mode);
+    // Verification hook: a folder open writes its own row list next to the catalogue dump.
+    if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
+        QJsonArray rows;
+        for(const auto& e:page.entries)rows.push_back(QJsonObject{{"id",e.id},{"title",e.title},{"detail",e.detail},
+            {"action",int(e.action)},{"hasArtwork",!e.artwork.isNull()}});
+        QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".folder.json");
+        if(file.open(QIODevice::WriteOnly))file.write(QJsonDocument(QJsonObject{{"folder",mode},{"title",title},
+            {"rows",rows},{"count",rows.size()}}).toJson());
+    }
+    if(page.entries.isEmpty()){message_=title+"\n\n"+QObject::tr("This folder is empty.");return;}
+    pages_.push_back(std::move(page));
+    emit changed();
+}
 void Shell::refreshContent() {
     if(contentScanning_){contentRefreshPending_=true;return;}
     contentScanning_=true;
@@ -154,6 +213,10 @@ void Shell::refreshContent() {
     connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher]{
         auto result=watcher->result();watcher->deleteLater();contentScanning_=false;
         steamRoot_=result.steam.root;
+        steamInstalled_=result.steam;
+        family_=scanSteamFamily(steamInstalled_.steamId);
+        { QString familyError; familyGames_=scanFamilySharedGames(dataDirectory_,&familyError);
+          if(!familyError.isEmpty())qWarning().noquote()<<"steam family:"<<familyError; }
         const bool accountChanged=steamId_!=result.steam.steamId;
         steamId_=result.steam.steamId;
         if(!result.error.isEmpty()){message_="App Library\n\n"+result.error;result.apps=contentApps_;}
@@ -162,23 +225,30 @@ void Shell::refreshContent() {
             auto& category=categories_[c];
             const auto selected=category.entries.isEmpty()?QString{}:category.entries[selections_[c]].id;
             category.entries.erase(std::remove_if(category.entries.begin(),category.entries.end(),[](const Entry& e){
-                return e.id.startsWith("steam:") || e.id.startsWith("custom:");
+                return e.id.startsWith("steam:") || e.id.startsWith("steam-folder-") || e.id.startsWith("custom:");
             }),category.entries.end());
             QVector<Entry> providers;
-            if(category.id=="game")for(const auto& game:result.steam.games) {
-                auto e=item("steam:"+game.appId,game.title,"game_tex_default_ps3","explore_plugin_full",Action::LaunchSteam,game.appId);
-                e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;
-                e.detail=collectionLabel(game.appId);providers.push_back(std::move(e));
-            }
-            // Purchased but not installed: the owned list comes from the Steam Web API, so it can be listed
-            // and installed from here. Steam still performs the download (steam://install/<id>).
-            if(category.id=="game" && !ownedGames_.isEmpty())for(const auto& game:ownedGames_) {
-                if(game.installed)continue;
-                auto e=item("steam:"+game.appId,game.title,"game_tex_default_ps3","explore_plugin_full",Action::InstallSteam,game.appId);
-                e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;
-                const QString label=collectionLabel(game.appId);
-                e.detail=label.isEmpty()?QObject::tr("Owned - Not installed"):label+" - Not installed";
-                providers.push_back(std::move(e));
+            if(category.id=="game") {
+                // Steam lives in folders so the column is not a 280-row wall: installed titles,
+                // the rest of the owned library, and family-shared titles when provided.
+                const int installedCount=int(result.steam.games.size());
+                const int ownedNotInstalled=int(std::count_if(ownedGames_.cbegin(),ownedGames_.cend(),
+                    [](const OwnedGame& game){return !game.installed;}));
+                if(installedCount>0) {
+                    auto e=item("steam-folder-installed",QObject::tr("Installed Games"),"item_tex_ps3game_folder",
+                        "explore_plugin_full",Action::SteamFolder,"installed");
+                    e.detail=QString::number(installedCount);providers.push_back(std::move(e));
+                }
+                if(ownedNotInstalled>0) {
+                    auto e=item("steam-folder-library",QObject::tr("Not Installed"),"item_tex_plain_folder",
+                        "explore_plugin_full",Action::SteamFolder,"library");
+                    e.detail=QString::number(ownedNotInstalled);providers.push_back(std::move(e));
+                }
+                if(!familyGames_.isEmpty()) {
+                    auto e=item("steam-folder-family",QObject::tr("Family Shared"),"item_tex_plain_folder",
+                        "explore_plugin_full",Action::SteamFolder,"family");
+                    e.detail=QString::number(familyGames_.size());providers.push_back(std::move(e));
+                }
             }
             for(const auto& app:contentApps_)if(app.category==category.id) {
                 auto e=item("custom:"+app.id,app.title,app.kind=="game"?"game_tex_default_ps3":"tex_video","explore_plugin_full",
@@ -200,6 +270,23 @@ void Shell::refreshContent() {
             if(e.id.startsWith("steam:") && e.artwork.isNull())missingArt.push_back(e.value);
         if(qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0")steamArtwork_->refresh(missingArt);
         qInfo()<<"content: Steam installed"<<result.steam.games.size()<<"imported apps"<<contentApps_.size()<<"warnings"<<result.steam.warnings.size();
+        // Verification hook: dump the rebuilt catalogue so scripted runs can be checked without
+        // reading pixels (XMB_DUMP_ENTRIES=<json file>).
+        if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
+            QJsonArray categories;
+            for(const auto& category:categories_) {
+                QJsonArray entries;
+                for(const auto& e:category.entries)
+                    entries.push_back(QJsonObject{{"id",e.id},{"title",e.title},{"detail",e.detail},
+                        {"action",int(e.action)},{"value",e.value},{"hasArtwork",!e.artwork.isNull()}});
+                categories.push_back(QJsonObject{{"id",category.id},{"entries",entries},{"count",entries.size()}});
+            }
+            QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES"));
+            const auto bytes=QJsonDocument(QJsonObject{{"categories",categories},{"owned",ownedGames_.size()},
+                {"collections",collections_.size()},{"installedSteam",result.steam.games.size()},
+                {"importedApps",contentApps_.size()}}).toJson();
+            if(file.open(QIODevice::WriteOnly))file.write(bytes);
+        }
         emit changed();
         if(contentRefreshPending_){contentRefreshPending_=false;QTimer::singleShot(0,this,&Shell::refreshContent);}
     });
@@ -519,6 +606,7 @@ void Shell::activate() {
             message_=entry.title+"\n\nSteam could not be started. Refresh the game library and check the Steam installation.";
         break;
     }
+    case Action::SteamFolder:openSteamFolder(entry.value);break;
     case Action::InstallSteam: {
         // Steam owns the download: opening steam://install/<id> asks the client to install it.
         if(!QDesktopServices::openUrl(QUrl(SteamOwned::installUrl(entry.value))))

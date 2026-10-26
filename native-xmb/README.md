@@ -101,6 +101,10 @@ not installed shows an install action that hands `steam://install/<appid>` to St
 Row artwork, title position and spacing are the installed-PKG layout, so Steam rows and original PS3 titles share
 one presentation. F5 or **Refresh Game Library** rescans.
 
+Steam is kept in folders rather than one long list: **Installed Games**, **Not Installed** (the rest of the owned
+library, each row offering Install) and **Family Shared** when a shared list exists. Opening a folder pushes a page
+of that subset; OK launches an installed title or hands `steam://install/<id>` to Steam for one that is not installed.
+
 Two different local sources feed this without writing to Steam:
 
 - installed titles, from `libraryfolders.vdf` + `appmanifest_*.acf`;
@@ -116,10 +120,23 @@ one of these ways (optionally with `XMB_STEAM_ID`):
 Without a key the column keeps the installed titles and the XMB states that a key is needed instead of inventing a
 library. The key is never written to preferences, reports, manifests or logs.
 
+
+**Steam Families.** Valve's owned-games endpoint returns only your own purchases; family-shared titles are
+licensed to another member, and the family endpoint (`IFamilyGroupsService`) needs an OAuth access token - a Web
+API key is rejected with 401 (verified). Family *membership* is read locally from Steam (`FamilyGroup` in
+`userdata/<accountid>/config/localconfig.vdf`, e.g. group and 6 members here). To include shared titles now, write
+`<native-data>/family-shared.json`:
+
+```json
+{ "apps": [ { "id": 620, "title": "Portal 2" } ] }
+```
+
+`--steam-family-report` prints the membership and the shared count.
+
 The Friends column uses Steam too and needs the same key. **Open Steam Friends** also opens Steam's own friends
 window.
 
-Per-game artwork can be overridden with plain files under `<native-data>/artwork/`: `<appid>.png` for the wide row,
+ `<native-data>/artwork/`: `<appid>.png` for the wide row,
 `<appid>_icon.png` for the square icon and `<appid>_bg.png` for the background (`.jpg/.jpeg/.webp` also work). An
 override wins over the cached Steam header and the manifest icon; `XMB_STEAM_ARTWORK_LOG=1` logs which files are used.
 
