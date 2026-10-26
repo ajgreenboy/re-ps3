@@ -27,7 +27,7 @@ class QVideoSink;
 namespace xmb {
 class Assets;
 class SteamArtwork;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, SteamStoreSection, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;

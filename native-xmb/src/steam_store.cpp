@@ -112,12 +112,22 @@ void SteamStore::search(const QString& term, int page) {
             tr("Search “%1”").arg(trimmed), true);
 }
 
-void SteamStore::topSellers() {
+void SteamStore::featured(const QString& section) {
+    // featuredcategories returns top_sellers / new_releases / specials sections of the same shape.
+    static const QHash<QString, QString> titles{
+        {QStringLiteral("top_sellers"), QStringLiteral("Top Sellers")},
+        {QStringLiteral("new_releases"), QStringLiteral("New Releases")},
+        {QStringLiteral("specials"), QStringLiteral("Specials")}};
+    const QString key = titles.contains(section) ? section : QStringLiteral("top_sellers");
     request(QStringLiteral("https://store.steampowered.com/api/featuredcategories?cc=US&l=en"),
-            tr("Steam Top Sellers"), false);
+            tr("Steam %1").arg(titles.value(key)), false, key);
 }
 
-void SteamStore::request(const QString& url, const QString& label, bool searchResults) {
+void SteamStore::topSellers() {
+    featured(QStringLiteral("top_sellers"));
+}
+
+void SteamStore::request(const QString& url, const QString& label, bool searchResults, const QString& section) {
     cancel();
     const quint64 generation = ++generation_;
     busy_ = true;
@@ -139,7 +149,7 @@ void SteamStore::request(const QString& url, const QString& label, bool searchRe
         reply->abort();
         fail(generation, {}, tr("The store response was larger than expected."));
     });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, label, searchResults, generation] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, label, searchResults, section, generation] {
         reply_ = nullptr;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {
@@ -166,9 +176,9 @@ void SteamStore::request(const QString& url, const QString& label, bool searchRe
             for (const auto& value : root.value(QLatin1String("items")).toArray())
                 if (value.isObject()) rows.push_back(value.toObject());
         } else {
-            // featuredcategories: {"top_sellers":{"items":[..]},"specials":{"items":[..]},..}
-            const auto sellers = root.value(QLatin1String("top_sellers")).toObject();
-            for (const auto& value : sellers.value(QLatin1String("items")).toArray())
+            // featuredcategories: {"top_sellers":{"items":[..]},"new_releases":{..},"specials":{..}}
+            const auto block = root.value(section).toObject();
+            for (const auto& value : block.value(QLatin1String("items")).toArray())
                 if (value.isObject()) rows.push_back(value.toObject());
         }
         StoreItemList items;
