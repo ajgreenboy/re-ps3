@@ -86,7 +86,7 @@ QVector<Adapter> adapters() {
 }
 }
 
-QString systemInformation(const QString& renderer,const Label& label) {
+QString systemInformation(const QString& renderer,const Label& label,const QString& systemName) {
     // The PS3 page lists System Software, IP Address, MAC Address and Free Space (firmware labels); the host's
     // processor, memory, graphics and displays follow.
     QString cpu;qulonglong memory=0;
@@ -99,7 +99,7 @@ QString systemInformation(const QString& renderer,const Label& label) {
     const QStorageInfo disk=QStorageInfo::root();
     const auto gb=[](qint64 bytes){return QString::number(std::llround(double(bytes)/1e9))+" GB";};
     QStringList lines{label("msg_console_info","System Information"),"",
-        label("msg_ps3_name","System Name")+": "+QHostInfo::localHostName(),
+        // The name the user set in Settings > System Settings wins over the Windows host name.\n        label("msg_ps3_name","System Name")+": "+(systemName.trimmed().isEmpty()?QHostInfo::localHostName():systemName.trimmed()),
         label("msg_system_software","System Software")+": "+QSysInfo::prettyProductName()+" ("+QSysInfo::currentCpuArchitecture()+")",
         label("msg_ipaddress","IP Address")+": "+(network.isEmpty()?none:network[0].ip),
         label("msg_macaddress","MAC Address")+": "+(network.isEmpty()?none:network[0].mac),
