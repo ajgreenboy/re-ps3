@@ -59,7 +59,8 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
    not installed yet (`src/steam_owned.*`, `src/steam_collections.*`; design in
    `audit/XMB-TOOLING.md`). Purchased titles need `STEAM_WEB_API_KEY` in the launch
    environment; collections are read locally without it. Next there: per-game ICON0/PIC1
-   overrides, a manifest-editor page, embedded media playback, and an end-to-end
+   overrides (`src/steam_overrides.*`, done: `<data>/artwork/<appid>[_icon|_bg].png`), a manifest-editor page,
+   embedded media playback, and an end-to-end
    install -> launch -> return capture.
 1. **Phase 7 harness first:** RPCS3 reference captures of named states plus `work/ab-shot.ts` scores, so every later
    change has a number.

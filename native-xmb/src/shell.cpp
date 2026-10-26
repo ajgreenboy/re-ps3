@@ -6,6 +6,7 @@
 #include "steam_library.h"
 #include "steam_artwork.h"
 #include "steam_collections.h"
+#include "steam_overrides.h"
 #include <QDesktopServices>
 #include <QAudioOutput>
 #include <QMediaPlayer>
@@ -203,18 +204,32 @@ void Shell::refreshContent() {
         if(contentRefreshPending_){contentRefreshPending_=false;QTimer::singleShot(0,this,&Shell::refreshContent);}
     });
     const QString data=dataDirectory_;
-    watcher->setFuture(QtConcurrent::run([data]{
+    // App ids whose row artwork may come from a user override; captured for the worker.
+    QStringList ownedIds;
+    ownedIds.reserve(ownedGames_.size());
+    for(const auto& game:ownedGames_)ownedIds.push_back(game.appId);
+    watcher->setFuture(QtConcurrent::run([data,ownedIds]{
         Result result;result.steam=scanSteam();
         ContentRegistry::load(QDir(data).filePath("apps.json"),result.apps,result.error);
         const auto read=[&](const QString& key,const QString& path){
-            if(path.isEmpty() || result.art.size()>=128)return;
+            if(path.isEmpty() || result.art.size()>=128 || result.art.contains(key))return;
             QImageReader reader(path);reader.setDecideFormatFromContent(true);reader.setAutoTransform(true);
             const auto size=reader.size();if(!size.isValid() || size.width()>16384 || size.height()>16384)return;
             reader.setScaledSize(size.scaled(512,288,Qt::KeepAspectRatio));
             const auto image=reader.read();if(!image.isNull())result.art.insert(key,image);
         };
         const QString cache=QDir(data).filePath("cache/steam");
-        for(const auto& game:result.steam.games)read("steam:"+game.appId,game.artwork.isEmpty()?SteamArtwork::cachePath(cache,game.appId):game.artwork);
+        for(const auto& game:result.steam.games) {
+            // A user override wins over the cached header and the manifest icon.
+            const QString override=steamArtworkOverride(data,game.appId).row;
+            if(!override.isEmpty() && qEnvironmentVariableIsSet("XMB_STEAM_ARTWORK_LOG"))qInfo().noquote()<<"artwork override"<<game.appId<<override;
+            read("steam:"+game.appId,!override.isEmpty()?override:(game.artwork.isEmpty()?SteamArtwork::cachePath(cache,game.appId):game.artwork));
+        }
+        for(const auto& appId:ownedIds) {
+            const QString override=steamArtworkOverride(data,appId).row;
+            if(!override.isEmpty())read("steam:"+appId,override);
+            if(!override.isEmpty() && qEnvironmentVariableIsSet("XMB_STEAM_ARTWORK_LOG"))qInfo().noquote()<<"artwork override"<<appId<<override;
+        }
         for(const auto& app:result.apps)read("custom:"+app.id,app.artwork);
         return result;
     }));

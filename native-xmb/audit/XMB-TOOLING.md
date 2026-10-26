@@ -16,6 +16,7 @@ instead of adding a second menu catalog.
 | Steam friends column | `src/steam_friends.*` | Done (needs the same key) |
 | Steam header artwork cache | `src/steam_artwork.*` | Done |
 | Browse the public storefront | `src/steam_store.*` | Done |
+| Per-game artwork overrides (ICON0/PIC1) | `src/steam_overrides.*` | Done |
 
 ## Owned games: what the Game column shows
 
@@ -48,6 +49,23 @@ Note: two offline/public name sources were probed and dropped. Steam's local
 `appcache/appinfo.vdf` (version 41) stores member keys as indexes into a string table and
 its per-entry header layout is not fully understood yet; Valve also retired the keyless
 `ISteamApps/GetAppList` endpoint (404). The supported path is the Web API key.
+
+## Per-game artwork overrides
+
+`src/steam_overrides.*` lets an owned or installed title use the user's own pictures instead of
+a cached store header, under `<native-data>/artwork/`:
+
+| File | Slot |
+|---|---|
+| `<appid>.png` | wide row art, also used as the background |
+| `<appid>_icon.png` | square ICON0-style icon |
+| `<appid>_bg.png` | PIC1-style background |
+
+`.jpg/.jpeg/.webp` are accepted as well. A row/icon/background falls back to the other slots
+when its own file is missing, and an override wins over the cached header and the manifest
+icon. Files must be under 32 MiB; anything not named `<numeric appid>[_icon|_bg]` is ignored,
+so a stray file cannot hijack a row. `XMB_STEAM_ARTWORK_LOG=1` logs which overrides were used,
+and `--steam-artwork-report <json>` lists them without opening a window.
 
 ## The three in-XMB programs
 
@@ -93,6 +111,9 @@ Verification so far, on the local install:
 - owned/library reports with the key present: 282 purchased titles, 259 of them grouped into
   the 13 collections and 4 ungrouped; without a key they exit 2 with
   `Set STEAM_WEB_API_KEY to list the games this account owns.` and write no rows;
+- artwork overrides: two seeded files (`730.png`, `400_icon.png`) resolved to the right slots by
+  `--steam-artwork-report`, and a scripted run logged `artwork override 730 ...` while the column
+  kept its installed rows;
 - store: top sellers 7 unique rows, `portal` search 10 rows, nonsense query 0 rows + exit 2;
 - scripted XMB run with the new column wiring exits 0 and logs
   `steam owned: 282 games in 13 collections` followed by the refreshed
@@ -109,8 +130,7 @@ Verification so far, on the local install:
 
 ## Remaining work
 
-1. Per-game ICON0/PIC1 overrides for owned Steam titles.
-2. A registry/manifest editor page, so imports need no hand-written JSON.
+1. A registry/manifest editor page, so imports need no hand-written JSON.
 3. Embedded media playback (Jellyfin first) with real authentication.
 4. Exercise an actual install -> launch -> return lifecycle end to end, with captures.
 5. Revisit `appinfo.vdf` only if a fully offline name source becomes necessary.
