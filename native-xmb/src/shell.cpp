@@ -200,7 +200,17 @@ QVector<Entry> Shell::steamFolderEntries(const QString& mode) const {
 void Shell::openSteamFolder(const QString& mode) {
     const QString title=mode=="installed"?QObject::tr("Installed Games")
         :mode=="family"?QObject::tr("Family Shared"):QObject::tr("Not Installed");
+    QElapsedTimer timer;timer.start();
     Page page;page.title=title;page.entries=steamFolderEntries(mode);
+    if(qEnvironmentVariableIsSet("XMB_STEAM_ARTWORK_LOG"))
+        qInfo()<<"steam folder"<<mode<<page.entries.size()<<"rows built in"<<timer.elapsed()<<"ms";
+    // Rows without cached art ask for their store header in the background; the loaded handler
+    // fills the open page, so a folder shows placeholders instead of blocking on 275 decodes.
+    {
+        QStringList missing;
+        for(const auto& e:page.entries)if(e.artwork.isNull())missing.push_back(e.value);
+        if(!missing.isEmpty() && qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0")steamArtwork_->refresh(missing);
+    }
     // Verification hook: a folder open writes its own row list next to the catalogue dump.
     if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
         QJsonArray rows;
@@ -474,7 +484,13 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         refreshContent();
     });
     connect(steamArtwork_.get(),&SteamArtwork::loaded,this,[this](const QString& id,const QImage& image){
-        for(auto& category:categories_)for(auto& e:category.entries)if(e.id=="steam:"+id)e.artwork=image;
+        bool touched=false;
+        const auto apply=[&](Entry& e){if(e.id=="steam:"+id){e.artwork=image;touched=true;}};
+        for(auto& category:categories_)for(auto& e:category.entries)apply(e);
+        // A Steam library folder may be the open page: fill its rows too, so a folder opens with
+        // placeholders and the cached headers arrive without a second visit.
+        for(auto& page:pages_)for(auto& e:page.entries)apply(e);
+        if(!touched)return;
         emit changed();
     });
     connect(&steamRefresh_,&QTimer::timeout,this,[this]{
