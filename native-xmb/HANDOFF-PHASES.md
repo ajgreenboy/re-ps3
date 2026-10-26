@@ -33,7 +33,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Themes | `.p3t` still background, icons and five menu-sound roles; RAF scenes and font/colour open |
 | Input | Keyboard, XInput, and DualShock 3/4 / DualSense over HID (`src/pad.cpp`; HID untested without a controller) |
 | Installed titles | Installed Steam games appear like installed PKGs directly in Game; dev_hdd0 and games.yml titles retain their RPCS3 launch path. See audit/STEAM-INTEGRATION.md |
-| Steam Friends | Optional asynchronous Web API backend with explicit connection errors and Steam chat handoff; authenticated list not yet verified |
+| Steam Friends | Signed-in local client helper reads 46 real friends/presence without changing profile privacy; Web API remains optional fallback. See audit/STEAM-CLIENT-FRIENDS.md |
 | Imported apps | Versioned JSON importer adds local executables or service URLs to XMB categories; Jellyfin browser-app example included. Embedded player/authentication remain open |
 | Host settings | System Information, network list, video/audio output and master volume read and write the real PC |
 

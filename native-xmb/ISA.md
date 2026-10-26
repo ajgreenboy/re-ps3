@@ -88,7 +88,7 @@ Use Steam and imported content as explicitly identified native providers for the
 - [x] ISC-35: Installed Steam titles are discovered without including incomplete downloads or missing install directories in the disposable filtering probe.
 - [x] ISC-36: Steam games appear directly in Game using the installed-PKG image/title layout, without platform card chrome or the Steam subtitle.
 - [ ] ISC-37: A real Steam title launches and returns to XMB with a verified lifecycle.
-- [ ] ISC-38: A permitted live Steam account supplies real friends and presence in the Friends column.
+- [x] ISC-38: A permitted live Steam account supplies real friends and presence in the Friends column.
 - [x] ISC-38.1: A manual friends refresh without credentials displays an explicit connection error.
 - [x] ISC-39: Reimporting a content manifest updates entries by ID without duplicates.
 - [x] ISC-39.1: An invalid app import leaves the existing registry byte-identical.
@@ -113,6 +113,8 @@ Build logs establish compilation. Requested window observations establish specif
 | Content providers | SteamLibrary/SteamFriends/SteamArtwork/ContentRegistry | Verified Steam lifecycle, connected friends, custom game artwork editor and embedded media services |
 
 ## Decisions
+
+- 2026-10-26: Prefer an isolated read-only connection to the signed-in Steam client for Friends. A valid Web API profile response followed by friends HTTP 401 does not justify telling the user to make their list public. The optional helper reads 46 real contacts without an AppID assignment or privacy change; credentials remain local and are not passed to the helper. See audit/STEAM-CLIENT-FRIENDS.md.
 
 - 2026-10-25: Continued the recommended Phase 7 with named-state capture/scoring and explicit state guards.
   Corrected PNG packed-row expansion and scripted arrows left held after the repeat change. Added in-memory
@@ -183,6 +185,8 @@ Build logs establish compilation. Requested window observations establish specif
   criterion now: ISC-9.1/9.2/9.3 separate callback cadence, rate-invariant easing and settled visual guards from unverified physical presentation
 
 ## Verification
+
+- ISC-38: 2026-10-26 live client report exits 0 with source steam-client: 46 friends, 12 online and one playing. A mismatched expected account returns zero contacts; native replay shows 49 entries and preserves selected friend on refresh. Build and artifact paths are in audit/STEAM-CLIENT-FRIENDS.md.
 
 - ISC-42/42.1: 2026-10-25 actual captures — all six focused-interior lumas are 178.49–201.93; maximum day/night channel difference is 0. Twelve captures and the Original wallpaper replay exit 0. See audit/CATEGORY-ICON-FIX.md for sample bounds and original RGB values.
 

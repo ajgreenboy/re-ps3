@@ -163,7 +163,7 @@ int main(int argc,char** argv) {
         QObject::connect(&friends,&xmb::SteamFriends::loaded,&app,[&](const xmb::SteamFriendList& people,const QString& error){
             QJsonArray entries;
             for(const auto& person:people)entries.push_back(QJsonObject{{"steamId",person.steamId},{"name",person.name},{"game",person.game},{"personaState",person.personaState}});
-            QFile file(parser.value("steam-friends-report"));const auto bytes=QJsonDocument(QJsonObject{{"friends",entries},{"error",error}}).toJson();
+            QFile file(parser.value("steam-friends-report"));const auto bytes=QJsonDocument(QJsonObject{{"friends",entries},{"error",error},{"source",friends.source()}}).toJson();
             if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();app.exit(2);return;}
             app.exit(error.isEmpty()?0:2);
         });

@@ -112,3 +112,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Optional Steam client interface headers
+
+The read-only client helper compiles against external Valve Steamworks public headers and loads the user's installed Steam client DLL. Neither the headers nor Steam DLLs are bundled in this repository. The verified local build used the SDK 1.54 interface declarations published in [ValveSoftware/Proton](https://github.com/ValveSoftware/Proton/tree/proton_10.0/lsteamclient/steamworks_sdk_154). The headers retain Valve's copyright and applicable SDK terms; use an appropriately obtained SDK for distribution builds.
