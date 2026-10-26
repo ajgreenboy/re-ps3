@@ -37,6 +37,7 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
     if(key=="photo/interval")return {{"5 seconds",5000},{"10 seconds",10000},{"15 seconds",15000},{"30 seconds",30000}};
     if(key=="photo/fit")return {{"Fit",0},{"Fill",1}};
     if(key=="media/repeatMode")return {{"Off",0},{"Repeat One",1},{"Repeat All",2}};
+    if(key=="display/screensaverMinutes")return {{"After 5 Minutes",5},{"After 10 Minutes",10},{"After 20 Minutes",20},{"After 30 Minutes",30},{"Do Not Use",0}};
     if(key=="power/idleMinutes")return {{"Off",0},{"15 minutes",15},{"30 minutes",30},{"1 hour",60},{"2 hours",120}};
     return {{"Off",false},{"On",true}};
 }
@@ -104,6 +105,7 @@ void Shell::openSettings(const QString& id) {
         page.title=tr("msg_display_setting","Display Settings");
         page.entries={option("display_output_setting",tr("msg_display_output_setting","Video Output Settings"),tr("msg_display_output_setting_explanation",{}),{},Action::Information,"host:display"),
             option("tvtype",tr("msg_tvtype","TV Type"),tr("msg_tvtype_explanation",{}),{},Action::Unavailable),
+            option("screensaver","Screensaver","Dims the native display after inactivity.","display/screensaverMinutes"),
             option("fullscreen","Full Screen","Expands the native XMB window to fill the display.","display/fullscreen")};
     } else if(id=="power") {
         page.title=tr("msg_power_saving_setting","Power Save Settings");

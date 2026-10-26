@@ -78,6 +78,15 @@ public:
     QString status() const { return status_; }
     qint64 mediaPosition() const;
     qint64 mediaDuration() const;
+    bool mediaPaused() const;
+    bool videoOpen() const;
+    void seekMedia(qint64 delta);
+    QString appRegistryPath() const;
+    void noteActivity() { touch(); }
+    qint64 idleMilliseconds() const { return idleTimeOverride_>=0?idleTimeOverride_:activity_.elapsed(); }
+    void setIdleTimeOverride(qint64 milliseconds) { idleTimeOverride_=milliseconds;emit changed(); }
+    int screensaverMinutes() const { return preferences_.value("display/screensaverMinutes").toInt(); }
+    bool idleDisplayAllowed() const;
     bool mediaOpen() const { return mediaOpen_; }
     QString mediaTitle() const { return mediaTitle_; }
     QString mediaQueueSummary() const;
@@ -151,6 +160,7 @@ private:
     QString status_;
     QTimer slideshow_,idle_;
     QElapsedTimer activity_;
+    qint64 idleTimeOverride_=-1;
     QImage photo_;
     int photoRotation_=0;
     QVector<Category> categories_;

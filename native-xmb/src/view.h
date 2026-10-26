@@ -8,6 +8,7 @@
 #include "rsx_program.h"
 #include "shell.h"
 #include "photo_viewport.h"
+#include "media_controls.h"
 #include "text_renderer.h"
 #include <array>
 #include <functional>
@@ -59,6 +60,7 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
+    bool eventFilter(QObject* watched,QEvent* event) override;
 private:
     Shell& shell_;
     Assets& assets_;
@@ -93,6 +95,9 @@ private:
     void syncColumns();
     QImage mediaFrame_;
     PhotoViewport photoViewport_;
+    MediaControls mediaControls_;
+    bool previousMediaOpen_=false;
+    QString previousMediaTitle_;
     void zoomPhoto(int direction);
     void resetPhotoView();
     void panPhoto(int dx,int dy);

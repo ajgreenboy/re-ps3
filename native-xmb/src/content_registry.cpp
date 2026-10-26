@@ -88,6 +88,67 @@ bool validateImportFiles(const QVector<ContentApp>& apps, QString& error) {
     return true;
 }
 
+bool validateAppForWrite(ContentApp& app, const QString& baseDirectory, QString& error) {
+    for(const auto& value : {app.id,app.title,app.kind,app.category,app.executable,app.workingDirectory,app.url,app.artwork})
+        if(value.contains(QChar::Null))return fail(error, QStringLiteral("App fields must not contain NUL characters"));
+    app.id = app.id.trimmed();
+    app.title = app.title.trimmed();
+    app.kind = app.kind.trimmed();
+    app.category = app.category.trimmed();
+    if (app.id.isEmpty())
+        return fail(error, QStringLiteral("App id must not be empty"));
+    for (const QChar ch : app.id) {
+        const ushort c = ch.unicode();
+        const bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+            || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-';
+        if (!allowed)
+            return fail(error, QStringLiteral("App id may contain only ASCII letters, digits, _, . and -"));
+    }
+    if (app.title.isEmpty())
+        return fail(error, QStringLiteral("App title must not be empty"));
+    if (app.kind != QStringLiteral("game") && app.kind != QStringLiteral("web"))
+        return fail(error, QStringLiteral("App kind must be 'game' or 'web'"));
+    static const QStringList categories = {
+        QStringLiteral("game"), QStringLiteral("tv"), QStringLiteral("music"),
+        QStringLiteral("video"), QStringLiteral("network")
+    };
+    if (!categories.contains(app.category))
+        return fail(error, QStringLiteral("Category must be game, tv, music, video or network"));
+
+    normalizePath(app.executable, baseDirectory);
+    normalizePath(app.workingDirectory, baseDirectory);
+    normalizePath(app.artwork, baseDirectory);
+    if (app.kind == QStringLiteral("game")) {
+        if (app.executable.isEmpty())
+            return fail(error, QStringLiteral("A game requires an executable path"));
+        QFileInfo executable(app.executable);
+        if (!executable.isAbsolute())
+            return fail(error, QStringLiteral("Game executable must resolve to an absolute path"));
+#ifdef Q_OS_WIN
+        if (executable.suffix().compare(QStringLiteral("exe"), Qt::CaseInsensitive) != 0)
+            return fail(error, QStringLiteral("Game executable must have a .exe extension"));
+#endif
+    } else {
+        const QUrl parsed(app.url, QUrl::StrictMode);
+        if (app.url.isEmpty() || !parsed.isValid()
+            || (parsed.scheme() != QStringLiteral("http") && parsed.scheme() != QStringLiteral("https"))
+            || parsed.host().isEmpty() || !parsed.userInfo().isEmpty()
+            || parsed.authority().contains(QLatin1Char('@')))
+            return fail(error, QStringLiteral("Web URL must be http(s), include a host, and contain no credentials"));
+        app.executable.clear();
+        app.arguments.clear();
+    }
+    for (const QString& argument : app.arguments) {
+        if (argument.contains(QChar::Null))
+            return fail(error, QStringLiteral("Arguments must not contain NUL characters"));
+    }
+    if (!validateExistingPath(app.executable, false, QStringLiteral("Executable"), error)
+        || !validateExistingPath(app.workingDirectory, true, QStringLiteral("Working directory"), error)
+        || !validateExistingPath(app.artwork, false, QStringLiteral("Artwork"), error))
+        return false;
+    return true;
+}
+
 bool parseApp(const QJsonValue& value, qsizetype index, const QString& baseDirectory,
               ContentApp& app, QString& error) {
     const QString where = QStringLiteral("apps[%1]").arg(index);
@@ -303,6 +364,39 @@ bool ContentRegistry::importFile(const QString& sourcePath, const QString& targe
     if (merged.size() > MaxAppCount)
         return fail(error, QStringLiteral("Merged registry exceeds the 1000-entry limit"));
     return writeRegistry(targetPath, merged, error);
+}
+
+bool ContentRegistry::upsert(const QString& path, ContentApp app, QString& error) {
+    error.clear();
+    QVector<ContentApp> current;
+    if (!readRegistry(path, current, error, true))
+        return false;
+    if (!validateAppForWrite(app, QFileInfo(path).absolutePath(), error))
+        return false;
+    const auto existing = std::find_if(current.begin(), current.end(), [&app](const ContentApp& candidate) {
+        return candidate.id == app.id;
+    });
+    if (existing == current.end())
+        current.append(std::move(app));
+    else
+        *existing = std::move(app);
+    if (current.size() > MaxAppCount)
+        return fail(error, QStringLiteral("Registry exceeds the 1000-entry limit"));
+    return writeRegistry(path, current, error);
+}
+
+bool ContentRegistry::remove(const QString& path, const QString& id, QString& error) {
+    error.clear();
+    QVector<ContentApp> current;
+    if (!readRegistry(path, current, error, true))
+        return false;
+    const auto existing = std::find_if(current.begin(), current.end(), [&id](const ContentApp& candidate) {
+        return candidate.id == id;
+    });
+    if (existing == current.end())
+        return fail(error, QStringLiteral("App registration no longer exists: %1").arg(id));
+    current.erase(existing);
+    return writeRegistry(path, current, error);
 }
 
 } // namespace xmb

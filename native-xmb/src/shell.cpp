@@ -1,4 +1,6 @@
 #include "shell.h"
+#include "media_controls.h"
+#include <QApplication>
 #include "assets.h"
 #include "catalog.h"
 #include "host.h"
@@ -143,7 +145,7 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
     });
     connect(process,QOverload<int,QProcess::ExitStatus>::of(&QProcess::finished),this,
             [this,process,title](int code,QProcess::ExitStatus status){
-        process->deleteLater();game_.clear();gameTitle_.clear();
+        process->deleteLater();game_.clear();gameTitle_.clear();touch();
         qInfo().noquote()<<"returned from"<<title<<"exit"<<code<<(status==QProcess::NormalExit?"normal":"crashed");
         if(status==QProcess::CrashExit)message_=title+"\n\n"+QObject::tr("This title ended unexpectedly.");
         emit changed();
@@ -633,7 +635,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     connect(&idle_,&QTimer::timeout,this,[this]{
         const int minutes=preferences_.value("power/idleMinutes").toInt();
         // Never close the XMB while a title it launched is still running.
-        if(minutes && !mediaOpen_ && !gameRunning() && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
+        if(minutes && !mediaOpen_ && !gameRunning() && !QApplication::activeModalWidget() && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
     });
     activity_.start();idle_.start(1000);applyPreferences();
     if(!preferences_.error().isEmpty())message_=preferences_.error();
@@ -656,7 +658,7 @@ void Shell::horizontal(int delta) {
     if(mediaOpen_) {
         if(categories_[category_].id=="photo") {
             stepPhoto(delta);
-        } else player_->setPosition(std::max<qint64>(0,player_->position()+delta*10000));
+        } else seekMedia(qint64(delta)*10000);
         return;
     }
     if(!pages_.isEmpty())return;
@@ -893,7 +895,15 @@ void Shell::togglePlayback(){
     if(player_->playbackState()==QMediaPlayer::PlayingState)player_->pause();else if(!player_->source().isEmpty()){status_.clear();if(player_->playbackState()==QMediaPlayer::StoppedState)player_->setPosition(0);player_->play();}
     emit changed();
 }
-void Shell::touch(){activity_.restart();}
+void Shell::touch(){idleTimeOverride_=-1;activity_.restart();}
+QString Shell::appRegistryPath()const{return QDir(dataDirectory_).filePath("apps.json");}
+bool Shell::idleDisplayAllowed()const{return !mediaOpen_ && !gameRunning() && message_.isEmpty() && !QApplication::activeModalWidget();}
+bool Shell::mediaPaused()const{return photoOpen()?!slideshow_.isActive():player_->playbackState()!=QMediaPlayer::PlayingState;}
+bool Shell::videoOpen()const{return mediaOpen_ && player_->hasVideo();}
+void Shell::seekMedia(qint64 delta){
+    if(!mediaOpen_ || photoOpen() || !player_->isSeekable())return;
+    touch();player_->setPosition(MediaControls::seekTarget(player_->position(),player_->duration()>0?player_->duration():-1,delta));emit changed();
+}
 void Shell::applyPreferences(){
     audio_->setVolume(preferences_.value("audio/volume").toInt()/100.f);audio_->setMuted(preferences_.value("audio/muted").toBool());
     interactionAudio_.setEnabled(preferences_.value("audio/keyTone").toBool() && !preferences_.value("audio/muted").toBool());

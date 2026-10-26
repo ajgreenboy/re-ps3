@@ -18,6 +18,10 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - Verify with `--script` (keys, `grab=`, `burst=<prefix>@KEY`), never by eye alone. Compare against frames of the
   reference video at the same state.
 
+## Latest broader continuation (2026-10-26)
+
+[Phase continuation and resume map](audit/PHASE-CONTINUATION.md): integrated app-registration editor, video controls that fade during playback, bounded seeking/hour labels, and Display Settings → Screensaver with verified native dim/wake. Exact firmware player panels, dim brightness and timings remain open.
+
 ## Where it stands
 
 | Layer | State |
@@ -46,7 +50,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 
 Latest user direction adds Steam games/Friends and future content tooling. The implemented first slice and its
 remaining requirements are in `audit/STEAM-INTEGRATION.md`: prioritize actual launch/return, permitted friends
-connection, per-game ICON0/PIC1 overrides and an importer editor. Jellyfin is currently a URL app, not a native player.
+connection, per-game ICON0/PIC1 overrides and the importer editor (now integrated; see the latest continuation). Jellyfin is currently a URL app, not a native player.
 Info-bar proportions and an analog clock now follow saved reference measurements (`audit/INFO-BAR.md`); exact
 firmware composition/projection remains open.
 

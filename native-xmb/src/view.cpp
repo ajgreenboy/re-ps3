@@ -1,4 +1,5 @@
 #include "view.h"
+#include "app_editor.h"
 #include "pad.h"
 #include <QPainter>
 #include <QKeyEvent>
@@ -34,6 +35,7 @@
 namespace xmb {
 View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),shell_(shell),assets_(assets) {
     setFocusPolicy(Qt::StrongFocus);setMinimumSize(800,450);
+    setMouseTracking(true);qApp->installEventFilter(this);
     // Decode and cache frequently used original assets before animation starts.
     for(const auto& category:shell_.categories()) {
         assets_.image(category.container,category.texture);
@@ -48,10 +50,10 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         else if(shell_.photoOpen())photoViewport_.reset(frame.size(),{1920,1080},shell_.photoFill());
         update();
     });
-    connect(&shell_,&Shell::requestLibrary,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,"Choose media folder");if(!path.isEmpty())shell_.chooseLibrary(path);});
-    connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");if(!file.isEmpty())shell_.chooseWallpaper(file);});
-    connect(&shell_,&Shell::requestTheme,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Theme",{},"PS3 Themes (*.p3t)");if(!file.isEmpty())shell_.chooseTheme(file);});
-    connect(&shell_,&Shell::requestImportApps,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Import Games and Apps",{},"App manifests (*.json)");if(!file.isEmpty())shell_.importApps(file);});
+    connect(&shell_,&Shell::requestLibrary,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,"Choose media folder");shell_.noteActivity();if(!path.isEmpty())shell_.chooseLibrary(path);});
+    connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");shell_.noteActivity();if(!file.isEmpty())shell_.chooseWallpaper(file);});
+    connect(&shell_,&Shell::requestTheme,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Theme",{},"PS3 Themes (*.p3t)");shell_.noteActivity();if(!file.isEmpty())shell_.chooseTheme(file);});
+    connect(&shell_,&Shell::requestImportApps,this,[this]{AppEditor editor(shell_.appRegistryPath(),this);connect(&editor,&AppEditor::registryChanged,&shell_,&Shell::refreshContent);editor.exec();shell_.noteActivity();});
     connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){openOsk("System Name",value,[this](const QString& name){shell_.setSystemName(name);});});
     connect(&shell_,&Shell::requestNewUser,this,[this]{openOsk("Create New User",{},[this](const QString& name){shell_.createUser(name);});});
     loadWallpaper();
@@ -214,8 +216,8 @@ void main(){
 out vec2 uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);})";
     static const char* compositeFragment=R"(#version 330 core
-in vec2 uv;out vec4 colour;uniform sampler2D layer;
-void main(){colour=texture(layer,uv);})"; // premultiplied; linear filtering at half scale = 2x2 box filter
+in vec2 uv;out vec4 colour;uniform sampler2D layer;uniform float dimOpacity;
+void main(){colour=dimOpacity>0.0?vec4(0,0,0,dimOpacity):texture(layer,uv);})"; // premultiplied; linear filtering at half scale = 2x2 box filter
     if(!uiComposite_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) || !uiComposite_.addShaderFromSourceCode(QOpenGLShader::Fragment,compositeFragment) || !uiComposite_.link())
         qCritical().noquote()<<"UI composite shader failed:"<<uiComposite_.log();
     particles_.init(*this);
@@ -618,9 +620,16 @@ void View::paintGL() {
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
     glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
-    uiComposite_.bind();uiComposite_.setUniformValue("layer",0);
+    uiComposite_.bind();uiComposite_.setUniformValue("layer",0);uiComposite_.setUniformValue("dimOpacity",0.f);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,uiResolved_->texture());
-    glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);
+    glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);
+    // Native approximation: dim the complete composed image; no host brightness or power changes.
+    if(shell_.screensaverMinutes()>0 && shell_.idleDisplayAllowed()) {
+        const qint64 age=shell_.idleMilliseconds()-qint64(shell_.screensaverMinutes())*60000;
+        const float dim=.55f*float(std::clamp(double(age)/750.,0.,1.));
+        if(dim>0){uiComposite_.setUniformValue("dimOpacity",dim);glDrawArrays(GL_TRIANGLES,0,3);}
+    }
+    glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D,0);uiComposite_.release();glDisable(GL_BLEND);
     grabIntroFrame();
     if(!frameTracePath_.isEmpty() && frameTrace_.size()<20000) {
@@ -731,6 +740,10 @@ void View::drawScene(QPainter& p) {
         p.fillRect(window,QColor(0,0,0,35));
     }
     if(shell_.mediaOpen()) {
+        const auto now=clock_.elapsed();
+        if(!previousMediaOpen_ || previousMediaTitle_!=shell_.mediaTitle())mediaControls_.opened(now);
+        previousMediaOpen_=true;previousMediaTitle_=shell_.mediaTitle();
+        mediaControls_.setPaused(shell_.mediaPaused() || shell_.busy(),now);
         if(!mediaFrame_.isNull()) {
             p.fillRect(QRectF(0,0,1920,1080),Qt::black);
             const auto size=QSizeF(mediaFrame_.size()).scaled(QSizeF(1920,1080),shell_.photoOpen() && shell_.photoFill()?Qt::KeepAspectRatioByExpanding:Qt::KeepAspectRatio);
@@ -738,6 +751,7 @@ void View::drawScene(QPainter& p) {
             p.drawImage(shell_.photoOpen() && photoViewport_.valid()?photoViewport_.imageRect():QRectF(QPointF((1920-size.width())/2,(1080-size.height())/2),size),mediaFrame_);
             p.restore();
         }
+        p.save();p.setOpacity(shell_.videoOpen()?mediaControls_.state(now).opacity:1.);
         text({110,970,1500,50},shell_.mediaTitle(),27,Qt::white);
         text({110,1020,1700,35},shell_.photoOpen()?QString("Circle Back   Cross ")+(shell_.slideshowActive()?"Pause":"Slideshow")+"   L1/R1 or +/- Zoom   Square/0 Reset   Triangle/Q/E Rotate   Arrows Pan when zoomed   [/] Photo":"Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle   Triangle/R Repeat",21,QColor(230,230,230));
         if(shell_.busy())text({110,910,1000,45},"Loading…",26,Qt::white);
@@ -746,10 +760,12 @@ void View::drawScene(QPainter& p) {
         if(!shell_.photoOpen() && shell_.mediaDuration()>0) {
             const double ratio=std::clamp(double(shell_.mediaPosition())/shell_.mediaDuration(),0.,1.);
             p.fillRect(QRectF(110,941,1700,4),QColor(255,255,255,60));p.fillRect(QRectF(110,941,1700*ratio,4),Qt::white);
-            const auto time=[](qint64 ms){const auto seconds=ms/1000;return QString("%1:%2").arg(seconds/60).arg(seconds%60,2,10,QChar('0'));};
+            const auto time=[](qint64 ms){return MediaControls::formatTime(ms);};
             text({1450,963,360,45},time(shell_.mediaPosition())+" / "+time(shell_.mediaDuration()),23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
         }
+        p.restore();
     } else {
+        previousMediaOpen_=false;
         const auto& categories=shell_.categories();
         const double childAmount=std::clamp(depthPosition_,0.,1.);
         for(int i=0;i<categories.size();++i) {
@@ -1007,7 +1023,15 @@ void View::replayKeyTap(int key) {
     QKeyEvent press(QEvent::KeyPress,key,Qt::NoModifier);keyPressEvent(&press);
     QKeyEvent release(QEvent::KeyRelease,key,Qt::NoModifier);keyReleaseEvent(&release);
 }
+bool View::eventFilter(QObject* watched,QEvent* event) {
+    const auto* widget=qobject_cast<QWidget*>(watched);
+    if(widget && (widget==this || widget->window()==window() || isAncestorOf(widget))) {
+        if(event->type()==QEvent::KeyPress || event->type()==QEvent::MouseButtonPress || event->type()==QEvent::MouseMove || event->type()==QEvent::Wheel) {shell_.noteActivity();mediaControls_.activity(clock_.elapsed());}
+    }
+    return QOpenGLWidget::eventFilter(watched,event);
+}
 void View::keyPressEvent(QKeyEvent* e) {
+    shell_.noteActivity();mediaControls_.activity(clock_.elapsed());
     if(introRunning()){coldboot_.skip();e->accept();return;}
 #ifdef Q_OS_WIN
     // Arrows go through pollController's repeat (the firmware's, not the OS's), so auto-repeats are dropped here.
@@ -1080,6 +1104,7 @@ void View::pollController() {
     }
     // A key tapped between two polls still counts as a press.
     const auto edge=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;const auto now=clock_.elapsed();
+    if(buttons || edge){shell_.noteActivity();mediaControls_.activity(now);}
     if(introRunning()){if(edge)coldboot_.skip();buttons_=buttons;return;}
     // Held-direction repeat as the real XMB does it (RPCS3 capture, 2026-10-25): the first move on the press, the
     // second 300 ms (18 frames) later, then one every 4 frames (66.7 ms), with no acceleration however long it is held.

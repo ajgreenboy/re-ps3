@@ -25,6 +25,12 @@ public:
 
     // Validate and merge sourcePath into targetPath by app id, then atomically save it.
     static bool importFile(const QString& sourcePath, const QString& targetPath, QString& error);
+
+    // Validate one app and merge it into the latest registry contents by id.
+    static bool upsert(const QString& path, ContentApp app, QString& error);
+
+    // Remove only the registration with id from the latest registry contents.
+    static bool remove(const QString& path, const QString& id, QString& error);
 };
 
 } // namespace xmb
