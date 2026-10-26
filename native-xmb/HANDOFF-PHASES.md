@@ -184,6 +184,12 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
 - Open: trace the page move's animate call in explore_plugin to confirm 300 ms and mode 4; info-bar clock updates.
 
 ### Phase 5: remaining firmware renderers and states
+- Particle system analysed: [PARTICLES.md](audit/PARTICLES.md). The firmware runs SPU particles.elf over a 1536-record
+  pool (1492 live at 7.979 spawns/frame, 3.116 s mean life) with 48-byte records (pos float4 carrying life alpha, quad
+  corner, orientation quaternion) and physics entirely from PARTICLES.mnu (cone 51.87 deg, speed 0.287-0.394, aging
+  0.00285223, DELTA TIME 0.0088883 s, friction 0.030551, gravity -6.8e-5, Brownian 0.225311, spin 2.74), drawn by two
+  shader passes: quads into the HDR scene, radial halo into the glare source. Today's sparkles are closed-form additive
+  point sprites drawn after tone mapping, so they never bloom; the port needs the simulation plus both passes.
 - Ribbon geometry from spline.elf is done. Next: particles from particles.elf exactly, including the wind response.
   The same tools apply: `work/spu/` disassembler, the RPCS3 SPU DMA log, buffer watch and local-store snapshots
   (`rpcs3-rsx-capture.patch`).
