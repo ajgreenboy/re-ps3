@@ -5,6 +5,7 @@
 #include "p3t.h"
 #include "steam_library.h"
 #include "steam_artwork.h"
+#include "steam_collections.h"
 #include <QDesktopServices>
 #include <QAudioOutput>
 #include <QMediaPlayer>
@@ -127,6 +128,23 @@ void Shell::launch(const Entry& entry) {
     }
     qInfo().noquote()<<"launch:"<<emulator<<"--no-gui"<<entry.value;
 }
+// The account's own Steam library collections turn the owned list into the user's own
+// groups; the label is what the XMB row shows under the title.
+QString Shell::collectionLabel(const QString& appId) const {
+    QStringList names;
+    for(const auto& collection:collections_)if(collection.appIds.contains(appId))names.push_back(collection.name);
+    return names.join(QStringLiteral(", "));
+}
+bool Shell::stageOwnedForRefresh() const {
+    // Only ask Valve when a key exists and no request is already running; the loaded
+    // handler compares a signature so a rescan does not loop.
+    return SteamOwned::hasApiKey() && !ownedInFlight_;
+}
+void Shell::refreshOwnedGames() {
+    if(!SteamOwned::hasApiKey() || ownedInFlight_)return;
+    ownedInFlight_=true;
+    steamOwned_.refresh(steamId_);
+}
 void Shell::refreshContent() {
     if(contentScanning_){contentRefreshPending_=true;return;}
     contentScanning_=true;
@@ -148,7 +166,18 @@ void Shell::refreshContent() {
             QVector<Entry> providers;
             if(category.id=="game")for(const auto& game:result.steam.games) {
                 auto e=item("steam:"+game.appId,game.title,"game_tex_default_ps3","explore_plugin_full",Action::LaunchSteam,game.appId);
-                e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;providers.push_back(std::move(e));
+                e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;
+                e.detail=collectionLabel(game.appId);providers.push_back(std::move(e));
+            }
+            // Purchased but not installed: the owned list comes from the Steam Web API, so it can be listed
+            // and installed from here. Steam still performs the download (steam://install/<id>).
+            if(category.id=="game" && !ownedGames_.isEmpty())for(const auto& game:ownedGames_) {
+                if(game.installed)continue;
+                auto e=item("steam:"+game.appId,game.title,"game_tex_default_ps3","explore_plugin_full",Action::InstallSteam,game.appId);
+                e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;
+                const QString label=collectionLabel(game.appId);
+                e.detail=label.isEmpty()?QObject::tr("Owned - Not installed"):label+" - Not installed";
+                providers.push_back(std::move(e));
             }
             for(const auto& app:contentApps_)if(app.category==category.id) {
                 auto e=item("custom:"+app.id,app.title,app.kind=="game"?"game_tex_default_ps3":"tex_video","explore_plugin_full",
@@ -164,6 +193,7 @@ void Shell::refreshContent() {
         contentLoaded_=true;
         if(accountChanged){steamFriendList_.clear();friendsAge_.invalidate();rebuildFriends();}
         if(!qEnvironmentVariable("STEAM_WEB_API_KEY").isEmpty())refreshSteamFriends(false,accountChanged);
+        if(stageOwnedForRefresh())refreshOwnedGames();
         QStringList missingArt;
         for(const auto& category:categories_)for(const auto& e:category.entries)
             if(e.id.startsWith("steam:") && e.artwork.isNull())missingArt.push_back(e.value);
@@ -320,6 +350,21 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         if(showFriendsErrors_ && !error.isEmpty()){message_="Steam Friends\n\n"+error;emit changed();}
         showFriendsErrors_=false;
     });
+    connect(&steamOwned_,&SteamOwned::loaded,this,[this](const OwnedGameList& games,const QString& error,bool needsKey){
+        ownedInFlight_=false;
+        if(!error.isEmpty()){if(needsKey)qInfo()<<"steam owned: no API key configured";else qWarning().noquote()<<"steam owned:"<<error;return;}
+        QString signature;
+        for(const auto& game:games)signature+=game.appId+(game.installed?QStringLiteral("+") :QStringLiteral("-"));
+        QString collectionsError;
+        const auto collections=scanSteamCollections(steamId_,&collectionsError);
+        for(const auto& collection:collections)signature+=collection.id;
+        if(signature==ownedSignature_)return; // nothing changed: keep the current column
+        ownedSignature_=signature;
+        ownedGames_=games;
+        collections_=collections;
+        qInfo()<<"steam owned:"<<games.size()<<"games in"<<collections.size()<<"collections";
+        refreshContent();
+    });
     connect(steamArtwork_.get(),&SteamArtwork::loaded,this,[this](const QString& id,const QImage& image){
         for(auto& category:categories_)for(auto& e:category.entries)if(e.id=="steam:"+id)e.artwork=image;
         emit changed();
@@ -457,6 +502,12 @@ void Shell::activate() {
         const QString exe=QDir(steamRoot_).filePath("steam.exe");
         if(!QFileInfo(exe).isFile() || !QProcess::startDetached(exe,{"-applaunch",entry.value},steamRoot_))
             message_=entry.title+"\n\nSteam could not be started. Refresh the game library and check the Steam installation.";
+        break;
+    }
+    case Action::InstallSteam: {
+        // Steam owns the download: opening steam://install/<id> asks the client to install it.
+        if(!QDesktopServices::openUrl(QUrl(SteamOwned::installUrl(entry.value))))
+            message_=entry.title+"\\n\\nSteam could not be asked to install this game.";
         break;
     }
     case Action::LaunchApp: {

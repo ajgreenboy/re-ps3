@@ -18,6 +18,26 @@ Account selection prefers a matching Steam installation's active registry accoun
 
 F5 at the root, or **Refresh Game Library**, rescans asynchronously and preserves selection by entry ID. **Import Games and Apps** selects a JSON manifest and refreshes after a successful import. Concurrent refresh/import requests are coalesced.
 
+## Owned games and collections
+
+The Game column is the account's owned library, not just its installed titles. The owned
+list comes from Valve's `IPlayerService/GetOwnedGames` (`src/steam_owned.*`), which
+requires `STEAM_WEB_API_KEY` in the launch environment; without it the column keeps the
+installed titles and reports that a key is needed. Installed titles keep launching
+(`steam://rungameid/<id>`); owned-but-uninstalled titles offer an install action
+(`steam://install/<id>`) so Steam performs the download.
+
+Rows are grouped by the user's own Steam library collections, read locally and keylessly
+from `userdata/<accountid>/config/cloudstorage/cloud-storage-namespace-1.json`
+(`user-collections.*`, `name` + `added[]`) by `src/steam_collections.*`. A row's detail line
+lists its collections, and scan results are ordered by them. The local Steam appinfo cache
+(`appcache/appinfo.vdf`, version 41 with a key string table) was probed as an offline name
+source and deliberately not shipped, because its entry layout is not fully understood yet.
+
+Reports: `--steam-collections-report`, `--owned-games-report` (needs the key) and
+`--steam-library-report` (owned titles grouped by collection). The in-XMB design, including
+the store browser and media apps, is in [XMB-TOOLING.md](XMB-TOOLING.md).
+
 ## Steam friends
 
 `src/steam_friends.*` uses Valve's HTTPS GetFriendList and GetPlayerSummaries endpoints. An optional `STEAM_WEB_API_KEY` is read only from the launch environment. It is never stored in preferences, manifests or logs. Do not paste keys into chat or commit them. Valve documents a 401 response for private friends lists and a 100-player summaries batch limit: [ISteamUser documentation](https://partner.steamgames.com/doc/webapi/ISteamUser).
@@ -53,4 +73,4 @@ The reports/importer do not open a window or require dev_flash. Reports contain 
 - The verified 1600x900 replay was on a display reporting 143.855 Hz: 143.46 swap callbacks/s, p95 interval 7.36 ms, no intervals above 25 ms in the 5000–7500 ms window. This is callback cadence on that display, not physical presentation proof or a comparison with the earlier 239 Hz monitor.
 - Builds, screenshots, state JSON, CLI reports and probe files stay in `out/native-reference/steam-integration/`. The first `fixture-ui.log` capture attempt had malformed PowerShell token concatenation; use `fixture-ui-valid.log` and `real-ui.log` instead.
 
-Next: exercise an actual Steam game launch/return lifecycle, connect a permitted friends account locally, cache real avatars, support per-game ICON0/PIC1 overrides, add an editor for manifests, then implement Jellyfin as a proper authenticated service/player. Large libraries, disconnect/reconnect, controller use and sustained performance still need runtime evidence.
+Next: set a Web API key to exercise the owned/collections path end to end, run an actual install -> launch -> return lifecycle, connect a permitted friends account locally, cache real avatars, support per-game ICON0/PIC1 overrides, add an editor for manifests, then implement Jellyfin as a proper authenticated service/player. Large libraries, disconnect/reconnect, controller use and sustained performance still need runtime evidence.

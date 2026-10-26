@@ -8,6 +8,7 @@
 #include "steam_friends.h"
 #include "content_registry.h"
 #include "steam_owned.h"
+#include "steam_collections.h"
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QDateTime>
@@ -21,7 +22,7 @@ class QVideoSink;
 namespace xmb {
 class Assets;
 class SteamArtwork;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -114,6 +115,9 @@ private:
     SteamFriends steamFriends_;
     SteamOwned steamOwned_;
     OwnedGameList ownedGames_;      // purchased titles from the Steam Web API (may be empty without a key)
+    SteamCollectionList collections_; // the account's own Steam library collections
+    bool ownedInFlight_=false;
+    QString ownedSignature_;        // app ids + installed flags + collection ids, to skip unchanged rebuilds
     std::unique_ptr<SteamArtwork> steamArtwork_;
     QTimer steamRefresh_;
     QElapsedTimer friendsAge_;
@@ -123,6 +127,8 @@ private:
     void rebuildFriends();
     void refreshSteamFriends(bool showErrors=false,bool force=false);
     void refreshOwnedGames();
+    bool stageOwnedForRefresh() const;
+    QString collectionLabel(const QString& appId) const;
     quint64 scanRequest_=0,photoRequest_=0;
     bool loading_=false;
     QString status_;

@@ -1,112 +1,113 @@
-# In-XMB tooling: store, import and media apps
+# In-XMB tooling: owned library, collections, store, import and media apps
 
-This note designs the programs that open **inside** the XMB instead of requiring a
-CLI. It builds on the existing Steam library, content registry and friends work
-(see [STEAM-INTEGRATION.md](STEAM-INTEGRATION.md) and
-[CONTENT-REGISTRY.md](CONTENT-REGISTRY.md)) rather than adding a second menu
-catalog.
+This note describes the programs that open **inside** the XMB. It builds on the Steam
+library, content registry and friends work (see
+[STEAM-INTEGRATION.md](STEAM-INTEGRATION.md) and [CONTENT-REGISTRY.md](CONTENT-REGISTRY.md))
+instead of adding a second menu catalog.
 
-## What already exists
+## State
 
-| Piece | State |
-|---|---|
-| Installed Steam titles in the Game column | Done: `src/steam_library.*` |
-| Import external games/apps from a JSON manifest | Done: `src/content_registry.*`, `--import-apps` |
-| Steam friends column | Done (needs a permitted key): `src/steam_friends.*` |
-| Steam header artwork cache | Done: `src/steam_artwork.*` |
-| **Browse/download games that are not installed yet** | **New: `src/steam_store.*`** |
+| Piece | Where | State |
+|---|---|---|
+| Installed Steam titles in the Game column | `src/steam_library.*` | Done |
+| **Owned (purchased) Steam games, with Install** | `src/steam_owned.*` | Done (needs `STEAM_WEB_API_KEY`) |
+| **User's own Steam collections as groups** | `src/steam_collections.*` | Done, keyless and local |
+| Import external games/apps from a JSON manifest | `src/content_registry.*` | Done |
+| Steam friends column | `src/steam_friends.*` | Done (needs the same key) |
+| Steam header artwork cache | `src/steam_artwork.*` | Done |
+| Browse the public storefront | `src/steam_store.*` | Done |
 
-`src/steam_store.*` reads Valve's public, keyless storefront endpoints:
+## Owned games: what the Game column shows
 
-- `GET https://store.steampowered.com/api/storesearch/?term=<q>&l=en&cc=US`
-- `GET https://store.steampowered.com/api/featuredcategories?cc=US&l=en`
-  (`top_sellers.items[]`)
+The Game column lists what the account **owns**, not only what is installed:
 
-It parses at most 60 rows, de-duplicates by app id, bounds the response to 4 MiB,
-uses a 12 s deadline, refuses redirects, sends no cookies or credentials, and
-cancels in flight work with a generation counter (the same discipline as
-`steam_friends.cpp`). It never buys, downloads or launches: it only lists rows and
-builds handoffs.
+- installed -> OK launches it (`SteamOwned::launchUrl`, i.e. `steam://rungameid/<id>`);
+- owned but not installed -> OK asks Steam to install it (`SteamOwned::installUrl`,
+  i.e. `steam://install/<id>`). Steam performs the download; the XMB never writes
+  into the Steam directory.
 
-```
---steam-store-report <json-file> [--steam-store-query <term>]
-    Query the public store (top sellers when no term) and write JSON, no window.
-```
+Each row's detail line carries its collection names, and the row order follows the
+collections, so the XMB mirrors the user's own library organisation.
 
-Each row carries `appId`, `title`, `image`, `price`, `discounted`, `windows`,
-`install` (`steam://install/<id>`) and `storePage`. Verified against the live
-store: search `portal` returned 10 rows (`Portal 2`, `Portal`, …) and top sellers
-returned 7 unique rows after de-duplication.
+### Sources
 
-## Design: three in-XMB programs
+| Data | Source | Key needed |
+|---|---|---|
+| Installed titles | `libraryfolders.vdf`, `appmanifest_*.acf` | no |
+| Purchased titles, names, icons, playtime | `IPlayerService/GetOwnedGames` | **yes** |
+| Collections (`name`, `added[]`) | `userdata/<accountid>/config/cloudstorage/cloud-storage-namespace-1.json`, entries keyed `user-collections.*` | no |
+| Store browsing | `api/storesearch`, `api/featuredcategories` | no |
 
-All three are ordinary Game/Media column entries; none adds a new window chrome.
-They reuse the existing PKG-style row presentation (wide header art, title
-position, focus scale, column easing) so a store row is visually indistinguishable
-from an installed title.
+Valve requires a Web API key for `GetOwnedGames`. Set `STEAM_WEB_API_KEY` in the launch
+environment (optionally `XMB_STEAM_ID`); keys are read from the environment only and are
+never stored, logged or committed. With no key the XMB keeps the installed titles and
+says a key is needed - it never fabricates a library.
 
-### 1. Steam Store (Games → Steam Store)
+Note: Steam's local `appcache/appinfo.vdf` would name unowned-by-API titles offline, but
+its version-41 layout uses a string table and per-entry headers this project has not
+finished reverse engineering. It was probed and dropped rather than shipped half-working;
+the Web API is the supported path.
 
-Opens as a **page** in the Game column, not a modal:
+## The three in-XMB programs
 
-- First row is a search field: OK opens the existing on-screen keyboard
-  (`Osk` in `view.h`), submitting calls `SteamStore::search(term)`.
-- Rows below are the results (title, price, artwork). The focused row scales like
-  an item icon.
-- OK on a row opens a small detail panel: **Install in Steam**, **Store Page**,
-  **Back**.
-  - *Install in Steam* → `SteamStore::installUrl()` → the shell's existing
-    `OpenUrl`/`LaunchSteam` path (`steam://install/<id>`), so Steam shows its own
-    install dialog. Steam remains the owner of download, DRM and updates.
-  - *Store Page* → `storeUrl()` in the system browser.
-- Empty search, network failure, timeout and oversized response each show an
-  explicit message row instead of a fabricated list.
-- Rows whose title is already installed (matched by app id against
-  `scanSteam().games`) render as **Installed** and OK launches the game instead of
-  prompting an install.
+All three are ordinary Game/Media column entries; none adds new window chrome, and each
+reuses the installed-PKG row presentation (wide header art, title position, focus scale,
+column easing).
 
-### 2. Import Games and Apps (Games → Import)
+### 1. Owned library + install (Game column)
 
-The import action already exists (`Action::ImportApps`, F5-adjacent). Make it
-self-describing inside the XMB:
+The primary surface described above. **Steam Store** remains available for browsing
+titles that are not owned yet: search (on-screen keyboard) or top sellers, then *Install
+in Steam* / *Store Page*. Rows already owned render with their owned state so the user is
+never told to buy something twice.
 
-- A page listing the manifest schema fields in plain language, plus **Choose
-  Manifest…** which opens the file dialog and calls `content_registry::importFile`
-  exactly as the CLI does.
-- After a successful import the page lists the newly added ids, and the column
-  refreshes through the existing `refreshContent` path.
-- A failed import shows the registry's own error text (container, entry id,
-  reason), matching the resource-failure rule in the ISA.
+### 2. Import Games and Apps
+
+`Action::ImportApps` already exists. Inside the XMB it becomes a self-describing page:
+the manifest fields in plain language, **Choose Manifest...** (file dialog) calling
+`content_registry::importFile`, a list of newly added ids, and the registry's own error
+text on failure. Reuse the existing `refreshContent` path afterwards.
 
 ### 3. Media Apps (Music/Video/TV columns)
 
-Media services are **content-registry entries** with `kind: "web"`, not a new
-mechanism. `examples/media-apps.json` seeds Jellyfin, Plex, YouTube and Spotify.
+Media services stay content-registry entries with `kind: "web"`. `examples/media-apps.json`
+seeds Jellyfin, Plex, YouTube and Spotify. OK opens the service in the system browser.
+Embedded playback remains future work (it needs an authenticated player per service).
 
-- OK on a web row opens the service in the system browser (`OpenUrl`).
-- The row uses the provider's favicon/artwork file when the manifest supplies
-  `artwork`, otherwise the firmware fallback icon.
-- Embedded playback is explicitly out of scope here: it needs an authenticated
-  player per service and is tracked as future work in STEAM-INTEGRATION.md.
+## CLI reports (headless, no window, no dev_flash)
+
+```powershell
+re-ps3-native.exe --steam-report            <json>   # installed titles
+re-ps3-native.exe --steam-collections-report <json>  # collections + member app ids
+re-ps3-native.exe --owned-games-report      <json>   # purchased titles (needs the key)
+re-ps3-native.exe --steam-library-report    <json>   # purchased titles grouped by collection
+re-ps3-native.exe --steam-store-report      <json> [--steam-store-query <term>]
+```
+
+Verification so far, on the local install:
+
+- collections: 13 groups read keylessly (Singleplayer 299, Multiplayer 210, Hidden 155,
+  Canyon Dogshit 131, Lego 21, Valve 20, Fighting 19, Apps 10, Hype 8, HTPC 3,
+  Favorites 1, ea/VR empty);
+- owned/library reports: without a key they exit 2 with
+  `Set STEAM_WEB_API_KEY to list the games this account owns.` and write no rows;
+- store: top sellers 7 unique rows, `portal` search 10 rows, nonsense query 0 rows + exit 2;
+- scripted XMB run with the new column wiring exits 0 and still reports
+  `content: Steam installed 10`.
 
 ## Rules these programs keep
 
-- No fabricated success: a failed search, import or launch reports its own error.
+- No fabricated success: a failed search, import, install handoff or launch reports its own error.
 - Steam data stays read-only; nothing is written into the Steam directory.
-- Network requests carry no cookies, session tokens, API keys or credentials, and
-  store caches stay under the native data directory.
-- Steam owns purchase/download/DRM/launch. The XMB only hands off.
+- Requests carry no cookies, session tokens or credentials except the key the user supplies
+  in the environment; caches live under the native data directory.
+- Steam owns purchase, download, DRM and launch. The XMB only hands off.
 - Personal reports, caches and captures stay outside Git.
 
-## Remaining work, in order
+## Remaining work
 
-1. Wire `SteamStore` into `Shell` (search page, detail panel, installed matching)
-   and add the **Steam Store** entry to the Game column.
-2. Import page text + post-import listing in the XMB.
-3. Per-game ICON0/PIC1 overrides for installed Steam titles (custom artwork).
-4. A registry/manifest editor page so imports do not need hand-written JSON.
-5. Jellyfin as an authenticated service with an embedded player.
-6. Verify an actual Steam install → launch → return lifecycle end to end.
-
-Steps 1-2 touch `shell.cpp` / `view.cpp`, which another session is editing; the
-model and CLI are landed first so the wiring is a small, additive change.
+1. Per-game ICON0/PIC1 overrides for owned Steam titles.
+2. A registry/manifest editor page, so imports need no hand-written JSON.
+3. Embedded media playback (Jellyfin first) with real authentication.
+4. Exercise an actual install -> launch -> return lifecycle end to end, with captures.
+5. Revisit `appinfo.vdf` only if a fully offline name source becomes necessary.
