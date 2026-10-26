@@ -5,6 +5,8 @@ RPCS3 VSH recording. Project goal: a complete native C++ recreation.
 
 ## Read this set
 
+Latest Friends continuation (2026-10-26): [signed-in Steam client connection](STEAM-CLIENT-FRIENDS.md), including the verified live list and external SDK build input.
+
 Latest continuations (2026-10-25): [Steam and installed-PKG content](STEAM-INTEGRATION.md),
 [import registry](CONTENT-REGISTRY.md), [all-theme icon correction](CATEGORY-ICON-FIX.md),
 [info bar](INFO-BAR.md) and [animation smoothness](ANIMATION-SMOOTHNESS.md).

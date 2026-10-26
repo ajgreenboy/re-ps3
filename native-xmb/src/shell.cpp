@@ -325,7 +325,7 @@ void Shell::refreshContent() {
         }
         contentLoaded_=true;
         if(accountChanged){steamFriendList_.clear();friendsAge_.invalidate();rebuildFriends();}
-        if(SteamOwned::hasApiKey())refreshSteamFriends(false,accountChanged);
+        if(SteamFriends::available())refreshSteamFriends(false,accountChanged);
         if(stageOwnedForRefresh())refreshOwnedGames();
         QStringList missingArt;
         for(const auto& category:categories_)for(const auto& e:category.entries)
@@ -399,6 +399,7 @@ void Shell::rebuildFriends() {
     for(int c=0;c<categories_.size();++c)if(categories_[c].id=="friends") {
         auto& entries=categories_[c].entries;
         const QString selected=entries.isEmpty()?QString{}:entries[std::clamp(selections_[c],0,int(entries.size())-1)].id;
+        const bool hadFriends=std::any_of(entries.cbegin(),entries.cend(),[](const Entry& e){return e.id.startsWith("steam-friend:");});
         entries.clear();
         for(const auto& person:steamFriendList_) {
             auto e=item("steam-friend:"+person.steamId,person.name,"tex_Avatar_Default","explore_category_friend",Action::OpenUrl,"steam://friends/message/"+person.steamId);
@@ -409,9 +410,10 @@ void Shell::rebuildFriends() {
         auto open=item("steam-friends:open","Open Steam Friends","item_tex_NewFriend","explore_category_friend",Action::OpenUrl,"steam://open/friends");
         open.detail=steamFriendsError_.isEmpty() && steamFriendList_.isEmpty()?"Your Steam friends list is empty.":steamFriendsError_;entries.push_back(std::move(open));
         entries.push_back(item("steam-friends:refresh","Refresh Steam Friends","item_tex_Players","explore_category_friend",Action::RefreshFriends));
-        const QString setup="Steam Friends\n\nFriends and presence come from Steam.\nSet STEAM_WEB_API_KEY in your launch environment and restart XMB.\nYour most recent local Steam account is selected automatically.\nUse XMB_STEAM_ID to select another numeric Steam ID.\nThe API key is never stored in XMB settings.\nPrivate lists and unavailable connections are reported here.";
+        const QString setup="Steam Friends\n\nFriends and presence come from Steam.\nThe signed-in Steam client supplies your friends without changing profile privacy.\nThe Web API is an optional fallback.\nYour most recent local Steam account is selected automatically.\nUse XMB_STEAM_ID to select another numeric Steam ID.\nThe API key is never stored in XMB settings.\nPrivate lists and unavailable connections are reported here.";
         entries.push_back(item("steam-friends:setup","Steam Connection","item_tex_Profile_Onlines","explore_category_friend",Action::Information,setup));
-        selections_[c]=0;for(int i=0;i<entries.size();++i)if(entries[i].id==selected){selections_[c]=i;break;}
+        selections_[c]=0;
+        if(hadFriends || steamFriendList_.isEmpty())for(int i=0;i<entries.size();++i)if(entries[i].id==selected){selections_[c]=i;break;}
     }
 }
 Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(parent),
@@ -569,10 +571,10 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         emit changed();
     });
     connect(&steamRefresh_,&QTimer::timeout,this,[this]{
-        if(categories_[category_].id=="friends" && SteamOwned::hasApiKey())refreshSteamFriends();
+        if(categories_[category_].id=="friends" && SteamFriends::available())refreshSteamFriends();
     });
     steamRefresh_.start(60000);
-    steamFriendsError_="Connect Steam friends with STEAM_WEB_API_KEY, or open the Steam friends window.";
+    steamFriendsError_="Connect the signed-in Steam client, or open the Steam friends window.";
     rebuildFriends();
     for(auto& category:categories_)if(category.id=="game") {
         category.entries.push_back(item("content:refresh","Refresh Game Library","item_tex_plain_folder",full,Action::RefreshContent));

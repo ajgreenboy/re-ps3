@@ -40,11 +40,13 @@ the store browser and media apps, is in [XMB-TOOLING.md](XMB-TOOLING.md).
 
 ## Steam friends
 
-`src/steam_friends.*` uses Valve's HTTPS GetFriendList and GetPlayerSummaries endpoints. An optional `STEAM_WEB_API_KEY` is read only from the launch environment. It is never stored in preferences, manifests or logs. Do not paste keys into chat or commit them. Valve documents a 401 response for private friends lists and a 100-player summaries batch limit: [ISteamUser documentation](https://partner.steamgames.com/doc/webapi/ISteamUser).
+2026-10-26 continuation: the signed-in client helper now supplies 46 verified live friends without changing profile privacy. It is preferred over the Web API path described below; see [STEAM-CLIENT-FRIENDS.md](STEAM-CLIENT-FRIENDS.md) for the build, evidence and limits.
+
+The optional Web fallback uses Valve's HTTPS GetFriendList and GetPlayerSummaries endpoints. Its key comes from the launch environment or the private AppData key file. It is never stored in preferences, manifests or logs. Do not paste keys into chat or commit them. Valve documents a 401 response for private friends lists and a 100-player summaries batch limit: [ISteamUser documentation](https://partner.steamgames.com/doc/webapi/ISteamUser).
 
 The list sorts in-game, online and offline friends and displays returned presence/game text using original avatar artwork and a presence indicator. Selecting a friend hands chat off to Steam; XMB does not send messages. **Open Steam Friends** works independently of the embedded list. Refresh is manual/F5, on entering a stale Friends column, and once per minute while that column is selected. Account changes force cancellation/restart so an old response cannot populate the newly selected account.
 
-Requests have deadlines, bounded responses, batched IDs and stale-generation cancellation. Key-bearing requests do not follow redirects. Missing credentials/accounts, privacy and network errors are explicit. No success/friends are fabricated. This is a provisional developer-key backend; native Steamworks authentication/SDK integration with an appropriately registered application, avatar fetching, invites and richer presence remain open. Valve recommends its client API for game-client profile needs; the optional Web API path does not establish that final integration.
+Requests have deadlines, bounded responses, batched IDs and stale-generation cancellation. Key-bearing requests do not follow redirects. Missing credentials/accounts, privacy and network errors are explicit. No success/friends are fabricated. The Web API remains a fallback; the optional local-client helper is now verified. Avatar fetching, invites and richer presence remain open. Valve recommends its client API for game-client profile needs; the optional Web API path does not establish that final integration.
 
 ## Commands and service apps
 

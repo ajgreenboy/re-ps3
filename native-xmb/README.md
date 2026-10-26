@@ -139,7 +139,7 @@ API key is rejected with 401 (verified). Family *membership* is read locally fro
 
 `--steam-family-report` prints the membership and the shared count.
 
-The Friends column uses Steam too and needs the same key. **Open Steam Friends** also opens Steam's own friends
+The Friends column prefers the signed-in Steam client through an optional native helper; this works without a Web API key or a profile-privacy change. Build it with `-SteamworksHeaders <sdk/public/steam>`; see [client connection](audit/STEAM-CLIENT-FRIENDS.md). The key is an optional friends fallback and still serves the owned-games provider. **Open Steam Friends** also opens Steam's own friends
 window.
 
  `<native-data>/artwork/`: `<appid>.png` for the wide row,

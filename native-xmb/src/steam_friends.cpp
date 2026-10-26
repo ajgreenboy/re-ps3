@@ -1,6 +1,12 @@
 #include "steam_friends.h"
 
 #include "steam_owned.h"
+#include <QSettings>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QProcess>
+#include <memory>
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -54,6 +60,10 @@ SteamFriends::~SteamFriends() { ++generation_;cancelRequests(); }
 bool SteamFriends::isCurrent(quint64 generation) const { return generation==generation_; }
 
 void SteamFriends::cancelRequests() {
+    if(clientProcess_) {
+        auto* process=clientProcess_;clientProcess_=nullptr;
+        process->kill(); // Its finished handler releases it, without blocking the render thread.
+    }
     const auto pending=replies_;
     replies_.clear();
     for(auto* reply:pending)if(reply)reply->abort();
@@ -66,9 +76,17 @@ void SteamFriends::refresh(QString steamId) {
     friendIds_.clear();
     summaryIds_.clear();
     friends_.clear();
-    nextSummary_=0;
-
+    nextSummary_=0;key_.clear();source_.clear();clientError_.clear();
+    if(!busy_){busy_=true;emit busyChanged(true);}
     const QString id=steamId.trimmed();
+    if(!id.isEmpty() && !validSteamId(id)){fail(generation,QStringLiteral("Steam ID must be a nonzero numeric 64-bit ID."));return;}
+    if(tryClient(generation,id))return;
+    startWeb(generation,id);
+}
+
+void SteamFriends::startWeb(quint64 generation,const QString& id) {
+    if(!isCurrent(generation))return;
+    source_=QStringLiteral("steam-web-api");
     if(!validSteamId(id)) {
         if(busy_){busy_=false;emit busyChanged(false);}
         emit loaded({},id.isEmpty()?QStringLiteral("No Steam account is selected. Sign in to Steam, or set XMB_STEAM_ID to your numeric Steam ID and restart XMB."):
@@ -78,7 +96,7 @@ void SteamFriends::refresh(QString steamId) {
     const QString key=SteamOwned::apiKey();
     if(key.isEmpty()) {
         if(busy_){busy_=false;emit busyChanged(false);}
-        emit loaded({},QStringLiteral("Steam friends need a Steam Web API key. Set STEAM_WEB_API_KEY or write the key to the steam_api_key file and restart XMB."));
+        emit loaded({},clientError_.isEmpty()?QStringLiteral("Connect the signed-in Steam client, or configure the optional Web API key."):QStringLiteral("Steam client connection: ")+clientError_);
         return;
     }
     if(!validApiKey(key)) {
@@ -92,15 +110,96 @@ void SteamFriends::refresh(QString steamId) {
     requestFriendList(generation,id,key_);
 }
 
+bool SteamFriends::available() {
+    const bool helper=qEnvironmentVariable("XMB_STEAM_WEB_ONLY")!="1" &&
+        QFileInfo(QDir(QCoreApplication::applicationDirPath()).filePath("xmb-steam-client.exe")).isFile();
+    return helper || SteamOwned::hasApiKey();
+}
+
+void SteamFriends::finishFriends() {
+    std::sort(friends_.begin(),friends_.end(),[](const SteamFriend& left,const SteamFriend& right){
+        const int a=sortBucket(left),b=sortBucket(right);
+        if(a!=b)return a<b;
+        const int order=QString::compare(left.name,right.name,Qt::CaseInsensitive);
+        return order?order<0:left.steamId<right.steamId;
+    });
+    busy_=false;key_.clear();emit busyChanged(false);emit loaded(friends_,{});
+}
+
+bool SteamFriends::tryClient(quint64 generation,const QString& steamId) {
+    if(qEnvironmentVariable("XMB_STEAM_WEB_ONLY")=="1")return false;
+    const QString helper=QDir(QCoreApplication::applicationDirPath()).filePath("xmb-steam-client.exe");
+    if(!QFileInfo(helper).isFile()){clientError_="The Steam client helper is not installed in this build.";return false;}
+    QString root=qEnvironmentVariable("XMB_STEAM_ROOT");
+    if(root.isEmpty())root=QSettings("HKEY_CURRENT_USER\\Software\\Valve\\Steam",QSettings::NativeFormat).value("SteamPath").toString();
+    if(root.isEmpty()){clientError_="Steam is not installed in the configured location.";return false;}
+    auto* process=new QProcess(this);clientProcess_=process;
+    auto environment=QProcessEnvironment::systemEnvironment();environment.remove("STEAM_WEB_API_KEY");
+    process->setProcessEnvironment(environment);
+    auto output=std::make_shared<QByteArray>();auto done=std::make_shared<bool>(false);
+    auto timedOut=std::make_shared<bool>(false);auto oversized=std::make_shared<bool>(false);
+    const auto complete=[this,process,output,done,timedOut,oversized,generation,steamId](int code,QProcess::ExitStatus status){
+        if(*done)return;*done=true;
+        if(clientProcess_==process)clientProcess_=nullptr;
+        output->append(process->readAllStandardOutput());
+        process->deleteLater();
+        if(!isCurrent(generation))return;
+        QString error;
+        QJsonObject result;
+        if(*timedOut)error="The signed-in Steam client did not respond in time.";
+        else if(*oversized || output->size()>MaxResponseBytes)error="The Steam client response exceeded the supported size.";
+        else {
+            const QByteArray marker="XMB_STEAM_FRIENDS:";const auto pos=output->lastIndexOf(marker);
+            QJsonParseError parse{};
+            const auto document=QJsonDocument::fromJson(pos<0?QByteArray{}:output->mid(pos+marker.size()).split('\n').first(),&parse);
+            if(parse.error!=QJsonParseError::NoError || !document.isObject())error="The Steam client helper returned no valid result.";
+            else {result=document.object();error=result.value("error").toString().left(1024);}
+            if(error.isEmpty() && (code!=0 || status!=QProcess::NormalExit))error="The Steam client helper could not complete the connection.";
+        }
+        SteamFriendList people;
+        if(error.isEmpty()) {
+            const QString owner=result.value("steamId").toString();const auto rows=result.value("friends");
+            if(!validSteamId(owner) || (!steamId.isEmpty() && owner!=steamId) || !rows.isArray() || rows.toArray().size()>4096)
+                error="The Steam client returned an unexpected account or friends list.";
+            else {
+                QSet<QString> ids;
+                for(const auto& value:rows.toArray()) {
+                    const auto row=value.toObject();SteamFriend person;
+                    person.steamId=row.value("steamId").toString();person.name=row.value("name").toString();
+                    person.game=row.value("game").toString();person.personaState=row.value("personaState").toInt(-1);
+                    if(!validSteamId(person.steamId) || person.name.isEmpty() || person.name.size()>256 || person.game.size()>256 ||
+                       person.personaState<0 || person.personaState>6 || ids.contains(person.steamId)) {error="The Steam client returned invalid friend data.";break;}
+                    ids.insert(person.steamId);people.push_back(std::move(person));
+                }
+            }
+        }
+        if(!error.isEmpty()){clientError_=error;startWeb(generation,steamId);return;}
+        friends_=std::move(people);source_="steam-client";finishFriends();
+    };
+    connect(process,&QProcess::readyReadStandardOutput,this,[process,output,oversized]{
+        output->append(process->readAllStandardOutput());
+        if(output->size()>MaxResponseBytes){*oversized=true;process->kill();}
+    });
+    connect(process,&QProcess::readyReadStandardError,this,[process]{process->readAllStandardError();});
+    connect(process,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),this,complete);
+    connect(process,&QProcess::errorOccurred,this,[complete](QProcess::ProcessError error){
+        if(error==QProcess::FailedToStart)complete(-1,QProcess::CrashExit);
+    });
+    QTimer::singleShot(RequestTimeoutMs,process,[process,done,timedOut]{if(!*done){*timedOut=true;process->kill();}});
+    QStringList arguments{"--steam-root",root};if(!steamId.isEmpty())arguments<<"--expected-user"<<steamId;
+    process->start(helper,arguments);
+    return true;
+}
+
 void SteamFriends::requestFriendList(quint64 generation,const QString& steamId,const QString& key) {
     QUrl url(QStringLiteral("https://api.steampowered.com/ISteamUser/GetFriendList/v1/"));
     QUrlQuery query;
-    query.addQueryItem(QStringLiteral("key"),key);
     query.addQueryItem(QStringLiteral("steamid"),steamId);
     query.addQueryItem(QStringLiteral("relationship"),QStringLiteral("friend"));
     url.setQuery(query);
 
     QNetworkRequest request(url);
+    request.setRawHeader("x-webapi-key",key.toUtf8());
     request.setTransferTimeout(RequestTimeoutMs);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
     auto* reply=network_->get(request);
@@ -124,8 +223,8 @@ void SteamFriends::requestFriendList(quint64 generation,const QString& steamId,c
             fail(generation,QStringLiteral("Steam returned a response larger than the supported limit."));
             return;
         }
-        if(status==401) {
-            fail(generation,QStringLiteral("This Steam friends list is private. Set the profile's friends list to public, then refresh."));
+        if(status==401 || status==403) {
+            fail(generation,QStringLiteral("Steam did not authorize this Web API friends request (HTTP %1). Use the signed-in Steam client connection.").arg(status)+(clientError_.isEmpty()?QString{}:QStringLiteral("\n\nSteam client: ")+clientError_));
             return;
         }
         if(networkError!=QNetworkReply::NoError || status<200 || status>=300) {
@@ -160,17 +259,7 @@ void SteamFriends::requestFriendList(quint64 generation,const QString& steamId,c
 void SteamFriends::requestSummaries(quint64 generation,const QString& key) {
     if(!isCurrent(generation))return;
     if(nextSummary_>=static_cast<int>(friendIds_.size())) {
-        std::sort(friends_.begin(),friends_.end(),[](const SteamFriend& left,const SteamFriend& right){
-            const int leftBucket=sortBucket(left),rightBucket=sortBucket(right);
-            if(leftBucket!=rightBucket)return leftBucket<rightBucket;
-            const int nameOrder=QString::compare(left.name,right.name,Qt::CaseInsensitive);
-            if(nameOrder!=0)return nameOrder<0;
-            return left.steamId<right.steamId;
-        });
-        busy_=false;
-        key_.clear();
-        emit busyChanged(false);
-        emit loaded(friends_,{});
+        finishFriends();
         return;
     }
 
@@ -183,11 +272,11 @@ void SteamFriends::requestSummaries(quint64 generation,const QString& key) {
 
     QUrl url(QStringLiteral("https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"));
     QUrlQuery query;
-    query.addQueryItem(QStringLiteral("key"),key);
     query.addQueryItem(QStringLiteral("steamids"),ids.join(','));
     url.setQuery(query);
 
     QNetworkRequest request(url);
+    request.setRawHeader("x-webapi-key",key.toUtf8());
     request.setTransferTimeout(RequestTimeoutMs);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
     auto* reply=network_->get(request);

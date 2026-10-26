@@ -7,6 +7,7 @@
 
 class QNetworkAccessManager;
 class QNetworkReply;
+class QProcess;
 
 namespace xmb {
 
@@ -24,7 +25,9 @@ public:
     explicit SteamFriends(QObject* parent=nullptr);
     ~SteamFriends() override;
 
-    // Reads STEAM_WEB_API_KEY from this process's environment and asynchronously refreshes the list.
+    // Prefer the signed-in Steam client helper; fall back to the optional Web API key.
+    static bool available();
+    QString source() const { return source_; }
     void refresh(QString steamId);
 
 signals:
@@ -33,6 +36,9 @@ signals:
 
 private:
     void cancelRequests();
+    bool tryClient(quint64 generation,const QString& steamId);
+    void startWeb(quint64 generation,const QString& steamId);
+    void finishFriends();
     void requestFriendList(quint64 generation,const QString& steamId,const QString& key);
     void requestSummaries(quint64 generation,const QString& key);
     void fail(quint64 generation,const QString& message);
@@ -43,7 +49,8 @@ private:
     QVector<QString> friendIds_;
     QSet<QString> summaryIds_;
     SteamFriendList friends_;
-    QString key_;
+    QString key_,source_,clientError_;
+    QProcess* clientProcess_=nullptr;
     quint64 generation_=0;
     int nextSummary_=0;
     bool busy_=false;
