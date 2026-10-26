@@ -68,9 +68,12 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
    media playback, and an end-to-end install -> launch -> return capture.
 1. **Phase 7 harness first:** RPCS3 reference captures of named states plus `work/ab-shot.ts` scores, so every later
    change has a number.
-2. **Phase 4 leftovers:** trace the page move's animate call (explore_plugin; its 300 ms float constants are at
-   DAT_00270674, DAT_002706c0, DAT_00270658, DAT_00270d30 and DAT_00271d0c) to confirm 300 ms in mode 4. The info-bar
-   clock update is also open.
+2. **Phase 4 leftovers:** the page move's animate call is still not traced. The five explore_plugin constants at
+   DAT_00270674 / DAT_002706c0 / DAT_00270658 / DAT_00270d30 / DAT_00271d0c are exactly 300.0f but drive content and
+   dialog transitions, NOT the page move, so they cannot be cited as its evidence; the page move lives in vsh.elf paf
+   PhXmBar (genuine 0.3 s bar constant DAT_0068f020). 300 ms at mode 4 remains a fit - the only model matching the
+   measured 17-18 frame ramp, with mode 5 excluded - not a traced call. The info-bar clock is a passive PhClock pushed
+   at one-minute resolution; its periodic writer is still open. See [PAGE-MOVE.md](audit/PAGE-MOVE.md).
 3. **Phase 5 particles:** port particles.elf. The current sparkles are linkev's, not the firmware's.
 4. **Phase 3 layout:** replace measured column, row and icon numbers with values traced from RCO objects and
    explore_plugin.
