@@ -43,10 +43,10 @@ environment (optionally `XMB_STEAM_ID`); keys are read from the environment only
 never stored, logged or committed. With no key the XMB keeps the installed titles and
 says a key is needed - it never fabricates a library.
 
-Note: Steam's local `appcache/appinfo.vdf` would name unowned-by-API titles offline, but
-its version-41 layout uses a string table and per-entry headers this project has not
-finished reverse engineering. It was probed and dropped rather than shipped half-working;
-the Web API is the supported path.
+Note: two offline/public name sources were probed and dropped. Steam's local
+`appcache/appinfo.vdf` (version 41) stores member keys as indexes into a string table and
+its per-entry header layout is not fully understood yet; Valve also retired the keyless
+`ISteamApps/GetAppList` endpoint (404). The supported path is the Web API key.
 
 ## The three in-XMB programs
 
