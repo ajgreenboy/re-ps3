@@ -193,7 +193,7 @@ void Shell::refreshContent() {
         }
         contentLoaded_=true;
         if(accountChanged){steamFriendList_.clear();friendsAge_.invalidate();rebuildFriends();}
-        if(!qEnvironmentVariable("STEAM_WEB_API_KEY").isEmpty())refreshSteamFriends(false,accountChanged);
+        if(SteamOwned::hasApiKey())refreshSteamFriends(false,accountChanged);
         if(stageOwnedForRefresh())refreshOwnedGames();
         QStringList missingArt;
         for(const auto& category:categories_)for(const auto& e:category.entries)
@@ -385,7 +385,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         emit changed();
     });
     connect(&steamRefresh_,&QTimer::timeout,this,[this]{
-        if(categories_[category_].id=="friends" && !qEnvironmentVariable("STEAM_WEB_API_KEY").isEmpty())refreshSteamFriends();
+        if(categories_[category_].id=="friends" && SteamOwned::hasApiKey())refreshSteamFriends();
     });
     steamRefresh_.start(60000);
     steamFriendsError_="Connect Steam friends with STEAM_WEB_API_KEY, or open the Steam friends window.";
@@ -460,7 +460,7 @@ void Shell::horizontal(int delta) {
     if(!pages_.isEmpty())return;
     library_.cancel();scanRequest_=0;loading_=false;status_.clear();
     const int previous=category_;category_=std::clamp(category_+delta,0,int(categories_.size())-1);
-    if(previous!=category_ && categories_[category_].id=="friends" && !qEnvironmentVariable("STEAM_WEB_API_KEY").isEmpty()
+    if(previous!=category_ && categories_[category_].id=="friends" && SteamOwned::hasApiKey()
        && (!friendsAge_.isValid() || friendsAge_.elapsed()>30000))refreshSteamFriends();
     if(previous!=category_)interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
 }
