@@ -481,3 +481,10 @@ data, which has not been recovered.
 - Where this document says UNKNOWN, the honest state is that no local evidence
   distinguishes the possibilities. Marking those items done would require the work in
   section 6.
+## Applied: hinting disabled in the native renderer
+
+The three Qt font sites that had `PreferVerticalHinting` (`src/text_renderer.cpp:183` and the two
+label helpers in `src/view.cpp`) now set `QFont::PreferNoHinting`, matching the traced
+`FT_LOAD_NO_HINTING`. Measured effect on the canonical capture: none - `work/ab-layers.ts --capture`
+reports the clock text at 13.51 dB / 0.6131 SSIM and the info bar at 17.12 / 0.7046 both before and
+after, so the unhinted setting is behaviourally neutral at the 2x UI layer while matching the firmware.

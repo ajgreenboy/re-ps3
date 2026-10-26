@@ -115,6 +115,9 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
   Match against icon crops from the reference.
 
 ### Phase 2: text renderer
+- Rasteriser traced: [TEXT-RASTER.md](audit/TEXT-RASTER.md). The firmware loads glyphs with FT_LOAD_NO_HINTING and
+  rasterises outlines (FT_Outline_Get_Bitmap), so there is no stem snapping at all; coverage is copied to alpha with an
+  identity gamma (no LUT), and overlapping coverage is unioned by compare-and-keep-larger, never alpha-over.
 - Latest continuation: `audit/FONT-MATCHING.md`. Matched original faces now use FreeType with recovered
   NO_HINTING|NO_BITMAP flags; source identity is checked by head+cmap tables. PAF metric/pixel parity remains open.
 - Active from 2026-10-25 at the user's direction. See `audit/TEXT-RENDERER.md` for the implementation, recovered

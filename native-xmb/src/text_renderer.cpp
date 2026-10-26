@@ -180,7 +180,9 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
     if(font.styleName().isEmpty() && font.weight()==QFont::Normal && !font.italic())font.setStyleName("Regular");
     font.setPixelSize(std::max(1,int(std::lround(requested.pixelSize()*rasterScale_))));
     font.setStyleStrategy(QFont::PreferAntialias);
-    font.setHintingPreference(useFreeType_?QFont::PreferNoHinting:QFont::PreferVerticalHinting);
+    // The firmware never hints: libfontFT loads glyphs with FT_LOAD_NO_HINTING (audit/TEXT-RASTER.md), so both
+    // rasteriser paths must stay unhinted or stems snap differently from the reference.
+    font.setHintingPreference(QFont::PreferNoHinting);
     auto& shaped=layout(text,font,rect.width()*rasterScale_,flags);
     qreal offset=0;if(flags&Qt::AlignVCenter)offset=(rect.height()*rasterScale_-shaped.height)/2;
     else if(flags&Qt::AlignBottom)offset=rect.height()*rasterScale_-shaped.height;

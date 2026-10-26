@@ -710,7 +710,7 @@ void View::drawScene(QPainter& p) {
     }();
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
         if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);textRenderer_.draw(*this,p,r,value,f,colour,flags);return;}
-        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferVerticalHinting);p.setFont(f);p.setPen(QColor(0,0,0,38));p.drawText(r.translated(1,1),flags,value);p.setPen(colour);p.drawText(r,flags,value);
+        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(QColor(0,0,0,38));p.drawText(r.translated(1,1),flags,value);p.setPen(colour);p.drawText(r,flags,value);
     };
     // Soft white halo behind a label (the XMB's focused-item glow): the text drawn at low alpha in a ring of offsets.
     auto glow=[&](const QRectF& r,const QString& value,int size,double strength,int flags=Qt::AlignLeft|Qt::AlignVCenter){
@@ -1195,7 +1195,7 @@ void View::oskPress() {
 void View::drawOsk(QPainter& p) {
     const auto label=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignCenter,bool bold=false) {
         if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);f.setBold(bold);textRenderer_.draw(*this,p,r,value,f,colour,flags,0,false);return;}
-        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setBold(bold);f.setHintingPreference(QFont::PreferVerticalHinting);p.setFont(f);p.setPen(colour);p.drawText(r,flags,value);
+        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setBold(bold);f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(colour);p.drawText(r,flags,value);
     };
     const auto key=[&](const QRectF& r,QColor top,QColor bottom,bool focused) {
         QLinearGradient g(r.topLeft(),r.bottomLeft());g.setColorAt(0,focused?QColor(255,255,255):top);g.setColorAt(1,focused?QColor(225,232,236):bottom);
