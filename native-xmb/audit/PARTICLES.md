@@ -596,9 +596,8 @@ The sparkle layer is replaced by the firmware-shaped simulation (same public API
 - one 48-byte-stride VBO and one additive `glDrawElements` call, no per-frame allocation;
 - measured pool: 1529 live at t=30 s (audit band 1492 +/- 5%), 1526 after a 600 s run, zero non-finite.
 
-Deliberately still open (each needs a file outside particles.*): pass 1 belongs in the HDR scene before
-`Hdr::finish` and pass 2 in the glare source (today it is one pass drawn after tone mapping, with the
-radial halo folded into the quad), `proc_iridescent.tga` and the untraced `_Color`/`_Gamma`/spot packing,
+Now drawn into the HDR scene before `Hdr::finish` (view.cpp), so the dust is tone mapped and glinted.
+Still open: pass 2 as a separate glare-source draw (the radial halo is folded into the quad today), `proc_iridescent.tga` and the untraced `_Color`/`_Gamma`/spot packing,
 the fresnel/life-bounds/darkness alpha chain, and the true emission volume (violume is a uniform box, so
 dust does not cluster on the wave yet). Blending stays additive until qgl material mode 3 is resolved.
 

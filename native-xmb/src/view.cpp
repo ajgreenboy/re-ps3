@@ -323,9 +323,10 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         dump.save(QString::fromLocal8Bit(qgetenv("XMB_BG_SCENE")));
         }
     }
+    // Particles belong to the HDR scene: the firmware draws particles_quads before the tone map and its
+    // radial halo into the glare source (audit/PARTICLES.md), so dust picks up the tone map and the glare.
+    if(originalParticles) { glBindFramebuffer(GL_FRAMEBUFFER,GLuint(scene)); particles_.render(*this,seconds,pixelWidth,pixelHeight); }
     if(hdr)hdr_.finish(*this,presetBlend,GLuint(target));
-    // Particles over the finished background (linkev/PlayStation-3-XMB's layering: background, wave, additive sparkles).
-    if(originalParticles){glBindFramebuffer(GL_FRAMEBUFFER,GLuint(target));particles_.render(*this,seconds,pixelWidth,pixelHeight);}
 }
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
 // as a day fraction t in [0,1] and the month as a float in [0,12] (constants at 0x92e54..0x92e6c, preset hours / 24
