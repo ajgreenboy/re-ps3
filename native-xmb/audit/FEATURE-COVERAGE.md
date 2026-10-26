@@ -653,3 +653,7 @@ Ordered by how likely a user probing the app is to hit them.
 > log shows `launch: ... (tracked)` then `returned from Probe App exit 1 normal`. Steam launches
 > are still detached through `steam.exe -applaunch`, and a configured backend preference is still
 > missing, so ISC-20 stays partial.
+> **Update 2:** the cosmetic `system/name` field is wired: `host::systemInformation` now takes the
+> stored name (`Preferences` key `system/name`) and only falls back to `QHostInfo::localHostName()`
+> when it is empty; Settings > System Information renders the value the user set. Verified by code
+> path and build, not yet by a GUI capture.

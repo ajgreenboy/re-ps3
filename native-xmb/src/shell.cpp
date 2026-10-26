@@ -687,7 +687,7 @@ void Shell::activate() {
     case Action::Information: {
         const host::Label label=[this](const QString& id,const QString& fallback){return assets_.text("sysconf_plugin",id,fallback);};
         message_=entry.value=="host:network"?host::networkStatus(label):entry.value=="host:display"?host::displayOutput():entry.value=="host:audio"?host::audioOutput():
-            entry.value.isEmpty()?host::systemInformation(renderer_,label):entry.value;break;
+            entry.value.isEmpty()?host::systemInformation(renderer_,label,preferences_.value("system/name").toString()):entry.value;break;
     }
     case Action::Library: {
         const auto path=preferences_.value("library/"+categories_[category_].id).toString();
