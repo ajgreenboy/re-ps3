@@ -257,6 +257,12 @@ void Shell::refreshContent() {
                     e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;
                     e.detail=collectionLabel(game.appId);providers.push_back(std::move(e));
                 }
+                {
+                    // Browsing the public storefront: the only place to find something not owned yet.
+                    auto e=item("steam-store",QObject::tr("Steam Store"),"item_tex_ps_store","explore_plugin_full",
+                        Action::SteamStoreBrowse,QString());
+                    e.detail=QObject::tr("Browse and install");providers.push_back(std::move(e));
+                }
                 const int ownedNotInstalled=int(std::count_if(ownedGames_.cbegin(),ownedGames_.cend(),
                     [](const OwnedGame& game){return !game.installed;}));
                 const int notInstalled=ownedNotInstalled+int(familyGames_.size());
@@ -493,6 +499,35 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         if(!touched)return;
         emit changed();
     });
+    // Steam Store: the browse page is an ordinary XMB page, and every row hands off to Steam for
+    // the actual purchase/install. No store page is fabricated while a request is in flight.
+    connect(&steamStore_,&SteamStore::loaded,this,[this](const StoreItemList& items,const QString& query,const QString& error){
+        if(!error.isEmpty()){message_=QObject::tr("Steam Store")+"\n\n"+error;emit changed();return;}
+        Page page;page.title=query.isEmpty()?QObject::tr("Steam Store"):query;
+        for(const auto& row:items) {
+            auto e=item("store:"+row.appId,row.title,"game_tex_default_ps3","explore_plugin_full",
+                Action::InstallSteam,row.appId);
+            const QString price=SteamStore::priceText(row);
+            e.detail=price.isEmpty()?QObject::tr("Open in Steam"):price;
+            page.entries.push_back(std::move(e));
+        }
+        if(page.entries.isEmpty()){message_=QObject::tr("Steam Store")+"\n\n"+QObject::tr("The store listed nothing.");emit changed();return;}
+        // Verification hook: the store page is dumped next to the catalogue for scripted checks.
+        if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
+            QJsonArray rows;
+            for(const auto& e:page.entries)rows.push_back(QJsonObject{{"id",e.id},{"title",e.title},
+                {"detail",e.detail},{"action",int(e.action)}});
+            QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".store.json");
+            if(file.open(QIODevice::WriteOnly))file.write(QJsonDocument(QJsonObject{{"title",page.title},
+                {"rows",rows},{"count",rows.size()}}).toJson());
+        }
+        pages_.push_back(std::move(page));
+        emit changed();
+    });
+    connect(&steamStore_,&SteamStore::busyChanged,this,[this](bool busy){
+        status_=busy?QObject::tr("Asking the Steam store..."):QString();
+        emit changed();
+    });
     connect(&steamRefresh_,&QTimer::timeout,this,[this]{
         if(categories_[category_].id=="friends" && SteamOwned::hasApiKey())refreshSteamFriends();
     });
@@ -629,6 +664,7 @@ void Shell::activate() {
         break;
     }
     case Action::SteamFolder:openSteamFolder(entry.value);break;
+    case Action::SteamStoreBrowse:steamStore_.topSellers();break;
     case Action::InstallSteam: {
         // Steam owns the download: opening steam://install/<id> asks the client to install it.
         if(!QDesktopServices::openUrl(QUrl(SteamOwned::installUrl(entry.value))))

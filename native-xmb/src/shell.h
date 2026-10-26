@@ -10,6 +10,7 @@
 #include "steam_owned.h"
 #include "steam_collections.h"
 #include "steam_family.h"
+#include "steam_store.h"
 #include "steam_library.h"
 #include <QTimer>
 #include <QElapsedTimer>
@@ -24,7 +25,7 @@ class QVideoSink;
 namespace xmb {
 class Assets;
 class SteamArtwork;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -121,6 +122,7 @@ private:
     SteamFamily family_;              // the Steam Families group this account belongs to
     QVector<FamilyGame> familyGames_; // optional family-shared titles from <data>/family-shared.json
     SteamInstallation steamInstalled_; // last local Steam scan, for the library folders
+    SteamStore steamStore_;          // public storefront browser (browse + install handoff)
     bool ownedInFlight_=false;
     QString ownedSignature_;        // app ids + installed flags + collection ids, to skip unchanged rebuilds
     std::unique_ptr<SteamArtwork> steamArtwork_;
