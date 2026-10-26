@@ -11,6 +11,8 @@
 #include "rsx_program.h"
 #include "p3t.h"
 #include <QJsonDocument>
+#include <QJsonArray>
+#include <algorithm>
 #include <QFile>
 #include <QFileInfo>
 #include <QLoggingCategory>
@@ -81,6 +83,7 @@ int main(int argc,char** argv) {
     parser.addOption({"render-clock","Fix the background/ribbon/particles/icon animation time in seconds for deterministic A/B captures","seconds"});
     parser.addOption({"ui-clock","Fix the displayed UI date/time for local captures; never changes the host clock","date-time"});
     parser.addOption({"focus-time","Fix focused-label age in milliseconds for glow/idle-fade captures","milliseconds"});
+    parser.addOption({"motion-report","Write easing samples at different host frame rates without opening a window","json-file"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
@@ -133,6 +136,30 @@ int main(int argc,char** argv) {
         return inventory.value("errorCount").toInt()?1:0;
     }
     xmb::Assets assets(parser.value("dev-flash"));
+    if(parser.isSet("motion-report")) {
+        QJsonArray cases;
+        for(const auto& spec:{std::pair{5,200},std::pair{4,300}}) {
+            QJsonArray rates;
+            for(int hz:{60,120,240}) {
+                QJsonArray samples;
+                for(double ms:{25.,50.,100.,150.,175.,200.,300.}) {
+                    xmb::View::PafEase ease;ease.retarget(0);ease.retarget(1,spec.second,spec.first);
+                    double elapsed=0;const double end=ms/1000.,tick=1./hz;
+                    while(elapsed<end){const double step=std::min(tick,end-elapsed);ease.advance(step);elapsed+=step;}
+                    samples.push_back(QJsonObject{{"milliseconds",ms},{"value",ease.value}});
+                }
+                xmb::View::PafEase interrupted;interrupted.retarget(0);interrupted.retarget(1,spec.second,spec.first);
+                interrupted.advance(.083);const double from=interrupted.value;interrupted.retarget(0,spec.second,spec.first);
+                const double retargeted=interrupted.value;interrupted.advance(.5);
+                rates.push_back(QJsonObject{{"hz",hz},{"samples",samples},{"retargetFrom",from},
+                    {"retargetValue",retargeted},{"afterLongTick",interrupted.value}});
+            }
+            cases.push_back(QJsonObject{{"mode",spec.first},{"durationMs",spec.second},{"rates",rates}});
+        }
+        QFile out(parser.value("motion-report"));const auto bytes=QJsonDocument(QJsonObject{{"cases",cases}}).toJson();
+        if(!out.open(QIODevice::WriteOnly) || out.write(bytes)!=bytes.size()){qCritical()<<out.errorString();return 2;}
+        return 0;
+    }
     if(parser.isSet("dev-hdd0"))assets.setHddRoot(parser.value("dev-hdd0"));
     if(parser.isSet("vsh-modules"))assets.setModulesRoot(parser.value("vsh-modules"));
     if(parser.isSet("export-image")) { // local analysis: container:name[,container:name...] -> <dir>/<name>.png

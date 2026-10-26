@@ -54,7 +54,27 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&shell_,&Shell::requestNewUser,this,[this]{openOsk("Create New User",{},[this](const QString& name){shell_.createUser(name);});});
     loadWallpaper();
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
-    connect(&timer_,&QTimer::timeout,this,[this]{pollController();update();});timer_.start();pad::start();
+    // Input polling is independent of presentation. A 16 ms repaint timer produced ~62.5 Hz even on a 239 Hz
+    // display. Request the next frame after Qt finishes composition/swap; swapInterval=1 remains in effect.
+    connect(&timer_,&QTimer::timeout,this,[this]{pollController();});timer_.start();pad::start();
+    connect(this,&QOpenGLWidget::frameSwapped,this,[this]{if(isVisible())update();},Qt::QueuedConnection);
+    frameTracePath_=qEnvironmentVariable("XMB_FRAME_TRACE");
+    if(!frameTracePath_.isEmpty()) {
+        frameTrace_.reserve(20000);
+        connect(this,&QOpenGLWidget::frameSwapped,this,[this]{
+            if(frameTrace_.size()<20000)frameTrace_.push_back({clock_.nsecsElapsed(),0,true,false,false});
+        });
+    }
+}
+void View::saveFrameTrace() {
+    if(frameTracePath_.isEmpty())return;
+    QFile file(frameTracePath_);
+    if(!file.open(QIODevice::WriteOnly|QIODevice::Text)){qWarning()<<"frame trace:"<<file.errorString();return;}
+    QTextStream out(&file);out<<"# Native paint/swap callbacks; CPU dispatch time, not physical presentation or GPU completion. Maximum 20000 samples.\n";
+    for(const auto& sample:frameTrace_) {
+        if(sample.swap)out<<"frame swap: "<<sample.at<<'\n';
+        else out<<"frame paint: "<<sample.at<<' '<<sample.cpu<<' '<<int(sample.rebuilt)<<' '<<int(sample.moving)<<'\n';
+    }
 }
 void View::PafEase::retarget(double target,double milliseconds,int mode) {
     if(!started_){value=from_=to_=target;started_=true;return;}
@@ -73,14 +93,19 @@ void View::PafEase::retarget(double target,double milliseconds,int mode) {
 }
 void View::PafEase::advance(double seconds) {
     if(!running_)return;
-    // FUN_00398748 modes 4/5: per elapsed frame v = ((1-v) k + v) x growth; a fractional frame above 0.05 is interpolated.
+    // FUN_00398748 modes 4/5: each canonical frame steps v = ((1-v) k + v) x growth.
     const auto step=[&](double v){return std::min(1.,((1.-v)*k_+v)*growth_);};
-    // paf takes this tick's frame count (DAT_006fb1f4): whole frames step, the fraction blends one step into the state.
-    elapsed_+=seconds;
-    const double frames=seconds*60;const int whole=int(frames);const double fraction=frames-whole;
-    for(int i=0;i<whole;++i)progress_=step(progress_);
-    if(fraction>.05)progress_+=(step(progress_)-progress_)*fraction;
+    // Sample the canonical 60 Hz curve at total elapsed time. Mutating the state with each fractional host tick
+    // changes the curve at 120/240 Hz. Interpolation preserves its integer-frame values while allowing smooth
+    // host refresh rates; the firmware's duration-end landing and retarget-from-current-value are retained.
+    elapsed_+=std::max(0.,seconds);
     if(elapsed_>=duration_){progress_=1;running_=false;}
+    else {
+        const double frames=elapsed_*60;const int whole=int(frames);const double fraction=frames-whole;
+        progress_=0;
+        for(int i=0;i<whole;++i)progress_=step(progress_);
+        progress_+=(step(progress_)-progress_)*fraction;
+    }
     value=from_+(to_-from_)*progress_;
 }
 void View::syncColumns() {
@@ -124,7 +149,7 @@ void View::loadWallpaper() {
         return reader.read();
     }));
 }
-View::~View(){if(context()){makeCurrent();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
+View::~View(){saveFrameTrace();if(context()){makeCurrent();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
     if(!initializeOpenGLFunctions()){qCritical()<<"Native renderer requires OpenGL 3.3";return;}
     textRenderer_.init(*this,QDir(assets_.root()).filePath("data/font"));
@@ -489,9 +514,10 @@ bool View::measureReference(const QString& path) {
     return out.status()==QTextStream::Ok;
 }
 void View::paintGL() {
-    const qint64 now=clock_.elapsed();
-    const double dt=std::min(.1,double(now-previous_)/1000.);previous_=now;
-    const double renderSeconds=secondsOverride_>=0.?secondsOverride_:now/1000.; // fixed for A/B captures
+    const qint64 frameStart=frameTracePath_.isEmpty()?0:clock_.nsecsElapsed();
+    const qint64 nowNs=clock_.nsecsElapsed(),now=nowNs/1000000;
+    const double dt=std::clamp(double(nowNs-previousFrameNs_)/1.e9,0.,.1);previousFrameNs_=nowNs;
+    const double renderSeconds=secondsOverride_>=0.?secondsOverride_:double(nowNs)/1.e9; // fixed for A/B captures
     // Every move is a firmware paf animation (PafEase): 200 ms in accel mode 5 for the category and item moves and the
     // column cross-fade; the page (depth) move is slower, fitted to 300 ms in mode 4 (audit/PIPELINE.md "Menu motion").
     categoryEase_.retarget(shell_.category(),moveMilliseconds);categoryEase_.advance(dt);categoryPosition_=categoryEase_.value;
@@ -578,6 +604,11 @@ void View::paintGL() {
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D,0);uiComposite_.release();glDisable(GL_BLEND);
     grabIntroFrame();
+    if(!frameTracePath_.isEmpty() && frameTrace_.size()<20000) {
+        bool moving=categoryEase_.running() || depthEase_.running() || fadeEase_.running();
+        for(const auto& column:columns_)moving|=column.ease.running();
+        frameTrace_.push_back({frameStart,clock_.nsecsElapsed()-frameStart,false,rebuild,moving});
+    }
     ++frames_;if(now-reportAt_>=5000){qInfo()<<"native frames:"<<frames_*1000./double(now-reportAt_)<<"fps; decoded images"<<assets_.decodedImages()<<"missing images"<<assets_.failedImages();frames_=0;reportAt_=now;}
 }
 // Local verification: XMB_INTRO_GRAB=<dir>@<seconds>,<seconds>,... saves the frame (as drawn) the first time the

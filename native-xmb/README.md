@@ -127,6 +127,13 @@ coldboot_stereo.ac3, then the XMB at 5.5 s, as on the console. Any key or pad bu
 at the XMB (scripted and measurement runs skip it too). `XMB_INTRO_GRAB=<folder>@<seconds>,...` saves frames at
 those intro times for comparison with an RPCS3 capture (audit/PIPELINE.md "Cold boot").
 
+## Animation diagnostics
+
+Animation diagnostics and measured high-refresh results are in
+[ANIMATION-SMOOTHNESS.md](audit/ANIMATION-SMOOTHNESS.md). `--motion-report <file.json>` samples the actual menu
+eases without opening a window. `XMB_FRAME_TRACE=<file>` records a bounded callback trace on orderly shutdown;
+`bun work/frame-report.ts <file> --warmup-ms 6000 --until-ms 10000` summarizes a chosen interval.
+
 ## Decrypted modules for the ribbon
 
 dev_flash holds the VSH modules encrypted (`*.sprx`). The ribbon cloth starts from rest tables inside
