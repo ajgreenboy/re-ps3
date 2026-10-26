@@ -37,7 +37,11 @@ public:
     explicit SteamOwned(QObject* parent = nullptr);
     ~SteamOwned() override;
 
-    // True when STEAM_WEB_API_KEY is present in the environment (the value is not exposed).
+    // Where the key comes from, in order: STEAM_WEB_API_KEY in the environment, then the
+    // user-only file <AppData>/re-ps3-native/steam_api_key (first line). The key is never
+    // logged, stored in preferences or committed; see audit/XMB-TOOLING.md.
+    static QString apiKey();
+    static QString apiKeyFilePath();
     static bool hasApiKey();
 
     // Asynchronously fetch the owned list for a SteamID64. Calls loaded() exactly once.

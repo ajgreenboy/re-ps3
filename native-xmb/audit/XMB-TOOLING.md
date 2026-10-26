@@ -38,9 +38,10 @@ collections, so the XMB mirrors the user's own library organisation.
 | Collections (`name`, `added[]`) | `userdata/<accountid>/config/cloudstorage/cloud-storage-namespace-1.json`, entries keyed `user-collections.*` | no |
 | Store browsing | `api/storesearch`, `api/featuredcategories` | no |
 
-Valve requires a Web API key for `GetOwnedGames`. Set `STEAM_WEB_API_KEY` in the launch
-environment (optionally `XMB_STEAM_ID`); keys are read from the environment only and are
-never stored, logged or committed. With no key the XMB keeps the installed titles and
+Valve requires a Web API key for `GetOwnedGames`. Supply it as `STEAM_WEB_API_KEY`
+in the launch environment or as a one-line file at `%APPDATA%\re-ps3-native\steam_api_key`
+(user-only, outside the repository); the Steam Friends column reads the same source. The key
+is never written to preferences, reports or logs and must never be committed. With no key the XMB keeps the installed titles and
 says a key is needed - it never fabricates a library.
 
 Note: two offline/public name sources were probed and dropped. Steam's local
@@ -89,10 +90,12 @@ Verification so far, on the local install:
 - collections: 13 groups read keylessly (Singleplayer 299, Multiplayer 210, Hidden 155,
   Canyon Dogshit 131, Lego 21, Valve 20, Fighting 19, Apps 10, Hype 8, HTPC 3,
   Favorites 1, ea/VR empty);
-- owned/library reports: without a key they exit 2 with
+- owned/library reports with the key present: 282 purchased titles, 259 of them grouped into
+  the 13 collections and 4 ungrouped; without a key they exit 2 with
   `Set STEAM_WEB_API_KEY to list the games this account owns.` and write no rows;
 - store: top sellers 7 unique rows, `portal` search 10 rows, nonsense query 0 rows + exit 2;
-- scripted XMB run with the new column wiring exits 0 and still reports
+- scripted XMB run with the new column wiring exits 0 and logs
+  `steam owned: 282 games in 13 collections` followed by the refreshed
   `content: Steam installed 10`.
 
 ## Rules these programs keep
