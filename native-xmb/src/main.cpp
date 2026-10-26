@@ -12,6 +12,9 @@
 #include "p3t.h"
 #include "content_registry.h"
 #include "steam_library.h"
+#include "steam_store.h"
+#include "steam_owned.h"
+#include "steam_collections.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <algorithm>
@@ -90,6 +93,11 @@ int main(int argc,char** argv) {
     parser.addOption({"steam-root","Override the local Steam installation directory","directory"});
     parser.addOption({"steam-report","Write discovered installed Steam games and exit without launching them","json-file"});
     parser.addOption({"steam-friends-report","Write Steam friends or an explicit connection error without opening a window","json-file"});
+    parser.addOption({"steam-store-report","Query the public Steam store catalogue and write the rows as JSON without opening a window","json-file"});
+    parser.addOption({"steam-store-query","Free-text store search for --steam-store-report (default: top sellers)","term"});
+    parser.addOption({"steam-library-report","Write this account's Steam library organised by its own collections (names, install/launch handoffs) without opening a window","json-file"});
+    parser.addOption({"steam-collections-report","Write this account's Steam library collections and their app ids without opening a window","json-file"});
+    parser.addOption({"owned-games-report","Write the games this Steam account owns, with an install/launch handoff each, without opening a window","json-file"});
     parser.addOption({"import-apps","Validate and merge a games/service-app manifest into the native library, then exit","json-file"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
@@ -159,7 +167,87 @@ int main(int argc,char** argv) {
         QTimer::singleShot(0,&app,[&friends,id]{friends.refresh(id);});
         return app.exec();
     }
-        
+    if(parser.isSet("steam-library-report")) {
+        // Purchased games (Steam Web API, needs STEAM_WEB_API_KEY) grouped by the account's own
+        // Steam collections, plus an "All games" fallback when no key is configured.
+        xmb::SteamOwned owned;
+        QObject::connect(&owned,&xmb::SteamOwned::loaded,&app,[&](const xmb::OwnedGameList& games,const QString& error,bool needsKey){
+            QString collectionsError;
+            const auto collections=xmb::scanSteamCollections(xmb::scanSteam().steamId,&collectionsError);
+            QHash<QString,QVector<const xmb::OwnedGame*>> byCollection;
+            QSet<QString> placed;
+            for(const auto& collection:collections)
+                for(const auto& appId:collection.appIds)
+                    for(const auto& game:games)
+                        if(game.appId==appId){byCollection[collection.id].push_back(&game);placed.insert(appId);}
+            QJsonArray groups;
+            for(const auto& collection:collections) {
+                QJsonArray rows;
+                for(const auto* game:byCollection.value(collection.id))
+                    rows.push_back(QJsonObject{{"appId",game->appId},{"title",game->title},{"installed",game->installed},
+                        {"playtimeMinutes",game->playtimeMinutes},{"header",game->headerUrl},{"icon",game->iconUrl},
+                        {"install",xmb::SteamOwned::installUrl(game->appId)},{"launch",xmb::SteamOwned::launchUrl(game->appId)}});
+                groups.push_back(QJsonObject{{"id",collection.id},{"name",collection.name},{"games",rows},{"count",rows.size()}});
+            }
+            QJsonArray ungrouped;
+            for(const auto& game:games) if(!placed.contains(game.appId))
+                ungrouped.push_back(QJsonObject{{"appId",game.appId},{"title",game.title},{"installed",game.installed},
+                    {"header",game.headerUrl},{"install",xmb::SteamOwned::installUrl(game.appId)},
+                    {"launch",xmb::SteamOwned::launchUrl(game.appId)}});
+            QFile file(parser.value("steam-library-report"));
+            const auto bytes=QJsonDocument(QJsonObject{{"steamId",xmb::scanSteam().steamId},{"owned",games.size()},
+                {"collections",groups},{"allGames",ungrouped},
+                {"error",error.isEmpty()?collectionsError:error},{"needsApiKey",needsKey}}).toJson();
+            if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();app.exit(2);return;}
+            app.exit(error.isEmpty()?0:2);
+        });
+        QTimer::singleShot(0,&app,[&owned]{owned.refresh(qEnvironmentVariable("XMB_STEAM_ID"));});
+        return app.exec();
+    }    if(parser.isSet("steam-collections-report")) {
+        QString error;
+        const auto collections=xmb::scanSteamCollections(qEnvironmentVariable("XMB_STEAM_ID"),&error);
+        QJsonArray rows;
+        for(const auto& collection:collections) {
+            QJsonArray ids;for(const auto& id:collection.appIds)ids.push_back(id);
+            rows.push_back(QJsonObject{{"id",collection.id},{"name",collection.name},{"appIds",ids},{"count",ids.size()}});
+        }
+        QFile file(parser.value("steam-collections-report"));
+        const auto bytes=QJsonDocument(QJsonObject{{"steamId",xmb::scanSteam().steamId},{"collections",rows},{"count",rows.size()},{"error",error}}).toJson();
+        if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();return 2;}
+        return error.isEmpty()?0:2;
+    }
+    if(parser.isSet("owned-games-report")) {
+        xmb::SteamOwned owned;
+        QObject::connect(&owned,&xmb::SteamOwned::loaded,&app,[&](const xmb::OwnedGameList& games,const QString& error,bool needsKey){
+            QJsonArray rows;
+            for(const auto& game:games)rows.push_back(QJsonObject{{"appId",game.appId},{"title",game.title},{"installed",game.installed},
+                {"playtimeMinutes",game.playtimeMinutes},{"icon",game.iconUrl},{"header",game.headerUrl},
+                {"install",xmb::SteamOwned::installUrl(game.appId)},{"launch",xmb::SteamOwned::launchUrl(game.appId)},
+                {"storePage",xmb::SteamOwned::storeUrl(game.appId)}});
+            QFile file(parser.value("owned-games-report"));
+            const auto bytes=QJsonDocument(QJsonObject{{"games",rows},{"count",rows.size()},{"error",error},{"needsApiKey",needsKey}}).toJson();
+            if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();app.exit(2);return;}
+            app.exit(error.isEmpty()?0:2);
+        });
+        QTimer::singleShot(0,&app,[&owned]{owned.refresh(qEnvironmentVariable("XMB_STEAM_ID"));});
+        return app.exec();
+    }
+    if(parser.isSet("steam-store-report")) {
+        xmb::SteamStore store;
+        QObject::connect(&store,&xmb::SteamStore::loaded,&app,[&](const xmb::StoreItemList& items,const QString& query,const QString& error){
+            QJsonArray rows;
+            for(const auto& item:items)rows.push_back(QJsonObject{{"appId",item.appId},{"title",item.title},{"image",item.imageUrl},
+                {"price",xmb::SteamStore::priceText(item)},{"discounted",item.discounted},{"windows",item.windows},
+                {"install",xmb::SteamStore::installUrl(item.appId)},{"storePage",xmb::SteamStore::storeUrl(item.appId)}});
+            QFile file(parser.value("steam-store-report"));
+            const auto bytes=QJsonDocument(QJsonObject{{"query",query},{"items",rows},{"count",rows.size()},{"error",error}}).toJson();
+            if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();app.exit(2);return;}
+            app.exit(error.isEmpty()?0:2);
+        });
+        const auto term=parser.value("steam-store-query");
+        QTimer::singleShot(0,&app,[&store,term]{if(term.isEmpty())store.topSellers();else store.search(term);});
+        return app.exec();
+    }
     if(!parser.isSet("dev-flash"))parser.showHelp(2);
     if(parser.isSet("inventory")) {
         const auto inventory=xmb::inventoryXmb(parser.value("dev-flash"));

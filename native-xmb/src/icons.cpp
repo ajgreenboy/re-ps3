@@ -89,7 +89,7 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
         const int unit=qEnvironmentVariableIntValue("XMB_ICON_DEBUG");
         const QString debug=unit<3?QString("fragColor = vec4(texture(tex%1, v_tc[0].xy).rgb, 1.);").arg(unit):
             unit==3?QString("fragColor = vec4(texture(tex3, v_tc[1].xy).rgb, 1.);"):QString("fragColor = vec4(h[0].rgb * 0.25, 1.);");
-        fragment.replace("fragColor = h[0];",debug);
+        fragment.replace("fragColor = vec4(h[0].rgb, h[0].a * layoutOpacity_);",debug);
     }
     if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) || !program_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment) || !program_.link()) {
         qWarning().noquote()<<"icons: link failed:"<<program_.log();return false;

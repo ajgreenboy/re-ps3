@@ -95,20 +95,38 @@ from its `USRDIR/EBOOT.BIN`. Both pieces follow MaXMB (MIT); see `THIRD-PARTY.md
 
 ## Steam games, friends and service apps
 
-Installed Steam games appear directly in Game using the installed-PKG artwork/title layout. Libraries are
-discovered locally and refreshed with F5 or **Refresh Game Library**; launching hands the numeric game ID to Steam.
-Original PS3 content remains supported. The Friends column uses Steam; its embedded list currently needs a
-`STEAM_WEB_API_KEY` in the launch environment and a selectable Steam account (or `XMB_STEAM_ID`). Keys stay out
-of preferences and manifests. **Open Steam Friends** also opens Steam's own friends window.
+The Game column lists the games your Steam account **owns**, organised by your own Steam library collections
+(Multiplayer, Singleplayer, Favorites, ...). A title that is installed launches straight away; one that is owned but
+not installed shows an install action that hands `steam://install/<appid>` to Steam, which performs the download.
+Row artwork, title position and spacing are the installed-PKG layout, so Steam rows and original PS3 titles share
+one presentation. F5 or **Refresh Game Library** rescans.
+
+Two different local sources feed this without writing to Steam:
+
+- installed titles, from `libraryfolders.vdf` + `appmanifest_*.acf`;
+- collections, from `userdata/<accountid>/config/cloudstorage/cloud-storage-namespace-1.json`
+  (`user-collections.*` entries).
+
+The *owned* list itself is Valve's `IPlayerService/GetOwnedGames`, which Valve requires an API key for, so set
+`STEAM_WEB_API_KEY` in the launch environment (and optionally `XMB_STEAM_ID`). Without a key the column keeps the
+installed titles and the XMB states that a key is needed instead of inventing a library. Keys stay out of
+preferences, manifests and logs.
+
+The Friends column uses Steam too and needs the same key. **Open Steam Friends** also opens Steam's own friends
+window.
 
 **Import Games and Apps** reads a versioned JSON manifest. The same tool is available without opening XMB:
 
 ```powershell
 & .\out\native-xmb\re-ps3-native.exe --data-dir <native-data> --import-apps <manifest.json>
 & .\out\native-xmb\re-ps3-native.exe --steam-report .\out\steam-installed.json
+& .\out\native-xmb\re-ps3-native.exe --steam-collections-report .\out\steam-collections.json
+& .\out\native-xmb\re-ps3-native.exe --owned-games-report .\out\steam-owned.json      # needs STEAM_WEB_API_KEY
+& .\out\native-xmb\re-ps3-native.exe --steam-library-report .\out\steam-library.json  # owned + collections
+& .\out\native-xmb\re-ps3-native.exe --steam-store-report .\out\steam-store.json [--steam-store-query portal]
 ```
 
-Edit `examples/jellyfin.json` for your server before importing it. This adds a TV/Video Services app that opens
+Edit `examples/jellyfin.json` (or `examples/media-apps.json` for Jellyfin, Plex, YouTube and Spotify) for your setup before importing it. This adds a TV/Video Services app that opens
 in your browser; embedded Jellyfin playback is future work. See [content schema](audit/CONTENT-REGISTRY.md) and
 [Steam handoff, verification and limits](audit/STEAM-INTEGRATION.md). No firmware or installed game files are changed.
 

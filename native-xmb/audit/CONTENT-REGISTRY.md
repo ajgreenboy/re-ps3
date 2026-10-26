@@ -44,3 +44,7 @@ system browser; embedded browsing and authentication are future work.
 The document is limited to 1 MiB and 1000 entries. Imports validate the complete
 source before writing, merge entries by `id` (source entries replace matches),
 and replace the target atomically.
+
+`examples/media-apps.json` seeds media services (Jellyfin, Plex, YouTube, Spotify) with the
+`kind: "web"` shape above. How these entries surface inside the XMB, next to the owned Steam
+library, is described in [XMB-TOOLING.md](XMB-TOOLING.md).

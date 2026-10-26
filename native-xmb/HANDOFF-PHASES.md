@@ -54,6 +54,13 @@ Phase 7 continuation is in `audit/VERIFICATION-HARNESS.md`: named-state capture,
 deterministic UI/focus controls and correct PNG scoring are now exercised. Matched firmware states and
 fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaround below from this Codex session.
 
+0. **Content tooling (in progress):** the Game column now lists the account's owned Steam
+   library grouped by its own Steam collections, with an install handoff for titles that are
+   not installed yet (`src/steam_owned.*`, `src/steam_collections.*`; design in
+   `audit/XMB-TOOLING.md`). Purchased titles need `STEAM_WEB_API_KEY` in the launch
+   environment; collections are read locally without it. Next there: per-game ICON0/PIC1
+   overrides, a manifest-editor page, embedded media playback, and an end-to-end
+   install -> launch -> return capture.
 1. **Phase 7 harness first:** RPCS3 reference captures of named states plus `work/ab-shot.ts` scores, so every later
    change has a number.
 2. **Phase 4 leftovers:** trace the page move's animate call (explore_plugin; its 300 ms float constants are at
