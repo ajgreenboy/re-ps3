@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "apps": [
+    {
+      "id": "jellyfin",
+      "title": "Jellyfin",
+      "kind": "web",
+      "category": "tv",
+      "url": "http://localhost:8096"
+    },
+    {
+      "id": "plex",
+      "title": "Plex",
+      "kind": "web",
+      "category": "video",
+      "url": "http://localhost:32400/web"
+    },
+    {
+      "id": "youtube-tv",
+      "title": "YouTube",
+      "kind": "web",
+      "category": "tv",
+      "url": "https://www.youtube.com/tv"
+    },
+    {
+      "id": "spotify-web",
+      "title": "Spotify",
+      "kind": "web",
+      "category": "music",
+      "url": "https://open.spotify.com"
+    }
+  ]
+}
