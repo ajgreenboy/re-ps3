@@ -645,3 +645,11 @@ Ordered by how likely a user probing the app is to hit them.
 - "Supported" in this document means the enumerated operation is implemented
   end to end in code and has no known blocking gap, not that the original panel,
   timing or conditional states are reproduced.
+
+> **Update (after this audit):** a tracked launch/return path now exists - `Shell::startTracked`
+> parents the child with `QProcess` for RPCS3 titles and imported apps, reports a crash, rescans
+> the library on return, and suppresses the idle auto-close while a title runs
+> (`Shell::gameRunning`). Verified by launching `cmd.exe /c timeout 4` from an imported entry:
+> log shows `launch: ... (tracked)` then `returned from Probe App exit 1 normal`. Steam launches
+> are still detached through `steam.exe -applaunch`, and a configured backend preference is still
+> missing, so ISC-20 stays partial.

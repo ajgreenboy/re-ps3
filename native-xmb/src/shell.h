@@ -18,6 +18,8 @@
 #include <QVector>
 #include <QImage>
 #include <memory>
+#include <QPointer>
+#include <QProcess>
 class QMediaPlayer;
 class QAudioOutput;
 class QVideoSink;
@@ -123,6 +125,8 @@ private:
     QVector<FamilyGame> familyGames_; // optional family-shared titles from <data>/family-shared.json
     SteamInstallation steamInstalled_; // last local Steam scan, for the library folders
     SteamStore steamStore_;          // public storefront browser (browse + install handoff)
+    QPointer<QProcess> game_;        // the launched title, kept so a return is observable
+    QString gameTitle_;              // its title, for the return message
     bool ownedInFlight_=false;
     QString ownedSignature_;        // app ids + installed flags + collection ids, to skip unchanged rebuilds
     std::unique_ptr<SteamArtwork> steamArtwork_;
@@ -136,6 +140,8 @@ private:
     void refreshOwnedGames();
     bool stageOwnedForRefresh() const;
     QString collectionLabel(const QString& appId) const;
+    bool startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title);
+    bool gameRunning() const;
     QVector<Entry> steamFolderEntries(const QString& mode) const;
     void openSteamFolder(const QString& mode);
     quint64 scanRequest_=0,photoRequest_=0;

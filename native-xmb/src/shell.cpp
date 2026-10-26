@@ -125,12 +125,51 @@ void Shell::addInstalledApps() {
         add(folder,content,true);
     }
 }
+// Launches a child and keeps it parented so the XMB knows when it returns. While it runs the
+// idle auto-close is suppressed; on exit the library is rescanned and the column restored,
+// which is the return lifecycle a launched game needs (audit/FEATURE-COVERAGE.md, ISC-20).
+bool Shell::startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title) {
+    if(!game_.isNull()){message_=QObject::tr("A title is already running.");return false;}
+    auto* process=new QProcess(this);
+    process->setProgram(program);
+    process->setArguments(arguments);
+    if(!workingDirectory.isEmpty())process->setWorkingDirectory(workingDirectory);
+    process->setProcessChannelMode(QProcess::ForwardedChannels);
+    connect(process,&QProcess::errorOccurred,this,[this,process,title](QProcess::ProcessError error){
+        if(error!=QProcess::FailedToStart)return;
+        process->deleteLater();game_.clear();
+        message_=title+"\n\n"+QObject::tr("This title could not be started.");emit changed();
+    });
+    connect(process,QOverload<int,QProcess::ExitStatus>::of(&QProcess::finished),this,
+            [this,process,title](int code,QProcess::ExitStatus status){
+        process->deleteLater();game_.clear();gameTitle_.clear();
+        qInfo().noquote()<<"returned from"<<title<<"exit"<<code<<(status==QProcess::NormalExit?"normal":"crashed");
+        if(status==QProcess::CrashExit)message_=title+"\n\n"+QObject::tr("This title ended unexpectedly.");
+        emit changed();
+        refreshContent();
+    });
+    process->start();
+    if(!process->waitForStarted(4000)){
+        process->deleteLater();
+        message_=title+"\n\n"+QObject::tr("This title could not be started.");
+        return false;
+    }
+    game_=QPointer<QProcess>(process);
+    gameTitle_=title;
+    activity_.start();
+    qInfo().noquote()<<"launch:"<<program<<arguments.join(' ')<<"(tracked)";
+    emit changed();
+    return true;
+}
+bool Shell::gameRunning() const {
+    return !game_.isNull() && game_->state()!=QProcess::NotRunning;
+}
 void Shell::launch(const Entry& entry) {
     const QString emulator=emulatorPath();
-    if(emulator.isEmpty() || !QProcess::startDetached(emulator,{"--no-gui",entry.value},QFileInfo(emulator).absolutePath())) {
-        message_=entry.title+"\n\nRPCS3 could not be started.";return;
+    if(emulator.isEmpty() || !startTracked(emulator,{"--no-gui",entry.value},QFileInfo(emulator).absolutePath(),entry.title)) {
+        if(emulator.isEmpty())message_=entry.title+"\n\nRPCS3 could not be started.";
+        return;
     }
-    qInfo().noquote()<<"launch:"<<emulator<<"--no-gui"<<entry.value;
 }
 // The account's own Steam library collections turn the owned list into the user's own
 // groups; the label is what the XMB row shows under the title.
@@ -244,7 +283,7 @@ void Shell::refreshContent() {
             auto& category=categories_[c];
             const auto selected=category.entries.isEmpty()?QString{}:category.entries[selections_[c]].id;
             category.entries.erase(std::remove_if(category.entries.begin(),category.entries.end(),[](const Entry& e){
-                return e.id.startsWith("steam:") || e.id.startsWith("steam-folder-") || e.id.startsWith("custom:");
+                return e.id.startsWith("steam:") || e.id.startsWith("steam-folder-") || e.id.startsWith("steam-store") || e.id.startsWith("custom:");
             }),category.entries.end());
             QVector<Entry> providers;
             if(category.id=="game") {
@@ -575,7 +614,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     });
     connect(&idle_,&QTimer::timeout,this,[this]{
         const int minutes=preferences_.value("power/idleMinutes").toInt();
-        if(minutes && !mediaOpen_ && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
+        // Never close the XMB while a title it launched is still running.
+        if(minutes && !mediaOpen_ && !gameRunning() && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
     });
     activity_.start();idle_.start(1000);applyPreferences();
     if(!preferences_.error().isEmpty())message_=preferences_.error();
@@ -681,8 +721,10 @@ void Shell::activate() {
     }
     case Action::LaunchApp: {
         const auto app=std::find_if(contentApps_.cbegin(),contentApps_.cend(),[&](const auto& a){return a.id==entry.value;});
-        if(app==contentApps_.cend() || !QFileInfo(app->executable).isFile() ||
-           !QProcess::startDetached(app->executable,app->arguments,app->workingDirectory))message_=entry.title+"\n\nThis application could not be started.";
+        if(app==contentApps_.cend() || !QFileInfo(app->executable).isFile())
+            message_=entry.title+"\n\nThis application could not be started.";
+        else if(!startTracked(app->executable,app->arguments,app->workingDirectory,entry.title))
+            message_=entry.title+"\n\nThis application could not be started.";
         break;
     }
     case Action::OpenUrl:
