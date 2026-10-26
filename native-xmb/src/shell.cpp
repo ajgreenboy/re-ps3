@@ -158,7 +158,10 @@ QVector<Entry> Shell::steamFolderEntries(const QString& mode) const {
     int decoded=0;
     const auto add=[&](const QString& appId,const QString& title,const QString& detail,Action action) {
         auto e=item("steam:"+appId,title,"game_tex_default_ps3","explore_plugin_full",action,appId);
-        e.gameTile=true;e.detail=detail;
+        // Inside a page these are ordinary items, not the category column's wide provider
+        // tiles: a gameTile row here is laid out at the wide-tile size and lands out of
+        // alignment. Artwork is centre-cropped to a square for the same reason.
+        e.gameTile=false;e.detail=detail;
         if(decoded<64) {
             QImageReader reader(SteamArtwork::cachePath(cache,appId));
             if(reader.canRead()) {
@@ -166,7 +169,11 @@ QVector<Entry> Shell::steamFolderEntries(const QString& mode) const {
                 if(size.isValid() && size.width()<=16384 && size.height()<=16384) {
                     reader.setScaledSize(size.scaled(512,288,Qt::KeepAspectRatio));
                     const auto image=reader.read();
-                    if(!image.isNull()){e.artwork=image;++decoded;}
+                    if(!image.isNull()) {
+                        const int side=std::min(image.width(),image.height());
+                        e.artwork=image.copy((image.width()-side)/2,(image.height()-side)/2,side,side);
+                        ++decoded;
+                    }
                 }
             }
         }
@@ -178,11 +185,13 @@ QVector<Entry> Shell::steamFolderEntries(const QString& mode) const {
             add(game.appId,game.title,label.isEmpty()?QObject::tr("Installed"):label,Action::LaunchSteam);
         }
     } else if(mode=="library") {
+        // Everything that is not installed: owned titles plus family-shared ones.
         for(const auto& game:ownedGames_) {
             if(game.installed)continue;
             const QString label=collectionLabel(game.appId);
             add(game.appId,game.title,label.isEmpty()?QObject::tr("Not installed"):label+" - Not installed",Action::InstallSteam);
         }
+        for(const auto& game:familyGames_)add(game.appId,game.title,QObject::tr("Family shared - Not installed"),Action::InstallSteam);
     } else if(mode=="family") {
         for(const auto& game:familyGames_)add(game.appId,game.title,QObject::tr("Family shared"),Action::InstallSteam);
     }
@@ -229,25 +238,22 @@ void Shell::refreshContent() {
             }),category.entries.end());
             QVector<Entry> providers;
             if(category.id=="game") {
-                // Steam lives in folders so the column is not a 280-row wall: installed titles,
-                // the rest of the owned library, and family-shared titles when provided.
-                const int installedCount=int(result.steam.games.size());
+                // Installed titles sit inline: they launch straight from the column. Only titles
+                // that are not on disk go into a folder, so the long tail of owned-but-unplayed
+                // games stays out of the way.
+                for(const auto& game:result.steam.games) {
+                    auto e=item("steam:"+game.appId,game.title,"game_tex_default_ps3","explore_plugin_full",
+                        Action::LaunchSteam,game.appId);
+                    e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;
+                    e.detail=collectionLabel(game.appId);providers.push_back(std::move(e));
+                }
                 const int ownedNotInstalled=int(std::count_if(ownedGames_.cbegin(),ownedGames_.cend(),
                     [](const OwnedGame& game){return !game.installed;}));
-                if(installedCount>0) {
-                    auto e=item("steam-folder-installed",QObject::tr("Installed Games"),"item_tex_ps3game_folder",
-                        "explore_plugin_full",Action::SteamFolder,"installed");
-                    e.detail=QString::number(installedCount);providers.push_back(std::move(e));
-                }
-                if(ownedNotInstalled>0) {
+                const int notInstalled=ownedNotInstalled+int(familyGames_.size());
+                if(notInstalled>0) {
                     auto e=item("steam-folder-library",QObject::tr("Not Installed"),"item_tex_plain_folder",
                         "explore_plugin_full",Action::SteamFolder,"library");
-                    e.detail=QString::number(ownedNotInstalled);providers.push_back(std::move(e));
-                }
-                if(!familyGames_.isEmpty()) {
-                    auto e=item("steam-folder-family",QObject::tr("Family Shared"),"item_tex_plain_folder",
-                        "explore_plugin_full",Action::SteamFolder,"family");
-                    e.detail=QString::number(familyGames_.size());providers.push_back(std::move(e));
+                    e.detail=QString::number(notInstalled);providers.push_back(std::move(e));
                 }
             }
             for(const auto& app:contentApps_)if(app.category==category.id) {

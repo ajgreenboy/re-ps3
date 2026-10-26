@@ -9,7 +9,7 @@ instead of adding a second menu catalog.
 
 | Piece | Where | State |
 |---|---|---|
-| Installed Steam titles in the Game column | `src/steam_library.*` | Done |
+| Installed Steam titles inline in the Game column | `src/steam_library.*` | Done |
 | **Owned (purchased) Steam games, with Install** | `src/steam_owned.*` | Done (needs `STEAM_WEB_API_KEY`) |
 | **User's own Steam collections as groups** | `src/steam_collections.*` | Done, keyless and local |
 | Import external games/apps from a JSON manifest | `src/content_registry.*` | Done |
@@ -17,7 +17,7 @@ instead of adding a second menu catalog.
 | Steam header artwork cache | `src/steam_artwork.*` | Done |
 | Browse the public storefront | `src/steam_store.*` | Done |
 | Per-game artwork overrides (ICON0/PIC1) | `src/steam_overrides.*` | Done |
-| Steam library folders (installed / not installed / family) | `src/shell.cpp` (`Action::SteamFolder`) | Done |
+| Steam **Not Installed** folder (owned not installed + family-shared) | `src/shell.cpp` (`Action::SteamFolder`) | Done |
 | Steam Families membership + shared list | `src/steam_family.*` | Done (OAuth token still open) |
 
 ## Owned games: what the Game column shows
@@ -29,8 +29,8 @@ The Game column lists what the account **owns**, not only what is installed:
   i.e. `steam://install/<id>`). Steam performs the download; the XMB never writes
   into the Steam directory.
 
-Each row's detail line carries its collection names, and the row order follows the
-collections, so the XMB mirrors the user's own library organisation.
+Each row's detail line carries its collection names, so the XMB mirrors the user's own
+library organisation.
 
 ### Sources
 
@@ -54,24 +54,27 @@ its per-entry header layout is not fully understood yet; Valve also retired the 
 
 ## Library folders
 
-The Game column groups Steam instead of listing it flat, so the column is three folder rows and then the
-original PS3 titles:
+The Game column shows the locally installed Steam titles inline and keeps the long tail in a single folder:
 
 | Row | Contents | Action on OK |
 |---|---|---|
-| Installed Games | the 10 locally installed titles | launch (`steam://rungameid/<id>`) |
-| Not Installed | the rest of the owned library (272 here) | install (`steam://install/<id>`) |
-| Family Shared | titles from `<data>/family-shared.json` (3 in the seeded run) | install |
+| Installed titles, inline (10 here) | one row per locally installed title, with its collection labels | launch (`steam://rungameid/<id>`) |
+| **Not Installed** folder | every owned title that is not installed (272 here) plus family-shared titles from `<data>/family-shared.json` (3 in the seeded run), 275 rows together | install (`steam://install/<id>`) |
 
-`Action::SteamFolder` pushes an ordinary XMB page (`Shell::Page`), so navigation, easing and Back are the same as
-every other page. Rows are built on demand; at most 64 cached thumbnails are decoded when a folder opens and the
+There is no separate **Installed Games** or **Family Shared** folder row. The **Not Installed**
+row's detail is the combined count (275). `Action::SteamFolder` pushes an ordinary XMB page
+(`Shell::Page`), so navigation, easing and Back are the same as every other page. Rows are
+built on demand; at most 64 cached thumbnails are decoded when the folder opens and the
 rest fall back to the firmware icon before the online header fetch fills them in.
 
 Verified with `XMB_DUMP_ENTRIES` (writes the catalogue, and `<dump>.folder.json` when a folder opens):
 
-- column: `Installed Games (10)`, `Not Installed (272)`, `Family Shared (3)`, then PS3 utilities;
-- Installed page: 10 rows, `action=LaunchSteam`, collection labels (`Multiplayer`, `Singleplayer`), cached artwork;
-- Not Installed page: 272 rows, `action=InstallSteam`, labels like `Hidden - Not installed`.
+- column: the 10 installed titles inline with `action=LaunchSteam`, then `Not Installed` (detail `275`),
+  then PS3 utilities;
+- installed rows: collection labels (`Multiplayer`, `Singleplayer`), cached artwork;
+- Not Installed page: 275 rows, `action=InstallSteam`, labels like `Hidden - Not installed` and
+  `Family shared - Not installed`;
+- no `Installed Games` or `Family Shared` folder row is emitted.
 
 ## Steam Families
 
@@ -83,8 +86,8 @@ What works without that token:
 
 - membership, read locally from `FamilyGroup` in `userdata/<accountid>/config/localconfig.vdf` - group id, name and
   the member account ids (verified: group `9416`, 6 members);
-- an optional shared-titles list at `<data>/family-shared.json`, which fills the **Family Shared** folder and is
-  needed because no local file maps family app ids to names:
+- an optional shared-titles list at `<data>/family-shared.json`, which adds those titles to the **Not Installed**
+  folder and is needed because no local file maps family app ids to names:
 
 ```json
 { "apps": [ { "id": 620, "title": "Portal 2" }, { "id": 400, "title": "Portal" } ] }
@@ -153,7 +156,8 @@ Verification so far, on the local install:
 - collections: 13 groups read keylessly (Singleplayer 299, Multiplayer 210, Hidden 155,
   Canyon Dogshit 131, Lego 21, Valve 20, Fighting 19, Apps 10, Hype 8, HTPC 3,
   Favorites 1, ea/VR empty);
-- library folders: see "Library folders" above (10 / 272 / 3 rows opened as pages);
+- Steam column layout: see "Library folders" above (10 installed titles inline; the `Not Installed`
+  page opens with 275 rows);
 - family: membership read for group `9416` with 6 members; shared list from JSON only;
 - owned/library reports with the key present: 282 purchased titles, 259 of them grouped into
   the 13 collections and 4 ungrouped; without a key they exit 2 with

@@ -54,16 +54,18 @@ Phase 7 continuation is in `audit/VERIFICATION-HARNESS.md`: named-state capture,
 deterministic UI/focus controls and correct PNG scoring are now exercised. Matched firmware states and
 fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaround below from this Codex session.
 
-0. **Content tooling (in progress):** the Game column now lists the account's owned Steam
-   library grouped by its own Steam collections, with an install handoff for titles that are
-   not installed yet (`src/steam_owned.*`, `src/steam_collections.*`; design in
-   `audit/XMB-TOOLING.md`). Purchased titles need `STEAM_WEB_API_KEY` in the launch
-   environment; collections are read locally without it. Next there: per-game ICON0/PIC1
-   overrides (`src/steam_overrides.*`, done: `<data>/artwork/<appid>[_icon|_bg].png`), the Game column's Steam
-   folders (installed / not installed / family, done) and Steam Families shared titles, which need an OAuth token
-   (a Web API key is rejected with 401; `<data>/family-shared.json` fills the gap meanwhile); next: a manifest-editor
-   page, embedded media playback, and an end-to-end
-   install -> launch -> return capture.
+0. **Content tooling (in progress):** the Game column lists the account's installed Steam titles
+   inline (10 here) and keeps the rest of the owned library in one **Not Installed** folder
+   (owned not installed plus family-shared from `<data>/family-shared.json`, 275 rows here),
+   with an install handoff for the titles that are not installed yet (`src/steam_owned.*`,
+   `src/steam_collections.*`; design in `audit/XMB-TOOLING.md`). Purchased titles need
+   `STEAM_WEB_API_KEY` in the launch environment; collections are read locally without it.
+   Next there: per-game ICON0/PIC1 overrides (`src/steam_overrides.*`, done:
+   `<data>/artwork/<appid>[_icon|_bg].png`), the Game column's Steam layout (installed titles
+   inline, one `Not Installed` folder for owned and family-shared rows, done) and Steam Families
+   shared titles, which need an OAuth token (a Web API key is rejected with 401;
+   `<data>/family-shared.json` fills the gap meanwhile); next: a manifest-editor page, embedded
+   media playback, and an end-to-end install -> launch -> return capture.
 1. **Phase 7 harness first:** RPCS3 reference captures of named states plus `work/ab-shot.ts` scores, so every later
    change has a number.
 2. **Phase 4 leftovers:** trace the page move's animate call (explore_plugin; its 300 ms float constants are at
