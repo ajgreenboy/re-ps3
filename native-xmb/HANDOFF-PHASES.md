@@ -25,14 +25,16 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Background, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs |
 | Ribbon | Ported end to end (2026-10-25): plugin cloth, ffd_shader1 lattice, spline.elf FFD/camera/bicubic sheet, each stage matched to RPCS3 captures; LINE1 presets follow the plugin's clock keyframes and boot schedule (audit/PIPELINE.md "Ribbon port", "Ribbon presets") |
 | Particles | linkev/PlayStation-3-XMB's sparkle layer (point sprites, closed-form motion; not a firmware port); the boot's GLOBAL ALPHA fades them in |
-| Category icons | Original uses firmware glass; fixed colours use an opaque normal-map material to resolve dark interiors. See audit/CATEGORY-ICON-FIX.md; full parity open |
+| Category icons | All built-in colours use an opaque normal-map material; Original follows the firmware monthly palette. Six day/night pairs verified; firmware shader remains diagnostic. See audit/CATEGORY-ICON-FIX.md; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | Qt drawing with firmware RCO textures and strings; layout, sizes, opacity and timing measured from the reference |
 | Text | Original font faces rasterized with FreeType and recovered load flags 10 into the 2x GL atlas; label glow/idle fade are MaXMB observations; PAF metrics, pixel phase and full parity remain open (audit/FONT-MATCHING.md) |
 | Motion | paf's own eases (`View::PafEase`): category, item and cross-fade moves are 200 ms mode 5 (traced in vsh.elf PhXmBar); the page move is 300 ms mode 4 (fitted from RPCS3, not traced). Held-key repeat 300 ms then 66.7 ms; help text drawn on the selection with no delay (audit/PIPELINE.md "Menu motion") |
 | Cold boot | 4.93 intro ported: coldboot.raf scene and script, boot sound, anim_coldboot2 events, background boot presets; skippable, `--no-intro` (audit/PIPELINE.md "Cold boot") |
 | Themes | `.p3t` still background, icons and five menu-sound roles; RAF scenes and font/colour open |
 | Input | Keyboard, XInput, and DualShock 3/4 / DualSense over HID (`src/pad.cpp`; HID untested without a controller) |
-| Installed titles | dev_hdd0 games and games.yml disc copies start in the RPCS3 next to dev_hdd0 (`--no-gui`) |
+| Installed titles | Installed Steam games appear like installed PKGs directly in Game; dev_hdd0 and games.yml titles retain their RPCS3 launch path. See audit/STEAM-INTEGRATION.md |
+| Steam Friends | Optional asynchronous Web API backend with explicit connection errors and Steam chat handoff; authenticated list not yet verified |
+| Imported apps | Versioned JSON importer adds local executables or service URLs to XMB categories; Jellyfin browser-app example included. Embedded player/authentication remain open |
 | Host settings | System Information, network list, video/audio output and master volume read and write the real PC |
 
 ## In flight (2026-10-25)
@@ -41,6 +43,12 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` has an uncommitted change from another agent. Leave it alone unless you are that agent.
 
 ## Next steps (recommended order)
+
+Latest user direction adds Steam games/Friends and future content tooling. The implemented first slice and its
+remaining requirements are in `audit/STEAM-INTEGRATION.md`: prioritize actual launch/return, permitted friends
+connection, per-game ICON0/PIC1 overrides and an importer editor. Jellyfin is currently a URL app, not a native player.
+Info-bar proportions and an analog clock now follow saved reference measurements (`audit/INFO-BAR.md`); exact
+firmware composition/projection remains open.
 
 Phase 7 continuation is in `audit/VERIFICATION-HARNESS.md`: named-state capture, expected-state guards,
 deterministic UI/focus controls and correct PNG scoring are now exercised. Matched firmware states and

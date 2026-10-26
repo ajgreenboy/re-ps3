@@ -10,6 +10,8 @@
 #include "catalog.h"
 #include "rsx_program.h"
 #include "p3t.h"
+#include "content_registry.h"
+#include "steam_library.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <algorithm>
@@ -20,6 +22,7 @@
 #include <QImageReader>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QScreen>
 #include <QtEndian>
 #include <QTextLayout>
 #include <QRawFont>
@@ -84,6 +87,10 @@ int main(int argc,char** argv) {
     parser.addOption({"ui-clock","Fix the displayed UI date/time for local captures; never changes the host clock","date-time"});
     parser.addOption({"focus-time","Fix focused-label age in milliseconds for glow/idle-fade captures","milliseconds"});
     parser.addOption({"motion-report","Write easing samples at different host frame rates without opening a window","json-file"});
+    parser.addOption({"steam-root","Override the local Steam installation directory","directory"});
+    parser.addOption({"steam-report","Write discovered installed Steam games and exit without launching them","json-file"});
+    parser.addOption({"steam-friends-report","Write Steam friends or an explicit connection error without opening a window","json-file"});
+    parser.addOption({"import-apps","Validate and merge a games/service-app manifest into the native library, then exit","json-file"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
@@ -123,8 +130,37 @@ int main(int argc,char** argv) {
             <<(theme.dynamic()?"(dynamic)":"")<<","<<icons.size()<<"icons,"<<sounds.size()<<"sounds";
         return 0;
     }
-    if(!parser.isSet("dev-flash"))parser.showHelp(2);
     const QString data=parser.isSet("data-dir")?parser.value("data-dir"):QDir(QCoreApplication::applicationDirPath()).filePath("data");
+    if(parser.isSet("steam-root"))qputenv("XMB_STEAM_ROOT",parser.value("steam-root").toUtf8());
+    if(parser.isSet("import-apps")) {
+        QString error;
+        if(!xmb::ContentRegistry::importFile(parser.value("import-apps"),QDir(data).filePath("apps.json"),error)){qCritical().noquote()<<error;return 2;}
+        qInfo()<<"Apps imported successfully.";return 0;
+    }
+    if(parser.isSet("steam-report")) {
+        const auto steam=xmb::scanSteam();QJsonArray games,warnings;
+        for(const auto& game:steam.games)games.push_back(QJsonObject{{"appId",game.appId},{"title",game.title},{"installDirectory",game.installDirectory},{"artwork",game.artwork}});
+        for(const auto& warning:steam.warnings)warnings.push_back(warning);
+        const auto bytes=QJsonDocument(QJsonObject{{"games",games},{"warnings",warnings},{"count",games.size()}}).toJson();
+        QFile file(parser.value("steam-report"));
+        if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();return 2;}
+        return 0;
+    }
+    if(parser.isSet("steam-friends-report")) {
+        xmb::SteamFriends friends;
+        QObject::connect(&friends,&xmb::SteamFriends::loaded,&app,[&](const xmb::SteamFriendList& people,const QString& error){
+            QJsonArray entries;
+            for(const auto& person:people)entries.push_back(QJsonObject{{"steamId",person.steamId},{"name",person.name},{"game",person.game},{"personaState",person.personaState}});
+            QFile file(parser.value("steam-friends-report"));const auto bytes=QJsonDocument(QJsonObject{{"friends",entries},{"error",error}}).toJson();
+            if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();app.exit(2);return;}
+            app.exit(error.isEmpty()?0:2);
+        });
+        const auto id=qEnvironmentVariable("XMB_STEAM_ID",xmb::scanSteam().steamId);
+        QTimer::singleShot(0,&app,[&friends,id]{friends.refresh(id);});
+        return app.exec();
+    }
+        
+    if(!parser.isSet("dev-flash"))parser.showHelp(2);
     if(parser.isSet("inventory")) {
         const auto inventory=xmb::inventoryXmb(parser.value("dev-flash"));
         if(inventory.value("documentCount").toInt()==0){qCritical()<<"No local XMBML files found";return 2;}
@@ -347,14 +383,12 @@ int main(int argc,char** argv) {
     QObject::connect(&shell,&xmb::Shell::requestQuit,&app,&QApplication::quit);
     QObject::connect(&shell,&xmb::Shell::changed,&window,[&]{if(shell.fullscreen()!=window.isFullScreen()){if(shell.fullscreen())window.showFullScreen();else window.showNormal();}});
     if(shell.fullscreen())window.showFullScreen();else window.show();
+    if(window.screen())qInfo()<<"native display refresh:"<<window.screen()->refreshRate()<<"Hz";
     if(parser.isSet("script")) {
         // Local verification: replay key presses and save framebuffer grabs at the window's real resolution, e.g.
         // --script "full,wait,LEFT,DOWN,grab=C:/tmp/a.png,quit". One token every 300 ms.
         auto tokens=std::make_shared<QStringList>(parser.value("script").split(','));
-        const auto tap=[view](int key){
-            QKeyEvent press(QEvent::KeyPress,key,Qt::NoModifier);QCoreApplication::sendEvent(view,&press);
-            QKeyEvent release(QEvent::KeyRelease,key,Qt::NoModifier);QCoreApplication::sendEvent(view,&release);
-        };
+        const auto tap=[view](int key){view->replayKeyTap(key);};
         auto* timer=new QTimer(&app);timer->setInterval(300);
         QObject::connect(timer,&QTimer::timeout,&app,[&app,&window,&shell,view,tokens,timer,tap]{
             if(tokens->isEmpty()){timer->stop();return;}
@@ -362,7 +396,7 @@ int main(int argc,char** argv) {
             static const QHash<QString,int> keys{{"LEFT",Qt::Key_Left},{"RIGHT",Qt::Key_Right},{"UP",Qt::Key_Up},{"DOWN",Qt::Key_Down},
                 {"ENTER",Qt::Key_Return},{"ESC",Qt::Key_Escape},{"PGUP",Qt::Key_PageUp},{"PGDN",Qt::Key_PageDown},{"BACKSPACE",Qt::Key_Backspace},
                 {"PREV",Qt::Key_BracketLeft},{"NEXT",Qt::Key_BracketRight},{"SHUFFLE",Qt::Key_M},{"REPEAT",Qt::Key_R},
-                {"ZOOMIN",Qt::Key_Plus},{"ZOOMOUT",Qt::Key_Minus},{"RESETVIEW",Qt::Key_0},{"ROTATELEFT",Qt::Key_Q},{"ROTATERIGHT",Qt::Key_E}};
+                {"ZOOMIN",Qt::Key_Plus},{"ZOOMOUT",Qt::Key_Minus},{"RESETVIEW",Qt::Key_0},{"ROTATELEFT",Qt::Key_Q},{"ROTATERIGHT",Qt::Key_E},{"REFRESH",Qt::Key_F5}};
             if(token=="full")shell.setFullscreen(true);
             else if(token.startsWith("size=")) {
                 const auto dimensions=token.mid(5).split('x');bool widthOk=false,heightOk=false;
@@ -377,7 +411,10 @@ int main(int argc,char** argv) {
                 qInfo().noquote()<<"script: grab"<<token.mid(5)<<image.size()<<(image.save(token.mid(5))?"saved":"FAILED");
                 const QJsonObject state{{"category",shell.categories()[shell.category()].id},
                     {"categoryIndex",shell.category()},{"depth",shell.depth()},{"selection",shell.selection()},
-                    {"width",image.width()},{"height",image.height()},{"clock",shell.clockText()}};
+                    {"width",image.width()},{"height",image.height()},{"clock",shell.clockText()},
+                    {"entryId",shell.entries().isEmpty()?QString{}:shell.entries()[shell.selection()].id},
+                    {"entryTitle",shell.entries().isEmpty()?QString{}:shell.entries()[shell.selection()].title},
+                    {"entryCount",shell.entries().size()}};
                 QFile stateFile(token.mid(5)+".json");const auto bytes=QJsonDocument(state).toJson();
                 if(!stateFile.open(QIODevice::WriteOnly) || stateFile.write(bytes)!=bytes.size())qWarning()<<"script: state save FAILED"<<stateFile.errorString();
                 qInfo()<<"script: state"<<state;

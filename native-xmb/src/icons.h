@@ -10,11 +10,11 @@
 #include <QOpenGLShaderProgram>
 
 namespace xmb {
-// Original colour uses the firmware's glass icons (qgl/icons.qrc): quad.vpo and icons_no_ss_no_shad.fpo, the
+// Firmware diagnostics use the glass icons (qgl/icons.qrc): quad.vpo and icons_no_ss_no_shad.fpo, the
 // variant the firmware runs at 1920x1080 with ICONS.mnu SHADOW STREN 0 (captured from RPCS3, audit/PIPELINE.md).
 // Per icon the shader reads the icontex normal map (tex0), icontex "dif" (tex1), widgets/other/texenv.dds rotated by
 // _EnvRot (tex2) and a 128x128 px cut of the frame behind the icon (tex3, glutils CookieCutter), which it refracts.
-// Fixed colours use the same quad/normal maps with a native opaque material (audit/CATEGORY-ICON-FIX.md).
+// Normal presentation uses the same quad/normal maps with an opaque theme material (audit/CATEGORY-ICON-FIX.md).
 //
 // Uniforms follow the capture of custom_render_plugin's values (fragment constants patched into the microcode):
 //   _PackedLightParams[i] = (attenuation i, light1.i, light2.i, 0) for i = DIFF, SPEC1, SPEC2; [3] = (ENV, SPEC1 POW,
@@ -38,7 +38,7 @@ public:
     bool init(QOpenGLFunctions_3_3_Core& gl,Assets& assets);
     bool ready() const { return ready_; }
     void setClock(const QDateTime& when) { clock_=when; }
-    void setFixedTint(const QVector3D& tint) { fixedTint_=tint; }
+    void setFixedTint(const QVector3D& tint,float strength=.12f) { fixedTint_=tint;tintStrength_=strength; }
     // Draws the icons onto targetFbo, cutting each one's background from that same framebuffer first.
     // light: 0 night .. 1 day (the background's NightDayBlend preset blend).
     void render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& icons,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo);
@@ -50,6 +50,7 @@ private:
     QOpenGLShaderProgram opaque_;
     bool opaqueReady_=false;
     QVector3D fixedTint_;
+    float tintStrength_=.12f;
     GLuint vao_=0,vbo_=0,diffuse_=0,environment_=0,cut_=0,cutFbo_=0;
     QHash<QString,GLuint> normalMaps_;
     QHash<QString,float> day_,night_;

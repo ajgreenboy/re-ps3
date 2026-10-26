@@ -22,6 +22,7 @@
 #include <cmath>
 #include <numbers>
 #include <QSet>
+#include <QScopedValueRollback>
 #include <algorithm>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -50,6 +51,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&shell_,&Shell::requestLibrary,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,"Choose media folder");if(!path.isEmpty())shell_.chooseLibrary(path);});
     connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");if(!file.isEmpty())shell_.chooseWallpaper(file);});
     connect(&shell_,&Shell::requestTheme,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Theme",{},"PS3 Themes (*.p3t)");if(!file.isEmpty())shell_.chooseTheme(file);});
+    connect(&shell_,&Shell::requestImportApps,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Import Games and Apps",{},"App manifests (*.json)");if(!file.isEmpty())shell_.importApps(file);});
     connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){openOsk("System Name",value,[this](const QString& name){shell_.setSystemName(name);});});
     connect(&shell_,&Shell::requestNewUser,this,[this]{openOsk("Create New User",{},[this](const QString& name){shell_.createUser(name);});});
     loadWallpaper();
@@ -243,7 +245,23 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     icons_.setClock(backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime());
     static const QVector3D colours[]={{.55f,.39f,.13f},{.12f,.36f,.68f},{.40f,.20f,.60f},{.62f,.17f,.18f},{.16f,.43f,.32f},{.48f,.50f,.54f}};
     const int selectedColour=std::clamp(shell_.theme(),0,5);
-    icons_.setFixedTint(selectedColour?colours[selectedColour]:QVector3D{});
+    QVector3D iconTint=colours[selectedColour];
+    if(selectedColour==0) {
+        // Original follows the original month textures, including seasonal interpolation. This tint also works
+        // over wallpaper; it changes RGB only and never samples/refraction-darkens the icon interior.
+        const auto date=(backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime()).date();
+        const auto monthTint=[&](int month){
+            if(!monthIconTints_.contains(month)) {
+                const auto& palette=assets_.image("qgl/lines",QString("textures/month_bg/rgb/%1.dds").arg(month,2,10,QChar('0')));
+                const auto c=palette.isNull()?QColor(200,180,120):palette.pixelColor(palette.width()/2,palette.height()/2);
+                monthIconTints_.insert(month,QVector3D(c.redF(),c.greenF(),c.blueF()));
+            }
+            return monthIconTints_.value(month);
+        };
+        const float fraction=float(date.day()-1)/date.daysInMonth();
+        iconTint=monthTint(date.month())*(1-fraction)+monthTint(date.month()%12+1)*fraction;
+    }
+    icons_.setFixedTint(iconTint,selectedColour==0?.45f:.12f);
     // Original colour theme: the firmware's own background shader and monthly palettes.
     // The firmware background renders every colour setting (as on the PS3, a fixed colour is the same wave pinned to one
     // palette); only the wallpaper mode bypasses it.
@@ -820,13 +838,26 @@ void View::drawScene(QPainter& p) {
                 // Setting rows carry the small round settings bullet: 18 px, 39 px focused (reference 95 s).
                 const bool bullet=entry.container=="qgl/icontex" && entry.texture=="23n";
                 const double size=bullet?18+focus*21:level==0?60+focus*44:40+focus*16;
-                const bool tile=entry.texture.contains("album") || entry.container=="file"; // ICON0 thumbnails are wide
+                const bool tile=entry.gameTile || entry.texture.contains("album") || entry.container=="file"; // ICON0 thumbnails are wide
                 const double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
                 const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
                 // icontex items are glass icons like the categories: the firmware draws them with the same shader at
                 // brightness 1, behind an open page 0.247 (focused row 0.698) (RPCS3 capture, audit/PIPELINE.md);
                 // everything else is RCO or file artwork.
-                if(const auto themed=shell_.themeIcon(entry.themeIcon);!themed.isNull()) { // a PS3 theme's icon, on the glass icon's quad
+                if(entry.gameTile) {
+                    // Native installed PKGs render ICON0 directly in this slot: no launcher card/chrome.
+                    const QRectF card(iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight);
+                    const auto& cover=entry.artwork.isNull()?assets_.image(entry.container,entry.texture):entry.artwork;
+                    if(!cover.isNull()) {
+                        const QSizeF fitted=QSizeF(cover.size()).scaled(card.size(),Qt::KeepAspectRatio);
+                        p.save();p.setOpacity(iconAlpha);p.drawImage(QRectF(card.center()-QPointF(fitted.width()/2,fitted.height()/2),fitted),cover);p.restore();
+                    }
+                }
+                else if(!entry.artwork.isNull()) {
+                    const auto fitted=QSizeF(entry.artwork.size()).scaled({iconWidth,iconHeight},Qt::KeepAspectRatio);
+                    p.save();p.setOpacity(iconAlpha);p.drawImage(QRectF(QPointF(iconX-fitted.width()/2,y-fitted.height()/2),fitted),entry.artwork);p.restore();
+                }
+                else if(const auto themed=shell_.themeIcon(entry.themeIcon);!themed.isNull()) { // a PS3 theme's icon, on the glass icon's quad
                     const double quad=itemIconSize(level,bullet,focus);
                     p.save();p.setOpacity(iconAlpha);p.drawImage(QRectF(iconX-quad/2,y-quad/2,quad,quad),themed);p.restore();
                 }
@@ -835,6 +866,11 @@ void View::drawScene(QPainter& p) {
                     iconQueue_.push_back({entry.texture,{iconX,y},itemIconSize(level,bullet,focus),brightness,columnAlpha,2700+157.2*depth});
                 }
                 else drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
+                if(entry.friendRow) {
+                    p.save();p.setOpacity(iconAlpha);p.setPen(QPen(QColor(20,20,20,180),1.5));
+                    p.setBrush(entry.presenceState==0?QColor(130,130,130):entry.presenceState==7?QColor(110,190,245):QColor(140,220,110));
+                    p.drawEllipse(QPointF(iconX+size*.36,y+size*.36),5+focus*2,5+focus*2);p.restore();
+                }
                 // Observed on the console by MaXMB (MIT, styles.css "labels-idle"; not yet confirmed on our references,
                 // whose clips never rest on a row): after 4 s on one row of Photo/Music/Video/Game/Network/PSN, the
                 // other rows' titles fade out over 0.8 s.
@@ -879,8 +915,20 @@ void View::drawScene(QPainter& p) {
         // Info bar (system_plugin tex_infobar: a translucent white band with a bright bottom edge) framing the clock in the
         // top-right corner; the clock's centre sits at y~104 as in the reference video.
         if(!infoPage) {
-            p.drawImage(QRectF(1490,60,430,88),assets_.image("system_plugin","tex_infobar")); // stretched, as the 1x125 strip is meant
-            text({1240,82,550,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+            // Measured from the saved 1920x1080 firmware root capture; runtime PAF projection remains to trace.
+            const QRectF infoBar(1329,75,591,58);
+            p.save();p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,20));p.drawRoundedRect(infoBar,4,4);
+            p.setOpacity(.12);p.drawImage(infoBar,assets_.image("system_plugin","tex_infobar"));
+            p.setOpacity(1);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));p.drawRoundedRect(infoBar.adjusted(.5,.5,-.5,-.5),4,4);p.restore();
+            text({1240,82,525,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+            const auto time=shell_.clockDateTime().time();const QPointF center(1791,104);
+            const auto hand=[&](double angle,double length){const double a=angle*std::numbers::pi/180.;return QPointF(std::sin(a)*length,-std::cos(a)*length);};
+            p.save();p.setBrush(Qt::NoBrush);
+            for(int shadow=1;shadow>=0;--shadow) {
+                const auto c=center+QPointF(shadow*1.5,shadow*1.5);p.setPen(QPen(shadow?QColor(0,0,0,150):QColor(255,255,255),2.7,Qt::SolidLine,Qt::RoundCap));
+                p.drawEllipse(c,14,14);p.drawLine(c,c+hand(time.minute()*6,10));p.drawLine(c,c+hand((time.hour()%12)*30+time.minute()*.5,7));
+            }
+            p.restore();
         }
     }
     if(infoPage) {
@@ -952,11 +1000,16 @@ quint16 arrowBit(int key) {
     switch(key){case Qt::Key_Up:return 0x0001;case Qt::Key_Down:return 0x0002;case Qt::Key_Left:return 0x0004;case Qt::Key_Right:return 0x0008;default:return 0;}
 }
 }
+void View::replayKeyTap(int key) {
+    QScopedValueRollback<bool> replay(replayingInput_,true);
+    QKeyEvent press(QEvent::KeyPress,key,Qt::NoModifier);keyPressEvent(&press);
+    QKeyEvent release(QEvent::KeyRelease,key,Qt::NoModifier);keyReleaseEvent(&release);
+}
 void View::keyPressEvent(QKeyEvent* e) {
     if(introRunning()){coldboot_.skip();e->accept();return;}
 #ifdef Q_OS_WIN
     // Arrows go through pollController's repeat (the firmware's, not the OS's), so auto-repeats are dropped here.
-    if(const auto bit=arrowBit(e->key())) {
+    if(const auto bit=arrowBit(e->key());bit && !replayingInput_) {
         if(!e->isAutoRepeat()){keyHeld_|=bit;keyPressed_|=bit;}
         e->accept();return;
     }

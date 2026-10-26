@@ -51,6 +51,8 @@ public:
     void setFocusTime(qint64 milliseconds) { focusTimeOverride_=milliseconds;++uiRevision_;update(); }
     // The 4.93 cold-boot intro before the XMB (coldboot.h); off for measurement and scripted runs. Set before show.
     void setIntroEnabled(bool enabled) { introEnabled_=enabled; }
+    // Verification taps dispatch synchronously, independent of foreground focus and the physical input poll.
+    void replayKeyTap(int key);
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -63,6 +65,7 @@ private:
     QOpenGLShaderProgram background_;
     GLuint vao_=0;
     bool glReady_=false;
+    bool replayingInput_=false;
     QTimer timer_;
     QElapsedTimer clock_;
     // Opt-in, bounded in-memory frame trace; written only on shutdown to avoid per-frame disk I/O.
@@ -100,6 +103,7 @@ private:
     TextRenderer textRenderer_;
     int uiRevision_=0;    // bumped on every shell change
     QImage wallpaperImage_,monthImage_;
+    QHash<int,QVector3D> monthIconTints_;
     QString wallpaperPath_;
     quint64 wallpaperRequest_=0;
     std::unique_ptr<QOpenGLTexture> monthTexture_;

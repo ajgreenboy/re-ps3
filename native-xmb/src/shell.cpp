@@ -3,6 +3,9 @@
 #include "catalog.h"
 #include "host.h"
 #include "p3t.h"
+#include "steam_library.h"
+#include "steam_artwork.h"
+#include <QDesktopServices>
 #include <QAudioOutput>
 #include <QMediaPlayer>
 #include <QVideoSink>
@@ -124,8 +127,103 @@ void Shell::launch(const Entry& entry) {
     }
     qInfo().noquote()<<"launch:"<<emulator<<"--no-gui"<<entry.value;
 }
+void Shell::refreshContent() {
+    if(contentScanning_){contentRefreshPending_=true;return;}
+    contentScanning_=true;
+    struct Result { SteamInstallation steam; QVector<ContentApp> apps; QHash<QString,QImage> art; QString error; };
+    auto* watcher=new QFutureWatcher<Result>(this);
+    connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher]{
+        auto result=watcher->result();watcher->deleteLater();contentScanning_=false;
+        steamRoot_=result.steam.root;
+        const bool accountChanged=steamId_!=result.steam.steamId;
+        steamId_=result.steam.steamId;
+        if(!result.error.isEmpty()){message_="App Library\n\n"+result.error;result.apps=contentApps_;}
+        contentApps_=result.apps;
+        for(int c=0;c<categories_.size();++c) {
+            auto& category=categories_[c];
+            const auto selected=category.entries.isEmpty()?QString{}:category.entries[selections_[c]].id;
+            category.entries.erase(std::remove_if(category.entries.begin(),category.entries.end(),[](const Entry& e){
+                return e.id.startsWith("steam:") || e.id.startsWith("custom:");
+            }),category.entries.end());
+            QVector<Entry> providers;
+            if(category.id=="game")for(const auto& game:result.steam.games) {
+                auto e=item("steam:"+game.appId,game.title,"game_tex_default_ps3","explore_plugin_full",Action::LaunchSteam,game.appId);
+                e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;providers.push_back(std::move(e));
+            }
+            for(const auto& app:contentApps_)if(app.category==category.id) {
+                auto e=item("custom:"+app.id,app.title,app.kind=="game"?"game_tex_default_ps3":"tex_video","explore_plugin_full",
+                    app.kind=="game"?Action::LaunchApp:Action::OpenUrl,app.kind=="game"?app.id:app.url);
+                e.detail=app.kind=="game"?QString{}:"Service app · Opens in your browser";
+                e.artwork=result.art.value("custom:"+app.id);e.gameTile=app.kind=="game";providers.push_back(std::move(e));
+            }
+            category.entries=providers+category.entries;
+            selections_[c]=0;
+            for(int i=0;i<category.entries.size();++i)if(category.entries[i].id==selected){selections_[c]=i;break;}
+            if(!contentLoaded_ && category.id=="game" && !providers.isEmpty())selections_[c]=0;
+        }
+        contentLoaded_=true;
+        if(accountChanged){steamFriendList_.clear();friendsAge_.invalidate();rebuildFriends();}
+        if(!qEnvironmentVariable("STEAM_WEB_API_KEY").isEmpty())refreshSteamFriends(false,accountChanged);
+        QStringList missingArt;
+        for(const auto& category:categories_)for(const auto& e:category.entries)
+            if(e.id.startsWith("steam:") && e.artwork.isNull())missingArt.push_back(e.value);
+        if(qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0")steamArtwork_->refresh(missingArt);
+        qInfo()<<"content: Steam installed"<<result.steam.games.size()<<"imported apps"<<contentApps_.size()<<"warnings"<<result.steam.warnings.size();
+        emit changed();
+        if(contentRefreshPending_){contentRefreshPending_=false;QTimer::singleShot(0,this,&Shell::refreshContent);}
+    });
+    const QString data=dataDirectory_;
+    watcher->setFuture(QtConcurrent::run([data]{
+        Result result;result.steam=scanSteam();
+        ContentRegistry::load(QDir(data).filePath("apps.json"),result.apps,result.error);
+        const auto read=[&](const QString& key,const QString& path){
+            if(path.isEmpty() || result.art.size()>=128)return;
+            QImageReader reader(path);reader.setDecideFormatFromContent(true);reader.setAutoTransform(true);
+            const auto size=reader.size();if(!size.isValid() || size.width()>16384 || size.height()>16384)return;
+            reader.setScaledSize(size.scaled(512,288,Qt::KeepAspectRatio));
+            const auto image=reader.read();if(!image.isNull())result.art.insert(key,image);
+        };
+        const QString cache=QDir(data).filePath("cache/steam");
+        for(const auto& game:result.steam.games)read("steam:"+game.appId,game.artwork.isEmpty()?SteamArtwork::cachePath(cache,game.appId):game.artwork);
+        for(const auto& app:result.apps)read("custom:"+app.id,app.artwork);
+        return result;
+    }));
+}
+void Shell::importApps(const QString& file) {
+    if(file.isEmpty())return;
+    QString error;
+    if(!ContentRegistry::importFile(file,QDir(dataDirectory_).filePath("apps.json"),error))message_="Import Games and Apps\n\n"+error;
+    else refreshContent();
+    emit changed();
+}
+void Shell::refreshSteamFriends(bool showErrors,bool force) {
+    if(friendsRefreshing_ && !force)return;
+    showFriendsErrors_=showErrors;friendsRefreshing_=true;steamFriendsError_="Refreshing Steam friends…";rebuildFriends();emit changed();
+    steamFriends_.refresh(qEnvironmentVariable("XMB_STEAM_ID",steamId_));
+}
+void Shell::rebuildFriends() {
+    for(int c=0;c<categories_.size();++c)if(categories_[c].id=="friends") {
+        auto& entries=categories_[c].entries;
+        const QString selected=entries.isEmpty()?QString{}:entries[std::clamp(selections_[c],0,int(entries.size())-1)].id;
+        entries.clear();
+        for(const auto& person:steamFriendList_) {
+            auto e=item("steam-friend:"+person.steamId,person.name,"tex_Avatar_Default","explore_category_friend",Action::OpenUrl,"steam://friends/message/"+person.steamId);
+            static const QStringList states{"Offline","Online","Busy","Away","Snooze","Looking to trade","Looking to play"};
+            e.detail=person.game.isEmpty()?states.value(person.personaState,"Online"):"Playing "+person.game;
+            e.friendRow=true;e.presenceState=person.game.isEmpty()?person.personaState:7;entries.push_back(std::move(e));
+        }
+        auto open=item("steam-friends:open","Open Steam Friends","item_tex_NewFriend","explore_category_friend",Action::OpenUrl,"steam://open/friends");
+        open.detail=steamFriendsError_.isEmpty() && steamFriendList_.isEmpty()?"Your Steam friends list is empty.":steamFriendsError_;entries.push_back(std::move(open));
+        entries.push_back(item("steam-friends:refresh","Refresh Steam Friends","item_tex_Players","explore_category_friend",Action::RefreshFriends));
+        const QString setup="Steam Friends\n\nFriends and presence come from Steam.\nSet STEAM_WEB_API_KEY in your launch environment and restart XMB.\nYour most recent local Steam account is selected automatically.\nUse XMB_STEAM_ID to select another numeric Steam ID.\nThe API key is never stored in XMB settings.\nPrivate lists and unavailable connections are reported here.";
+        entries.push_back(item("steam-friends:setup","Steam Connection","item_tex_Profile_Onlines","explore_category_friend",Action::Information,setup));
+        selections_[c]=0;for(int i=0;i<entries.size();++i)if(entries[i].id==selected){selections_[c]=i;break;}
+    }
+}
 Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(parent),
     assets_(assets),preferences_(dataDirectory),library_(),interactionAudio_(assets.root()),profiles_(dataDirectory),
+    dataDirectory_(dataDirectory),
+    steamArtwork_(std::make_unique<SteamArtwork>(QDir(dataDirectory).filePath("cache/steam"))),
     player_(std::make_unique<QMediaPlayer>()),audio_(std::make_unique<QAudioOutput>()),video_(std::make_unique<QVideoSink>()) {
     QDir().mkpath(dataDirectory);
     const QString sys="explore_category_sysconf",full="explore_plugin_full";
@@ -216,6 +314,27 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     selections_.fill(0,categories_.size());
     rebuildUsers();
     addInstalledApps();
+    connect(&steamFriends_,&SteamFriends::loaded,this,[this](const SteamFriendList& friends,const QString& error){
+        steamFriendList_=friends;steamFriendsError_=error;friendsRefreshing_=false;rebuildFriends();emit changed();
+        if(error.isEmpty())friendsAge_.restart();
+        if(showFriendsErrors_ && !error.isEmpty()){message_="Steam Friends\n\n"+error;emit changed();}
+        showFriendsErrors_=false;
+    });
+    connect(steamArtwork_.get(),&SteamArtwork::loaded,this,[this](const QString& id,const QImage& image){
+        for(auto& category:categories_)for(auto& e:category.entries)if(e.id=="steam:"+id)e.artwork=image;
+        emit changed();
+    });
+    connect(&steamRefresh_,&QTimer::timeout,this,[this]{
+        if(categories_[category_].id=="friends" && !qEnvironmentVariable("STEAM_WEB_API_KEY").isEmpty())refreshSteamFriends();
+    });
+    steamRefresh_.start(60000);
+    steamFriendsError_="Connect Steam friends with STEAM_WEB_API_KEY, or open the Steam friends window.";
+    rebuildFriends();
+    for(auto& category:categories_)if(category.id=="game") {
+        category.entries.push_back(item("content:refresh","Refresh Game Library","item_tex_plain_folder",full,Action::RefreshContent));
+        category.entries.push_back(item("content:import","Import Games and Apps","item_tex_plain_folder",full,Action::ImportApps));
+    }
+    QTimer::singleShot(0,this,&Shell::refreshContent);
     connect(&profiles_,&Profiles::changed,this,[this]{rebuildUsers();emit changed();});
     connect(&profiles_,&Profiles::failed,this,[this](const QString& error){message_=error;emit changed();});
     player_->setAudioOutput(audio_.get());player_->setVideoSink(video_.get());
@@ -265,7 +384,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         QTimer::singleShot(0,this,[this,request,error]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(true,error);});
     });
 }
-Shell::~Shell()=default;
+Shell::~Shell(){disconnect(&steamFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
 const QVector<Entry>& Shell::entries()const {return pages_.isEmpty()?categories_[category_].entries:pages_.last().entries;}
 const QVector<Entry>& Shell::entriesAt(int depth)const {return depth==0?categories_[category_].entries:pages_.at(depth-1).entries;}
 int Shell::selectionAt(int depth)const {return depth==0?selections_[category_]:pages_.at(depth-1).selection;}
@@ -281,6 +400,8 @@ void Shell::horizontal(int delta) {
     if(!pages_.isEmpty())return;
     library_.cancel();scanRequest_=0;loading_=false;status_.clear();
     const int previous=category_;category_=std::clamp(category_+delta,0,int(categories_.size())-1);
+    if(previous!=category_ && categories_[category_].id=="friends" && !qEnvironmentVariable("STEAM_WEB_API_KEY").isEmpty()
+       && (!friendsAge_.isValid() || friendsAge_.elapsed()>30000))refreshSteamFriends();
     if(previous!=category_)interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
 }
 void Shell::vertical(int delta) {
@@ -332,6 +453,24 @@ void Shell::activate() {
     case Action::Folder:openDirectory(entry.value);break;
     case Action::File:openFile(entry);break;
     case Action::Launch:launch(entry);break;
+    case Action::LaunchSteam: {
+        const QString exe=QDir(steamRoot_).filePath("steam.exe");
+        if(!QFileInfo(exe).isFile() || !QProcess::startDetached(exe,{"-applaunch",entry.value},steamRoot_))
+            message_=entry.title+"\n\nSteam could not be started. Refresh the game library and check the Steam installation.";
+        break;
+    }
+    case Action::LaunchApp: {
+        const auto app=std::find_if(contentApps_.cbegin(),contentApps_.cend(),[&](const auto& a){return a.id==entry.value;});
+        if(app==contentApps_.cend() || !QFileInfo(app->executable).isFile() ||
+           !QProcess::startDetached(app->executable,app->arguments,app->workingDirectory))message_=entry.title+"\n\nThis application could not be started.";
+        break;
+    }
+    case Action::OpenUrl:
+        if(!QDesktopServices::openUrl(QUrl(entry.value)))message_=entry.title+"\n\nThe application could not be opened.";
+        break;
+    case Action::RefreshContent:refreshContent();break;
+    case Action::RefreshFriends:refreshSteamFriends(true);break;
+    case Action::ImportApps:emit requestImportApps();break;
     case Action::Unavailable:message_=entry.title+"\n\nThis feature is not available in the native recreation yet.";break;
     }
     emit changed();
@@ -485,6 +624,10 @@ void Shell::loadTheme() {
 qint64 Shell::mediaPosition()const{return player_->position();}
 qint64 Shell::mediaDuration()const{return player_->duration();}
 void Shell::refreshDirectory(){
+    if(pages_.isEmpty() && !mediaOpen_) {
+        if(categories_[category_].id=="friends")refreshSteamFriends(true);else refreshContent();
+        return;
+    }
     if(pages_.isEmpty() || pages_.last().directory.isEmpty() || mediaOpen_)return;
     loading_=true;status_="Reading media folder…";
     const auto kind=categories_[category_].id;

@@ -93,10 +93,30 @@ Titles in `dev_hdd0/game`, and disc copies in RPCS3's `config/games.yml`, start 
 dev_hdd0 (`rpcs3.exe --no-gui`). A title RPCS3 lists starts by Title ID (`%RPCS3_GAMEID%:<id>`); any other starts
 from its `USRDIR/EBOOT.BIN`. Both pieces follow MaXMB (MIT); see `THIRD-PARTY.md`.
 
+## Steam games, friends and service apps
+
+Installed Steam games appear directly in Game using the installed-PKG artwork/title layout. Libraries are
+discovered locally and refreshed with F5 or **Refresh Game Library**; launching hands the numeric game ID to Steam.
+Original PS3 content remains supported. The Friends column uses Steam; its embedded list currently needs a
+`STEAM_WEB_API_KEY` in the launch environment and a selectable Steam account (or `XMB_STEAM_ID`). Keys stay out
+of preferences and manifests. **Open Steam Friends** also opens Steam's own friends window.
+
+**Import Games and Apps** reads a versioned JSON manifest. The same tool is available without opening XMB:
+
+```powershell
+& .\out\native-xmb\re-ps3-native.exe --data-dir <native-data> --import-apps <manifest.json>
+& .\out\native-xmb\re-ps3-native.exe --steam-report .\out\steam-installed.json
+```
+
+Edit `examples/jellyfin.json` for your server before importing it. This adds a TV/Video Services app that opens
+in your browser; embedded Jellyfin playback is future work. See [content schema](audit/CONTENT-REGISTRY.md) and
+[Steam handoff, verification and limits](audit/STEAM-INTEGRATION.md). No firmware or installed game files are changed.
+
 ## PS3 themes
 
-Fixed colour choices use light, opaque category materials with a subtle theme tint. Original retains the
-firmware glass shader. Details and remaining reference work are in `audit/CATEGORY-ICON-FIX.md`.
+All built-in colours use light, opaque category materials with a theme tint. Original follows the firmware's
+monthly palette; its glass shader remains available for diagnosis. Details and remaining reference work are in
+`audit/CATEGORY-ICON-FIX.md`.
 
 Settings > Theme Settings > Select Theme opens a PS3 theme file (`.p3t`). The theme is read in memory (`src/p3t.cpp`,
 ported from MaXMB, MIT; see `THIRD-PARTY.md`) and nothing from it is written to disk:

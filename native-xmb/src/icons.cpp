@@ -94,13 +94,12 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) || !program_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment) || !program_.link()) {
         qWarning().noquote()<<"icons: link failed:"<<program_.log();return false;
     }
-    // Fixed colours are a native palette selection. Their reconstructed
-    // background is not the firmware glass shader's captured input surface:
-    // refracting it produces near-black interiors. Use an opaque material with
-    // the original geometry/normal maps, and keep the firmware path for Original.
+    // The reconstructed background is not the glass shader's captured input surface: refraction can produce
+    // near-black interiors in Original as well as fixed colours. Use the opaque theme material normally;
+    // keep the firmware program available through the explicit diagnostics below.
     static const char* opaqueFragment=R"(#version 330 core
 in vec4 v_tc[10];out vec4 colour;
-uniform sampler2D tex0;uniform vec3 tint;uniform float brightness,opacity;
+uniform sampler2D tex0;uniform vec3 tint;uniform float brightness,opacity,tintStrength;
 void main(){
     vec4 material=texture(tex0,v_tc[0].xy);
     if(material.a<=0.)discard;
@@ -110,7 +109,7 @@ void main(){
     float bevel=pow(1.-max(normal.z,0.),2.)*.10;
     float light=(.58+.26*diffuse+bevel)*mix(.70,1.,clamp(brightness,0.,1.));
     // Tint the surface, not its opacity; only shape coverage and page transitions fade.
-    colour=vec4(clamp(mix(vec3(1.),tint,.12)*light,0.,1.),material.a*opacity);
+    colour=vec4(clamp(mix(vec3(1.),tint,tintStrength)*light,0.,1.),material.a*opacity);
 })";
     opaqueReady_=opaque_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) &&
         opaque_.addShaderFromSourceCode(QOpenGLShader::Fragment,opaqueFragment) && opaque_.link();
@@ -231,6 +230,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
             opaque_.bind();opaque_.setUniformValueArray("vc",vc.data(),int(vc.size()));
             const float peak=std::max({fixedTint_.x(),fixedTint_.y(),fixedTint_.z()});
             opaque_.setUniformValue("tint",fixedTint_/peak);opaque_.setUniformValue("brightness",float(icon.brightness));
+            opaque_.setUniformValue("tintStrength",tintStrength_);
             opaque_.setUniformValue("opacity",float(icon.opacity));opaque_.setUniformValue("tex0",0);
             gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,normals);
             gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
