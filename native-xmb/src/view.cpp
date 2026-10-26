@@ -754,8 +754,9 @@ void View::drawScene(QPainter& p) {
         for(int i=0;i<categories.size();++i) {
             // Firmware geometry (RPCS3 capture at 1920x1080, audit/PIPELINE.md): focus column at x 565, icons 200 px apart
             // with 10 px more either side of the focused one, centres y 290 (focused 280); quads 117 px, focused 167 px;
-            // shader brightness 0.698 unfocused, 1 focused. Inside a page (reference 95 s) the open category steps 250 px
-            // left; the ones to its right stay faintly (~0.1) on a 186 px pitch, and the ones to its left leave.
+            // shader brightness 0.698 unfocused, 1 focused. Inside a page (reference 95 s) the open category steps 262 px
+            // left (traced: RCO xmenu posX -395 and the captured open-page x 303, audit/LAYOUT-TRACE.md); the ones to its
+            // right stay faintly (~0.1) on a 186 px pitch, and the ones to its left leave.
             if(infoPage)break;
             const auto& cat=categories[i];const double distance=i-categoryPosition_;
             const bool open=i==shell_.category();
