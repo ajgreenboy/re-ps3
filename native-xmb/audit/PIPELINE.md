@@ -18,7 +18,7 @@ CATEGORY-ICON-FIX.md for the evidence and fidelity limits.
 | Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Replaced**: linkev/PlayStation-3-XMB's sparkle layer (`particles.cpp`, THIRD-PARTY.md): additive point sprites, closed-form motion from per-particle seeds, drawn over the finished background; not a firmware port (the earlier CPU reconstruction of particles.elf drifted and jumped with the ribbon's arc length). The boot's GLOBAL ALPHA still applies |
 | HDR tone map + glare | `lines.qrc` glutils ToneMap, GlareSource*, Gaussian, AccGlare, ApplyGlare, HDR.mnu | **Ported** |
 | Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n–70n normal maps + dif | **Ported** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo, the variant the firmware runs at 1080p; uniforms from ICONS.mnu by the packing read from an RPCS3 capture; matches RPCS3's frame side by side |
-| Item icons, labels, dialogs, info bar | explore_plugin / system_plugin via paf (RCO layouts and textures) | **Reconstructed**: RCO textures are the firmware's; positions, sizes and fades measured from the 60 fps reference |
+| Item icons, labels, dialogs, info bar | explore_plugin / system_plugin via paf (RCO layouts and textures) | **Reconstructed** (item icons partly ported): `icontex` item icons and settings bullets now draw through the firmware glass program - captured sizes 77.616/184.800 (items) and 35.721/85.050 (bullets), row pitch 80, brightness 1.0 in the open column and 0.247/0.698 behind an open page, all confirmed in `ITEM-ICONS.md`; RCO/artwork/theme icons and the labels still use Qt |
 | Text | paf font renderer with the RD-R/B (SCE-PS3 Rodin) faces from dev_flash/data/font | **Partial**: native-resolution GL glyph atlas, Qt shaping/rasterization; PAF coverage/style trace in TEXT-RENDERER.md; hinting and glow parity open |
 | Cold-boot intro | custom_render_plugin boot case + anim_coldboot2 events; raf.sprx playing vsh/resource/coldboot.raf (coldboot.jsx) with raf.qrc vert0/sce01; coldboot_stereo.ac3 | **Ported** (`coldboot.cpp`): RAF scene, script timeline, sound, event times, background boot presets; matches the RPCS3 capture (see "Cold boot") |
 
@@ -337,7 +337,9 @@ Translator fixes found by diffing against RPCS3's own GLSL for this program (`Lo
 
 Clock inputs updated: `_ChangingColor` now samples amb.bmp and `_LuminanceParams` derives from GLASS; see
 `ICON-MATERIAL-CLOCK.md`. Daytime visual parity still needs a matched capture. Item
-icons in the open column still go through Qt. The background is brighter than RPCS3's at the same hour, which also
+icons in the open column still go through Qt. **Superseded by ITEM-ICONS.md**: icontex item icons and settings bullets now
+queue to `IconRenderer` (view.cpp) and only RCO, artwork and theme icons stay on the Qt path. The background is brighter
+than RPCS3's at the same hour, which also
 lightens the refracted unfocused icons. Diagnosis: `XMB_ICON_UCODE=<capture>` runs on the firmware's captured
 constants; `XMB_ICON_DEBUG=0..4` shows a single input texture or the result.
 

@@ -102,6 +102,12 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
 ## Phases to 100%
 
 ### Phase 1: category icon renderer (done for category icons; item icons in the open column still Qt, see below)
+- Item-icon parity: [ITEM-ICONS.md](audit/ITEM-ICONS.md). Item icons and settings bullets share the category program and
+  material (quad.vpo + icons_no_ss_no_shad.fpo, night override); captured sizes 77.616/184.800 (items) and 35.721/85.050
+  (bullets), row pitch 80 (+175 first row, level-0 row 385 above focus), brightness 1.0 in the open column and
+  0.247/0.698 behind an open page, parent column at distance 2857.2 with x 303/455.5 - all confirm the native values.
+  Open: the opaque path tints RGB by brightness where the firmware scales alpha, a second 1.1022x size class, level>0
+  sizes, and the Qt fallback for non-icontex icons.
 - Firmware: `icons.qrc` quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo, ICONS.mnu (+ day, night, yoake,
   higure, boot and music overrides), texenv.dds, amb.bmp, `icontex.qrc` normal maps and `dif`.
 - The uniform packing in custom_render_plugin is VMX code that Ghidra decompiles poorly (apply = FUN_000473b4, draw =
