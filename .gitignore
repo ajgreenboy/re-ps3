@@ -30,6 +30,7 @@ xenon/xmb_switch_tables.toml
 /work/*
 !/work/*.ts
 !/work/*.ps1
+!/work/*.thresholds.json
 *.bin
 *.idb
 *.i64

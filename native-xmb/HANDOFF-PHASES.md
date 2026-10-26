@@ -146,6 +146,7 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
   `VIDEO-REFERENCES.md`; the day path otherwise matches. No night-brightness correction is warranted.
 
 ### Phase 3: item, column and dialog drawing through the firmware's own layout
+- Traced values and remaining gaps: [LAYOUT-TRACE.md](audit/LAYOUT-TRACE.md).
 - Initial trace: system_plugin infobar/infotext and OSK templates mostly have zero/dynamic geometry. Do not
   replace measured pixels with those zeros. `basic_plugins.prx` FUN_00007c7c owns infobar initialization;
   its final configuration goes through vshcommon_28549FD0 and runtime PAF setters. Local read-only export:

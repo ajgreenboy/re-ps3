@@ -1,0 +1,69 @@
+{
+  "schema": "xmb-per-layer-thresholds/1",
+  "updated": "2026-10-25",
+  "reference": "out/native-reference/ab-rpcs3-root.png",
+  "baselinePair": {
+    "native": "out/native-reference/ab-native-root.png",
+    "note": "Stored 1920x1080 native capture of the settled Game root menu, scored against the stored RPCS3 frame. This pair is the historical baseline: whole frame 18.20 dB / 0.8388 SSIM. Offline scoring of this pair is deterministic, so its gate catches tooling (decoder/metric/crop) regressions."
+  },
+  "tolerance": {
+    "psnrDb": 0.5,
+    "ssim": 0.004,
+    "rationale": "Two canonical capture runs are pixel-identical (PSNR Infinity, SSIM 1.0000), so run-to-run jitter contributes nothing. The budget therefore only absorbs GPU/driver shader noise and small environment drift. 0.5 dB PSNR is a 12% MSE increase, while a visible layer regression (a moved icon, a dropped label row, a shifted gradient) moves a layer score by more than 1 dB; 0.004 SSIM is likewise far above observed noise and far below a visible regression."
+  },
+  "capture": {
+    "exe": "C:/dev/out/native-phase2/re-ps3-native.exe",
+    "flash": "C:/dev/rpcs3/bin/dev_flash",
+    "tokens": "full,wait,wait,wait",
+    "renderClock": 30,
+    "backgroundClock": "2026-10-25T10:00:00",
+    "uiClock": "2026-10-25T12:32:00",
+    "focusTimeMs": 2000,
+    "timeoutMs": 120000,
+    "note": "Canonical capture recipe. All animation clocks are pinned, so two runs are pixel-identical. XMB_STEAM_ROOT points at an empty directory: the stored RPCS3 reference frame's Game column predates this PC's Steam library and shows the dev_flash XMBML entries only. backgroundClock 10:00 is the traced daytime mapping used by the stored baseline; uiClock matches the reference frame's 25/10 12:32."
+  },
+  "layers": [
+    {
+      "name": "frame",
+      "description": "Whole 1920x1080 frame (aggregate; not a layer by itself)",
+      "crop": [0, 0, 1920, 1080],
+      "baseline": { "psnr": 18.2027, "ssim": 0.8388 },
+      "captureBaseline": { "psnr": 18.0018, "ssim": 0.8278 }
+    },
+    {
+      "name": "top background",
+      "description": "Upper-left background gradient and glare, no clock, no category icons",
+      "crop": [0, 0, 700, 200],
+      "baseline": { "psnr": 19.0241, "ssim": 0.9251 },
+      "captureBaseline": { "psnr": 20.2505, "ssim": 0.9364 }
+    },
+    {
+      "name": "category icon row",
+      "description": "Full-width band across the category icons and their spacing",
+      "crop": [0, 240, 1920, 120],
+      "baseline": { "psnr": 20.1304, "ssim": 0.9022 },
+      "captureBaseline": { "psnr": 21.0771, "ssim": 0.8982 }
+    },
+    {
+      "name": "item label row",
+      "description": "Focused item row: icon plus glowing label. Content still differs (reference 'Corrupted Data' vs native PS Vita entries), so this is a regression gate, not a fidelity pass",
+      "crop": [400, 425, 800, 100],
+      "baseline": { "psnr": 11.8619, "ssim": 0.3791 },
+      "captureBaseline": { "psnr": 11.8454, "ssim": 0.3774 }
+    },
+    {
+      "name": "clock text",
+      "description": "Digits of the top-right date/time only",
+      "crop": [1570, 80, 260, 50],
+      "baseline": { "psnr": 10.3272, "ssim": 0.3504 },
+      "captureBaseline": { "psnr": 13.5098, "ssim": 0.6131 }
+    },
+    {
+      "name": "info bar",
+      "description": "Top-right info bar: translucent band, border and analog clock icon, including its text",
+      "crop": [1329, 75, 591, 58],
+      "baseline": { "psnr": 13.3995, "ssim": 0.4973 },
+      "captureBaseline": { "psnr": 17.1242, "ssim": 0.7046 }
+    }
+  ]
+}

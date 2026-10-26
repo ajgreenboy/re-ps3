@@ -96,6 +96,58 @@ native shows PS Vita System Application Utility, and the ribbon phase is unmatch
 avoids the differing left-side category sequence. Reference UI clock is 25/10 12:32; the background override
 uses the previously traced daytime mapping at 10:00. Full-frame state/content matching remains outstanding.
 
+## Per-layer thresholds (2026-10-25)
+
+`work/ab-layers.ts` gates six named regions against the stored RPCS3 frame using the threshold table in
+`work/ab-layers.thresholds.json`. The default invocation scores the stored baseline pair; `--capture` re-renders
+the native with every clock pinned and gates that fresh frame instead.
+
+```powershell
+# score the stored baseline pair (deterministic; reproduces the 18.20 dB baseline)
+bun work/ab-layers.ts
+
+# regression check: render the current build, then gate the fresh frame
+bun work/ab-layers.ts --capture
+
+# machine-readable report for tooling
+bun work/ab-layers.ts --capture --json
+```
+
+Exit 0 means every layer is within budget, 1 means a layer left its budget, and 2 is an input/runtime error
+(missing file, dimension mismatch, capture failure). `--exe`, `--flash`, `--steam-root`, the three clock options,
+`--focus-time`, `--tokens` and `--timeout-ms` override the canonical capture recipe stored in the thresholds file;
+the default exe is the phase-2 build at `C:/dev/out/native-phase2/re-ps3-native.exe`.
+
+### Threshold rationale
+
+Baselines are measured values, not goals; each gate is `measured >= baseline - budget` with a global budget of
+0.5 dB PSNR and 0.004 SSIM. Two canonical captures are pixel-identical (PSNR Infinity, SSIM 1.0000), so the budget
+does not need to cover run-to-run jitter. 0.5 dB PSNR is a 12% MSE increase and 0.004 SSIM is a comparable visible
+change, while a moved icon, a dropped label row or a shifted gradient moves a layer by more than 1 dB. Stored-pair
+scoring is deterministic, so its gate mainly catches decoder, metric or crop regressions. These are regression
+gates on an unmatched state, not firmware-fidelity passes: the item-label and clock baselines are low because the
+native content and old info bar still differ from the reference frame.
+
+### Measured baseline
+
+Stored pair = `out/native-reference/ab-rpcs3-root.png` vs `ab-native-root.png`; canonical capture = current build
+with pinned clocks and an empty Steam root.
+
+| Layer | Crop (x,y,w,h) | Stored pair PSNR / SSIM | Canonical capture PSNR / SSIM |
+|---|---|---:|---:|
+| Whole frame | 0,0,1920,1080 | 18.20 / 0.8388 | 18.00 / 0.8278 |
+| Top background | 0,0,700,200 | 19.02 / 0.9251 | 20.25 / 0.9364 |
+| Category icon row | 0,240,1920,120 | 20.13 / 0.9022 | 21.08 / 0.8982 |
+| Item label row | 400,425,800,100 | 11.86 / 0.3791 | 11.85 / 0.3774 |
+| Clock text | 1570,80,260,50 | 10.33 / 0.3504 | 13.51 / 0.6131 |
+| Info bar | 1329,75,591,58 | 13.40 / 0.4973 | 17.12 / 0.7046 |
+
+The capture recipe pins `--render-clock 30 --background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00
+--focus-time 2000`, uses the `full,wait,wait,wait` script tokens and points `XMB_STEAM_ROOT` at an empty directory
+so the Game column keeps the reference's pre-Steam dev_flash content. The stored-pair row reproduces the earlier
+whole-frame 18.20 dB / 0.8388 and category-row 20.13 dB / 0.9022 baselines; the older top-background 19.03 dB /
+0.9248 used an unrecorded crop and is re-measured here as 19.02 / 0.9251.
+
 ## Continuation
 
 1. Assemble matching reference states and provenance using permitted saved/user-provided evidence. Do not use
@@ -104,4 +156,6 @@ uses the previously traced daytime mapping at 10:00. Full-frame state/content ma
    substantially larger than the shared category-column crop. Keep font/phase differences separate.
 3. Continue `FONT-MATCHING.md` for overlap coverage, subpixel placement, PAF metrics and weight effects.
 4. Trace the page move's actual 300 ms/mode-4 call, then particles and RCO-driven layout as routed by the main handoff.
-5. Set fidelity/regression thresholds only for matched states; do not turn these exploratory scores into pass gates.
+5. `work/ab-layers.ts` now enforces per-layer regression budgets against the stored RPCS3 frame. It does not
+   establish firmware fidelity while states are unmatched: replace each baseline deliberately when a matched
+   reference state and a corrected layer are captured, and do not read a pass as visual parity.
