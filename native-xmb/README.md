@@ -95,15 +95,17 @@ from its `USRDIR/EBOOT.BIN`. Both pieces follow MaXMB (MIT); see `THIRD-PARTY.md
 
 ## Steam games, friends and service apps
 
-The Game column lists the games your Steam account **owns**, organised by your own Steam library collections
-(Multiplayer, Singleplayer, Favorites, ...). A title that is installed launches straight away; one that is owned but
-not installed shows an install action that hands `steam://install/<appid>` to Steam, which performs the download.
-Row artwork, title position and spacing are the installed-PKG layout, so Steam rows and original PS3 titles share
-one presentation. F5 or **Refresh Game Library** rescans.
+The Game column lists the games your Steam account **owns**. Installed titles sit inline in the column and launch
+straight away; each row's detail carries its Steam collection labels (Multiplayer, Singleplayer, Favorites, ...).
+Titles that are owned but not installed go into one **Not Installed** folder row, whose detail shows the combined
+count. Row artwork, title position and spacing are the installed-PKG layout, so Steam rows and original PS3 titles
+share one presentation. F5 or **Refresh Game Library** rescans.
 
-Steam is kept in folders rather than one long list: **Installed Games**, **Not Installed** (the rest of the owned
-library, each row offering Install) and **Family Shared** when a shared list exists. Opening a folder pushes a page
-of that subset; OK launches an installed title or hands `steam://install/<id>` to Steam for one that is not installed.
+Steam uses one folder rather than a folder per subset: **Not Installed** holds every owned title that is not on
+disk plus any family-shared titles from `<native-data>/family-shared.json` (275 rows here: 272 owned and 3
+family-shared, alongside the 10 installed titles inline). The earlier **Installed Games** and **Family Shared**
+folder rows are gone. Opening **Not Installed** pushes an ordinary XMB page of rows; OK hands `steam://install/<id>`
+to Steam, which performs the download.
 
 Two different local sources feed this without writing to Steam:
 
@@ -125,7 +127,7 @@ library. The key is never written to preferences, reports, manifests or logs.
 licensed to another member, and the family endpoint (`IFamilyGroupsService`) needs an OAuth access token - a Web
 API key is rejected with 401 (verified). Family *membership* is read locally from Steam (`FamilyGroup` in
 `userdata/<accountid>/config/localconfig.vdf`, e.g. group and 6 members here). To include shared titles now, write
-`<native-data>/family-shared.json`:
+`<native-data>/family-shared.json` (its titles join the **Not Installed** folder):
 
 ```json
 { "apps": [ { "id": 620, "title": "Portal 2" } ] }
