@@ -64,6 +64,11 @@ The reports/importer do not open a window or require dev_flash. Reports contain 
 
 ## Verification and remaining work
 
+- The rebuilt normal executable was reopened with the user's Green preference. Computer Use confirmed light,
+  opaque category icons and actual installed game artwork. The live log reports approximately 240 paint frames/s
+  on that window's display, with zero missing images. The concurrent Store/owned-library/collection continuation
+  is documented in `XMB-TOOLING.md`; those changes and the pre-existing icon diagnostics were preserved.
+
 - The actual installed-library report found 10 titles across the local libraries; a redistributable installer was excluded. Eight had local wide artwork after the expanded cache lookup.
 - A disposable manifest probe retained one installed game and rejected an incomplete download, a missing folder and an escaping install path.
 - Native CLI imports succeeded into a new data directory. Reimport retained two entries by ID. An invalid `javascript:` service URL returned exit 2 and left the registry SHA-256 unchanged.

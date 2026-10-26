@@ -5,6 +5,10 @@ RPCS3 VSH recording. Project goal: a complete native C++ recreation.
 
 ## Read this set
 
+Latest continuations (2026-10-25): [Steam and installed-PKG content](STEAM-INTEGRATION.md),
+[import registry](CONTENT-REGISTRY.md), [all-theme icon correction](CATEGORY-ICON-FIX.md),
+[info bar](INFO-BAR.md) and [animation smoothness](ANIMATION-SMOOTHNESS.md).
+
 1. [Functional analysis](FUNCTIONS.md): behavior, data ownership, state variants
    and implementation requirements across every category.
 2. [Feature catalog](FEATURE-CATALOG.md): 307 indexed guide topics/actions,
