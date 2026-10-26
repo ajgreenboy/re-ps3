@@ -53,6 +53,9 @@ Recreate the stock firmware4.93 XMB feature surface and presentation with native
 - [ ] ISC-7: Keyboard and controller share navigation/actions without separate behavior.
 - [ ] ISC-8: All submenu/overlay transitions preserve selection and return history.
 - [ ] ISC-9: Rendering sustains the display refresh rate with measured frame pacing.
+- [x] ISC-9.1: The matched 1920x1000 navigation probe has a Qt swap-callback p95 interval below 5 ms on the current high-refresh display.
+- [x] ISC-9.2: Actual PafEase samples for both used modes agree within 1e-12 at 60, 120 and 240 Hz.
+- [x] ISC-9.3: Anti: the smoothness correction changes no pixels in the three existing settled-state self-reference probes.
 - [ ] ISC-10: Background geometry, material, colour and motion match recorded reference.
 - [ ] ISC-11: Original interaction sounds have reference-correct timing and mixing.
 - [ ] ISC-12: RCO text/localization, layout, animation, image and model resources are supported.
@@ -139,6 +142,8 @@ Build logs establish compilation. Requested window observations establish specif
   Root/child focus gaps and parent columns now use recorded geometry; original
   RSX material, wave simulation and many service pages remain open work.
 
+- 2026-10-25 19:24: Prioritized the reported animation regression over pending info-bar work. Repaint requests now follow Qt swap callbacks; canonical elapsed-time easing avoids host-rate-dependent curves. Retained firmware durations and the existing 100 ms catch-up cap. Callback evidence closes only ISC-9.1/9.2/9.3; physical presentation and sustained workloads keep ISC-9 open. See audit/ANIMATION-SMOOTHNESS.md.
+
 ## Changelog
 
 - 2026-10-25 | conjectured: the ribbon was a flat sheet displaced by ffd_shader1, placed on screen by fitted constants
@@ -151,7 +156,16 @@ Build logs establish compilation. Requested window observations establish specif
   learned: icon texture coordinates need normalization at ingestion
   criterion now: original icon fidelity remains open; the specific orientation correction has a native screenshot
 
+- 2026-10-25 | conjectured: firmware recurrence could be advanced independently at each fractional host tick without changing its trajectory
+  refuted by: actual mode-5 samples at 100 ms were 0.7758198506 at 60 Hz, 0.7539896043 at 120 Hz and 0.7437066212 at 240 Hz
+  learned: interpolate the cumulative canonical 60 Hz curve; repaint scheduling also needs to follow the display rather than a 16 ms input timer
+  criterion now: ISC-9.1/9.2/9.3 separate callback cadence, rate-invariant easing and settled visual guards from unverified physical presentation
+
 ## Verification
+
+- ISC-9.1: 2026-10-25 bounded callback trace — corrected 1920x1000 report: "p95Ms": 4.1971 and "fps": 236.96217593232973 over 6000–10000 ms. Baseline p95 17.3672 ms; callback scope only.
+- ISC-9.2: 2026-10-25 actual native motion diagnostic — both modes' sampled positions agree across 60/120/240 Hz within 1e-12; retargeting preserves the current value and long advance reaches the target. Source/evidence paths in audit/ANIMATION-SMOOTHNESS.md.
+- ISC-9.3: 2026-10-25 existing Game, Settings and Game Settings scenarios — "ssim": 1 for each settled self-reference, PSNR Infinity. Both Release builds succeeded; the normal application is reopened.
 
 - 2026-10-25 Phase 7: 20/20 known PNG format/filter cases decode byte-exactly. Independent Game, Settings and
   Game Settings page captures are pixel-identical at 960x540 with all capture clocks pinned. Threshold failure,

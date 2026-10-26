@@ -139,6 +139,11 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
 - Item icons: the firmware's icon glow/focus effect and the "PS" frame for game icons.
 
 ### Phase 4: motion and timing from firmware
+- Smoothness correction (2026-10-25): repaint requests follow Qt swap callbacks instead of the 16 ms input timer;
+  cumulative sampling preserves the canonical ease at 60/120/240 Hz. Matched navigation at 1920x1000 improved
+  from 62.58 to 236.96 swap callbacks/s (p95 gap 17.37 to 4.20 ms). These are callback measurements;
+  physical presentation and sustained workloads remain open. See `audit/ANIMATION-SMOOTHNESS.md` for evidence,
+  diagnostics and remaining limits. The rebuilt normal app is open; info-bar/clock work remains next.
 - Done 2026-10-25: the menu ease is paf's own. The cross bar is vsh.elf's `PhXmBar`; its focus moves are 200 ms
   paf animations in acceleration mode 5, a per-frame ease with k = 0.2206 that lands on frame 12
   (audit/PIPELINE.md "Menu motion"; `View::PafEase`).

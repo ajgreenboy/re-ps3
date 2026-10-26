@@ -65,7 +65,12 @@ private:
     bool glReady_=false;
     QTimer timer_;
     QElapsedTimer clock_;
-    qint64 previous_=0,reportAt_=0;
+    // Opt-in, bounded in-memory frame trace; written only on shutdown to avoid per-frame disk I/O.
+    struct FrameSample { qint64 at,cpu; bool swap,rebuilt,moving; };
+    QString frameTracePath_;
+    QVector<FrameSample> frameTrace_;
+    void saveFrameTrace();
+    qint64 previousFrameNs_=0,reportAt_=0;
     quint64 frames_=0;
     double categoryPosition_=6;
     int previousCategory_=6;
