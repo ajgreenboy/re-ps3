@@ -41,6 +41,8 @@ public:
 
     // Free-text catalogue search. Calls loaded() once with either items or error.
     void search(const QString& term, int page = 1);
+    // A featured section of the storefront: "top_sellers", "new_releases" or "specials".
+    void featured(const QString& section);
     // Featured top sellers, i.e. a sensible "browse" list before the user types.
     void topSellers();
     // Abandon the in-flight request; no signal is emitted for the cancelled query.
@@ -57,7 +59,7 @@ signals:
     void busyChanged(bool busy);
 
 private:
-    void request(const QString& url, const QString& query, bool searchResults);
+    void request(const QString& url, const QString& query, bool searchResults, const QString& section = QStringLiteral("top_sellers"));
     void finish(quint64 generation);
     void fail(quint64 generation, const QString& query, const QString& message);
 

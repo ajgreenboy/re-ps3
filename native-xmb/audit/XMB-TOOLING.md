@@ -125,7 +125,9 @@ The primary surface described above. A **Steam Store** row above the Not Install
 opens a browse page of live top sellers (`SteamStore::topSellers`) with prices, and each row
 hands `steam://install/<id>` to Steam. Verified in a scripted run: page title `Steam Top
 Sellers`, 7 rows, prices such as `$69.99` and `$17.99 (-70%)`, every row `action=InstallSteam`.
-A free-text search page (on-screen keyboard) is the next step; nothing is bought inside the XMB.
+Opening the store now shows three sections first - Top Sellers, New Releases and Specials - and only requests the
+chosen one, so the page is instant; verified as depth 2 with 7 rows. A free-text search page (on-screen keyboard) is
+the next step; nothing is bought inside the XMB.
 
 ### 2. Import Games and Apps
 

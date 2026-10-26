@@ -704,7 +704,22 @@ void Shell::activate() {
         break;
     }
     case Action::SteamFolder:openSteamFolder(entry.value);break;
-    case Action::SteamStoreBrowse:steamStore_.topSellers();break;
+    case Action::SteamStoreBrowse: {
+        // Sections first: no request until a section is chosen, so opening the store is instant.
+        Page page;page.title=QObject::tr("Steam Store");
+        const auto section=[&](const QString& id,const QString& title,const QString& detail){
+            auto e=item("store-section:"+id,title,"item_tex_plain_folder","explore_plugin_full",
+                Action::SteamStoreSection,id);
+            e.detail=detail;page.entries.push_back(std::move(e));
+        };
+        section("top_sellers",QObject::tr("Top Sellers"),QObject::tr("What sells most right now"));
+        section("new_releases",QObject::tr("New Releases"),QObject::tr("Just released"));
+        section("specials",QObject::tr("Specials"),QObject::tr("Discounted games"));
+        pages_.push_back(std::move(page));
+        emit changed();
+        break;
+    }
+    case Action::SteamStoreSection:steamStore_.featured(entry.value);break;
     case Action::InstallSteam: {
         // Steam owns the download: opening steam://install/<id> asks the client to install it.
         if(!QDesktopServices::openUrl(QUrl(SteamOwned::installUrl(entry.value))))
