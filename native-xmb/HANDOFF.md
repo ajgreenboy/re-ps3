@@ -4,6 +4,8 @@
 See [MaXMB integration and handoff review](audit/MAXMB-INTEGRATION.md) for the October 25 continuation.
 The checkpoints below are historical; the procedural-wave descriptions no longer describe the current renderer.
 
+Latest broader phase work: [app tooling, playback controls and idle display](audit/PHASE-CONTINUATION.md).
+
 ## Active direction
 
 **Latest continuation:** see [October24 full audit and handoff](audit/HANDOFF.md)

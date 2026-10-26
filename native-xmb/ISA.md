@@ -2,7 +2,7 @@
 task: Complete native C++ recreation of PS3 XMB
 phase: execute
 progress: in-progress
-updated: 2026-10-25
+updated: 2026-10-26
 ---
 
 # Native XMB ideal state
@@ -98,6 +98,17 @@ Use Steam and imported content as explicitly identified native providers for the
 - [x] ISC-42: All six built-in colour captures have a focused icon-interior luma above 130 in the named probe.
 - [x] ISC-42.1: The same icon-interior RGB differs by at most one channel level between day and night captures for each built-in colour.
 
+- [x] ISC-43: The integrated editor saves a renamed service registration while preserving its stable ID.
+- [x] ISC-43.1: Invalid editor upserts preserve malformed existing registry bytes.
+- [x] ISC-43.2: Removing an unsaved editor registration changes no registry file and reports no error.
+- [x] ISC-44: Native playing-video controls hide after inactivity and return when paused.
+- [x] ISC-44.1: Native seeks clamp at zero and the known duration, including overflow deltas.
+- [x] ISC-45: Screensaver settings expose five supported choices and persist a changed selection.
+- [x] ISC-45.1: Native dim/wake replay restores the exact awake frame after input.
+- [x] ISC-45.2: Paused video remains pixel-identical under a forced idle age.
+- [x] ISC-45.4: An XMB message overlay suppresses additional screensaver dimming during a forced idle replay.
+- [ ] ISC-45.3: Screensaver brightness, fade and wake behavior match measured firmware evidence.
+
 ## Test Strategy
 
 Build logs establish compilation. Requested window observations establish specific visible states; source inspection alone does not close workflow criteria. Feature-specific runtime evidence is recorded in audit/HANDOFF.md and audit/VISUAL-BEHAVIOR.md; no new test suite is introduced.
@@ -113,6 +124,9 @@ Build logs establish compilation. Requested window observations establish specif
 | Content providers | SteamLibrary/SteamFriends/SteamArtwork/ContentRegistry | Verified Steam lifecycle, connected friends, custom game artwork editor and embedded media services |
 
 ## Decisions
+
+- 2026-10-26: refined: user requested continuing functionality across phases, beyond Steam Friends. Added phase-6 registration/media slices and phase-5 native idle dimming. Exact firmware player rendering/timing, native Jellyfin playback and remaining screen states stay open. See audit/PHASE-CONTINUATION.md.
+
 
 - 2026-10-26: Prefer an isolated read-only connection to the signed-in Steam client for Friends. A valid Web API profile response followed by friends HTTP 401 does not justify telling the user to make their list public. The optional helper reads 46 real contacts without an AppID assignment or privacy change; credentials remain local and are not passed to the helper. See audit/STEAM-CLIENT-FRIENDS.md.
 
@@ -168,6 +182,9 @@ Build logs establish compilation. Requested window observations establish specif
 - 2026-10-25: User reported gray icons in fresh Original-profile screenshots and required correct rendering across all themes. Extended the opaque material to Original, deriving its tint from current/next firmware monthly palettes. Six day/night pairs and an Original wallpaper replay verify appearance invariants; full firmware material parity remains open.
 
 ## Changelog
+
+- 2026-10-26: Conjecture: idle dimming can be composed without changing the existing UI layers. Refuted-by: the first screenshot exposed a draw accidentally inserted in the background pass. Learned: apply the dim overlay only after shader icons and UI composition; corrected captures show full-frame 0.450688 RGB ratio and exact wake restoration. Criteria-now: ISC-45.1/45.2 verified for native behavior; ISC-45.3 remains open.
+
 
 - 2026-10-25 | conjectured: the ribbon was a flat sheet displaced by ffd_shader1, placed on screen by fitted constants
   refuted by: RPCS3 captures of the lines1 vertex buffer (a rolled 128x128 sheet written by SPU spline.elf)
@@ -238,3 +255,7 @@ Recording evidence and observed nested return are detailed in
 HANDOFF.md. QRC/DDS build and local70-map sheet
 completed; Computer Use observed original Settings shapes and Theme → Color →
 Back restoring selection. The broad transition-parity criterion remains unchecked.
+
+- ISC-43–45.2: 2026-10-26 Release build; 17 disposable component checks; actual editor rename/save; five-option Display Settings replay and persistence; video hide/pause/seek replay; dim/wake and paused-idle pixel comparisons. Existing three named-state gates remain pixel-identical. Detailed local evidence and remaining limits: audit/PHASE-CONTINUATION.md.
+
+- ISC-43.2/45.4: Focused lower-cost reviews found draft removal and internal-message suppression gaps. Corrections passed six QApplication editor component checks and a message idle replay (RGB ratio 1.000007; unchanged bottom crop). See audit/PHASE-CONTINUATION.md.

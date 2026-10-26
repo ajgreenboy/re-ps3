@@ -521,6 +521,7 @@ int main(int argc,char** argv) {
                     shell.setFullscreen(false);window.showNormal();window.resize(w,h);
                 } else qWarning()<<"script: invalid size"<<token;
             }
+            else if(token.startsWith("idle=")) {bool ok=false;const auto age=token.mid(5).toLongLong(&ok);if(ok && age>=0)shell.setIdleTimeOverride(age);else qWarning()<<"script: invalid idle age";}
             else if(token=="quit")app.quit();
             else if(token.startsWith("grab=")) {
                 const auto image=view->grabFramebuffer();
@@ -530,7 +531,8 @@ int main(int argc,char** argv) {
                     {"width",image.width()},{"height",image.height()},{"clock",shell.clockText()},
                     {"entryId",shell.entries().isEmpty()?QString{}:shell.entries()[shell.selection()].id},
                     {"entryTitle",shell.entries().isEmpty()?QString{}:shell.entries()[shell.selection()].title},
-                    {"entryCount",shell.entries().size()}};
+                    {"entryCount",shell.entries().size()},{"mediaOpen",shell.mediaOpen()},{"mediaPaused",shell.mediaPaused()},
+                    {"mediaPosition",shell.mediaPosition()},{"mediaDuration",shell.mediaDuration()},{"idleMilliseconds",shell.idleMilliseconds()},{"screensaverMinutes",shell.screensaverMinutes()}};
                 QFile stateFile(token.mid(5)+".json");const auto bytes=QJsonDocument(state).toJson();
                 if(!stateFile.open(QIODevice::WriteOnly) || stateFile.write(bytes)!=bytes.size())qWarning()<<"script: state save FAILED"<<stateFile.errorString();
                 qInfo()<<"script: state"<<state;

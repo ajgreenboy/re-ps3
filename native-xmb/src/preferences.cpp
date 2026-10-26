@@ -17,7 +17,7 @@ QVariant Preferences::defaultValue(const QString& key) {
     if(key=="photo/interval")return 5000;
     if(key=="media/repeatMode")return 0;
     if(key=="audio/keyTone")return true;
-    if(key=="power/idleMinutes")return 0;
+    if(key=="power/idleMinutes" || key=="display/screensaverMinutes")return 0;
     if(key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return false;
     if(key=="system/name")return QSysInfo::machineHostName().left(64);
     if(key=="clock/timeZone")return QString("System");
@@ -36,6 +36,7 @@ bool Preferences::valid(const QString& key,const QVariant& value) {
     if(key=="photo/interval")return integer(1000,60000);
     if(key=="media/repeatMode")return integer(0,2);
     if(key=="power/idleMinutes")return integer(0,120);
+    if(key=="display/screensaverMinutes")return integer(0,30) && (value.toInt()==0 || value.toInt()==5 || value.toInt()==10 || value.toInt()==20 || value.toInt()==30);
     if(key=="audio/keyTone" || key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return value.metaType().id()==QMetaType::Bool;
     if(value.metaType().id()!=QMetaType::QString)return false;
     const auto text=value.toString();
