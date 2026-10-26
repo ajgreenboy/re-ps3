@@ -632,7 +632,15 @@ void Shell::activate() {
     case Action::InstallSteam: {
         // Steam owns the download: opening steam://install/<id> asks the client to install it.
         if(!QDesktopServices::openUrl(QUrl(SteamOwned::installUrl(entry.value))))
-            message_=entry.title+"\\n\\nSteam could not be asked to install this game.";
+            message_=entry.title+"\n\nSteam could not be asked to install this game.";
+        else {
+            // Picking up a finished download: rescan once after a while so the row moves from the
+            // Not Installed folder to a launchable inline title without a manual F5. The delay can
+            // be shortened with XMB_INSTALL_REFRESH_MS for scripted checks.
+            bool ok=false;
+            const int delay=qEnvironmentVariableIntValue("XMB_INSTALL_REFRESH_MS",&ok);
+            QTimer::singleShot(ok && delay>0 ? delay : 120000,this,&Shell::refreshContent);
+        }
         break;
     }
     case Action::LaunchApp: {
