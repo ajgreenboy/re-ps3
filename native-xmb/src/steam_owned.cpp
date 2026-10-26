@@ -8,7 +8,11 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QDir>
 #include <QSet>
+#include <QStandardPaths>
+#include <QRegularExpression>
+#include <QFile>
 #include <QTimer>
 #include <QUrlQuery>
 
@@ -18,7 +22,7 @@ constexpr int RequestTimeoutMs = 15000;
 constexpr qint64 MaxResponseBytes = 8 * 1024 * 1024;
 constexpr int MaxGames = 4096;
 
-QString apiKey() { return qEnvironmentVariable("STEAM_WEB_API_KEY").trimmed(); }
+QString keyFromEnvironment() { return qEnvironmentVariable("STEAM_WEB_API_KEY").trimmed(); }
 
 QString iconUrlFor(const QString& appId, const QString& hash) {
     if (hash.isEmpty()) return {};
@@ -38,6 +42,24 @@ SteamOwned::SteamOwned(QObject* parent) : QObject(parent), network_(new QNetwork
 }
 
 SteamOwned::~SteamOwned() { cancel(); }
+
+QString SteamOwned::apiKeyFilePath() {
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (dir.isEmpty()) return {};
+    return QDir(dir).filePath(QStringLiteral("steam_api_key"));
+}
+
+QString SteamOwned::apiKey() {
+    const QString fromEnv = keyFromEnvironment();
+    if (!fromEnv.isEmpty()) return fromEnv;
+    // A single-line user-only file keeps the key off the command line and out of Git.
+    QFile file(apiKeyFilePath());
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    if (file.size() > 4096) return {};
+    const QString text = QString::fromUtf8(file.readAll()).trimmed();
+    const int newline = text.indexOf(QRegularExpression(QStringLiteral("[\\r\\n]")));
+    return (newline > 0 ? text.left(newline) : text).trimmed();
+}
 
 bool SteamOwned::hasApiKey() { return !apiKey().isEmpty(); }
 

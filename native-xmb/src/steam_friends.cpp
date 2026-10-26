@@ -1,5 +1,7 @@
 #include "steam_friends.h"
 
+#include "steam_owned.h"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -73,10 +75,10 @@ void SteamFriends::refresh(QString steamId) {
             QStringLiteral("Steam ID must be a nonzero numeric 64-bit ID."));
         return;
     }
-    const QString key=QProcessEnvironment::systemEnvironment().value(QStringLiteral("STEAM_WEB_API_KEY")).trimmed();
+    const QString key=SteamOwned::apiKey();
     if(key.isEmpty()) {
         if(busy_){busy_=false;emit busyChanged(false);}
-        emit loaded({},QStringLiteral("Steam friends need a Steam Web API key. Set STEAM_WEB_API_KEY in the environment and restart XMB."));
+        emit loaded({},QStringLiteral("Steam friends need a Steam Web API key. Set STEAM_WEB_API_KEY or write the key to the steam_api_key file and restart XMB."));
         return;
     }
     if(!validApiKey(key)) {

@@ -44,4 +44,6 @@ xenon/xmb_switch_tables.toml
 *.pem
 *.key
 console-psid*
+steam_api_key*
+steam_api_key
 idps*

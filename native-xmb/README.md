@@ -107,10 +107,14 @@ Two different local sources feed this without writing to Steam:
 - collections, from `userdata/<accountid>/config/cloudstorage/cloud-storage-namespace-1.json`
   (`user-collections.*` entries).
 
-The *owned* list itself is Valve's `IPlayerService/GetOwnedGames`, which Valve requires an API key for, so set
-`STEAM_WEB_API_KEY` in the launch environment (and optionally `XMB_STEAM_ID`). Without a key the column keeps the
-installed titles and the XMB states that a key is needed instead of inventing a library. Keys stay out of
-preferences, manifests and logs.
+The *owned* list itself is Valve's `IPlayerService/GetOwnedGames`, which Valve requires an API key for. Give it
+one of these ways (optionally with `XMB_STEAM_ID`):
+
+- `STEAM_WEB_API_KEY` in the launch environment, or
+- a one-line file at `%APPDATA%\re-ps3-native\steam_api_key` (user-only, outside the repository and git-ignored).
+
+Without a key the column keeps the installed titles and the XMB states that a key is needed instead of inventing a
+library. The key is never written to preferences, reports, manifests or logs.
 
 The Friends column uses Steam too and needs the same key. **Open Steam Friends** also opens Steam's own friends
 window.
