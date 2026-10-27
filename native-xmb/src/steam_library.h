@@ -24,4 +24,12 @@ struct SteamInstallation {
 // performs no network access and makes no changes to Steam files.
 SteamInstallation scanSteam(const QString& explicitRoot = {});
 
+// Live state of one title as the running Steam client reports it in the registry
+// (HKCU\Software\Valve\Steam). Read-only; always false off Windows.
+struct SteamAppState {
+    bool running = false;
+    bool updating = false;
+};
+SteamAppState steamAppState(const QString& appId);
+
 }

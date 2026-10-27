@@ -585,4 +585,25 @@ SteamInstallation scanSteam(const QString& explicitRoot) {
     return result;
 }
 
+SteamAppState steamAppState(const QString& appId) {
+    SteamAppState state;
+#ifdef Q_OS_WIN
+    bool numeric = false;
+    appId.toULongLong(&numeric);
+    if (!numeric) return state;
+    // Steam keeps these live while it runs: RunningAppID names the title in the foreground of its
+    // lifecycle, Apps\<id>\Running stays 1 from launch (including any launcher) until the last
+    // process exits, and Apps\<id>\Updating is 1 while a pre-launch update downloads.
+    const QString base = QStringLiteral("HKEY_CURRENT_USER\\Software\\Valve\\Steam");
+    const QSettings steam(base, QSettings::NativeFormat);
+    const QSettings app(base + QStringLiteral("\\Apps\\") + appId, QSettings::NativeFormat);
+    state.running = steam.value(QStringLiteral("RunningAppID")).toString() == appId ||
+                    app.value(QStringLiteral("Running")).toInt() == 1;
+    state.updating = app.value(QStringLiteral("Updating")).toInt() == 1;
+#else
+    Q_UNUSED(appId);
+#endif
+    return state;
+}
+
 } // namespace xmb

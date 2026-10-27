@@ -162,6 +162,11 @@ private:
     QString mediaAlbum_;             // album of the loaded track, when tagged
     QPointer<QProcess> game_;        // the launched title, kept so a return is observable
     QString gameTitle_;              // its title, for the return message
+    QString steamGameId_;            // a Steam title handed to steam.exe, watched through the registry
+    QTimer steamWatch_;              // polls Steam's Running flags while steamGameId_ is set
+    QElapsedTimer steamWatchAge_;    // since the handoff (or last update tick), for the start timeout
+    bool steamGameSeen_=false;       // Steam has reported the title running at least once
+    int steamGameClear_=0;           // consecutive polls without the flag after it was seen
     bool ownedInFlight_=false;
     QString ownedSignature_;        // app ids + installed flags + collection ids, to skip unchanged rebuilds
     std::unique_ptr<SteamArtwork> steamArtwork_;
@@ -177,6 +182,9 @@ private:
     QString collectionLabel(const QString& appId) const;
     bool startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title);
     bool gameRunning() const;
+    bool startSteamTracked(const QString& appId,const QString& title);
+    void pollSteamGame();
+    void restoreFocus();
     QVector<Entry> steamFolderEntries(const QString& mode) const;
     void openSteamFolder(const QString& mode);
     quint64 scanRequest_=0,photoRequest_=0;
