@@ -1028,6 +1028,32 @@ void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect)
     const QSizeF size=QSizeF(bounds.size()).scaled(rect.size(),Qt::KeepAspectRatio);
     p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);
 }
+void View::drawSubtitle(QPainter& p,const QString& cue) {
+    // Console subtitle presentation, in the XMB's own text pipeline: the same GL glyph atlas (shaped by
+    // Qt, rasterised through FontRaster/FreeType) the menus use, white on a dark outline so a cue stays
+    // readable over a bright frame. The band is centred in the lower third but stops at y 850: the
+    // player overlay draws its queue line at 895, the progress bar at 941 and the title at 970, so a cue
+    // never lands on the controls, and the long line wraps upward from its bottom edge.
+    const QRectF band(210,650,1500,200);
+    const int size=32;
+    const int flags=Qt::AlignHCenter|Qt::AlignBottom|Qt::TextWordWrap;
+    const QColor fill(248,248,248),outline(0,0,0,215);
+    if(textRenderer_.ready()) {
+        QFont font(shell_.fontFamily());font.setPixelSize(size);
+        // Four diagonal passes for the outline, then the fill. Whole-pixel offsets, so the per-phase
+        // glyph tiles are reused rather than re-rasterised.
+        for(const auto& offset:{QPointF(-2,-2),QPointF(2,-2),QPointF(-2,2),QPointF(2,2)})
+            textRenderer_.draw(*this,p,band.translated(offset),cue,font,outline,flags,0,false);
+        textRenderer_.draw(*this,p,band,cue,font,fill,flags,0,true);
+        return;
+    }
+    QFont font(shell_.fontFamily());font.setPixelSize(size);font.setStyleStrategy(QFont::PreferAntialias);
+    font.setHintingPreference(QFont::PreferNoHinting);p.setFont(font);
+    p.setPen(outline);
+    for(const auto& offset:{QPointF(-2,-2),QPointF(2,-2),QPointF(-2,2),QPointF(2,2)})
+        p.drawText(band.translated(offset),flags,cue);
+    p.setPen(fill);p.drawText(band,flags,cue);
+}
 void View::drawScene(QPainter& p) {
     iconQueue_.clear();
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
@@ -1053,6 +1079,64 @@ void View::drawScene(QPainter& p) {
             p.setPen(QColor(235,245,255,int(alpha*strength)));p.drawText(r.translated(std::cos(a)*radius,std::sin(a)*radius),flags,value);
         }
     };
+    // Options panel (reference frame 45.4 s): a translucent light strip from x~1330 to the right edge with a bright
+    // left edge; options 23 px, 40 px apart, centred on the focus row; the focused option glows. Slides in from the right.
+    // Shared by the settings choice columns, the item-level Triangle menu and the in-player panel so all three keep
+    // one visual language. `rows` switches it to the player panel's form: a marker column on the left for the current
+    // choice, dimmed rows for the ones this build cannot honour, and the focused row's note under the list.
+    const auto drawOptionsPanel=[&](const QStringList& items,double position,double alpha,double ahead,const QString& heading,
+                                    const QVector<MenuOption>* rows=nullptr) {
+        const double x0=1330+ahead*600;
+        const double rowCount=rows?double(rows->size()):double(items.size());
+        const double first=505-(rowCount-1.)*20.;
+        p.save();p.setOpacity(alpha);
+        // Over the XMB's own background the light strip is enough. Over video it is not: white 23 px text
+        // on a bright frame is unreadable, so the in-player panel lays the strip on a dark plate (the
+        // console's control panel dims the picture behind it for the same reason).
+        if(rows) {
+            QLinearGradient shade(x0,0,1920,0);
+            shade.setColorAt(0,QColor(0,0,0,158));shade.setColorAt(1,QColor(0,0,0,120));
+            p.fillRect(QRectF(x0,0,1920-x0,1080),shade);
+        }
+        QLinearGradient fill(x0,0,1920,0);fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
+        p.fillRect(QRectF(x0,0,1920-x0,1080),fill);
+        QLinearGradient edge(x0-10,0,x0+4,0);edge.setColorAt(0,QColor(255,255,255,0));edge.setColorAt(.75,QColor(255,255,255,70));edge.setColorAt(1,QColor(255,255,255,0));
+        p.fillRect(QRectF(x0-10,0,14,1080),edge);
+        // The list scrolls with the focused row, so the heading and the note follow the row they belong
+        // to rather than the list's resting box: `first` is only where row 0 sits when focus is at 0.
+        const double rowZero=505-position*40;
+        if(!heading.isEmpty()) { // a submenu (Sort By) or the player panel names itself above its list
+            const double headingY=rows?std::max(56.,rowZero-68.):first-64;
+            text({x0+(rows?34:16),headingY,1920-x0-40,40},heading,19,QColor(255,255,255,190));
+        }
+        const double labelX=x0+(rows?34:16),labelWidth=1920-labelX-24;
+        for(int i=0;i<int(rowCount);++i) {
+            const double distance=i-position,y=505+distance*40;
+            if(y<-40 || y>1120)continue;
+            const double focus=std::max(0.,1.-std::abs(distance));
+            const QRectF rect(labelX,y-20,labelWidth,40);
+            const bool enabled=rows?(*rows)[i].enabled:true;
+            const QString title=rows?(*rows)[i].title:items[i];
+            // A row this build cannot honour still takes the focus halo (weaker), so it is visibly the
+            // selected row; its title is dimmed and its note says why.
+            if(focus>.5)glow(rect,title,23,(focus-.5)*2*(enabled?1.:.45));
+            if(rows && (*rows)[i].active) { // the current choice, where the console's own list shows a check
+                p.save();p.setBrush(QColor(255,255,255,235));p.setPen(Qt::NoPen);
+                p.drawEllipse(QPointF(x0+18,y),4.5,4.5);p.restore();
+            }
+            const int level=rows&&!enabled?115:int(255*(.78+.22*focus));
+            text(rect,title,23,QColor(255,255,255,level));
+            if(rows && focus>.5) {
+                // One line under the list while a row has focus: the file behind a subtitle row, or the
+                // reason a row cannot be chosen. Never a claim the shell has not measured.
+                const QString note=(*rows)[i].note;
+                if(!note.isEmpty())
+                    text({labelX,std::min(1010.,rowZero+rowCount*40.+8),labelWidth,90},note,16,QColor(225,225,225,235),
+                        Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
+            }
+        }
+        p.restore();
+    };
     if(shell_.backgroundMode()==2 && !wallpaperImage_.isNull()) {
         // Covers the whole window, not just the 16:9 scene, so the bars beside a letterboxed scene show the picture too.
         const QRectF window=p.transform().inverted().mapRect(QRectF(0,0,p.device()->width(),p.device()->height())).united(QRectF(0,0,1920,1080));
@@ -1072,9 +1156,17 @@ void View::drawScene(QPainter& p) {
             p.drawImage(shell_.photoOpen() && photoViewport_.valid()?photoViewport_.imageRect():QRectF(QPointF((1920-size.width())/2,(1080-size.height())/2),size),mediaFrame_);
             p.restore();
         }
+        // The active sidecar subtitle cue. Drawn over the video, below the controls in z-order, and only
+        // while no dialog is up (a dialog's own black plate would otherwise have text over it). The PS
+        // menu paints the whole frame black later in this function, so it hides the cue without a
+        // special case here.
+        if(shell_.videoOpen() && shell_.message().isEmpty()) {
+            const auto cue=shell_.subtitleCueText();
+            if(!cue.isEmpty())drawSubtitle(p,cue);
+        }
         p.save();p.setOpacity(shell_.videoOpen()?mediaControls_.state(now).opacity:1.);
         text({110,970,1500,50},shell_.mediaTitle(),27,Qt::white);
-        text({110,1020,1700,35},shell_.photoOpen()?QString("Circle Back   Cross ")+(shell_.slideshowActive()?"Pause":"Slideshow")+"   L1/R1 or +/- Zoom   Square/0 Reset   Triangle/Q/E Rotate   Arrows Pan when zoomed   [/] Photo":"Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle   Triangle/R Repeat",21,QColor(230,230,230));
+        text({110,1020,1700,35},shell_.photoOpen()?QString("Circle Back   Cross ")+(shell_.slideshowActive()?"Pause":"Slideshow")+"   L1/R1 or +/- Zoom   Square/0 Reset   Triangle/Q/E Rotate   Arrows Pan when zoomed   [/] Photo":"Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle   R Repeat   Triangle Options",21,QColor(230,230,230));
         if(shell_.busy())text({110,910,1000,45},"Loading…",26,Qt::white);
         else if(!shell_.photoOpen())text({110,895,1700,36},shell_.mediaQueueSummary(),21,QColor(230,230,230));
         else if(photoViewport_.valid())text({110,895,1700,36},QString("Zoom %1%").arg(photoViewport_.zoomPercent(),0,'f',0),21,QColor(230,230,230));
@@ -1085,6 +1177,13 @@ void View::drawScene(QPainter& p) {
             text({1450,963,360,45},time(shell_.mediaPosition())+" / "+time(shell_.mediaDuration()),23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
         }
         p.restore();
+        // The in-player panel (Triangle): the same right-hand options panel, over the video and over the
+        // controls' band, so it reads as an overlay that owns the screen while it is open. It changes
+        // nothing about the controls' own clock: mediaControls_ was advanced above exactly as before.
+        if(shell_.optionsArePlayer() && optionsOpenEase_.value>0.) {
+            drawOptionsPanel(QStringList{},optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,
+                shell_.optionsTitle(),&shell_.options());
+        }
     } else {
         previousMediaOpen_=false;
         const auto& categories=shell_.categories();
@@ -1118,30 +1217,6 @@ void View::drawScene(QPainter& p) {
             if(column.entries.isEmpty())return false;
             for(const auto& entry:column.entries)if(entry.action!=Action::SetSetting)return false;
             return true;
-        };
-        // Options panel (reference frame 45.4 s): a translucent light strip from x~1330 to the right edge with a bright
-        // left edge; options 23 px, 40 px apart, centred on the focus row; the focused option glows. Slides in from the right.
-        // Shared by the settings choice columns and the item-level Triangle menu so both keep one visual language.
-        const auto drawOptionsPanel=[&](const QStringList& items,double position,double alpha,double ahead,const QString& heading) {
-            const double x0=1330+ahead*600;
-            p.save();p.setOpacity(alpha);
-            QLinearGradient fill(x0,0,1920,0);fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
-            p.fillRect(QRectF(x0,0,1920-x0,1080),fill);
-            QLinearGradient edge(x0-10,0,x0+4,0);edge.setColorAt(0,QColor(255,255,255,0));edge.setColorAt(.75,QColor(255,255,255,70));edge.setColorAt(1,QColor(255,255,255,0));
-            p.fillRect(QRectF(x0-10,0,14,1080),edge);
-            if(!heading.isEmpty()) { // a submenu (Sort By) names itself above its list
-                const double first=505-(double(items.size())-1.)*20.;
-                text({x0+16,first-64,1920-x0-40,40},heading,19,QColor(255,255,255,190));
-            }
-            for(int i=0;i<items.size();++i) {
-                const double distance=i-position,y=505+distance*40;
-                if(y<-40 || y>1120)continue;
-                const double focus=std::max(0.,1.-std::abs(distance));
-                const QRectF rect(x0+16,y-20,1920-x0-40,40);
-                if(focus>.5)glow(rect,items[i],23,(focus-.5)*2);
-                text(rect,items[i],23,QColor(255,255,255,int(255*(.78+.22*focus))));
-            }
-            p.restore();
         };
         const auto drawColumns=[&](const QVector<Column>& columns,double opacity,double offset,bool active) {
         // An open options panel is not a level of its own: the columns keep the layout of the page under it.
@@ -1904,13 +1979,17 @@ void View::pollController() {
     if(movement&XINPUT_GAMEPAD_DPAD_UP)shell_.vertical(-1);
     if(movement&XINPUT_GAMEPAD_DPAD_DOWN)shell_.vertical(1);
     if(edge&XINPUT_GAMEPAD_A)shell_.activate();if(edge&XINPUT_GAMEPAD_B)shell_.back();
-    // Triangle on a content row: the item options panel (media playback keeps Triangle for Repeat).
-    if(edge&XINPUT_GAMEPAD_Y && !shell_.mediaOpen())shell_.toggleOptions();
+    // Triangle: the item options panel on a content row, and the in-player panel (subtitles, audio
+    // tracks, repeat, shuffle) while a video plays. Music, which has no player panel, keeps Triangle as
+    // Repeat, and Repeat also keeps the R key, so nothing lost a binding it had.
+    if(edge&XINPUT_GAMEPAD_Y) {
+        if(!shell_.mediaOpen() || shell_.videoOpen())shell_.toggleOptions();
+        else shell_.cycleMediaRepeat();
+    }
     if(shell_.mediaOpen()) {
         if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)shell_.skipMedia(-1);
         if(edge&XINPUT_GAMEPAD_RIGHT_SHOULDER)shell_.skipMedia(1);
         if(edge&XINPUT_GAMEPAD_X)shell_.toggleMediaShuffle();
-        if(edge&XINPUT_GAMEPAD_Y)shell_.cycleMediaRepeat();
     }
     if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
     buttons_=buttons;

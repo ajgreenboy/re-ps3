@@ -14,6 +14,7 @@
 #include "steam_family.h"
 #include "steam_store.h"
 #include "steam_library.h"
+#include "subtitles.h"
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QDateTime>
@@ -49,8 +50,21 @@ struct Entry {
 struct Category { QString id,title,container,texture; QVector<Entry> entries; QString themeIcon; };
 // Item-level Triangle options menu: the PS3 shows a right-hand panel, not a level. Each row is a command
 // this build really performs; the list is built from the selected entry so other surfaces inherit it.
-enum class OptionCommand { Activate, Information, SortByNameAscending, SortByNameDescending, SortMenu, Close };
-struct MenuOption { QString title; OptionCommand command=OptionCommand::Close; };
+// The same panel carries the in-player rows (subtitles, audio tracks, repeat, shuffle), which is where the
+// firmware's video control panel keeps its subtitle and audio-change buttons.
+enum class OptionCommand { Activate, Information, SortByNameAscending, SortByNameDescending, SortMenu, Close,
+    SubtitlesOff, SubtitleTrack, AudioTrack, RepeatMode, ToggleShuffle };
+struct MenuOption {
+    QString title;
+    OptionCommand command=OptionCommand::Close;
+    int index=-1;          // the row's payload: a subtitle track index or an audio track index
+    bool enabled=true;     // false: listed but not selectable, and `note` says why (no pretending)
+    bool active=false;     // the current choice, marked in the player panel
+    QString note;          // one line under the list while this row has focus (a reason, a file name)
+};
+// One audio track QMediaPlayer reports for the loaded media. `switchable` turns false the moment this
+// build asked for it and the player's own activeAudioTrack() did not follow, and then `reason` says so.
+struct AudioTrackInfo { QString label; bool switchable=true; QString reason; };
 // The console's notification pop-up. The firmware builds it from system_plugin's page_notification page:
 // a Plane carrying tex_notification (the 64x64 plaque), a notification_icon_a/b Plane carrying a
 // tex_notification_* 100x100 glyph, and Text objects to the right of the icon (notification_message_a in
@@ -156,6 +170,20 @@ public:
     void optionsMove(int delta);   // Up/Down inside the panel
     void optionsActivate();        // Cross
     void optionsClose();           // Circle: step back one level, then close
+    bool optionsArePlayer() const { return optionsOpen_ && playerPanel_; } // the in-player panel is up
+    // ---- Sidecar subtitles and audio tracks (audit/SUBTITLES.md) ----
+    // The subtitle files discovered beside the video being played, the chosen one (index -1 = Off) and
+    // the cue under the player's own position. The choice is remembered per file for this session only.
+    const QVector<subtitles::Track>& subtitleTracks() const { return subtitleTracks_; }
+    int subtitleTrackIndex() const { return subtitleTrackIndex_; }
+    QString subtitleFile() const;    // the chosen sidecar path, empty when subtitles are Off
+    QString subtitleLabel() const;   // its panel label, empty when Off
+    QString subtitleCueText();       // the cue covering mediaPosition(), empty when none is showing
+    int subtitleCueNumber();         // 1-based cue number at mediaPosition(), 0 when none
+    const QVector<AudioTrackInfo>& audioTracks() const { return audioTracks_; }
+    int activeAudioTrack() const { return activeAudioTrack_; } // 0-based, -1 = the backend names none
+    void chooseSubtitleTrack(int index); // -1 = Off; anything else indexes subtitleTracks()
+    void chooseAudioTrack(int index);    // set the track, then verify the backend's own read-back
     // The notification queue: one pop-up at a time, each shown for a fixed lifetime, the rest waiting in
     // order behind it. Bounded, so a failing producer cannot grow it without limit.
     static constexpr qint64 notificationLifetimeMs=4000;
@@ -269,12 +297,31 @@ private:
     QVector<MenuOption> options_,optionsParent_;
     QString optionsTitle_;
     void buildOptions();
+    // The in-player variant of the same panel: Subtitles Off / one row per sidecar file, the audio
+    // tracks the player reports, then Repeat and Shuffle (which used to hold the face buttons).
+    bool playerPanel_=false;
+    void buildPlayerOptions();
+    void refreshPlayerOptions();
     void dismissOptions();
     void resetOptions();
     QString activateLabel(const Entry& entry) const;
     QString entryKind(const Entry& entry) const;
     void showEntryInformation(const Entry& entry);
     void sortPageByName(bool ascending);
+    // Subtitle and audio-track state. Discovery and parsing live in subtitles.cpp; this class owns the
+    // choice, the cue lookup against the player's position and the session memory of that choice.
+    bool subtitleLog_=false;
+    QVector<subtitles::Track> subtitleTracks_;
+    int subtitleTrackIndex_=-1;
+    int subtitleCueNumber_=0;
+    QString subtitleMediaPath_;          // the local file the tracks belong to
+    QHash<QString,QString> subtitleChoice_; // media path -> sidecar path ("" = Off), this session only
+    QVector<AudioTrackInfo> audioTracks_;
+    QHash<int,QString> audioRejected_;   // track index -> why the backend would not switch to it
+    int activeAudioTrack_=-1;
+    void prepareSubtitles(const QString& path); // discover beside a file that is starting to play
+    void applySubtitleTrack(int index);
+    void refreshAudioTracks();
     // Notification queue state. The front entry is the pop-up on screen; its lifetime starts when it is
     // promoted to the front, so a burst of events each gets its full 4 s in turn.
     QVector<Notification> notifications_;

@@ -631,7 +631,17 @@ int main(int argc,char** argv) {
                     {"mediaProvider",shell.mediaProvider()},{"playMethod",shell.mediaPlayMethod()},{"mediaPosition",shell.mediaPosition()},{"mediaDuration",shell.mediaDuration()},{"idleMilliseconds",shell.idleMilliseconds()},{"screensaverMinutes",shell.screensaverMinutes()},
                     {"notificationCount",shell.notificationCount()},{"notificationRemainingMs",double(shell.notificationRemainingMs())},
                     {"notificationTitle",shell.notification()?shell.notification()->title:QString{}},
-                    {"notificationIcon",shell.notification()?shell.notification()->icon:QString{}}};
+                    {"notificationIcon",shell.notification()?shell.notification()->icon:QString{}},
+                    // Sidecar subtitles and the audio track the player reports (audit/SUBTITLES.md). The
+                    // cue number is 1-based and 0 when no cue covers the capture's position; audioTrack is
+                    // 1-based and 0 when the backend names none, so both read as "none" without a sentinel.
+                    {"subtitleFile",shell.subtitleFile()},{"subtitleLabel",shell.subtitleLabel()},
+                    {"subtitleTrackCount",shell.subtitleTracks().size()},
+                    {"subtitleCue",shell.subtitleCueNumber()},
+                    {"subtitleCueText",shell.subtitleCueText().left(160)},
+                    {"audioTrack",shell.activeAudioTrack()>=0?shell.activeAudioTrack()+1:0},
+                    {"audioTrackCount",shell.audioTracks().size()},
+                    {"audioTrackName",shell.audioTracks().value(shell.activeAudioTrack()).label}};
                 QFile stateFile(token.mid(5)+".json");const auto bytes=QJsonDocument(state).toJson();
                 if(!stateFile.open(QIODevice::WriteOnly) || stateFile.write(bytes)!=bytes.size())qWarning()<<"script: state save FAILED"<<stateFile.errorString();
                 qInfo()<<"script: state"<<state;

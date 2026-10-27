@@ -117,6 +117,10 @@ private:
     NotificationShown notificationShown_;
     bool notificationTextureWarned_=false;
     void drawNotification(QPainter& painter,double amount);
+    // The active sidecar subtitle cue (Shell::subtitleCueText): centred in the lower third, above the
+    // media controls, drawn through the GL glyph atlas with a dark outline so it stays legible over a
+    // bright frame. audit/SUBTITLES.md.
+    void drawSubtitle(QPainter& painter,const QString& cue);
     // A 64x64 RCO tile (the notification plaque) stretched to any size without turning its rounded corners
     // into ellipses: the corners keep their pixels, the edges and centre stretch.
     void drawNineSlice(QPainter& painter,const QString& container,const QString& texture,const QRectF& rect,qreal inset,qreal opacity);
