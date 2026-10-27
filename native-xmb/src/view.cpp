@@ -591,6 +591,15 @@ void View::paintGL() {
     if(!outgoing_.isEmpty()){fadeEase_.advance(dt);categoryFade_=fadeEase_.value;if(!fadeEase_.running()){categoryFade_=0;outgoing_.clear();}}
     depthEase_.retarget(shell_.depth(),pageMilliseconds,4);depthEase_.advance(dt);depthPosition_=depthEase_.value;
     for(auto& column:columns_){column.ease.retarget(column.selection,moveMilliseconds);column.ease.advance(dt);column.position=column.ease.value;}
+    // The item-level Triangle options panel: its list slides in from the right over 200 ms (mode 5) and moves
+    // between rows on the same curve. A fresh open lands on the current selection without sliding the list.
+    if(shell_.optionsOpen()) {
+        if(!optionsWasOpen_){optionsOpenEase_=PafEase();optionsOpenEase_.retarget(0);optionsPanelEase_=PafEase();}
+        optionsOpenEase_.retarget(1,moveMilliseconds);
+        optionsPanelEase_.retarget(shell_.optionsSelection(),moveMilliseconds);
+    } else optionsOpenEase_.retarget(0,moveMilliseconds);
+    optionsOpenEase_.advance(dt);optionsPanelEase_.advance(dt);
+    optionsWasOpen_=shell_.optionsOpen();
     // Local diagnosis: XMB_MOTION_LOG=1 logs the focused column's and the depth's eased positions each frame while they move.
     if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && !columns_.isEmpty() && columns_.back().ease.running())
         qInfo().noquote()<<"motion:"<<now<<"ms position"<<QString::number(columns_.back().position,'f',4)<<"target"<<columns_.back().selection;
@@ -628,6 +637,9 @@ void View::paintGL() {
     QString signature=QString::asprintf("%.4f %.4f %.4f %d %d %d ",categoryPosition_,depthPosition_,categoryFade_,shell_.category(),shell_.depth(),uiRevision_);
     for(const auto& column:columns_)signature+=QString::number(column.position,'f',4)+' ';
     signature+=shell_.clockText()+shell_.message()+shell_.status();
+    // The options panel animates (slide-in, row focus) without a shell change on every frame.
+    if(shell_.optionsOpen() || optionsOpenEase_.value>0.)
+        signature+=QString::asprintf(" options %d %.4f %.4f %d",shell_.optionsOpen()?1:0,optionsOpenEase_.value,optionsPanelEase_.value,shell_.optionsSelection());
     if(focusClock_.isValid()) { // the focused label's breathing glow and the idle label fade, in coarse steps
         const double resting=double(focusTime());
         signature+=QString::asprintf(" glow %d idle %d",int((.5-.5*std::cos(2*std::numbers::pi*resting/3400.))*24),int(std::clamp((resting-4000)/800.,0.,1.)*16));
@@ -846,20 +858,25 @@ void View::drawScene(QPainter& p) {
         };
         // Options panel (reference frame 45.4 s): a translucent light strip from x~1330 to the right edge with a bright
         // left edge; options 23 px, 40 px apart, centred on the focus row; the focused option glows. Slides in from the right.
-        const auto drawOptionsPanel=[&](const Column& column,double alpha,double ahead) {
+        // Shared by the settings choice columns and the item-level Triangle menu so both keep one visual language.
+        const auto drawOptionsPanel=[&](const QStringList& items,double position,double alpha,double ahead,const QString& heading) {
             const double x0=1330+ahead*600;
             p.save();p.setOpacity(alpha);
             QLinearGradient fill(x0,0,1920,0);fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
             p.fillRect(QRectF(x0,0,1920-x0,1080),fill);
             QLinearGradient edge(x0-10,0,x0+4,0);edge.setColorAt(0,QColor(255,255,255,0));edge.setColorAt(.75,QColor(255,255,255,70));edge.setColorAt(1,QColor(255,255,255,0));
             p.fillRect(QRectF(x0-10,0,14,1080),edge);
-            for(int i=0;i<column.entries.size();++i) {
-                const double distance=i-column.position,y=505+distance*40;
+            if(!heading.isEmpty()) { // a submenu (Sort By) names itself above its list
+                const double first=505-(double(items.size())-1.)*20.;
+                text({x0+16,first-64,1920-x0-40,40},heading,19,QColor(255,255,255,190));
+            }
+            for(int i=0;i<items.size();++i) {
+                const double distance=i-position,y=505+distance*40;
                 if(y<-40 || y>1120)continue;
                 const double focus=std::max(0.,1.-std::abs(distance));
                 const QRectF rect(x0+16,y-20,1920-x0-40,40);
-                if(focus>.5)glow(rect,column.entries[i].title,23,(focus-.5)*2);
-                text(rect,column.entries[i].title,23,QColor(255,255,255,int(255*(.78+.22*focus))));
+                if(focus>.5)glow(rect,items[i],23,(focus-.5)*2);
+                text(rect,items[i],23,QColor(255,255,255,int(255*(.78+.22*focus))));
             }
             p.restore();
         };
@@ -876,7 +893,11 @@ void View::drawScene(QPainter& p) {
             const double columnAlpha=(1.-ahead)*opacity;
             // A setting's choices open as the PS3 options panel on the right instead of a new column.
             if(panelColumn) {
-                if(columnAlpha>0)drawOptionsPanel(column,columnAlpha,ahead);
+                if(columnAlpha>0) {
+                    QStringList titles;titles.reserve(column.entries.size());
+                    for(const auto& entry:column.entries)titles<<entry.title;
+                    drawOptionsPanel(titles,column.position,columnAlpha,ahead,QString());
+                }
                 continue;
             }
             // The list under an open options panel stays in place; unfocused rows drop to icons only.
@@ -974,6 +995,13 @@ void View::drawScene(QPainter& p) {
             // list ~150 px away while it fades and brings the new one in from ~150 px, crossing over each other.
             if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*150,false);
             drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*150,true);
+            // Item-level Triangle options: the same right-hand panel over the page it belongs to. Only drawn while
+            // the shell reports it open; the panel never becomes a level of the column stack.
+            if(shell_.optionsOpen() && optionsOpenEase_.value>0.) {
+                QStringList titles;titles.reserve(shell_.options().size());
+                for(const auto& option:shell_.options())titles<<option.title;
+                drawOptionsPanel(titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,shell_.optionsTitle());
+            }
         }
         if(!shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
         // Info bar (system_plugin tex_infobar: a translucent white band with a bright bottom edge) framing the clock in the
@@ -1264,6 +1292,17 @@ void View::keyPressEvent(QKeyEvent* e) {
         else if(e->key()==Qt::Key_Escape)shell_.psMenuClose();
         e->accept();return;
     }
+    // The item options panel owns the keyboard while open: Up/Down move inside it, Cross (Return) runs the
+    // option, Circle (Escape/Backspace) steps back or closes, Triangle (T) hides the whole menu. The XMB
+    // behind the panel receives none of these keys.
+    if(shell_.optionsOpen()) {
+        if(e->key()==Qt::Key_Up)shell_.optionsMove(-1);
+        else if(e->key()==Qt::Key_Down)shell_.optionsMove(1);
+        else if(e->key()==Qt::Key_Return || e->key()==Qt::Key_Enter)shell_.optionsActivate();
+        else if(e->key()==Qt::Key_Escape || e->key()==Qt::Key_Backspace)shell_.optionsClose();
+        else if(e->key()==Qt::Key_T)shell_.toggleOptions();
+        e->accept();return;
+    }
     // Keyboard substitute for the PS button (controllers send 0x400 over HID): F10 opens the system menu.
     if(e->key()==Qt::Key_F10){shell_.psHeld();e->accept();return;}
 #ifdef Q_OS_WIN
@@ -1310,6 +1349,8 @@ void View::keyPressEvent(QKeyEvent* e) {
     case Qt::Key_R:shell_.cycleMediaRepeat();break;
     case Qt::Key_PageUp:shell_.vertical(-10);break;case Qt::Key_PageDown:shell_.vertical(10);break;
     case Qt::Key_F5:shell_.refreshDirectory();break;
+    // Triangle on the XMB: the selected entry's options (keyboard substitute; controllers send Y).
+    case Qt::Key_T:shell_.toggleOptions();break;
     case Qt::Key_F11:shell_.setFullscreen(!window()->isFullScreen());break;
     default:QOpenGLWidget::keyPressEvent(e);return;
     }
@@ -1339,6 +1380,16 @@ void View::pollController() {
         if(edgePs&XINPUT_GAMEPAD_DPAD_DOWN)shell_.psMenuMove(1);
         if(edgePs&XINPUT_GAMEPAD_A)activatePsMenuSelection();
         if(edgePs&XINPUT_GAMEPAD_B)shell_.psMenuClose();
+        return;
+    }
+    // The item options panel owns the pad while open: D-pad moves, Cross runs, Circle/Triangle dismiss it.
+    if(shell_.optionsOpen()) {
+        const auto edgePs=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;buttons_=buttons;
+        if(edgePs&XINPUT_GAMEPAD_DPAD_UP)shell_.optionsMove(-1);
+        if(edgePs&XINPUT_GAMEPAD_DPAD_DOWN)shell_.optionsMove(1);
+        if(edgePs&XINPUT_GAMEPAD_A)shell_.optionsActivate();
+        if(edgePs&XINPUT_GAMEPAD_B)shell_.optionsClose();
+        if(edgePs&XINPUT_GAMEPAD_Y)shell_.toggleOptions();
         return;
     }
     if(xinput || playstation) {
@@ -1385,6 +1436,8 @@ void View::pollController() {
     if(movement&XINPUT_GAMEPAD_DPAD_UP)shell_.vertical(-1);
     if(movement&XINPUT_GAMEPAD_DPAD_DOWN)shell_.vertical(1);
     if(edge&XINPUT_GAMEPAD_A)shell_.activate();if(edge&XINPUT_GAMEPAD_B)shell_.back();
+    // Triangle on a content row: the item options panel (media playback keeps Triangle for Repeat).
+    if(edge&XINPUT_GAMEPAD_Y && !shell_.mediaOpen())shell_.toggleOptions();
     if(shell_.mediaOpen()) {
         if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)shell_.skipMedia(-1);
         if(edge&XINPUT_GAMEPAD_RIGHT_SHOULDER)shell_.skipMedia(1);

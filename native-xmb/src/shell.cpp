@@ -989,6 +989,165 @@ void Shell::psMenuClose() {
     psMenu_=false;psConfirmOff_=false;
     emit changed();
 }
+// --- Item options (Triangle) ----------------------------------------------------------------------
+// Firmware behaviour (manual): Triangle opens a per-item options list as a panel on the right, not a new
+// column; the listed actions vary by category. This build lists only commands it really performs. The list
+// is derived from the selected entry, so any content surface gets the panel; a local folder page (Video
+// Library) is the first surface proven end to end. Display All is deliberately absent: a page already lists
+// every row it has, nothing is grouped or hidden, so the command would be a no-op.
+QString Shell::activateLabel(const Entry& entry) const {
+    switch(entry.action) {
+    case Action::Folder:case Action::SteamFolder:case Action::JellyfinFolder:
+    case Action::Library:case Action::SteamStoreBrowse:case Action::SteamStoreSection:
+        return QObject::tr("Open");
+    case Action::File:
+        return categories_[category_].id=="photo"?QObject::tr("View"):QObject::tr("Play");
+    case Action::Launch:case Action::LaunchSteam:case Action::LaunchApp:case Action::JellyfinPlay:
+        return QObject::tr("Play");
+    case Action::Information:return QObject::tr("View");
+    default:return QObject::tr("Start");
+    }
+}
+QString Shell::entryKind(const Entry& entry) const {
+    switch(entry.action) {
+    case Action::Folder:case Action::Library:case Action::SteamFolder:case Action::JellyfinFolder:return QObject::tr("Folder");
+    case Action::File: {
+        const auto& kind=categories_[category_].id;
+        return kind=="photo"?QObject::tr("Image"):kind=="music"?QObject::tr("Music"):QObject::tr("Video");
+    }
+    case Action::Launch:case Action::LaunchApp:return QObject::tr("Game");
+    case Action::LaunchSteam:return QObject::tr("Steam game");
+    case Action::SettingsPage:case Action::SettingChoices:return QObject::tr("Settings");
+    case Action::Unavailable:return QObject::tr("Unavailable");
+    case Action::JellyfinApp:case Action::JellyfinPlay:return QObject::tr("Jellyfin media");
+    default:return QObject::tr("Item");
+    }
+}
+void Shell::resetOptions() {
+    optionsOpen_=optionsNested_=false;optionsSelection_=0;
+    options_.clear();optionsParent_.clear();optionsTitle_.clear();
+}
+void Shell::buildOptions() {
+    resetOptions();
+    if(entries().isEmpty())return;
+    const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
+    // No Play/Start row for a row the shell itself cannot act on; Information stays honest for those.
+    if(entry.action!=Action::Unavailable)options_.push_back({activateLabel(entry),OptionCommand::Activate});
+    options_.push_back({QObject::tr("Information"),OptionCommand::Information});
+    // Sort By reorders the rows actually on this page, which is exactly the firmware's promise.
+    if(!pages_.isEmpty() && !pages_.last().directory.isEmpty() && entries().size()>1)
+        options_.push_back({QObject::tr("Sort By"),OptionCommand::SortMenu});
+    options_.push_back({QObject::tr("Close"),OptionCommand::Close});
+}
+void Shell::toggleOptions() {
+    touch();
+    if(optionsOpen_){dismissOptions();return;}
+    if(!message_.isEmpty() || mediaOpen_ || psMenu_ || loading_ || entries().isEmpty())return;
+    // A settings choice column already is the options panel; Triangle there adds nothing.
+    bool choiceColumn=true;
+    for(const auto& e:entries())if(e.action!=Action::SetSetting){choiceColumn=false;break;}
+    if(choiceColumn)return;
+    buildOptions();
+    if(options_.isEmpty())return;
+    optionsOpen_=true;
+    interactionAudio_.play(InteractionAudio::Cue::Options);
+    QStringList titles;for(const auto& option:options_)titles<<option.title;
+    const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
+    qInfo().noquote()<<"shell: options opened category="<<categories_[category_].id<<"depth="<<pages_.size()
+        <<"entry="<<entry.id<<"rows="<<options_.size()<<titles.join('|');
+    emit changed();
+}
+void Shell::optionsMove(int delta) {
+    if(!optionsOpen_ || options_.isEmpty() || delta==0)return;
+    const int count=options_.size();
+    optionsSelection_=(optionsSelection_+delta%count+count)%count;
+    interactionAudio_.play(InteractionAudio::Cue::Move);
+    qInfo().noquote()<<"shell: options selection"<<optionsSelection_<<options_[optionsSelection_].title;
+    emit changed();
+}
+void Shell::optionsActivate() {
+    if(!optionsOpen_ || options_.isEmpty())return;
+    const int index=std::clamp(optionsSelection_,0,int(options_.size())-1);
+    const auto option=options_[index];
+    const auto entry=entries().value(std::clamp(selection(),0,std::max(0,int(entries().size())-1)));
+    switch(option.command) {
+    case OptionCommand::Activate:
+        qInfo().noquote()<<"shell: options activate"<<option.title<<"entry="<<entry.id;
+        resetOptions();
+        activate(); // the entry's own action, exactly as Cross on the row
+        break;
+    case OptionCommand::Information:
+        resetOptions();
+        showEntryInformation(entry);
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        emit changed();
+        break;
+    case OptionCommand::SortMenu:
+        optionsParent_=options_;optionsNested_=true;optionsTitle_=QObject::tr("Sort By");
+        options_={{QObject::tr("Name (A-Z)"),OptionCommand::SortByNameAscending},
+                  {QObject::tr("Name (Z-A)"),OptionCommand::SortByNameDescending},
+                  {QObject::tr("Close"),OptionCommand::Close}};
+        optionsSelection_=0;
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        qInfo().noquote()<<"shell: options sort menu opened";
+        emit changed();
+        break;
+    case OptionCommand::SortByNameAscending:
+    case OptionCommand::SortByNameDescending: {
+        const bool ascending=option.command==OptionCommand::SortByNameAscending;
+        resetOptions();
+        sortPageByName(ascending);
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        emit changed();
+        break;
+    }
+    case OptionCommand::Close:optionsClose();break;
+    }
+}
+void Shell::optionsClose() {
+    if(!optionsOpen_)return;
+    if(optionsNested_) { // Circle steps back to the item list; the menu stays open
+        options_=optionsParent_;optionsParent_.clear();optionsNested_=false;optionsTitle_.clear();optionsSelection_=0;
+        interactionAudio_.play(InteractionAudio::Cue::Back);
+        qInfo().noquote()<<"shell: options back to item list";
+        emit changed();
+        return;
+    }
+    dismissOptions();
+}
+void Shell::dismissOptions() {
+    if(!optionsOpen_)return;
+    resetOptions();
+    interactionAudio_.play(InteractionAudio::Cue::Back);
+    qInfo().noquote()<<"shell: options closed";
+    emit changed();
+}
+void Shell::showEntryInformation(const Entry& entry) {
+    QStringList rows;
+    rows<<QObject::tr("Kind: ")+entryKind(entry);
+    if(!entry.detail.isEmpty())rows<<QObject::tr("Detail: ")+entry.detail;
+    if(entry.action==Action::Folder || entry.action==Action::File || entry.action==Action::Library)
+        rows<<QObject::tr("Path: ")+QDir::toNativeSeparators(entry.value);
+    else if(!entry.value.isEmpty())rows<<QObject::tr("Value: ")+entry.value;
+    // Title, blank line, then "Key: value" rows: the existing information-page layout detects this shape.
+    message_=entry.title+"\n\n"+rows.join('\n');
+    qInfo().noquote()<<"shell: options information title="<<entry.title<<"rows="<<rows.size();
+}
+void Shell::sortPageByName(bool ascending) {
+    if(pages_.isEmpty())return;
+    auto& page=pages_.last();
+    if(page.entries.size()<2)return;
+    const QString selected=page.entries.value(page.selection).id;
+    // Folders first, then titles alphabetically; a stable sort keeps equal titles in their existing order.
+    std::stable_sort(page.entries.begin(),page.entries.end(),[ascending](const Entry& left,const Entry& right){
+        const bool leftFolder=left.action==Action::Folder,rightFolder=right.action==Action::Folder;
+        if(leftFolder!=rightFolder)return leftFolder;
+        const int order=QString::compare(left.title,right.title,Qt::CaseInsensitive);
+        return ascending?order<0:order>0;
+    });
+    for(int i=0;i<page.entries.size();++i)if(page.entries[i].id==selected){page.selection=i;break;}
+    qInfo().noquote()<<"shell: options sorted page"<<page.title<<(ascending?"A-Z":"Z-A")<<page.entries.size()<<"rows";
+}
 void Shell::back() {
     touch();
     if(!message_.isEmpty() || mediaOpen_ || !pages_.isEmpty())interactionAudio_.play(InteractionAudio::Cue::Back);
