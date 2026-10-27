@@ -392,9 +392,15 @@ QString selectedSteamId(const QString& steamRoot, bool allowActiveRegistry) {
         if (!user.block || !steamIdForAccountKey(user.key, &steamId)) continue;
         Account account;
         account.steamId = steamId;
-        account.mostRecent = stringValue(user.children, QStringLiteral("MostRecent")) == QStringLiteral("1");
+        // The client writes lower-case "timestamp" today and has dropped MostRecent; accept the older
+        // spellings so a different Steam version still resolves the active account.
+        account.mostRecent = stringValue(user.children, QStringLiteral("MostRecent")) == QStringLiteral("1") ||
+                             stringValue(user.children, QStringLiteral("AutoLogin")) == QStringLiteral("1") ||
+                             stringValue(user.children, QStringLiteral("AllowAutoLogin")) == QStringLiteral("1");
         bool timestampValid = false;
-        account.timestamp = stringValue(user.children, QStringLiteral("Timestamp")).toULongLong(&timestampValid);
+        QString stamp = stringValue(user.children, QStringLiteral("timestamp"));
+        if (stamp.isEmpty()) stamp = stringValue(user.children, QStringLiteral("Timestamp"));
+        account.timestamp = stamp.toULongLong(&timestampValid);
         account.hasTimestamp = timestampValid;
         accounts.append(account);
     }
