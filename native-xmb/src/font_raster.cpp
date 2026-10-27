@@ -49,6 +49,7 @@ struct FontRaster::Impl {
         QByteArray head;
         QByteArray cmap;
         FT_F26Dot6 size64 = 0;
+        QPoint delta26_6; // transform currently installed on the face, in 1/64 pixel
     };
 
     FT_Library library = nullptr;
@@ -205,7 +206,7 @@ QString FontRaster::mapSymbols(QString text)
 }
 
 FontRaster::RasterGlyph FontRaster::rasterize(const QRawFont& font, quint32 glyphIndex,
-                                              qint32 loadFlags)
+                                              qint32 loadFlags, QPoint delta26_6)
 {
     RasterGlyph result;
     if (!impl_ || !impl_->library || !font.isValid())
@@ -225,6 +226,17 @@ FontRaster::RasterGlyph FontRaster::rasterize(const QRawFont& font, quint32 glyp
     if(entry.size64!=size64) {
         if (FT_Set_Char_Size(face, 0, static_cast<FT_F26Dot6>(size64), 72, 72) != 0)return result;
         entry.size64=static_cast<FT_F26Dot6>(size64);
+    }
+    // Sub-pixel phase. The firmware's draw function masks both pen phases with 0x3f and calls
+    // FT_Set_Transform before FT_Load_Glyph, so the outline itself moves by that fraction and the
+    // rendered coverage carries it. Reinstalled only when the phase changes: the transform lives
+    // on the face and every rasterisation below states its own delta, so the result is
+    // independent of call order.
+    if(entry.delta26_6!=delta26_6) {
+        FT_Matrix identity = {0x10000L, 0, 0, 0x10000L};
+        FT_Vector delta = {static_cast<FT_Pos>(delta26_6.x()), static_cast<FT_Pos>(delta26_6.y())};
+        FT_Set_Transform(face, &identity, &delta);
+        entry.delta26_6 = delta26_6;
     }
     const FT_Int32 flags = static_cast<FT_Int32>(loadFlags) | FT_LOAD_NO_BITMAP;
     if (FT_Load_Glyph(face, static_cast<FT_UInt>(glyphIndex), flags) != 0 ||
@@ -264,6 +276,41 @@ FontRaster::RasterGlyph FontRaster::rasterize(const QRawFont& font, quint32 glyp
     result.bearing = QPoint(face->glyph->bitmap_left, -face->glyph->bitmap_top);
     result.valid = true;
     return result;
+}
+
+qreal FontRaster::advance(const QRawFont& font, quint32 glyphIndex) const
+{
+    if (!impl_ || !impl_->library || !font.isValid())
+        return 0;
+    const int index = impl_->match(font);
+    if (index < 0)
+        return 0;
+    const qreal pixelSize = font.pixelSize();
+    if (!std::isfinite(pixelSize) || pixelSize <= 0.0 || pixelSize > maxPixelSize)
+        return 0;
+    const qint64 size64 = qRound64(pixelSize * 64.0);
+    if (size64 <= 0 || size64 > 4096 * 64)
+        return 0;
+    auto& entry = impl_->faces[index];
+    if (entry.size64 != size64) {
+        if (FT_Set_Char_Size(entry.face, 0, static_cast<FT_F26Dot6>(size64), 72, 72) != 0)
+            return 0;
+        entry.size64 = static_cast<FT_F26Dot6>(size64);
+    }
+    // A translation transform does not change the advance, but the face may still carry one from
+    // the last rasterisation. Clear it so the metric call is independent of draw order.
+    if (!entry.delta26_6.isNull()) {
+        FT_Matrix identity = {0x10000L, 0, 0, 0x10000L};
+        FT_Vector delta = {0, 0};
+        FT_Set_Transform(entry.face, &identity, &delta);
+        entry.delta26_6 = QPoint();
+    }
+    // FT_LOAD_NO_HINTING matches the firmware's load flags 10 (audit/TEXT-RASTER.md 1.1); PAF sums
+    // unhinted 26.6 advances (_opd_FUN_00397e5c @ 0x397e5c).
+    if (FT_Load_Glyph(entry.face, static_cast<FT_UInt>(glyphIndex),
+                      FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) != 0)
+        return 0;
+    return qreal(entry.face->glyph->advance.x) / 64.0;
 }
 
 } // namespace xmb
