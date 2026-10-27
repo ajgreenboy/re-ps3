@@ -276,6 +276,11 @@ void main(){colour=dimOpacity>0.0?vec4(0,0,0,dimOpacity):texture(layer,uv);})"; 
 // the reference day-cycle video relative to 10:30-16:30 (audit/VIDEO-REFERENCES.md); linear between them.
 double View::itemIconSize(int,bool bullet,double focus) {
     // Settings bullets in a page; every other icontex item is a category-column icon (no other level was captured).
+    // The 1.1022x second size class (85.554/203.700, audit/ITEM-ICONS.md) is NOT applied: at level>0 the only
+    // icontex items in this build are the settings bullets, and the settings page's focused bullet was captured at
+    // 85.05 with no factor. A/B on the Video Settings page: it scales that bullet to 93.7 (1463 changed px in the
+    // bullet column) and changes nothing on the item rows it is meant to help (0 changed px on the Video Library
+    // page), so it was reverted. It waits on the settled deeper-page capture described in the audit.
     return bullet?35.721+(85.05-35.721)*focus:77.616+(184.8-77.616)*focus;
 }
 double View::dayLight(double hour) {
@@ -747,6 +752,95 @@ void View::drawImage(QPainter& p,const QString& container,const QString& texture
     const QSizeF size=QSizeF(bounds.size()).scaled(rect.size(),Qt::KeepAspectRatio);
     p.save();p.setOpacity(opacity);p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);p.restore();
 }
+// The item-icon glass mask, prepared once per texture. The firmware draws these glyphs with the icon program:
+// alpha is the mask, and the program turns it into a refracted surface whose flat interior is almost the frame
+// itself (measured on the stored RPCS3 root frame: the folder body reads as 0.18 of white over the background)
+// with a bright rim at the mask edge (the program's Fresnel term). A plain alpha blend shows the whole mask
+// (0.70 there), which is what made the folder rows read as flat grey slabs instead of blue/gold glass.
+const QImage& View::itemGlyph(const QString& container,const QString& texture) {
+    const QString key=container+"/"+texture;
+    if(const auto it=itemGlyphs_.constFind(key);it!=itemGlyphs_.constEnd())return it.value();
+    const QImage& source=assets_.bestImage(container,texture);
+    if(source.isNull())return itemGlyphs_.insert(key,QImage()).value();
+    QImage argb=source.convertToFormat(QImage::Format_ARGB32);
+    // Opaque artwork (the PS Store bag, ICON0 stills, disc art) keeps its own pixels: its mask covers its
+    // footprint opaquely. A glass glyph's body is a translucent mask (median coverage well below opaque) and only
+    // its rim reaches 250, so the median of the covered pixels tells the two apart.
+    int histogram[256]{};
+    qint64 covered=0;
+    for(int y=0;y<argb.height();++y) {
+        const auto* row=reinterpret_cast<const QRgb*>(argb.constScanLine(y));
+        for(int x=0;x<argb.width();++x){const int alpha=qAlpha(row[x]);++histogram[alpha];if(alpha)++covered;}
+    }
+    int median=0;
+    if(covered)for(int total=0,alpha=1;alpha<256;++alpha){total+=histogram[alpha];if(total>=covered/2){median=alpha;break;}}
+    if(median>=230)return itemGlyphs_.insert(key,argb).value();
+    // The icon program reflects the frame through the mask, so the white it adds falls as the mask thickens: a
+    // folder's body reads as ~0.18 of white over the background and its emblem (a thicker region) nearly
+    // disappears into the frame. Measured on the stored RPCS3 root frame: the plain folder's 196/255 body shows as
+    // 0.18 of white, i.e. k*(255-196). The remaining term is the program's Fresnel highlight, which the mask does
+    // not carry, so the silhouette (the pixels that touch the transparent outside) keeps the mask's own alpha.
+    static constexpr double kThin=.78;
+    const int w=argb.width(),h=argb.height();
+    QVector<quint8> outside(size_t(w)*size_t(h),0);
+    QVector<int> pending;
+    const auto seed=[&](int x,int y){const size_t at=size_t(y)*size_t(w)+size_t(x);if(!outside[at] && !qAlpha(reinterpret_cast<const QRgb*>(argb.constScanLine(y))[x])){outside[at]=1;pending.push_back(y*w+x);}};
+    for(int x=0;x<w;++x){seed(x,0);seed(x,h-1);}
+    for(int y=0;y<h;++y){seed(0,y);seed(w-1,y);}
+    while(!pending.isEmpty()) {
+        const int index=pending.takeLast(),x=index%w,y=index/w;
+        if(x>0)seed(x-1,y);
+        if(x+1<w)seed(x+1,y);
+        if(y>0)seed(x,y-1);
+        if(y+1<h)seed(x,y+1);
+    }
+    const auto isOutside=[&](int x,int y){return x<0||y<0||x>=w||y>=h||outside[size_t(y)*size_t(w)+size_t(x)];};
+    // The rim is ~4 texture pixels thick so that it survives the downscale to a 60..105 px row (a 1 px rim would
+    // vanish under the smoothing).
+    QVector<quint8> rim(size_t(w)*size_t(h),0);
+    for(int y=0;y<h;++y)for(int x=0;x<w;++x)
+        if(qAlpha(reinterpret_cast<const QRgb*>(argb.constScanLine(y))[x]) &&
+           (isOutside(x-1,y)||isOutside(x+1,y)||isOutside(x,y-1)||isOutside(x,y+1)))rim[size_t(y)*size_t(w)+size_t(x)]=1;
+    for(int pass=0;pass<3;++pass) {
+        QVector<quint8> grown=rim;
+        for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
+            const size_t at=size_t(y)*size_t(w)+size_t(x);
+            if(rim[at] || !qAlpha(reinterpret_cast<const QRgb*>(argb.constScanLine(y))[x]))continue;
+            const auto lit=[&](int nx,int ny){return nx>=0&&ny>=0&&nx<w&&ny<h&&rim[size_t(ny)*size_t(w)+size_t(nx)];};
+            if(lit(x-1,y)||lit(x+1,y)||lit(x,y-1)||lit(x,y+1))grown[at]=1;
+        }
+        rim=grown;
+    }
+    QImage prepared(argb.size(),QImage::Format_ARGB32);
+    prepared.fill(Qt::transparent);
+    for(int y=0;y<h;++y) {
+        const auto* in=reinterpret_cast<const QRgb*>(argb.constScanLine(y));
+        auto* out=reinterpret_cast<QRgb*>(prepared.scanLine(y));
+        for(int x=0;x<w;++x) {
+            const int alpha=qAlpha(in[x]);
+            if(!alpha)continue;
+            const int coverage=rim[size_t(y)*size_t(w)+size_t(x)]?alpha:std::clamp(int((255-alpha)*kThin),0,255);
+            out[x]=qRgba(qRed(in[x]),qGreen(in[x]),qBlue(in[x]),coverage);
+        }
+    }
+    return itemGlyphs_.insert(key,prepared).value();
+}
+void View::drawItemGlyph(QPainter& p,const QString& container,const QString& texture,const QRectF& rect,qreal opacity) {
+    const auto& image=itemGlyph(container,texture);
+    if(image.isNull())return;
+    // The mask footprint is the same before and after preparation, so the cached alpha bounds of the source fit
+    // the same rect (the prepared body alpha falls below the bounds threshold, which would shrink it).
+    const QString key=container+"/"+texture;
+    auto bounds=imageBounds_.value(key);
+    if(bounds.isNull()) {
+        const QImage argb=assets_.bestImage(container,texture).convertToFormat(QImage::Format_ARGB32);
+        for(int y=0;y<argb.height();++y){const auto* row=reinterpret_cast<const QRgb*>(argb.constScanLine(y));for(int x=0;x<argb.width();++x)if(qAlpha(row[x])>16)bounds=bounds.united(QRect(x,y,1,1));}
+        if(bounds.isNull())bounds=assets_.bestImage(container,texture).rect();
+        imageBounds_.insert(key,bounds);
+    }
+    const QSizeF size=QSizeF(bounds.size()).scaled(rect.size(),Qt::KeepAspectRatio);
+    p.save();p.setOpacity(opacity);p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);p.restore();
+}
 void View::drawNineSlice(QPainter& p,const QString& container,const QString& texture,const QRectF& rect,qreal inset,qreal opacity) {
     // tex_notification is a 64x64 tile: a dark fill with a lighter 1 px border and rounded corners. Scaling it
     // to the plaque's aspect would stretch the corner arcs into ellipses, so the 3x3 parts are drawn with the
@@ -1012,19 +1106,35 @@ void View::drawScene(QPainter& p) {
                 // Setting rows carry the small round settings bullet: 18 px, 39 px focused (reference 95 s).
                 const bool bullet=entry.container=="qgl/icontex" && entry.texture=="23n";
                 const double size=bullet?18+focus*21:level==0?60+focus*44:40+focus*16;
-                const bool tile=entry.gameTile || entry.texture.contains("album") || entry.container=="file"; // ICON0 thumbnails are wide
-                const double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
-                const double iconAlpha=columnAlpha*(1.-behind*.78*(1.-focus));
+                // Firmware folder glyphs: a folder row in the Game column carries the emblem of what it holds - the
+                // captured Game Data Utility row is item_tex_ps3game_folder (folder + gamepad, explore_category_game.rco
+                // and explore_plugin_full.rco), not the bare storage folder. Steam's All Games / collection / Not
+                // Installed rows are the same row, so they take that glyph. The media columns ship no emblem folder
+                // at all: explore_category_video.rco's only folder is item_tex_plain_folder, which is what local
+                // library folders keep.
+                const QString itemTexture=entry.texture=="item_tex_plain_folder" && entry.action==Action::SteamFolder?
+                    QStringLiteral("item_tex_ps3game_folder"):entry.texture;
+                const bool tile=entry.gameTile || itemTexture.contains("album") || entry.container=="file"; // ICON0 thumbnails are wide
+                // A row behind an open page is the parent column, and every captured parent-column row is an item icon
+                // (77.616 unfocused / 184.800 focused, 2857.2/0.247 below focus). Keeping the wide album/ICON0 card
+                // there drew a 320x180 placeholder on the same spot as the open category icon (Video Library over the
+                // film strip), so a behind row is drawn at the item-icon box of its own level, art or not.
+                const double quad=itemIconSize(level,bullet,focus);
+                double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
+                if(behind>.001 && tile){iconWidth=size;iconHeight=size;}
+                // Captured parent-column brightness (_Ambiant.w 0.698 focused, 0.247 unfocused, RPCS3 fpdump7): it
+                // belongs to the column, not to the glass row class, or the card behind a page stays at full strength.
+                const double iconAlpha=columnAlpha*(1.-behind*(1.-(.247+.451*focus)));
                 // icontex items are glass icons like the categories: the firmware draws them with the same shader at
                 // brightness 1, behind an open page 0.247 (focused row 0.698) (RPCS3 capture, audit/PIPELINE.md);
                 // everything else is RCO or file artwork.
                 if(entry.gameTile) {
                     // Native installed PKGs render ICON0 directly in this slot: no launcher card/chrome.
                     const QRectF card(iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight);
-                    const auto& cover=entry.artwork.isNull()?assets_.image(entry.container,entry.texture):entry.artwork;
-                    if(!cover.isNull()) {
-                        const QSizeF fitted=QSizeF(cover.size()).scaled(card.size(),Qt::KeepAspectRatio);
-                        p.save();p.setOpacity(iconAlpha);p.drawImage(QRectF(card.center()-QPointF(fitted.width()/2,fitted.height()/2),fitted),cover);p.restore();
+                    if(entry.artwork.isNull())drawItemGlyph(p,entry.container,itemTexture,card,iconAlpha);
+                    else {
+                        const QSizeF fitted=QSizeF(entry.artwork.size()).scaled(card.size(),Qt::KeepAspectRatio);
+                        p.save();p.setOpacity(iconAlpha);p.drawImage(QRectF(card.center()-QPointF(fitted.width()/2,fitted.height()/2),fitted),entry.artwork);p.restore();
                     }
                 }
                 else if(!entry.artwork.isNull()) {
@@ -1032,14 +1142,13 @@ void View::drawScene(QPainter& p) {
                     p.save();p.setOpacity(iconAlpha);p.drawImage(QRectF(QPointF(iconX-fitted.width()/2,y-fitted.height()/2),fitted),entry.artwork);p.restore();
                 }
                 else if(const auto themed=shell_.themeIcon(entry.themeIcon);!themed.isNull()) { // a PS3 theme's icon, on the glass icon's quad
-                    const double quad=itemIconSize(level,bullet,focus);
                     p.save();p.setOpacity(iconAlpha);p.drawImage(QRectF(iconX-quad/2,y-quad/2,quad,quad),themed);p.restore();
                 }
                 else if(entry.container=="qgl/icontex" && icons_.ready() && !tile) {
                     const double brightness=1.-behind*(1.-(.247+.451*focus));
-                    iconQueue_.push_back({entry.texture,{iconX,y},itemIconSize(level,bullet,focus),brightness,columnAlpha,2700+157.2*depth});
+                    iconQueue_.push_back({entry.texture,{iconX,y},quad,brightness,columnAlpha,2700+157.2*depth});
                 }
-                else drawImage(p,entry.container,entry.texture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
+                else drawItemGlyph(p,entry.container,itemTexture,{iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight},iconAlpha);
                 if(entry.friendRow) {
                     p.save();p.setOpacity(iconAlpha);p.setPen(QPen(QColor(20,20,20,180),1.5));
                     p.setBrush(entry.presenceState==0?QColor(130,130,130):entry.presenceState==7?QColor(110,190,245):QColor(140,220,110));

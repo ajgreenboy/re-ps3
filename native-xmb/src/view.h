@@ -204,6 +204,13 @@ private:
     void oskClose(bool accept);
     QString oskCharacter(int row,int column) const;
     void drawImage(QPainter& painter,const QString& container,const QString& texture,const QRectF& rect,qreal opacity=1);
+    // RCO item glyphs are the firmware's white glass masks (the folder family, album placeholders and the other
+    // item textures): their alpha never reaches opaque, and the icon program shows only about a fifth of the mask
+    // as white over the frame while keeping a bright rim where the mask ends. Prepared once per texture; opaque
+    // RCO artwork (the store bag, ICON0 stills) comes back unchanged.
+    QHash<QString,QImage> itemGlyphs_;
+    const QImage& itemGlyph(const QString& container,const QString& texture);
+    void drawItemGlyph(QPainter& painter,const QString& container,const QString& texture,const QRectF& rect,qreal opacity);
     void drawCategory(QPainter& painter,const Category& category,const QRectF& rect);
 };
 }
