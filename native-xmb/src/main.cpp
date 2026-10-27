@@ -584,6 +584,40 @@ int main(int argc,char** argv) {
                     qInfo().noquote()<<"script: notify"<<title<<fields.value(1).trimmed()<<fields.value(2).trimmed();
                 }
             }
+            else if(token=="VOLUP" || token=="VOLDOWN" || token=="MUTE") {
+                // The couch volume path: the same key a Windows media key becomes when Qt delivers it as a key
+                // event, so the script drives View's real handler rather than a private shortcut.
+                tap(token=="VOLUP"?Qt::Key_VolumeUp:token=="VOLDOWN"?Qt::Key_VolumeDown:Qt::Key_VolumeMute);
+                qInfo().noquote()<<"script: volume key"<<token;
+            }
+            else if(token.startsWith("VOLSET=")) {
+                bool ok=false;const int percent=token.mid(7).toInt(&ok);
+                if(ok && percent>=0 && percent<=100){view->setMasterVolumePercent(percent);qInfo()<<"script: volume set"<<percent;}
+                else qWarning()<<"script: invalid VOLSET token (whole percent, 0-100)";
+            }
+            else if(token.startsWith("VOLKEY=")) {
+#ifdef Q_OS_WIN
+                // The message forms a media key actually arrives in, posted to the XMB window so the native event
+                // filter handles them exactly as it handles the real key: WM_APPCOMMAND (up|down|mute) and
+                // WM_KEYDOWN with VK_VOLUME_* (vkup|vkdown|vkmute). Both are swallowed by the filter, which is
+                // what keeps DefWindowProc from stepping the endpoint a second time.
+                const QString what=token.mid(7);
+                const int command=what=="up"?APPCOMMAND_VOLUME_UP:what=="down"?APPCOMMAND_VOLUME_DOWN:
+                    what=="mute"?APPCOMMAND_VOLUME_MUTE:0;
+                const WPARAM key=what=="vkup"?VK_VOLUME_UP:what=="vkdown"?VK_VOLUME_DOWN:
+                    what=="vkmute"?VK_VOLUME_MUTE:0;
+                if(!command && !key)qWarning()<<"script: invalid VOLKEY token (up|down|mute|vkup|vkdown|vkmute)";
+                else {
+                    const HWND handle=reinterpret_cast<HWND>(window.winId());
+                    if(command)PostMessageW(handle,WM_APPCOMMAND,reinterpret_cast<WPARAM>(handle),MAKELPARAM(0,command));
+                    else {PostMessageW(handle,WM_KEYDOWN,key,0);PostMessageW(handle,WM_KEYUP,key,0);}
+                    qInfo().noquote()<<"script: volume message"<<what;
+                }
+#else
+                qWarning()<<"script: VOLKEY is Windows only";
+#endif
+            }
+            else if(token=="VOLRESTORE"){view->restoreMasterVolume();qInfo()<<"script: volume restore";}
             else if(token=="quit")app.quit();
             else if(token.startsWith("grab=")) {
                 const auto image=view->grabFramebuffer();

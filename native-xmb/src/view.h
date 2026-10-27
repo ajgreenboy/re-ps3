@@ -20,6 +20,7 @@
 #include <QElapsedTimer>
 #include <QTimer>
 #include <QOpenGLTexture>
+class QAbstractNativeEventFilter;
 
 namespace xmb {
 class View final:public QOpenGLWidget,protected QOpenGLFunctions_3_3_Core {
@@ -59,6 +60,10 @@ public:
     // same global watcher state machine a physical press does, including the 1 s hold.
     void replayPsTap();
     void replayPsHold();
+    // The couch volume path, reachable from --script so a capture can pin an exact level. These are the
+    // same functions the pad's L2/R2, the media keys and the native WM_APPCOMMAND filter call.
+    void setMasterVolumePercent(int percent);   // VOLSET=<0..100>
+    void restoreMasterVolume();                 // VOLRESTORE: the level and mute state read at start-up
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -132,6 +137,30 @@ private:
     MediaControls mediaControls_;
     bool previousMediaOpen_=false;
     QString previousMediaTitle_;
+    // ---- Couch volume: the PC's master volume, the pad's L2/R2, the Windows media keys, and the HUD ----
+    // The firmware's own volume display is one page holding a single level meter (videoplayer_plugin.rco
+    // videoplayer_volume_page / videoplayer_volume_level_meter, and the same pair in audioplayer_plugin.rco
+    // and explore_plugin_full.rco volume_page / volume_level_meter). Its paf projection is not recovered,
+    // so the native HUD's rect is fitted and borrows the information bar's material; the visibility clock is
+    // the MediaControls model (3 s visible, 250 ms fade) rather than a second timing scheme.
+    MediaControls volumeHud_;
+    int volumeLevel_=-1;             // last level Windows reported; -1 when the endpoint is unavailable
+    bool volumeMuted_=false;         // Windows' endpoint mute state as last read
+    int volumeStart_=-1;             // start-up level and mute state, put back by restoreMasterVolume()
+    bool volumeStartMuted_=false;
+    int volumeRamp_=0;               // the held trigger: -1 L2, +1 R2, 0 released
+    qint64 volumeRampAt_=0;          // next held-trigger step deadline
+    qint64 volumeHudAt_=0;           // when the HUD's 3 s interval started, for the opt-in fade trace
+    bool volumeHudVisible_=false;    // for the opt-in trace of the HUD's own expiry
+    bool volumeWarned_=false;        // one line only when the endpoint cannot be read
+    std::unique_ptr<QAbstractNativeEventFilter> volumeKeys_;
+    bool volumeInputBlocked() const;                       // a surface that owns input or the frame is up
+    bool volumeKeyAction(int action,const char* source);   // 1 up, 2 down, 3 mute; false = key not taken
+    void volumeStep(int direction,const QString& source);  // one 5% step through the host endpoint
+    void volumeToggleMute(const QString& source);
+    void volumeApply(int percent,const QString& source);   // set, read back, log, show the HUD
+    void pollVolumeRamp(float down,float up,qint64 now);   // held L2/R2 repeat, called from pollController
+    void drawVolumeHud(QPainter& painter,double opacity);
     void zoomPhoto(int direction);
     void resetPhotoView();
     void panPhoto(int dx,int dy);

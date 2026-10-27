@@ -1,9 +1,11 @@
 #include "view.h"
 #include "app_editor.h"
+#include "host.h"
 #include "jellyfin_signin.h"
 #include "pad.h"
 #include <QPainter>
 #include <QKeyEvent>
+#include <QAbstractNativeEventFilter>
 #include <QDateTime>
 #include <QFileDialog>
 #include <QLoggingCategory>
@@ -60,6 +62,57 @@ QString foregroundDescription() {
 #else
 QString foregroundDescription() { return QStringLiteral("unsupported"); }
 #endif
+#ifdef Q_OS_WIN
+// Windows delivers one media volume key press in two forms that can both reach this window: WM_APPCOMMAND
+// (APPCOMMAND_VOLUME_UP/DOWN/MUTE, which DefWindowProc would hand to the shell) and, on most keyboards, a
+// WM_KEYDOWN/WM_SYSKEYDOWN with VK_VOLUME_UP/DOWN/MUTE. Both are taken here so the host applies exactly one
+// 5% step (or one mute toggle) and the HUD cannot disagree with the endpoint. A volume key is not a key the
+// XMB uses, so swallowing it takes nothing from navigation; when the apply call declines the key (another
+// surface owns input), the message is left alone and Windows behaves exactly as it would without this app.
+class VolumeKeyFilter final:public QAbstractNativeEventFilter {
+public:
+    explicit VolumeKeyFilter(std::function<bool(int,const char*)> apply):apply_(std::move(apply)){clock_.start();}
+    bool nativeEventFilter(const QByteArray& type,void* message,qintptr* result) override {
+        if(type!="windows_generic_MSG" && type!="windows_dispatcher_MSG")return false;
+        auto* msg=static_cast<MSG*>(message);
+        int action=0;const char* source="";
+        if(msg->message==WM_APPCOMMAND) {
+            switch(GET_APPCOMMAND_LPARAM(msg->lParam)) {
+            case APPCOMMAND_VOLUME_UP:action=1;source="appcommand up";break;
+            case APPCOMMAND_VOLUME_DOWN:action=2;source="appcommand down";break;
+            case APPCOMMAND_VOLUME_MUTE:action=3;source="appcommand mute";break;
+            default:return false;
+            }
+        } else if(msg->message==WM_KEYDOWN || msg->message==WM_SYSKEYDOWN) {
+            switch(msg->wParam) {
+            case VK_VOLUME_UP:action=1;source="vk_volume up";break;
+            case VK_VOLUME_DOWN:action=2;source="vk_volume down";break;
+            case VK_VOLUME_MUTE:action=3;source="vk_volume mute";break;
+            default:return false;
+            }
+        } else return false;
+        // The two forms of one press arrive together: the second within 100 ms is the same press and is
+        // swallowed without a second step. Two separate presses 100 ms apart are faster than a human.
+        const qint64 now=clock_.elapsed();
+        if(action==lastAction_ && now-lastAt_<100) {
+            if(result)*result=0;
+            if(qEnvironmentVariableIsSet("XMB_VOLUME_LOG"))qInfo().noquote()<<QString("volume: trace %1 duplicate of a press %2 ms ago (swallowed)").arg(source).arg(now-lastAt_);
+            return true;
+        }
+        if(!apply_(action,source))return false; // declined: the host keeps its own handling of this key
+        lastAction_=action;lastAt_=now;
+        if(result)*result=0;
+        return true;
+    }
+private:
+    std::function<bool(int,const char*)> apply_;
+    QElapsedTimer clock_;
+    int lastAction_=0;
+    qint64 lastAt_=-1000;
+};
+#endif
+// Opt-in trace for the volume path; the per-change read-back line is logged unconditionally.
+bool volumeTrace() { static const bool on=qEnvironmentVariableIsSet("XMB_VOLUME_LOG");return on; }
 }
 View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),shell_(shell),assets_(assets) {
     setFocusPolicy(Qt::StrongFocus);setMinimumSize(800,450);
@@ -92,6 +145,19 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     });
     loadWallpaper();
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
+    // The PC's master volume at start-up: logged once (an isolated data directory does not isolate the
+    // Windows audio endpoint, so a scripted run has to put this back) and kept for VOLRESTORE.
+    volumeLevel_=host::masterVolume();
+    volumeMuted_=host::masterMuted();
+    volumeStart_=volumeLevel_;volumeStartMuted_=volumeMuted_;
+    qInfo().noquote()<<QString("volume: start %1% muted %2 on the default playback endpoint")
+        .arg(volumeLevel_<0?QStringLiteral("unavailable"):QString::number(volumeLevel_)).arg(volumeMuted_?1:0);
+#ifdef Q_OS_WIN
+    // Media keys: WM_APPCOMMAND and VK_VOLUME_* are taken before Qt or DefWindowProc sees them.
+    volumeKeys_=std::make_unique<VolumeKeyFilter>([this](int action,const char* source){return volumeKeyAction(action,source);});
+    qApp->installNativeEventFilter(volumeKeys_.get());
+    if(volumeTrace())qInfo()<<"volume: trace media-key filter installed (WM_APPCOMMAND, VK_VOLUME_*)";
+#endif
     // Input polling is independent of presentation. A 16 ms repaint timer produced ~62.5 Hz even on a 239 Hz
     // display. Request the next frame after Qt finishes composition/swap; swapInterval=1 remains in effect.
     connect(&timer_,&QTimer::timeout,this,[this]{pollController();});timer_.start();pad::start();
@@ -195,7 +261,11 @@ void View::loadWallpaper() {
         return reader.read();
     }));
 }
-View::~View(){saveFrameTrace();if(context()){makeCurrent();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
+View::~View(){
+#ifdef Q_OS_WIN
+    if(volumeKeys_ && qApp)qApp->removeNativeEventFilter(volumeKeys_.get());
+#endif
+    saveFrameTrace();if(context()){makeCurrent();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
     if(!initializeOpenGLFunctions()){qCritical()<<"Native renderer requires OpenGL 3.3";return;}
     textRenderer_.init(*this,QDir(assets_.root()).filePath("data/font"));
@@ -666,6 +736,16 @@ void View::paintGL() {
     if(notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
         signature+=QString::asprintf(" notify %d ",int(notificationEase_.value*256.))+notificationShown_.title+'|'+
             notificationShown_.detail+'|'+notificationShown_.icon;
+    // The volume HUD fades on its own clock between shell changes, so its opacity (quantised by 1/256, finer
+    // than the 2x layer can show) and the value it is drawing belong in the signature.
+    if(const auto hud=volumeHud_.state(clock_.elapsed());hud.visible) {
+        signature+=QString::asprintf(" vol %d %d %d ",int(hud.opacity*256.),volumeLevel_,volumeMuted_?1:0);
+        // Opt-in trace of the fade itself: one line per frame while it runs, so the 3000/250 ms boundary the
+        // video controls are specified at is measurable here without landing a capture inside a 250 ms window.
+        if(volumeTrace() && hud.opacity<1.)
+            qInfo().noquote()<<QString("volume: trace HUD fade opacity %1 at %2 ms after the change")
+                .arg(hud.opacity,0,'f',3).arg(clock_.elapsed()-volumeHudAt_);
+    }
     if(shell_.mediaOpen())signature+=QString::number(now); // media frames change every frame
     bool rebuild=signature!=uiSignature_;
     if(!uiMsaa_ || uiMsaa_->size()!=pixels) {
@@ -1260,6 +1340,21 @@ void View::drawScene(QPainter& p) {
         drawImage(p,"system_plugin","tex_cross",{902,895,24,24});text({936,887,160,40},"OK",21,QColor(235,235,235));
     }
     if(osk_.open)drawOsk(p);
+    // The transient volume HUD. It is a timed composite, not a panel: it appears on every change and fades on
+    // the MediaControls model, takes no input (nothing here reads a key or a button), and draws only in the
+    // frames that have room for it - the PS menu blacks the frame, an information/dialog page replaces it, and
+    // the options panel and the on-screen keyboard own the keys that could change the level anyway.
+    {
+        const auto hud=volumeHud_.state(clock_.elapsed());
+        if(volumeTrace() && hud.visible!=volumeHudVisible_) {
+            volumeHudVisible_=hud.visible;
+            qInfo().noquote()<<QString("volume: trace HUD %1 (level %2 muted %3, %4 ms after the change)")
+                .arg(hud.visible?"visible":"expired").arg(volumeLevel_).arg(volumeMuted_?1:0)
+                .arg(clock_.elapsed()-volumeHudAt_);
+        }
+        const bool room=!shell_.psMenuOpen() && shell_.message().isEmpty() && !shell_.optionsOpen() && !osk_.open;
+        if(room && hud.visible && hud.opacity>.002) drawVolumeHud(p,hud.opacity);
+    }
     // The console's notification pop-up, drawn last so it sits above the XMB, and never while the PS menu is
     // up: that menu blacks the frame and owns the screen. It takes no input (nothing here reads keys), so it
     // cannot steal a press from whatever is underneath.
@@ -1305,6 +1400,161 @@ void View::drawScene(QPainter& p) {
         text({1430,88,90,42},"-",22,QColor(210,210,210),Qt::AlignRight|Qt::AlignVCenter);
         p.restore();
     }
+}
+// ---- Couch volume ----------------------------------------------------------------------------------------
+// The PC's master volume, driven by the pad's analog triggers and by the Windows media keys, with one
+// transient HUD. Every change goes through host::setMasterVolume / host::setMasterMuted and then logs what
+// Windows reports afterwards, so the endpoint - not this process's cache - is the record of what happened.
+//
+// Input mapping, in one place:
+//   L2 held                    one 5% step down on the press, then a step every 120 ms (60 ms past 0.75)
+//   R2 held                    the same upwards
+//   volume up/down/mute keys   WM_APPCOMMAND and VK_VOLUME_* taken by the native filter, Qt::Key_Volume*
+//                              taken in keyPressEvent; nothing else on the XMB uses them
+//   VOLUP/VOLDOWN/MUTE         --script tokens that drive the key path
+//   VOLSET=<0..100>            --script: an exact level, so a capture can pin 30/60/90
+//   VOLKEY=up|down|mute        --script: posts the real WM_APPCOMMAND, i.e. the Windows path end to end
+//   VOLKEY=vkup|vkdown|vkmute  --script: posts the WM_KEYDOWN VK_VOLUME_* form of the same key
+//   VOLRESTORE                 --script: the level and mute state read at start-up
+// A surface that owns the keyboard or the frame takes the keys too: while it is up the input is declined
+// (so a media key keeps its normal Windows behaviour) and the HUD stays hidden.
+bool View::volumeInputBlocked() const {
+    return introRunning() || osk_.open || shell_.psMenuOpen() || shell_.optionsOpen() ||
+        !shell_.message().isEmpty() || QApplication::activeModalWidget()!=nullptr;
+}
+void View::volumeApply(int percent,const QString& source) {
+    const int requested=std::clamp(percent,0,100);
+    const bool set=host::setMasterVolume(requested);
+    const int reported=host::masterVolume();
+    volumeMuted_=host::masterMuted();
+    volumeLevel_=reported>=0?reported:requested;
+    volumeHud_.opened(clock_.elapsed());
+    volumeHudAt_=clock_.elapsed();
+    if(!set && volumeTrace())qInfo()<<"volume: trace setMasterVolume failed (the endpoint refused the write)";
+    // The read-back is the point of this line: the HUD draws what Windows reports, not what was asked for.
+    qInfo().noquote()<<QString("volume: %1 request %2% -> Windows reports %3% (muted %4)")
+        .arg(source).arg(requested)
+        .arg(reported<0?QStringLiteral("unavailable"):QString::number(reported)).arg(volumeMuted_?1:0);
+    update();
+}
+void View::volumeStep(int direction,const QString& source) {
+    // The step is taken from the endpoint's own level, not from the cache, so a change made outside the app
+    // (another program's mixer, a headset's own buttons) cannot accumulate a drift.
+    const int base=host::masterVolume();
+    if(base<0) {
+        if(!volumeWarned_) {
+            volumeWarned_=true;
+            qWarning()<<"volume: no default playback endpoint; the volume controls do nothing";
+        }
+        return;
+    }
+    volumeApply(base+(direction>0?5:-5),source);
+}
+void View::volumeToggleMute(const QString& source) {
+    const bool was=host::masterMuted();
+    const bool set=host::setMasterMuted(!was);
+    const int reported=host::masterVolume();
+    volumeMuted_=host::masterMuted();
+    volumeLevel_=reported>=0?reported:volumeLevel_;
+    volumeHud_.opened(clock_.elapsed());
+    volumeHudAt_=clock_.elapsed();
+    if(!set && volumeTrace())qInfo()<<"volume: trace setMasterMuted failed (the endpoint refused the write)";
+    qInfo().noquote()<<QString("volume: %1 mute %2 -> Windows reports muted %3, level %4%")
+        .arg(source).arg(was?0:1).arg(volumeMuted_?1:0)
+        .arg(reported<0?QStringLiteral("unavailable"):QString::number(reported));
+    update();
+}
+bool View::volumeKeyAction(int action,const char* source) {
+    const QString who=QString::fromLatin1(source);
+    if(volumeInputBlocked()) {
+        if(volumeTrace())qInfo().noquote()<<"volume: trace"<<who<<"ignored (another surface owns the input)";
+        return false;
+    }
+    if(action==3)volumeToggleMute(who);
+    else volumeStep(action==1?1:-1,who);
+    return true;
+}
+void View::setMasterVolumePercent(int percent) {
+    volumeApply(percent,QStringLiteral("VOLSET"));
+}
+void View::restoreMasterVolume() {
+    if(volumeStart_<0) {
+        qWarning()<<"volume: VOLRESTORE has no start-up level to put back (the endpoint was unavailable at start)";
+        return;
+    }
+    const bool muteSet=host::setMasterMuted(volumeStartMuted_);
+    volumeApply(volumeStart_,QStringLiteral("VOLRESTORE"));
+    qInfo().noquote()<<QString("volume: restored the start-up state %1% muted %2 -> Windows reports %3% muted %4 (mute call ok %5)")
+        .arg(volumeStart_).arg(volumeStartMuted_?1:0).arg(volumeLevel_).arg(volumeMuted_?1:0).arg(muteSet?1:0);
+}
+void View::pollVolumeRamp(float down,float up,qint64 now) {
+    // The pad's triggers are analog axes, not D-pad bits: nothing here touches `buttons`, `repeatAt_` or the
+    // navigation paths, so a held trigger cannot move the XMB or consume a D-pad repeat.
+    constexpr float kPress=.35f;      // a resting DualShock 3/4 trigger reads 0.0; this is the press threshold
+    if(volumeInputBlocked()){volumeRamp_=0;return;}
+    const float pressure=std::max(down,up);
+    if(pressure<kPress) {
+        if(volumeRamp_ && volumeTrace())qInfo()<<"volume: trace ramp released";
+        volumeRamp_=0;
+        return;
+    }
+    const int direction=up>down?1:-1;
+    const qint64 interval=pressure>=.75f?60:120; // full squeeze ramps twice as fast
+    if(direction!=volumeRamp_) {                  // the press: one step now, then the held repeat
+        volumeRamp_=direction;volumeRampAt_=now+interval;
+        if(volumeTrace())qInfo().noquote()<<QString("volume: trace ramp start %1 pressure %2 interval %3 ms")
+            .arg(direction>0?"R2":"L2").arg(pressure,0,'f',2).arg(interval);
+        volumeStep(direction,direction>0?QStringLiteral("R2"):QStringLiteral("L2"));
+        return;
+    }
+    if(now<volumeRampAt_)return;
+    // Counted from the last deadline, not from this poll, so the 16 ms poll cannot stretch the interval.
+    volumeRampAt_=std::max(volumeRampAt_,now-interval)+interval;
+    volumeStep(direction,direction>0?QStringLiteral("R2"):QStringLiteral("L2"));
+}
+// The native volume HUD. Its shape comes from the firmware: the console's volume display is one page holding
+// a single horizontal level meter (videoplayer_plugin.rco videoplayer_volume_page /
+// videoplayer_volume_level_meter, and the same pair in audioplayer_plugin.rco and explore_plugin_full.rco
+// volume_page / volume_level_meter). That page's projection lives in the plugin's own paf code and is not
+// recovered, so the rect here is fitted rather than traced - and it is fitted to the one band no other
+// composite uses: immediately left of the information panel (x 1329..1920, y 75..133), above the
+// notification plaque (y 145), left of the options panel (x 1330) and clear of the OSK (y 290) and the PS
+// menu (which blacks the frame). The fill and border are the information bar's own material, so it reads as
+// part of the XMB rather than as an application overlay.
+void View::drawVolumeHud(QPainter& p,double opacity) {
+    const double alpha=std::clamp(opacity,0.,1.);
+    if(alpha<=.002)return;
+    const QRectF panel(1000,75,222,58);
+    p.save();
+    p.setOpacity(alpha);
+    p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,20));p.drawRoundedRect(panel,4,4);
+    p.setOpacity(.12*alpha);p.drawImage(panel,assets_.image("system_plugin","tex_infobar"));
+    p.setOpacity(alpha);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));
+    p.drawRoundedRect(panel.adjusted(.5,.5,-.5,-.5),4,4);
+    const auto label=[&](const QRectF& rect,const QString& value,int size,QColor colour,int flags) {
+        if(textRenderer_.ready()) {
+            QFont font(shell_.fontFamily());font.setPixelSize(size);
+            textRenderer_.draw(*this,p,rect,value,font,colour,flags);return;
+        }
+        QFont font(shell_.fontFamily());font.setPixelSize(size);font.setStyleStrategy(QFont::PreferAntialias);
+        font.setHintingPreference(QFont::PreferNoHinting);p.setFont(font);
+        p.setPen(QColor(0,0,0,38));p.drawText(rect.translated(1,1),flags,value);
+        p.setPen(colour);p.drawText(rect,flags,value);
+    };
+    // The firmware's own label for this display (msg_volume_control, "Volume Control" in the player plugins).
+    label(QRectF(panel.left()+12,panel.top()+7,150,18),
+        assets_.text("videoplayer_plugin","msg_volume_control","Volume Control"),15,QColor(220,220,220),Qt::AlignLeft|Qt::AlignVCenter);
+    const int level=std::clamp(volumeLevel_,0,100);
+    // Muted: the level is still what it is, but nothing is audible, so the number gives way to "Mute" and the
+    // meter greys. Nothing here writes the mute state except the mute key itself.
+    label(QRectF(panel.right()-122,panel.top()+5,110,24),
+        volumeMuted_?QStringLiteral("Mute"):QStringLiteral("%1%").arg(level),19,
+        volumeMuted_?QColor(200,200,200):Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+    const QRectF track(panel.left()+12,panel.top()+37,panel.width()-24,6);
+    p.setPen(Qt::NoPen);p.setBrush(QColor(255,255,255,55));p.drawRect(track);
+    if(level>0)p.fillRect(QRectF(track.left(),track.top(),track.width()*level/100.,track.height()),
+        volumeMuted_?QColor(150,150,150):QColor(255,255,255));
+    p.restore();
 }
 void View::zoomPhoto(int direction) {
     if(!shell_.photoOpen() || !photoViewport_.valid())return;
@@ -1508,6 +1758,14 @@ void View::keyPressEvent(QKeyEvent* e) {
     }
     // Keyboard substitute for the PS button (controllers send 0x400 over HID): F10 opens the system menu.
     if(e->key()==Qt::Key_F10){shell_.psHeld();e->accept();return;}
+    // The Windows media volume keys. The native filter takes the WM_APPCOMMAND/VK_VOLUME form before Qt or
+    // DefWindowProc sees it; this is the path for a Key_Volume* that does arrive as a key event, and it is the
+    // path the VOLUP/VOLDOWN/MUTE script tokens drive. The XMB binds no volume key, so handling it here takes
+    // nothing away from navigation.
+    if(e->key()==Qt::Key_VolumeUp || e->key()==Qt::Key_VolumeDown || e->key()==Qt::Key_VolumeMute) {
+        volumeKeyAction(e->key()==Qt::Key_VolumeMute?3:(e->key()==Qt::Key_VolumeUp?1:2),"keys");
+        e->accept();return;
+    }
 #ifdef Q_OS_WIN
     // Arrows go through pollController's repeat (the firmware's, not the OS's), so auto-repeats are dropped here.
     if(const auto bit=arrowBit(e->key());bit && !replayingInput_) {
@@ -1569,7 +1827,7 @@ void View::focusOutEvent(QFocusEvent* e) {
 }
 void View::pollController() {
 #ifdef Q_OS_WIN
-    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;return;}
+    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;volumeRamp_=0;return;}
     // XInput pad 0 and any PlayStation controller over HID (pad.cpp), merged; the left stick doubles as the D-pad.
     XINPUT_STATE state{};const bool xinput=XInputGetState(0,&state)==ERROR_SUCCESS;
     pad::State hid;const bool playstation=pad::latest(hid);
@@ -1577,6 +1835,13 @@ void View::pollController() {
     // PS is consumed by the global watcher (ps_watcher.cpp), which also covers a focused game; it must
     // never reach the XMB navigation bits below.
     buttons=quint16(buttons&~0x400);
+    // L2/R2 are analog triggers rather than D-pad bits: they are read here and never merged into `buttons`,
+    // so a held trigger cannot move the XMB, cannot press Cross, and cannot disturb repeatAt_. Both the pad's
+    // own report (pad.cpp l2/r2) and an XInput pad's triggers feed the same ramp; whichever is pressed harder
+    // wins when both controllers are attached.
+    const float triggerDown=std::max(xinput?state.Gamepad.bLeftTrigger/255.f:0.f,playstation?hid.l2:0.f);
+    const float triggerUp=std::max(xinput?state.Gamepad.bRightTrigger/255.f:0.f,playstation?hid.r2:0.f);
+    pollVolumeRamp(triggerDown,triggerUp,clock_.elapsed());
     if(shell_.psMenuOpen()) {
         const auto edgePs=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;buttons_=buttons;
         if(edgePs&XINPUT_GAMEPAD_DPAD_UP)shell_.psMenuMove(-1);
