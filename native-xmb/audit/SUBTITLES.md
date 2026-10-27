@@ -529,3 +529,5 @@ The item-level panel was also re-captured after the drawing generalisation
 Not touched: `settings_menu.cpp`, `preferences.cpp`, `xmbml_view.*`, `host.*`, `pad.*`,
 `media_controls.*`, `jellyfin_*`, the verification harness, its thresholds and its references.
 Captures, fixtures and logs live under `out/native-subs/` and are not committed.
+
+**Note (2026-10-27):** Continue Watching is now the first row of the Video column, so the repro scripts that say 9 LEFT, 4 RIGHT, ENTER reach Video Library only with one extra DOWN before ENTER. Those runs were captured before the row existed; the evidence in this file is otherwise unchanged.
