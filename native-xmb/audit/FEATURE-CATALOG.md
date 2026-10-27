@@ -9,6 +9,11 @@ XMB-210 and XMB-218 were re-read against the source and now state the implemente
 remains. Five native surfaces that are not Sony guide topics had no rows at all; they are listed in
 "Native surfaces outside the 307-topic index" near the end of this file.
 
+Status revision 2026-10-27: NATIVE-06..NATIVE-12 add the seven native surfaces that landed after the
+2026-10-26 sweep - the Download Management page, the notification composite, the Triangle options menu, the
+subtitle/audio-track player panel, Continue Watching, the volume HUD and the in-XMB Jellyfin sign-in page.
+XMB-165 and XMB-201 were re-read against the source and now name the implemented part.
+
 ## About the XMB™ menu
 
 Required backend: Menu state, input routing, overlays, text entry, concurrent activities.
@@ -207,7 +212,7 @@ Required backend: Audio decoder/mixer, media database, queue, DSP, visualization
 |---|---|---|---|
 | XMB-163 | Music category | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/music.html) |
 | XMB-164 | Using the control panel | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
-| XMB-165 | Using the control panel → Volume Control | Partial: host player path; original panel and repeat-all/queue semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
+| XMB-165 | Using the control panel → Volume Control | Partial: real Windows master volume plus the volume HUD and L2/R2, media-key and `--script` ramps exist (`View::pollVolumeRamp()`, `View::drawVolumeHud()`, `host::masterVolume()`; audit/HTPC-IDEAS.md section 6), and volume/mute/key tone are real settings rows; the original control-panel page, its projection and a per-track mixer are open | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-166 | Using the control panel → Visual Player | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-167 | Using the control panel → Add to Playlist | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-168 | Using the control panel → Delete | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
@@ -250,7 +255,7 @@ Required backend: Video decoder, tracks, subtitles, timeline/chapter/scene model
 | XMB-198 | Using the control panel → Go To | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-199 | Using the control panel → Angle Options | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-200 | Using the control panel → Audio Options | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
-| XMB-201 | Using the control panel → Subtitle Options | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
+| XMB-201 | Using the control panel → Subtitle Options | Partial: sidecar SRT/WebVTT subtitles are discovered, parsed and drawn, and the Triangle player panel selects them and shows the audio tracks the player reports (audit/SUBTITLES.md); embedded stream subtitles (`QMediaPlayer::subtitleTracks`), disc/BD subtitle options and Jellyfin subtitle fetching are not implemented | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-202 | Using the control panel → Subtitle Style Options | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-203 | Using the control panel → Volume Control | Partial: host player path; original panel and format-specific semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-204 | Using the control panel → AV Settings | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
@@ -393,10 +398,11 @@ Required backend: Presence, profiles, relationships, messaging, chat and media s
 | XMB-306 | Message Box → Protecting messages | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/protectmsg.html) |
 | XMB-307 | Message Box → Deleting messages | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/deletemsg.html) |
 
-## Native surfaces outside the 307-topic index (added 2026-10-26)
+## Native surfaces outside the 307-topic index (added 2026-10-26, extended 2026-10-27)
 
 These are not Sony guide topics, so they are not counted in the 307 above and were missing from this
-catalogue until 2026-10-26. Statuses are read from the source; they are not runtime observations.
+catalogue until 2026-10-26. Statuses are read from the source and from the recorded runs the cited audit
+documents; nothing here was re-executed for this catalogue.
 
 | ID | Native surface | Status | Evidence |
 |---|---|---|---|
@@ -405,6 +411,13 @@ catalogue until 2026-10-26. Statuses are read from the source; they are not runt
 | NATIVE-03 | Native Jellyfin service and player | Partial: local sign-in, library/folder pages, direct and server-negotiated HLS playback, pause/seek/Back and sign-out verified against Jellyfin 12.4; posters, selectors and resume UI open (ISC-46.6) | `src/jellyfin_*.cpp`; audit/JELLYFIN-NATIVE.md |
 | NATIVE-04 | Imported-app registry and editor | Done for the recorded checks: versioned JSON registry, atomic merge, executables/browser apps/Jellyfin services and a native editor; invalid input preserves the existing bytes | `src/content_registry.*`, `src/app_editor.cpp`; audit/APP-EDITOR.md, CONTENT-REGISTRY.md |
 | NATIVE-05 | PS system menu and global PS hook | Partial: a held PS button opens the system menu with Turn Off the System and Quit Game; a focus-independent 20 ms HID watcher brings the XMB forward from a running title; controller charge/slot data is still static | `src/ps_watcher.*`, `Shell::psMenuActivate`, `View::paintGL` PS menu; audit/PS-BUTTON.md, PS-INGAME-HOOK.md |
+| NATIVE-06 | Download Management page (Steam download queue) | Partial: the Network column's firmware `dlctrl` row (`seg_dlctrl`, `tex_dl_manage`, classified `RowKind::DownloadControl` from the `ese://` `type=download_control` provider) opens a real page over Steam's own queue - title, state text, progress from the manifest counters or `no progress published`, cached header artwork, F5 reload that cannot duplicate rows, per-row Information with the documented no-pause limit and a `.dl.json` dump. No per-row progress bar; no pause/resume/start/cancel; the scan runs on the UI thread (6-8 ms here) | `Shell::openSteamDownloads` / `reloadSteamDownloads`, `Action::SteamDownloads`; audit/STEAM-DOWNLOADS.md section 10 |
+| NATIVE-07 | XMB notification pop-up composite | Partial: the `system_plugin` `page_notification` composite (plaque `tex_notification` plus the 100x100 type glyphs) driven by a 4-entry FIFO queue with a 4 s lifetime and a 200 ms mode-5 slide, from two real producers (tracked-title return, library rescan). Sound, the firmware overlap policy, per-type suppression, trophy/friend triggers and the icon shadow plane are open | `Shell::notify()`, `View::drawNotification()`; audit/NOTIFICATIONS.md |
+| NATIVE-08 | Item-level Triangle options menu | Partial: a right-hand panel on content rows with `Open`/`Play`/`View`/`Start`, `Information`, `Sort By` (a second level that really reorders the page) and `Close`, derived from the selected entry and owning input while open. Steam folder rows get no Sort By (no `Page::directory`), and the firmware's other item commands (Delete, Copy, Add to Playlist, Eject Disc) are deliberately absent | `Shell::buildOptions()` / `optionsActivate()`; audit/OPTIONS-MENU.md |
+| NATIVE-09 | Sidecar subtitles and the in-player panel | Partial: SRT/WebVTT discovery beside local video, bounded tolerant parsing, cues drawn through the GL glyph atlas in a lower third, and a Triangle panel for subtitles/audio tracks/Repeat/Shuffle that verifies its own read-back before claiming an audio switch. Embedded and disc subtitle streams, Jellyfin subtitles and a real multi-track switch are open | `src/subtitles.*`, `Shell::buildPlayerOptions()`, `View::drawSubtitle()`; audit/SUBTITLES.md |
+| NATIVE-10 | Continue Watching | Partial: the Video column's first row lists remembered positions newest-first (at most 20, 30-day age) from the `media/resume` records, with resume/Information/Remove, disabled rows for missing files and an empty state; the old hash-only map is migrated by hashing the configured libraries and unresolved entries are dropped with a logged reason | `Shell::openContinueWatching()`, `migrateResumePoints()`; audit/MEDIA-CONTROLS.md "Continue Watching" |
+| NATIVE-11 | Volume HUD and the couch volume path | Partial: L2/R2 ramp the real Windows master volume (read back from `host::masterVolume()`, never a cached value), volume media keys pass through a native event filter that swallows its own message, and a firmware-shaped HUD (Volume Control string, level meter, 3 s + 250 ms fade) draws in the band left of the info bar. The page projection is fitted, and XMB-165's original control-panel page is still absent | `View::pollVolumeRamp()`, `View::drawVolumeHud()`; audit/HTPC-IDEAS.md section 6 |
+| NATIVE-12 | Jellyfin sign-in page in the XMB | Done for the recorded checks: a signed-out Jellyfin opens an ordinary page (Server URL / Username / Password / Sign In / Cancel) with a masked on-screen keyboard, client errors on the page, a Cancel that aborts the in-flight request and no modal widget; verified against a stub and a closed port, not against a real account | `Shell::openJellyfinSignInPage()` / `submitJellyfinSignIn()`; audit/JELLYFIN-NATIVE.md "Sign-in inside the XMB" |
 
 ## Reference coverage limits
 

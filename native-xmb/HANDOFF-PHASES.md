@@ -237,7 +237,10 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
   icons and menu sounds are in (README "PS3 themes", audit/MAXMB-INTEGRATION.md). Sounds use MaXMB's five-role
   mapping and per-role system fallback. Still open: dynamic RAF scenes and the `font` / `color` selections.
 - Screen states: screensaver/dim, Power off, user login screen, notifications (tex_notification_*), the in-game
-  XMB (xmb_ingame).
+  XMB (xmb_ingame). Updated 2026-10-27: the notification composite is implemented (plaque and glyphs from
+  `system_plugin`, bounded FIFO queue, 200 ms mode-5 slide, two honest producers - audit/NOTIFICATIONS.md); its
+  sound, overlap policy and per-type suppression stay open, and the in-game XMB itself is still absent (the PS
+  watcher only brings the XMB forward and opens the system menu).
 
 ### Phase 6: content and features
 - Remaining XMBML categories and items that are placeholders ("Unavailable"), driven by the firmware XML.

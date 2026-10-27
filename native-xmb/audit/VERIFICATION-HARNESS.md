@@ -97,9 +97,11 @@ native shows PS Vita System Application Utility, and the ribbon phase is unmatch
 avoids the differing left-side category sequence. Reference UI clock is 25/10 12:32; the background override
 uses the previously traced daytime mapping at 10:00. Full-frame state/content matching remains outstanding.
 Updated 2026-10-26: the stored RPCS3 frame is a DD/MM, 24-hour console, while the native clock now defaults
-to MM/DD and 12-hour (`src/settings_menu.cpp:19-21`, `src/shell.cpp:190-196`); the clock band is therefore a
-content difference by construction. Setting the preferences back to DD/MM and 24-hour reproduces the
-reference string (INFO-BAR.md:16-25, :68-71).
+to MM/DD and 12-hour (`Preferences::defaultValue` returns 1 for both `clock/dateFormat` and
+`clock/hourFormat`; `clockDate()` / `clockTime()` in `src/settings_menu.cpp:19-21` format them); the clock band
+is therefore a content difference by construction. Setting the preferences back to DD/MM and 24-hour reproduces
+the reference string (INFO-BAR.md:16-25, :68-71) and scores 13.61 / 0.6226 on clock text and 17.21 / 0.7114 on
+the info bar, against the 11.39 / 0.4105 and 14.78 / 0.6117 baselines the American default is gated on.
 
 ## Per-layer thresholds (2026-10-25)
 
@@ -144,12 +146,20 @@ with pinned clocks and an empty Steam root.
 | Top background | 0,0,700,200 | 19.02 / 0.9251 | 20.24 / 0.9344 |
 | Category icon row | 0,240,1920,120 | 20.13 / 0.9022 | 21.05 / 0.8950 |
 | Item label row | 400,425,800,100 | 11.86 / 0.3791 | 11.94 / 0.3910 |
-| Clock text | 1570,80,260,50 | 10.33 / 0.3504 | 13.51 / 0.6131 |
-| Info bar | 1329,75,591,58 | 13.40 / 0.4973 | 17.12 / 0.7046 |
+| Clock text | 1570,80,260,50 | 10.33 / 0.3504 | 11.39 / 0.4105 |
+| Info bar | 1329,75,591,58 | 13.40 / 0.4973 | 14.78 / 0.6117 |
 
-The canonical column was re-measured on 2026-10-26 after the particle layer was toned down (fewer specks, matched to
-the reference): frame, top background, category icon row and item label row moved; clock and info bar did not. The
-capture recipe pins `--render-clock 30 --background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00
+The canonical column was re-measured three times on 2026-10-26, and the last one supersedes the earlier numbers.
+After the particle layer was toned down (fewer specks, matched to the reference), frame, top background, category
+icon row and item label row moved while clock and info bar did not (13.51 / 0.6131 and 17.12 / 0.7046). That was
+true of the particle pass only: the sub-pixel glyph-phase pass then read 13.66 / 0.6198 and 17.26 / 0.7098, and the
+American clock default (MM/DD, 12-hour) finally moved the band for real - the pinned `12:32` now renders
+`10/25 12:32 PM`, so the table above carries the current baselines **11.39 / 0.4105** and **14.78 / 0.6117**
+(`work/ab-layers.thresholds.json` revisionNote items 1 and 3). With `clock/dateFormat` and `clock/hourFormat` set
+back to DD/MM and 24-hour the reference string is reproduced and the same two layers score 13.61 / 0.6226 and
+17.21 / 0.7114.
+
+The capture recipe pins `--render-clock 30 --background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00
 --focus-time 2000`, uses the `full,wait,wait,wait` script tokens and points `XMB_STEAM_ROOT` at an empty directory
 so the Game column keeps the reference's pre-Steam dev_flash content. The stored-pair row reproduces the earlier
 whole-frame 18.20 dB / 0.8388 and category-row 20.13 dB / 0.9022 baselines; the older top-background 19.03 dB /
@@ -159,7 +169,9 @@ whole-frame 18.20 dB / 0.8388 and category-row 20.13 dB / 0.9022 baselines; the 
 
 The Steam pages have no RPCS3 capture, so each named state's reference is the deterministic native render of that
 same state. These are self-baseline regression gates: they catch drawing, layout and content changes, and they say
-nothing about firmware fidelity.
+nothing about firmware fidelity. `bun work/ab-layers.ts --list-states` prints exactly the four recipes below
+(`steam-game-root`, `steam-all-games`, `steam-store-sections`, `steam-not-installed`), and `--all` runs the stored
+pair, the canonical capture and all four in one command.
 
 Two deliberate changes on 2026-10-26 forced a refresh. The Game column was reshaped to Steam Store plus a single
 All Games folder: the inline installed rows and the top-level Not Installed row are gone, and Not Installed is now
