@@ -335,7 +335,11 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     // Particles belong to the HDR scene: the firmware draws particles_quads before the tone map and its
     // radial halo into the glare source (audit/PARTICLES.md), so dust picks up the tone map and the glare.
     if(originalParticles) { glBindFramebuffer(GL_FRAMEBUFFER,GLuint(scene)); particles_.render(*this,seconds,pixelWidth,pixelHeight); }
-    if(hdr)hdr_.finish(*this,presetBlend,GLuint(target));
+    if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),[this,seconds,originalParticles](int width,int height){
+        // Second firmware pass: the same dust drawn into the glare source so the mip blur blooms it
+        // (particles_second). Re-running the sim for the same `seconds` advances no steps.
+        if(originalParticles)particles_.render(*this,seconds,width,height);
+    });
 }
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
 // as a day fraction t in [0,1] and the month as a float in [0,12] (constants at 0x92e54..0x92e6c, preset hours / 24
