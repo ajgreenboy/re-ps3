@@ -63,6 +63,8 @@ existing preset weight; selecting independent dawn/dusk/boot overrides and repro
 the visible UI clock remains the real PC clock. Fixed colours select a background palette only; icon material
 uses the actual/diagnostic calendar. The previous implementation incorrectly substituted the background month
 into both layers. Fixed-colour rendering now has an opaque native path; see CATEGORY-ICON-FIX.md.
+Updated 2026-10-26: every built-in colour, including Original, now uses that opaque path; the glass program is
+diagnostic only (`src/icons.cpp:97-109,164-166`).
 Set `XMB_ICON_LOG_MATERIAL=1` with `XMB_LOG=<local log>` to record the first derived material values.
 
 Remaining user-reported requirements:
@@ -74,6 +76,7 @@ by another session; use the current phase handoff for that status, rather than a
 - The background is brighter than the RPCS3 reference at the same hour. Scene encoding, exposure, day curve,
   presets, palette orientation and tone-map composition need matched-state evidence. No arbitrary darkening
   multiplier was introduced. This also affects the icon refraction input.
-- Item icons in the open column still use Qt. Some are icontex normal maps and others are baked RCO images;
-  their actual shader/asset bindings must be identified before passing them to the glass shader.
+- Updated 2026-10-26: item icons in the open column no longer use Qt when they are icontex items - they queue to
+  `IconRenderer` with the opaque material (`src/view.cpp:949-952`); baked RCO, artwork and theme images still use
+  QPainter. Their shader/asset bindings must be identified before passing them to the glass shader.
 - Native rasterizer/glow parity, RCO runtime layout and later phases remain open in HANDOFF-PHASES.md.

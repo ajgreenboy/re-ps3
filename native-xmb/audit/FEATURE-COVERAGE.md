@@ -43,9 +43,9 @@ code is `View::PafEase` (menu easing) in `src/view.cpp:81-112`.
 | ISC-13 | partial | Create/select and persisted settings are real; no delete/rename/avatar/logout, no user-scoped preferences, no recovery path. |
 | ISC-14 | partial | Theme/sound/date-time/power/fullscreen have real backends; display/input/output are read-only or absent, 6 of 16 groups have no working setting, one field is cosmetic. |
 | ISC-15 | supported (narrow) | Browse, view, rotate and slideshow all exist end to end; the original Photo panel, EXIF, effects, playlists and device sources are absent. |
-| ISC-16 | partial | Playback, queue, repeat/shuffle, seek and volume are real; metadata and playlists are enumerated by the criterion and absent. |
+| ISC-16 | partial | Playback, queue, repeat/shuffle, seek and volume are real; the now-playing line uses player title/artist tags, but library rows carry no tags and playlists are absent. |
 | ISC-17 | partial | Playback, queue, seek and volume are real; subtitles are enumerated by the criterion and absent. |
-| ISC-20 | partial | RPCS3/Steam/imported-app launch works as a detached spawn; no configured backend setting and no return lifecycle tracking. |
+| ISC-20 | partial | RPCS3 and imported-app launch is a tracked QProcess with a return report, rescan and idle guard; Steam launch is watched through Steam's registry. No configured backend setting. |
 
 Counts: 1 supported, 5 partial, 0 unsupported.
 
@@ -360,11 +360,14 @@ work.
 
 **Untested or missing.**
 
-- **Metadata: absent.** A scan record's title is the file name
-  (`src/media_library.cpp:106-107`, reused as the row title at
-  `src/shell.cpp:541`). No artist, album, track number, genre, embedded
-  duration or artwork is read anywhere in `src/`. ISC-16 enumerates metadata,
-  so the criterion is not met.
+- **Metadata: partial (revised 2026-10-26).** A scan record's title is still the
+  file name (`src/media_library.cpp:106-107`, reused as the row title when the
+  page is built), and library rows read no tags. The now-playing line does:
+  at `LoadedMedia` the player's title, contributing artist and album title are read
+  (`Shell::Shell`'s media-status handler); title and artist replace the overlay line, while
+  `mediaAlbum_` is stored and not displayed. Track number, genre, embedded duration
+  and embedded artwork are not read. ISC-16 enumerates metadata, so the criterion
+  is still not met.
 - **Playlists: absent.** No playlist model, file format or UI in `src/`.
 - No visual player, mini panel, CD import, crossfade/DSP, output frequency,
   dynamic normalizer, bitmapping, music icon change, or media database.
@@ -382,8 +385,9 @@ work.
 - Not re-run in this audit.
 
 **Verdict: partial.** Playback, queue, repeat/shuffle, seek, volume and error
-handling are real; the criterion's "metadata" and "playlists" are not
-implemented.
+handling are real; metadata is partial (the now-playing line reads title/artist
+tags, library rows do not) and playlists are not implemented, so the criterion
+stays partial.
 
 ## ISC-17: local video browsing, playback, subtitles and controls
 
@@ -448,18 +452,16 @@ return lifecycle.
   `%RPCS3_GAMEID%:<id>` or the `EBOOT.BIN` path `:109`; otherwise an information
   row with the reason `:106-108`.
 - PS3 backend: `src/shell.cpp:59-64` locates `rpcs3.exe` (or `rpcs3`) in the
-  directory above `dev_hdd0`; `src/shell.cpp:128-134` calls
-  `QProcess::startDetached(emulator, {"--no-gui", arg}, emulatorDir)` and only
-  reports failure.
+  directory above `dev_hdd0`; `Shell::startTracked` starts it with `--no-gui <id>`,
+  keeps the `QProcess`, reports exit/crash and rescans on return.
 - Steam backend: installed titles are scanned from app manifests with the
   fully-installed flag (`src/steam_library.cpp:494-540`, StateFlags test
   `:520-522`), roots from registry/env (`:421-455`, `XMB_STEAM_ROOT` `:424-425`),
-  and launch is `steam.exe -applaunch <appid>`
-  (`src/shell.cpp:646-651`).
+  and launch is `steam.exe -applaunch <appid>` watched through Steam's registry
+  (`Shell::startSteamTracked` / `Shell::pollSteamGame`).
 - Imported-app backend: `Action::LaunchApp` starts the manifest executable with
-  its declared argument array and working directory
-  (`src/shell.cpp:668-673`; registry validated in
-  `src/content_registry.cpp`).
+  its declared argument array and working directory through `startTracked`
+  (registry validated in `src/content_registry.cpp`).
 - Configuration inputs: `--dev-flash`, `--dev-hdd0` (`src/main.cpp:82-83,290,315`),
   `--steam-root` / `XMB_STEAM_ROOT` (`src/main.cpp:95,146`), and directory
   layout (RPCS3 sibling of `dev_hdd0`). No backend preference key exists
@@ -469,7 +471,7 @@ return lifecycle.
 
 - Launch is real, not a stub: an actual emulator or store client is started with
   the correct title argument, imported apps receive their argv/cwd, and failure
-  to start is reported as a message (`src/shell.cpp:131,649,671`).
+  to start is reported as a message (`Shell::startTracked` / `Shell::launch`).
 - Backend selection is deterministic from disk layout/registry/env at scan time;
   RPCS3 titles use its game ID when listed so RPCS3 reuses its licences and
   installed data (`src/shell.cpp:71-73,109`).
@@ -478,27 +480,38 @@ return lifecycle.
 
 **Untested or missing.**
 
-- **Return lifecycle: entirely absent.** All three launch paths use
-  `QProcess::startDetached` and keep no handle or signal
-  (`src/shell.cpp:130,648,671`; no `QProcess` object is constructed anywhere in
-  `src/`). The shell has no "game running" state, no exit notification, no
-  return-to-XMB transition, no focus/selection restore, no Quit Game action, and
-  no in-game XMB or PS overlay. The player/media state and idle timer are
-  unaffected by a launch.
+- **Return lifecycle: present for RPCS3 and imported apps, watched for Steam
+  (updated 2026-10-26).** `Shell::startTracked` parents the child with a
+  `QProcess`, reports a crash, rescans the library and restores the column on
+  exit, and `Shell::gameRunning` suppresses
+  the idle auto-close while a title runs. Steam launches are handed to
+  `steam.exe -applaunch` and watched through Steam's registry `Apps\<id>\Running`
+  state (`Shell::startSteamTracked` / `Shell::pollSteamGame`). Quit Game exists in the PS menu
+  (`Shell::psMenuItems` / `Shell::psMenuActivate`)
+  and a focus-independent PS watcher (`src/ps_watcher.*`) can bring the XMB
+  forward from a running title. Still absent: a configured backend preference,
+  an in-game XMB/overlay, and a recorded real launch-return capture; selection
+  restoration is limited to the rescan.
+  The original claim ("entirely absent ... no `QProcess` object is constructed
+  anywhere in `src/`") was accurate before 2026-10-26 and is kept here as the
+  record.
 - **Configured backend: not user-configured.** There is no persisted setting
   for an emulator path, Steam path, launch arguments or per-title overrides.
   If `rpcs3.exe` is not beside `dev_hdd0`, every PS3 title silently degrades to
   an information row (`src/shell.cpp:108`) even when RPCS3 is installed
   elsewhere. Steam path is only overridable by environment variable or command
   line.
-- No "Quit Game", no game settings consumption (PS upscaler/smoothing absent,
-  catalog XMB-014/015), no process priority, no exclusive display/fullscreen
-  handoff, no game-running window state.
+- Quit Game now exists in the PS menu (`Shell::psMenuActivate`). Still absent:
+  game settings consumption (PS upscaler/smoothing absent, catalog XMB-014/015),
+  process priority, exclusive display/fullscreen handoff and a game-running
+  window state.
 - Disc copies without an `EBOOT.BIN` and without a `games.yml` entry cannot
   launch (`src/shell.cpp:100-101,109`).
-- Idle auto-close keeps running while a game is up: only `mediaOpen_` is exempt
+- ~~Idle auto-close keeps running while a game is up: only `mediaOpen_` is exempt
   (`src/shell.cpp:562-565`), so a set auto-off can quit XMB behind a running
-  game.
+  game.~~ Corrected 2026-10-26: the idle timer now also requires
+  `!gameRunning()`, and the display-awake hold follows
+  a running title. The old text was accurate before the tracked lifecycle landed.
 - ISA's own follow-up criteria are unchecked: ISC-37 (real Steam title launches
   and returns with verified lifecycle) remains open in `ISA.md`, and
   `audit/HANDOFF.md:187` (Phase C) lists emulator launch/return services as
@@ -506,9 +519,10 @@ return lifecycle.
 - Not observed at runtime in this audit; no launch/return evidence was recorded
   for RPCS3 or Steam here.
 
-**Verdict: partial.** A working detached launch path with three real backends,
-but the backend is discovered rather than configured in the product, and the
-return lifecycle half of the criterion does not exist.
+**Verdict: partial.** Three real backends and, since 2026-10-26, a tracked
+return lifecycle for RPCS3/imported apps plus a registry watcher for Steam. The
+backend is still discovered rather than configured in the product, and no real
+launch-return capture exists, so the criterion stays partial.
 
 ## Settings row ledger (ISC-13/14 support)
 
@@ -546,12 +560,13 @@ PS3 audio configuration.
 
 ## Documentation drift found while auditing
 
-- `audit/FEATURE-CATALOG.md` statuses lag the code: XMB-149 (Zoom In/Out) and
-  XMB-177 (Shuffle) are marked not implemented but are implemented
-  (`src/view.cpp:975-997`; `src/playback_queue.cpp:58-67`); XMB-170/171
-  (Previous/Next) are marked not implemented but the queue provides them
-  (`src/shell.cpp:769-774`); XMB-218 (A-B Repeat) is marked partial but no A-B
-  code exists.
+- `audit/FEATURE-CATALOG.md` statuses lagged the code: XMB-149 (Zoom In/Out) and
+  XMB-177 (Shuffle) were marked not implemented but are implemented
+  (`View::zoomPhoto`; `src/playback_queue.cpp:58-67`); XMB-170/171
+  (Previous/Next) were marked not implemented but the queue provides them
+  (`Shell::skipMedia`); XMB-218 (A-B Repeat) was marked partial but no A-B
+  code exists in `src/`. Corrected 2026-10-26 in the catalogue, along with
+  XMB-001/006/079/109/210 and the missing native surfaces.
 - `audit/FUNCTIONS.md:99-102` still says photo zoom/pan is absent; it now exists
   (`src/photo_viewport.cpp`, `src/view.cpp:975-997`).
 - `audit/FUNCTIONS.md:118-121` describes a boolean repeat only; the three-mode
@@ -578,20 +593,25 @@ Ordered by how likely a user probing the app is to hit them.
    wallpaper, theme and library folders are shared, so a new profile inherits
    everything and switching users is visually almost invisible
    (`src/profiles.h:15`, `src/shell.cpp:842-856`).
-5. **Photo workflow starts in a Windows folder dialog and ends at a static
-   viewer.** No Triangle panel, EXIF, thumbnails, effects, trim/copy/print,
-   wallpaper-from-photo, or Photo Gallery; unsupported formats fail with a
-   single dialog.
-6. **Music/video show file names, not media metadata, and have no playlist.**
-   The overlay is a host player with a title line and progress bar; MKVs with
-   unsupported codecs or subtitles disappoint; seeking is fixed 10 seconds.
+5. **Photo workflow starts in a Windows folder dialog and ends at a host viewer.**
+   The viewer rotates, zooms, pans and runs a slideshow (`View::zoomPhoto` and the
+   photo viewport), but there is no original photo control panel (the item options
+   panel is only Open/Information/Sort By), no EXIF, thumbnails, effects,
+   trim/copy/print, wallpaper-from-photo or Photo Gallery; unsupported formats fail
+   with a single dialog.
+6. **Music/video rows show file names, and there is no playlist.** Library rows
+   carry no tags; the now-playing line uses the player's title/artist when the
+   file is tagged (the `LoadedMedia` handler in `Shell::Shell`). The overlay is a
+   host player with a title line and progress bar; MKVs with unsupported codecs or
+   subtitles disappoint; seeking is fixed 10 seconds.
 7. **Back stops playback.** There is no music-while-browsing model, no mini
    player, no PS overlay, so any demo of "listen while using XMB" fails
    (`src/shell.cpp:684-691`).
-8. **Game launch is fire-and-forget.** No Quit Game, no return state, no
-   in-game XMB, no configured emulator path (PS3 titles require `rpcs3.exe`
-   beside `dev_hdd0`, Steam needs `steam.exe` and a running client), and the
-   idle timer can quit XMB behind a running game.
+8. **Game launch has no configured backend.** A tracked return, Quit Game and
+   an idle guard exist (2026-10-26), but there is no in-game XMB, no persisted
+   emulator path (PS3 titles require `rpcs3.exe` beside `dev_hdd0`; Steam needs
+   `steam.exe` and a running client), and no recorded real launch-return
+   capture.
 9. **Host side effects.** System Volume/Mute edit the Windows default output
    device; Full Screen persists; the wallpaper picker stores an absolute host
    path. On another machine these are visible side effects on the host, not the
@@ -602,13 +622,14 @@ Ordered by how likely a user probing the app is to hit them.
 
 ## Prioritised next work (5 items)
 
-1. **Launch lifecycle and a configured backend (closes ISC-20, unblocks
-   ISC-37).** Add a typed backend preference (emulator path/args, Steam path)
-   and a small activity model owning a `QProcess`: running state, exit signal,
-   return focus/selection, Quit Game, suspend the idle timer, refresh on return.
-   Files: `src/shell.cpp:59-64,128-134,646-673`, `src/shell.h:110-182`,
-   `src/preferences.cpp:27-47`, `src/settings_menu.cpp` (new Game/System backend
-   row), `src/main.cpp:500-501`.
+1. **Configured backend (the remaining half of ISC-20; unblocks ISC-37).** The
+   activity model landed 2026-10-26 - tracked `QProcess` for RPCS3/imported
+   apps, a Steam registry watcher, Quit Game, idle suspension and a rescan on
+   return (`Shell::startTracked` / `Shell::startSteamTracked`). What remains is the persisted backend
+   preference (emulator path/args, Steam path), a recorded real launch-return
+   capture, and selection/focus restoration beyond the rescan.
+   Files: `src/preferences.cpp:27-47`, `src/settings_menu.cpp` (new Game/System
+   backend row), `src/main.cpp:500-501`.
 2. **Per-profile storage and a real user lifecycle (closes most of ISC-13).**
    Move preferences and library paths under the active profile directory,
    migrate the shared document, and add rename/delete plus a startup user

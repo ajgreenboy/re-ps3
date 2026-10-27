@@ -98,19 +98,19 @@ composition while still producing incorrect text size or focus movement.
 
 | ID | Family | State and timing requirements | Current native gap |
 |---|---|---|---|
-| VIS-31 | Category change | Strip motion, old/new list phase, icon resize, label fade, background continuity | Incoming/outgoing content fade added; timings are still generic |
-| VIS-32 | Vertical movement | Row trajectories, focus size, label emphasis, descriptions and settle | Exponential smoothing and approximate spacing |
-| VIS-33 | Submenu open | Parent translation, other categories recede, child appears in phases | Same generic easing used for all components |
+| VIS-31 | Category change | Strip motion, old/new list phase, icon resize, label fade, background continuity | Incoming/outgoing content fade is a 200 ms mode-5 paf ease (`View::paintGL` and its column loop); item phase timing still fitted |
+| VIS-32 | Vertical movement | Row trajectories, focus size, label emphasis, descriptions and settle | PafEase mode 5 (200 ms) for the item move (`View::paintGL`); row spacing still approximate |
+| VIS-33 | Submenu open | Parent translation, other categories recede, child appears in phases | Category/item page moves have distinct paf eases (200 ms mode 5; page 300 ms mode 4, fitted), but the child phases share one curve |
 | VIS-34 | Submenu close | Child dismissal, parent restoration and selected-label return | Generic return; reference appears faster than entry |
-| VIS-35 | Context menu | Panel entry/exit, dimming, focus transfer and cancel | Not implemented |
-| VIS-36 | Player control panel | Overlay motion/fade, show/hide and auto-dismiss | Not implemented |
-| VIS-37 | Dialogs | Background treatment, panel reveal, button focus and dismissal | Static message overlay only |
-| VIS-38 | Information panel | Busy spinner, message/news/avatar indicators and transition | Clock only |
-| VIS-39 | Notifications/trophies | Entry, hold, exit, sound synchronization and overlap policy | Not implemented |
+| VIS-35 | Context menu | Panel entry/exit, dimming, focus transfer and cancel | Right-hand options panel exists for settings choices and item-level Triangle menus, with open/close and row focus (`src/shell.h` options API, `View::paintGL` options panel); firmware panel animation and the per-item action set remain open |
+| VIS-36 | Player control panel | Overlay motion/fade, show/hide and auto-dismiss | Controls fade after 3 s over 250 ms during playback (`src/media_controls.cpp`, `View::paintGL` media overlay); the firmware player panel is open |
+| VIS-37 | Dialogs | Background treatment, panel reveal, button focus and dismissal | Styled dialog: full-frame dim, two rules, heading/body split and a button hint (`View::paintGL` dialog block); multi-button variants and entry/exit animation open |
+| VIS-38 | Information panel | Busy spinner, message/news/avatar indicators and transition | Clock text and analog face plus the PS-tap controller HUD (`View::paintGL`); message/news/trophy indicators open |
+| VIS-39 | Notifications/trophies | Entry, hold, exit, sound synchronization and overlap policy | Partial, landing 2026-10-26: `Shell::notify` holds a bounded queue (one pop-up, 4 s lifetime, firmware `tex_notification*` icons) and `View::drawNotification` composes the plaque from `system_plugin` pieces with a 200 ms mode-5 slide/fade. Not yet verified on screen; sound, the firmware overlap policy and trophy triggers remain open. Read as source at this date, not a completed feature |
 | VIS-40 | Playback launch/return | Menu/background to media, control ownership, resume selection | Basic source switch, no reference-matched transition |
 | VIS-41 | Photo transitions | Normal, slide and fade; transformed-image continuity | Immediate image replacement only |
 | VIS-42 | Artwork previews | Selected title background/cover fade and unload on focus change | Not implemented |
-| VIS-43 | Startup/shutdown/login | Logo/wave/particles, user choice, audio and lifecycle | Not reconstructed |
+| VIS-43 | Startup/shutdown/login | Logo/wave/particles, user choice, audio and lifecycle | Cold boot is ported (`src/coldboot.cpp`); the PS menu turns the native app off after one confirmation (`Shell::psMenuActivate`); the login/user-select screen and a shutdown animation are open |
 | VIS-44 | Rapid/reversed input | Interruptibility, retargeting, selection vs visual state and repeat | Needs dedicated recordings and comparison |
 
 ### Frame-based timing observations
@@ -134,19 +134,33 @@ these estimates equal original-console timings.
 [Frame-by-frame Theme entry/return evidence](../screenshots/reference-timing-theme.jpg)
 is extracted from the user-supplied recording, not an automated RPCS3 capture.
 
-### Current native timing, read from source
+### Current native timing, read from source (revised 2026-10-26)
 
-- Movement and category/depth fade use `1 - exp(-18 * dt)` smoothing.
-- That reaches90%,95% and99% of a step after approximately128,166 and256ms.
-- A0.001 depth/fade cleanup threshold can retain a transition for about384ms.
-- Controller repeat begins after300ms, then repeats every100ms.
-- Keyboard autorepeat currently follows host key events; it is not normalized to
-  the controller repeat schedule.
-- Rendering requests use a16ms Qt timer. Logged62.5 loop FPS does not prove60Hz
-  presentation pacing, low latency or absence of dropped/repeated displayed frames.
+The block below was accurate for the exponential easing that preceded the PafEase port; the struck
+claims are kept as the record and are superseded by the source lines beside them.
 
-Entry and Back therefore need separate timelines. Reusing one exponential for
-every property cannot establish the recorded phase ordering or timing.
+- ~~Movement and category/depth fade use `1 - exp(-18 * dt)` smoothing.~~ Superseded: every move is a
+  paf animation through `View::PafEase` - category, item and column cross-fade are 200 ms mode 5
+  (traced in vsh.elf PhXmBar), the depth/page move is 300 ms mode 4 (fitted, not traced)
+  (`src/view.cpp:125-156,588-593`).
+- ~~That reaches90%,95% and99% of a step after approximately128,166 and256ms.~~ Superseded by the
+  per-frame mode tables: a 200 ms move lands in 12 frames and a 300 ms move in 18.
+- ~~A0.001 depth/fade cleanup threshold can retain a transition for about384ms.~~ The 0.001 snap still
+  exists (the depth snap in `View::paintGL`), but PafEase reaches the target at its own duration, so no 384 ms
+  retention follows.
+- ~~Controller repeat begins after300ms, then repeats every100ms.~~ Corrected: repeat begins after
+  300 ms, then every 67 ms, counted from the deadline (`View::pollController`); measured on the
+  console at 66.7 ms.
+- ~~Keyboard autorepeat currently follows host key events; it is not normalized to the controller
+  repeat schedule.~~ Corrected: arrow-key OS auto-repeats are dropped (`View::keyPressEvent` /
+  `View::keyReleaseEvent`) and go through the controller repeat schedule.
+- ~~Rendering requests use a16ms Qt timer.~~ Corrected: the 16 ms timer only polls input; the next
+  frame is requested from `QOpenGLWidget::frameSwapped` (`src/view.cpp:95-97,106`). Logged62.5 loop
+  FPS does not prove60Hz presentation pacing, low latency or absence of dropped/repeated displayed frames.
+
+Entry and Back still need separate timelines: the recorded Back transition is faster than entry
+(roughly70-130 ms against230-330 ms in the frame observations above), while the current depth ease
+uses one 300 ms duration in both directions.
 
 ## 6. Resource animation findings
 
@@ -165,17 +179,25 @@ The inspector recognizes MoveTo, Recolour, Rotate, Resize, Fade, Delay, FireEven
 Lock/Unlock and SlideOut layouts using primary RCOMage format definitions. It
 retains unknowns. It does not execute animation events or evaluate a PAF timeline.
 
-## 7. Interaction sound
+## 7. Interaction sound (revised 2026-10-26)
 
-Four original resources now decode from `system_plugin.rco`: cursor, decide,
-cancel and error. Observed files are VAGp version6,48kHz stereo with PS ADPCM
-blocks. The native service caches decoded PCM and reuses an audio sink. The
-original error cue decodes as silence; no substitute is synthesized.
+The system table now loads all nine `system_plugin.rco` cues - `snd_cursor`,
+`snd_decide`, `snd_category_decide`, `snd_cancel`, `snd_option`, `snd_error`,
+`snd_system_ok`, `snd_system_ng`, `snd_trophy` - as VAGp version 6, 48 kHz stereo
+PS ADPCM. Six native cue slots map onto them: Move=cursor, Confirm=decide,
+Back=cancel, Error=system_ng, Options=option, Accept=system_ok, with Options and
+Accept falling back to decide (`src/interaction_audio.cpp:32-43,321-345`).
+`snd_error` is a real 1.8 ms silent stub and is deliberately not used for Error;
+`snd_trophy` and `snd_category_decide` have no native action yet.
+
+Before 2026-10-26 only four cues - cursor, decide, cancel and error - were decoded,
+and the error entry then decoded as silence with no substitute.
 
 Audit requirements: exact action-to-cue mapping, boundary/no-op behavior, repeat
 suppression, interruption/mixing, volume/key-tone settings, device errors and
-audio/visual phase alignment. Native Move has a45ms debounce. Audibility and
-reference-matched timing have not been independently measured.
+audio/visual phase alignment. Native Move has a 45 ms floor and same-cue retriggers
+are dropped until the sample ends (`src/interaction_audio.cpp:405-415`).
+Audibility and reference-matched timing have not been independently measured.
 
 ## 8. Measurement plan for remaining behaviors
 

@@ -358,6 +358,13 @@ width difference and for the 10 px word gap. This is a `settings_menu.cpp`/`view
 character in the format string), outside this task's write fence, and it is the largest single text
 difference left in the clock layer.
 
+Updated 2026-10-26: the change above landed. `Shell::clockText()` is now one date-time gap and the
+clock defaults to MM/DD with a 12-hour time (`src/settings_menu.cpp:19-21`, `Shell::clockText`),
+so the "native" column in the table is the earlier DD/MM + 24-hour, two-space render and no longer
+describes the default. Against the DD/MM reference frame the remaining clock-band difference is string
+content (date order and the 12-hour marker), not the text pipeline; setting DD/MM and 24-hour back in
+preferences reproduces the reference string (INFO-BAR.md:16-25, :68-71).
+
 ### 6. Summary
 
 | item | state | measured effect | owner if not closed |
@@ -365,11 +372,12 @@ difference left in the clock layer.
 | Pen phase | Per-axis phase tiles rasterised at the pen phase, keyed and bounded; default on | clock 13.51 -> 13.66 dB, 0.6131 -> 0.6198 SSIM; info bar 17.12 -> 17.26 dB; no layer worse | closed; `XMB_TEXT_PHASE=0` is the bit-exact way back, named-state baselines need refreshing |
 | Coverage union | Verified native is alpha-over; keep-larger helper plus assertions in place; composition needs a shared mask | not measurable in the canonical state (no overlapping coverage pair); e+U+0301 overlap is 0 px | renderer-internal shared-mask pass, contract in section 2 |
 | Glow | Already a renderer product (second tile channel, Gaussian, same glyph) | unchanged numbers by design | view-level breathing/fade timing only |
-| Elision | Pure helper plus deterministic assertions; not wired | none (no label overflows in the capture) | `view.cpp:951` as listed in section 4 |
-| Clock metric | Metric authority agrees with PAF at equal size | n/a | `settings_menu.cpp:185` single space |
+| Elision | Pure helper plus deterministic assertions; not wired | none (no label overflows in the capture) | the label loop in `View::paintGL` as listed in section 4 |
+| Clock metric | Metric authority agrees with PAF at equal size | n/a | one-space clock format done 2026-10-26 (`Shell::clockText`) |
 
-Open, in order of expected value for the clock and item label layers: the clock string's second space
-(section 5), then the shared-mask union if a state with accented or overlapping glyphs is ever gated. The
+Open, in order of expected value for the clock and item label layers: the shared-mask union if a state with
+accented or overlapping glyphs is ever gated. The clock string's second space and the date-time gap were
+fixed on 2026-10-26 (section 5). The
 per-phase tiles change every native render, so refresh the named-state self-baselines with
 `bun work/ab-layers.ts --states --save-reference` (a deliberate step for a rendering change, not a
 fidelity claim). Their 55 dB self-baseline still catches accidental drift afterwards.
