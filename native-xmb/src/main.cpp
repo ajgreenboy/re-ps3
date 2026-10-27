@@ -572,6 +572,18 @@ int main(int argc,char** argv) {
             else if(token.startsWith("idle=")) {bool ok=false;const auto age=token.mid(5).toLongLong(&ok);if(ok && age>=0)shell.setIdleTimeOverride(age);else qWarning()<<"script: invalid idle age";}
             else if(token=="ps")view->replayPsTap();       // PS button tap: controller indicator
             else if(token=="pshold")view->replayPsHold();   // PS button hold: system menu
+            else if(token.startsWith("NOTIFY=")) {
+                // NOTIFY=<title>[|<detail>[|<icon>]] raises a notification through the same path a real event
+                // uses, so a capture can pin it: the icon is a tex_notification_<name> suffix (default info)
+                // or the full texture name. Commas are the script separator, so a title cannot contain one.
+                const auto fields=token.mid(7).split('|');
+                const QString title=fields.value(0).trimmed();
+                if(title.isEmpty())qWarning()<<"script: invalid NOTIFY token (empty title)";
+                else {
+                    shell.notify(title,fields.value(1).trimmed(),fields.value(2).trimmed());
+                    qInfo().noquote()<<"script: notify"<<title<<fields.value(1).trimmed()<<fields.value(2).trimmed();
+                }
+            }
             else if(token=="quit")app.quit();
             else if(token.startsWith("grab=")) {
                 const auto image=view->grabFramebuffer();
@@ -582,7 +594,10 @@ int main(int argc,char** argv) {
                     {"entryId",shell.entries().isEmpty()?QString{}:shell.entries()[shell.selection()].id},
                     {"entryTitle",shell.entries().isEmpty()?QString{}:shell.entries()[shell.selection()].title},
                     {"entryCount",shell.entries().size()},{"mediaOpen",shell.mediaOpen()},{"mediaPaused",shell.mediaPaused()},
-                    {"mediaProvider",shell.mediaProvider()},{"playMethod",shell.mediaPlayMethod()},{"mediaPosition",shell.mediaPosition()},{"mediaDuration",shell.mediaDuration()},{"idleMilliseconds",shell.idleMilliseconds()},{"screensaverMinutes",shell.screensaverMinutes()}};
+                    {"mediaProvider",shell.mediaProvider()},{"playMethod",shell.mediaPlayMethod()},{"mediaPosition",shell.mediaPosition()},{"mediaDuration",shell.mediaDuration()},{"idleMilliseconds",shell.idleMilliseconds()},{"screensaverMinutes",shell.screensaverMinutes()},
+                    {"notificationCount",shell.notificationCount()},{"notificationRemainingMs",double(shell.notificationRemainingMs())},
+                    {"notificationTitle",shell.notification()?shell.notification()->title:QString{}},
+                    {"notificationIcon",shell.notification()?shell.notification()->icon:QString{}}};
                 QFile stateFile(token.mid(5)+".json");const auto bytes=QJsonDocument(state).toJson();
                 if(!stateFile.open(QIODevice::WriteOnly) || stateFile.write(bytes)!=bytes.size())qWarning()<<"script: state save FAILED"<<stateFile.errorString();
                 qInfo()<<"script: state"<<state;

@@ -150,7 +150,13 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
             [this,process,title](int code,QProcess::ExitStatus status){
         process->deleteLater();game_.clear();gameTitle_.clear();touch();
         qInfo().noquote()<<"returned from"<<title<<"exit"<<code<<(status==QProcess::NormalExit?"normal":"crashed");
-        if(status==QProcess::CrashExit)message_=title+"\n\n"+QObject::tr("This title ended unexpectedly.");
+        // The return of a tracked title is a real event this build can report. The console itself has no
+        // return pop-up (only launches), so this one is a native event, not a firmware one.
+        if(status==QProcess::CrashExit) {
+            message_=title+"\n\n"+QObject::tr("This title ended unexpectedly.");
+            notify(title,QObject::tr("This title ended unexpectedly."),"tex_notification_caution");
+        }
+        else notify(title,QObject::tr("Returned to the XMB"),"tex_notification_info");
         emit changed();
         refreshContent();
     });
@@ -209,6 +215,7 @@ void Shell::pollSteamGame() {
     const QString title=gameTitle_;
     steamGameId_.clear();gameTitle_.clear();steamGameSeen_=false;steamGameClear_=0;
     qInfo().noquote()<<"returned from"<<title<<"(Steam reported it stopped)";
+    notify(title,QObject::tr("Returned to the XMB"),"tex_notification_info");
     restoreFocus();
     emit changed();
     refreshContent();
@@ -731,6 +738,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     connect(&preferences_,&Preferences::failed,this,[this](const QString& error){message_=error;emit changed();});
     connect(&preferences_,&Preferences::changed,this,[this]{applyPreferences();emit changed();});
     connect(&library_,&MediaLibrary::loaded,this,[this](quint64 request,const QString& path,const MediaEntries& files,const QString& error,bool truncated){
+        const bool refreshed=directoryRefresh_;directoryRefresh_=false;
         if(request!=scanRequest_ || pages_.isEmpty())return;
         loading_=false;scanRequest_=0;
         auto& page=pages_.last();
@@ -746,6 +754,12 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         status_=truncated?"Showing the first 5,000 matching items.":page.entries.isEmpty()?"There are no supported files.":QString{};
         if(!error.isEmpty())message_=error;
         qInfo()<<"media: directory result"<<files.size()<<"entries; truncated"<<truncated<<"error"<<!error.isEmpty();
+        // A rescan of an open media library (F5 / Refresh Directory) is a real library event: the console
+        // reports finished library work in the notification pop-up.
+        if(refreshed && error.isEmpty())
+            notify(tr("%1 Library updated").arg(categories_[category_].title),
+                   files.size()==1?tr("1 item"):tr("%1 items").arg(files.size()),
+                   kind=="music"?"tex_notification_music":"tex_notification_info");
         emit changed();
     });
     connect(&slideshow_,&QTimer::timeout,this,[this]{stepPhoto(1);});
@@ -794,9 +808,68 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         const auto request=mediaRequest_;
         QTimer::singleShot(0,this,[this,request,error]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(true,error);});
     });
+    // The notification queue runs on its own monotonic clock so a pop-up expires on real time whatever the
+    // render clock or the host frame rate is. 100 ms is fine for a 4 s lifetime and costs nothing idle.
+    notificationLog_=qEnvironmentVariableIsSet("XMB_NOTIFY_LOG");
+    notificationClock_.start();
+    notificationTimer_.setInterval(100);
+    connect(&notificationTimer_,&QTimer::timeout,this,&Shell::expireNotifications);
     initJellyfin();
 }
 Shell::~Shell(){host::holdDisplayAwake(false);jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();disconnect(&steamFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
+// --- Notifications --------------------------------------------------------------------------------
+// One pop-up on screen at a time; the rest wait in order. The lifetime starts when an entry reaches the
+// front, so a burst of events each gets its own 4 s instead of the last one starving the others.
+void Shell::notify(const QString& title,const QString& detail,const QString& icon) {
+    if(title.isEmpty())return;
+    static const QStringList firmwareIcons{
+        "tex_notification","tex_notification_caution","tex_notification_friend","tex_notification_headset",
+        "tex_notification_info","tex_notification_keypad","tex_notification_mediasever","tex_notification_music",
+        "tex_notification_psbutton_insensitive","tex_notification_settings","tex_notification_trophy_bronze",
+        "tex_notification_trophy_gold","tex_notification_trophy_platinum","tex_notification_trophy_silver"};
+    // Accept either the full firmware texture name or just its suffix ("trophy_gold"); anything else falls
+    // back to the plain information glyph rather than asking the asset service for a texture that is not there.
+    QString texture=icon.trimmed();
+    if(!texture.isEmpty() && !texture.startsWith("tex_notification"))
+        texture="tex_notification_"+texture;
+    if(!firmwareIcons.contains(texture))texture="tex_notification_info";
+    if(notifications_.size()>=notificationQueueLimit) {
+        // Drop the arriving event, not the pop-up already on screen: cutting a visible notification short
+        // would be a worse lie than losing the newest one under a burst.
+        if(notificationLog_)
+            qInfo().noquote()<<"notify: drop"<<title<<(detail.isEmpty()?QString():QString("| ")+detail)
+                <<"(queue full,"<<notificationQueueLimit<<"shown or waiting)";
+        return;
+    }
+    notifications_.push_back(Notification{title,detail.isEmpty()?QString{}:detail,texture,0});
+    if(notificationLog_)
+        qInfo().noquote()<<"notify: enqueue"<<title<<(detail.isEmpty()?QString():QString("| ")+detail)
+            <<texture<<"queue"<<notifications_.size()<<"/"<<notificationQueueLimit;
+    if(notifications_.size()==1)promoteNotification();
+    emit changed();
+}
+void Shell::promoteNotification() {
+    if(notifications_.isEmpty()){notificationTimer_.stop();return;}
+    auto& front=notifications_.first();
+    front.expiresAt=notificationClock_.elapsed()+notificationLifetimeMs;
+    if(!notificationTimer_.isActive())notificationTimer_.start();
+    if(notificationLog_)qInfo().noquote()<<"notify: show"<<front.title<<front.icon<<notificationLifetimeMs<<"ms";
+}
+void Shell::expireNotifications() {
+    // Exactly one entry per tick: a queued entry carries no expiry until it reaches the front, so a loop that
+    // popped every due entry would drop the whole queue the moment the first one timed out.
+    if(notifications_.isEmpty()){notificationTimer_.stop();return;}
+    if(notificationClock_.elapsed()<notifications_.first().expiresAt)return;
+    const auto done=notifications_.takeFirst();
+    if(notificationLog_)qInfo().noquote()<<"notify: expire"<<done.title;
+    if(notifications_.isEmpty())notificationTimer_.stop();
+    else promoteNotification();
+    emit changed();
+}
+qint64 Shell::notificationRemainingMs() const {
+    if(notifications_.isEmpty())return 0;
+    return std::max<qint64>(0,notifications_.first().expiresAt-notificationClock_.elapsed());
+}
 const QVector<Entry>& Shell::entries()const {return pages_.isEmpty()?categories_[category_].entries:pages_.last().entries;}
 const QVector<Entry>& Shell::entriesAt(int depth)const {return depth==0?categories_[category_].entries:pages_.at(depth-1).entries;}
 int Shell::selectionAt(int depth)const {return depth==0?selections_[category_]:pages_.at(depth-1).selection;}
@@ -1368,6 +1441,8 @@ void Shell::refreshDirectory(){
     if(pages_.isEmpty() || pages_.last().directory.isEmpty() || mediaOpen_)return;
     loading_=true;status_="Reading media folder…";
     const auto kind=categories_[category_].id;
+    // A rescan of a page that is already open (F5 / Refresh Directory) is reported when it lands.
+    directoryRefresh_=true;
     scanRequest_=library_.scan(pages_.last().directory,kind=="photo"?MediaKind::Photo:kind=="music"?MediaKind::Music:MediaKind::Video);emit changed();
 }
 void Shell::rebuildUsers(){

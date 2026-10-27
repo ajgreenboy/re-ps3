@@ -46,6 +46,18 @@ struct Category { QString id,title,container,texture; QVector<Entry> entries; QS
 // this build really performs; the list is built from the selected entry so other surfaces inherit it.
 enum class OptionCommand { Activate, Information, SortByNameAscending, SortByNameDescending, SortMenu, Close };
 struct MenuOption { QString title; OptionCommand command=OptionCommand::Close; };
+// The console's notification pop-up. The firmware builds it from system_plugin's page_notification page:
+// a Plane carrying tex_notification (the 64x64 plaque), a notification_icon_a/b Plane carrying a
+// tex_notification_* 100x100 glyph, and Text objects to the right of the icon (notification_message_a in
+// the one-line variant, notification_label0_b/1_b/2_b in the three-line one). The page is composed by
+// basic_plugins.prx FUN_0000773c, which grows the plate by 1 unit per text row past three. This shell keeps
+// the queue and the lifetime; View draws the composite (audit/NOTIFICATIONS.md).
+struct Notification {
+    QString title;   // notification_message_a / notification_label0_b
+    QString detail;  // notification_label1_b; empty for the one-line variant
+    QString icon;    // a system_plugin texture name: tex_notification, tex_notification_<kind>
+    qint64 expiresAt=0; // Shell's notification clock, milliseconds
+};
 class Shell final:public QObject {
     Q_OBJECT
 public:
@@ -139,6 +151,14 @@ public:
     void optionsMove(int delta);   // Up/Down inside the panel
     void optionsActivate();        // Cross
     void optionsClose();           // Circle: step back one level, then close
+    // The notification queue: one pop-up at a time, each shown for a fixed lifetime, the rest waiting in
+    // order behind it. Bounded, so a failing producer cannot grow it without limit.
+    static constexpr qint64 notificationLifetimeMs=4000;
+    static constexpr int notificationQueueLimit=4;
+    void notify(const QString& title,const QString& detail={},const QString& icon={});
+    const Notification* notification() const { return notifications_.isEmpty()?nullptr:&notifications_.first(); }
+    int notificationCount() const { return notifications_.size(); }
+    qint64 notificationRemainingMs() const; // of the pop-up on screen, 0 when there is none
 signals:
     void changed();
     void requestLibrary();
@@ -244,6 +264,14 @@ private:
     QString entryKind(const Entry& entry) const;
     void showEntryInformation(const Entry& entry);
     void sortPageByName(bool ascending);
+    // Notification queue state. The front entry is the pop-up on screen; its lifetime starts when it is
+    // promoted to the front, so a burst of events each gets its full 4 s in turn.
+    QVector<Notification> notifications_;
+    QTimer notificationTimer_;
+    QElapsedTimer notificationClock_;
+    bool notificationLog_=false;
+    void promoteNotification();
+    void expireNotifications();
     QString message_,mediaTitle_,renderer_;
     QDateTime clockOverride_;
     // Only the decoded pieces are kept (the .p3t itself is read again when the theme changes); nothing is written to disk.
@@ -265,6 +293,9 @@ private:
     std::unique_ptr<QVideoSink> video_;
     void openDirectory(const QString& path);
     void openFile(const Entry& entry);
+    // Set by refreshDirectory() so the scan's result reports itself as a rescan of an already-open page
+    // (the deterministic media event behind a "library updated" notification).
+    bool directoryRefresh_=false;
     void openSettings(const QString& page);
     void openChoices(const QString& key,const QString& title);
     void applyPreferences();
