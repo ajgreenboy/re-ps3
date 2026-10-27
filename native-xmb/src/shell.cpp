@@ -14,6 +14,9 @@
 #include <QAudioOutput>
 #include <QMediaPlayer>
 #include <QMediaMetaData>
+#include <QCryptographicHash>
+#include <QJsonObject>
+#include <QJsonDocument>
 #include <QVideoSink>
 #include <QVideoFrame>
 #include <QDir>
@@ -659,13 +662,22 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     connect(player_.get(),&QMediaPlayer::mediaStatusChanged,this,[this](QMediaPlayer::MediaStatus state){
         if(mediaOpen_ && !photoOpen()) {
             loading_=state==QMediaPlayer::LoadingMedia || state==QMediaPlayer::StalledMedia;
+            // A saved resume point is applied once the media reports LoadedMedia, not before.
+            if(state==QMediaPlayer::LoadedMedia && resumePending_>0) {
+                player_->setPosition(resumePending_);
+                qInfo()<<"media: resumed at"<<resumePending_<<"ms";
+                resumePending_=0;
+            }
             if(state==QMediaPlayer::LoadedMedia && !jellyfinQueue_) {
                 const auto tags=player_->metaData();const auto title=tags.value(QMediaMetaData::Title).toString().trimmed();
                 const auto artist=tags.value(QMediaMetaData::ContributingArtist).toString().trimmed();
                 mediaAlbum_=tags.value(QMediaMetaData::AlbumTitle).toString().trimmed();
                 if(!title.isEmpty()){mediaTitle_=artist.isEmpty()?title:title+" - "+artist;mediaTags_[mediaQueue_.currentIndex()]=mediaTitle_;}
             }
-            if(state==QMediaPlayer::EndOfMedia) {const auto request=mediaRequest_;QTimer::singleShot(0,this,[this,request]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(false);});}
+            if(state==QMediaPlayer::EndOfMedia) {
+                clearResumePosition(resumePath_);   // a finished file starts from the beginning next time
+                const auto request=mediaRequest_;QTimer::singleShot(0,this,[this,request]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(false);});
+            }
         }
         emit changed();
     });
@@ -814,7 +826,16 @@ void Shell::back() {
     touch();
     if(!message_.isEmpty() || mediaOpen_ || !pages_.isEmpty())interactionAudio_.play(InteractionAudio::Cue::Back);
     if(!message_.isEmpty())message_.clear();
-    else if(mediaOpen_){++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});}
+    else if(mediaOpen_){
+        // Leaving playback remembers where it was, so reopening resumes there. Ten seconds in and
+        // fifteen from the end are not worth remembering on long media; short clips use a tenth.
+        const qint64 at=player_->position(),total=player_->duration();
+        bool worth=total>0 && at>std::max<qint64>(10000,total/20) && at<total-std::max<qint64>(15000,total/20);
+        if(!worth && total>0 && total<=60000)worth=at>total/10 && at<total*9/10;
+        if(!resumePath_.isEmpty() && worth)storeResumePosition(resumePath_,at);
+        else clearResumePosition(resumePath_);
+        resumePath_.clear();resumePending_=0;
+        ++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});}
     else if(!pages_.isEmpty()){library_.cancel();scanRequest_=0;jellyfinRequest_=0;loading_=false;status_.clear();pages_.removeLast();}
     emit changed();
 }
@@ -865,11 +886,49 @@ int Shell::mediaRepeatMode() const {
     if(!preferences_.contains("media/repeatMode") && preferences_.value("media/repeat").toBool())return 1;
     return preferences_.value("media/repeatMode").toInt();
 }
+// Resume points: a small map of file id -> milliseconds in one preferences string. They are cleared
+// when a file reaches its end, so a finished title starts from the beginning next time.
+namespace {
+QString resumeIdFor(const QString& path) {
+    return QString::fromLatin1(QCryptographicHash::hash(path.toUtf8(),QCryptographicHash::Sha1).toHex().left(24));
+}
+QJsonObject resumeMap(const QString& json) {
+    const auto document=QJsonDocument::fromJson(json.toUtf8());
+    return document.isObject()?document.object():QJsonObject{};
+}
+}
+qint64 Shell::resumePositionFor(const QString& path) const {
+    if(path.isEmpty())return 0;
+    const auto value=resumeMap(preferences_.value("media/resume").toString()).value(resumeIdFor(path));
+    return qint64(value.toDouble(0));
+}
+void Shell::storeResumePosition(const QString& path,qint64 positionMs) {
+    if(path.isEmpty()||positionMs<=0)return;
+    auto map=resumeMap(preferences_.value("media/resume").toString());
+    map.insert(resumeIdFor(path),double(positionMs));
+    // Keep the map bounded: drop entries once it grows past a playlist's worth of files.
+    while(map.size()>64)map.erase(map.begin());
+    preferences_.setValue("media/resume",QString::fromUtf8(QJsonDocument(map).toJson(QJsonDocument::Compact)));
+}
+void Shell::clearResumePosition(const QString& path) {
+    if(path.isEmpty())return;
+    auto map=resumeMap(preferences_.value("media/resume").toString());
+    if(!map.contains(resumeIdFor(path)))return;
+    map.remove(resumeIdFor(path));
+    preferences_.setValue("media/resume",QString::fromUtf8(QJsonDocument(map).toJson(QJsonDocument::Compact)));
+}
 void Shell::startQueuedMedia() {
     if(jellyfinQueue_){startJellyfinMedia();return;}
     const auto* selected=mediaQueue_.current();if(!selected)return;
     const auto item=*selected; // player callbacks must not invalidate the selected queue entry
     ++mediaRequest_;mediaOpen_=true;mediaTitle_=item.title;loading_=true;status_.clear();
+    // A saved position resumes here; the seek itself happens on LoadedMedia.
+    resumePath_=item.path;
+    resumePending_=resumePositionFor(item.path);
+    if(resumePending_>0) {
+        const qint64 seconds=resumePending_/1000;
+        status_=QObject::tr("Resuming at %1:%2").arg(seconds/60).arg(seconds%60,2,10,QChar('0'));
+    }
     for(int i=0;i<entries().size();++i)if(entries()[i].action==Action::File && entries()[i].value==item.path){currentSelection()=i;break;}
     emit mediaFrame({});
     const auto source=QUrl::fromLocalFile(item.path);

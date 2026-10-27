@@ -160,6 +160,8 @@ private:
     SteamStore steamStore_;          // public storefront browser (browse + install handoff)
     QHash<int,QString> mediaTags_;   // per queue index, track tags read from the player
     QString mediaAlbum_;             // album of the loaded track, when tagged
+    QString resumePath_;             // file whose playback may resume
+    qint64 resumePending_=0;         // milliseconds to seek once the media reports Loaded
     QPointer<QProcess> game_;        // the launched title, kept so a return is observable
     QString gameTitle_;              // its title, for the return message
     QString steamGameId_;            // a Steam title handed to steam.exe, watched through the registry
@@ -210,6 +212,9 @@ private:
     quint64 mediaRequest_=0;
     int mediaFailures_=0;
     void startQueuedMedia();
+    qint64 resumePositionFor(const QString& path) const;
+    void storeResumePosition(const QString& path,qint64 positionMs);
+    void clearResumePosition(const QString& path);
     void advanceMedia(bool failed,const QString& error={});
     int category_=6;
     std::unique_ptr<QMediaPlayer> player_;
