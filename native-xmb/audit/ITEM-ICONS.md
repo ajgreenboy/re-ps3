@@ -227,3 +227,104 @@ letting the background through an opaque icon changes its appearance more than t
 alpha change was reverted and the reason is recorded in `src/icons.cpp`. Switching to `_Ambiant.w` on
 alpha therefore waits on drawing item icons through the refractive glass path (the open gap), and the
 measurement above is the bar the change has to beat.
+
+## Experiment 2026-10-26: the opaque material's light direction from ICONS.mnu
+
+Contradiction 2 above (an invented material) was attacked at its strongest evidence, the light direction. The
+firmware's key light is not guesswork: the captured fragment constants carry it. In `fpdump7/fp_0199` (the focused
+item icon) the three `_PackedLightParams` rows are
+
+```
+[0] = 3.12367  -0.0166247  -0.0852542
+[1] = 0.484729  0.382283   -0.97268
+[2] = 2.45394   0.923896    0.215928
+```
+
+Columns 1 and 2 are the two light vectors, each `(sin Z cos X, sin Z sin X, cos Z)` of the MNU angles:
+LIT1 ANG Z/X = 22.4976/92.4901 gives (-0.0166, 0.3823, 0.9239), LIT2 ANG Z/X = 282.47/84.9909 gives
+(-0.0853, -0.9727, 0.2159). The same values appear in every captured icon draw, category and item alike, and
+`_Ambiant` in that draw is `1.05025 1.05025 1.05025 1`, i.e. the MNU AMB triple with the per-draw state
+brightness in w.
+
+`IconRenderer::render` already derived both vectors from `LIT1/LIT2 ANG Z/X` for the glass path; the opaque
+material ignored them and lit the normal map from a hand-written `(-0.35, 0.4, 0.85)` three-quarter key. That
+constant is gone. The opaque fragment shader now takes the same `QVector3D l1` the glass path writes into
+`_PackedLightParams`, so one code path supplies the direction for both, and the AMB triple is read once into
+`ambientColour` for `_Ambiant` instead of being spelled out at the call site. Ambient level, matte diffuse weight
+and edge bevel stay fitted stand-ins: nothing in the captures gives them a direct counterpart.
+
+Canonical capture (`work/ab-layers.ts --capture`, stored RPCS3 reference, same tree both sides - the control run
+has the old hard-coded direction):
+
+| layer | control | LIT1 direction | delta |
+|---|---|---|---|
+| frame | 18.01 / 0.8301 | 18.01 / 0.8301 | +0.00 / +0.0000 |
+| top background | 20.24 / 0.9344 | 20.24 / 0.9344 | +0.00 / +0.0000 |
+| category icon row | 21.05 / 0.8950 | 20.91 / 0.8947 | -0.14 / -0.0003 |
+| item label row | 11.94 / 0.3910 | 11.94 / 0.3910 | +0.00 / +0.0000 |
+| clock text | 13.51 / 0.6131 | 13.51 / 0.6131 | +0.00 / +0.0000 |
+| info bar | 17.12 / 0.7046 | 17.12 / 0.7046 | +0.00 / +0.0000 |
+
+Six 180x180 crops centred on the category icons (focus row y 280, others 290, 200 px pitch) score 21.265 dB /
+0.8839 before and 21.111 dB / 0.8846 after: PSNR -0.15 dB, SSIM +0.0007. A pixel diff of the focused-item and
+bullet captures changes icon pixels only (root bbox 113,247..1212,520; settings page 249,237..1672,1048; no text
+or clock pixel moves), maximum delta 91 levels on the focused icon.
+
+Kept: the opaque material is now lit by the material's own vector. It costs 0.14 dB on the layer that matters,
+inside the 0.5 dB / 0.004 budget, and the most plausible reason the fitted key scored slightly better is that the
+firmware's glass adds an environment reflection (`tex2` rotated by `_EnvRot`) that the opaque stand-in has no
+equivalent for; the invented left-bias key was standing in for that term. Brightness placement is unchanged for
+the reason measured in the section above: `icon.brightness` scales RGB through `mix(.70, 1, b)` and alpha stays
+coverage x opacity, so the captured state value (1.0 open column, 0.247/0.698 behind a page) keeps acting where
+the stored reference layers agree with it.
+
+Two variants were built and rejected:
+
+- **MNU AMB folded into the opaque ambient** (`0.58 * dot(AMB, 1/3)` = 0.609 instead of 0.58, on top of the
+  LIT1 direction) scored 20.67 / 0.8943 on the category icon row, -0.38 dB / -0.0007: reverted, the opaque
+  ambient stays the fitted 0.58 because the AMB colour belongs to the glass ambient term, not to this level.
+- **y-mirrored LIT1** (-0.0166, -0.3823, 0.9239), which would be the correct vector if the firmware's
+  texture-space y were flipped relative to our uploaded normal map, scored 20.94 / 0.8957. It is also a wash and
+  marginally better on SSIM, but there is no independent evidence for the flip and it would put the opaque path
+  out of step with the glass path, which uses the unmodified vector: not adopted.
+
+## Second size class (1.1022x): the view.cpp wiring
+
+The unresolved pair is a pure uniform scale of the item pair, 85.554/77.616 = 1.10223 and 203.700/184.8 =
+1.10227, and its focus ratio (2.381) is the item pair's, so it is neither a focus state nor a different glyph.
+Neither position nor brightness moves with it: the 85.554 draws sit at `_Eye.x = -5` (screen 565, the open
+column's focus x), on the exact 80 px row pitch (`_Eye.y` -500/-580/-660) and at Amb.w 1.0, and only `_Eye.w`
+changes. In the native `_Eye.w` is `IconRenderer::Icon::size`, and a camera-distance change would drag the centres
+toward the screen centre the way the 2857.2 parent column does, so this is a quad-size multiplier alone.
+
+Rows above focus at the 80 px pitch mean a long scrolled list (the 16-row Settings page is the obvious candidate),
+and level>0 pages are exactly what `itemIconSize` cannot express today: it ignores `level` (finding 5 above). Two
+wiring options are consistent with the captures; both are `src/view.cpp` edits, outside this task's fence.
+
+Wiring A - a level scale (correct if the 85.554 draws are a settled deeper page). The whole change is inside
+`View::itemIconSize`, because both call sites already go through it (`view.cpp:925` theme icons, `view.cpp:930`
+icon queue):
+
+```cpp
+double View::itemIconSize(int level,bool bullet,double focus) {
+    const double base=bullet?35.721+(85.05-35.721)*focus:77.616+(184.8-77.616)*focus;
+    return base*(level>0?1.10223:1.);
+}
+```
+
+Wiring B - a page-entry scale on the incoming column (correct if the pair is a transition frame, which the 203.700
+at an intermediate x suggests). `ahead` is already computed at `view.cpp:875`:
+
+```cpp
+const double entryScale=1.+.10223*std::clamp(ahead,0.,1.);
+iconQueue_.push_back({entry.texture,{iconX,y},itemIconSize(level,bullet,focus)*entryScale,brightness,columnAlpha,2700+157.2*depth});
+```
+
+and the theme-icon quad two lines earlier (`view.cpp:925`) takes the same factor:
+`const double quad=itemIconSize(level,bullet,focus)*entryScale;`.
+
+Neither can be landed blind. The discriminating capture is a settled deeper page with a known selection and
+depth (Game > All Games > Not Installed, decode `_Eye.w` for the focused row and for the rows above focus): if the
+settled rows measure 85.554 the factor is a level scale (A); if only transition frames do, it is page-entry (B).
+The bullet branch needs its own check either way: the settings-page focused bullet captures at 85.05 with no
+1.1022 factor, so if A is chosen bullets may have to stay unscaled.
