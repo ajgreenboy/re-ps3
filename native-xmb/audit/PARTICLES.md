@@ -392,14 +392,19 @@ vertex count. **[U]/[I]** - section 6, item A1.
 
 ---
 
-## 4. Comparison with what `src/particles.cpp` does today
+## 4. Comparison with what `src/particles.cpp` did before the port
 
-Today's layer is linkev/PlayStation-3-XMB's sparkle layer: 2000 `GL_POINTS`, one GLSL 3.30 program, additive
+> **Superseded 2026-10-26.** The port landed; the current implementation is described in
+> "Applied: the pool simulation is in src/particles.cpp" and "Tuned 2026-10-26" at the end of this
+> file. This section and section 5 are the pre-port comparison and plan, kept as the record of what
+> was true when they were written.
+
+Before the port, the layer was linkev/PlayStation-3-XMB's sparkle layer: 2000 `GL_POINTS`, one GLSL 3.30 program, additive
 (`glBlendFunc(GL_ONE, GL_ONE)`), a per-seed closed form and a Gaussian-ish dot (`particles.cpp:11-47,74-85`).
 It is drawn **after** `Hdr::finish` (`view.cpp:326-328`), with opacity from the cold-boot GLOBAL ALPHA weight
 (`view.cpp:563`). It never touches `particles_quads` / `particles_second`, `particles.elf`, or `PARTICLES.mnu`.
 
-| # | Behaviour | Firmware | Today (`src/particles.cpp`) | Gap |
+| # | Behaviour | Firmware | Pre-port (`src/particles.cpp`) | Gap |
 |---|---|---|---|---|
 | 1 | Primitive | 4-vertex camera-facing quads, per-particle orientation quaternion | GL point sprites | geometry |
 | 2 | Count | pool 1536, ~1492 live | 2000 fixed | similar order, different basis |
@@ -581,8 +586,10 @@ Loaded but never drawn in the retail XMB flow. Do not port.
 Firmware particles = 1536-particle SPU-simulated pool (~1492 live, 3.1 s mean life, cone emission, gravity/
 friction/Brownian, physics identical across themes) rendered as two firmware-shader passes of oriented,
 DoF-sized, iridescent, spot-lit quads - pass 1 into the HDR scene, pass 2 into the glare source - driven by
-`PARTICLES.mnu`. Today's `src/particles.cpp` is 2000 additive point sprites with no simulation, no lifetime,
-no quad, one pass, after tone mapping. None of the firmware simulation parameters depend on clock time or the
+`PARTICLES.mnu`. Superseded 2026-10-26: the port replaced the pre-port layer; `src/particles.cpp` now runs
+the fixed-step pool described under "Applied" below. The pre-port description (2000 additive point sprites,
+no simulation, no lifetime, no quad, one pass, after tone mapping) is kept as the record of what was true
+before the port. None of the firmware simulation parameters depend on clock time or the
 ribbon; only the glare/DoF inputs follow the day-night preset.
 ## Applied: the pool simulation is in src/particles.cpp
 

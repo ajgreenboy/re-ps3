@@ -117,6 +117,13 @@ Use Steam and imported content as explicitly identified native providers for the
 - [x] ISC-46.5: Anti: native player logs contain no Jellyfin token query parameters after nested HLS playback.
 - [ ] ISC-46.6: Native Jellyfin posters, track/subtitle selectors and resume UI are verified.
 
+> Criteria state note (2026-10-26): an unchecked box means the whole criterion is unmet, not that the
+> behaviour is absent. ISC-20 has a tracked launch/return lifecycle for RPCS3 and imported apps and a
+> Steam registry watcher (`Shell::startTracked` / `Shell::startSteamTracked`), but no configured execution
+> backend exists, so it stays unchecked. ISC-6, ISC-10, ISC-11, ISC-12 and ISC-30 likewise have partial
+> sub-behaviours; read them with the detail in `audit/FEATURE-COVERAGE.md` and `audit/VISUAL-BEHAVIOR.md`
+> rather than as an absence list.
+
 ## Test Strategy
 
 Build logs establish compilation. Requested window observations establish specific visible states; source inspection alone does not close workflow criteria. Feature-specific runtime evidence is recorded in audit/HANDOFF.md and audit/VISUAL-BEHAVIOR.md; no new test suite is introduced.
@@ -158,13 +165,18 @@ Build logs establish compilation. Requested window observations establish specif
 - 2026-10-25: Fixed-colour category icons use an opaque original-normal-map material after reproducing dark
   interiors on Green. Original retains the firmware glass path. This resolves the reported appearance defect,
   not the broader material-parity criterion; evidence and limits are in audit/CATEGORY-ICON-FIX.md.
+- 2026-10-26: superseded the sentence above - every built-in colour, including Original, now uses the opaque
+  material (`src/icons.cpp:97-109,164-166`); the firmware glass program is diagnostic only. Original's tint
+  follows the current/next monthly RGB textures. See "Latest correction" in audit/CATEGORY-ICON-FIX.md.
 - 2026-10-25: Added an owned folder playback queue and photo viewport geometry using scoped lower-cost agents,
   followed by parent integration. See audit/MEDIA-CONTINUATION.md for observed sequencing/error/zoom behavior.
 
 - 2026-10-25: The ribbon is ported from the firmware end to end (custom_render_plugin cloth, ffd_shader1 lattice,
   spline.elf sheet), with each stage checked against RPCS3 captures. The LINE1 preset schedule follows the plugin's
   clock keyframes and boot sequence. The boot blend curves are measured, because the qgl_base player is not traced.
-  gameboot/welcome are not scheduled, since the native app has no game launch or first-time setup flow.
+  gameboot/welcome are not scheduled. Updated 2026-10-26: a game launch flow now exists (`Shell::startTracked`),
+  but gameboot1-5 and welcome_1/2 are still not scheduled; there is still no
+  first-time-setup flow.
 
 - 2026-10-25: User directed work from Phase 2 onwards while another session completed the category shader port.
   Text now uses a native-resolution GL atlas with Qt shaping/coverage; this does not close firmware rasterizer
@@ -272,3 +284,5 @@ Back restoring selection. The broad transition-parity criterion remains unchecke
 - ISC-43.2/45.4: Focused lower-cost reviews found draft removal and internal-message suppression gaps. Corrections passed six QApplication editor component checks and a message idle replay (RGB ratio 1.000007; unchanged bottom crop). See audit/PHASE-CONTINUATION.md.
 
 - ISC-41.1/46–46.5: Real Jellyfin 12.4 native replay passed 20 checks including direct/HLS decoding, pause/seek/Back and four stage captures. Six additional auth lifecycle checks passed. Live HLS exposed an ApiKey spelling missing from the initial URL filter; corrected, revoked the disposable exposed session, and repeated playback/log containment successfully. Existing three named-state pixel gates passed. Details and remaining selectors/artwork/resume scope: audit/JELLYFIN-NATIVE.md.
+
+- ISC-20 (still partial): source review 2026-10-26 - tracked `QProcess` for RPCS3 and imported apps with exit/crash report, library rescan and idle suppression (`Shell::startTracked` / `Shell::gameRunning`), Steam registry watcher (`Shell::startSteamTracked` / `Shell::pollSteamGame`), Quit Game and the PS system menu (`Shell::psMenuActivate`), and a focus-independent PS watcher (`src/ps_watcher.*`). No configured backend preference and no recorded real launch-return capture, so the criterion stays open; see audit/FEATURE-COVERAGE.md (ISC-20).

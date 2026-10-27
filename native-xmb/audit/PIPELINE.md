@@ -7,19 +7,22 @@ Local inventory (`out/native-reference/qrc-inventory.txt`, not committed) lists 
 
 ## Layers, back to front
 
-Current category-material routing: Original retains the firmware glass port described below. Fixed colours
-use an opaque native normal-map material after the Green theme reproduced near-black interiors; see
+Current category-material routing (updated 2026-10-26): every built-in colour, including Original, uses the
+opaque native normal-map material (`src/icons.cpp:97-109`, selected at `:164-166`); the firmware glass
+program is diagnostic only (`XMB_ICON_FIRMWARE` / `XMB_ICON_UCODE` / `XMB_ICON_DEBUG`). Original's tint
+still follows the original monthly RGB textures at a fitted 0.45 strength (`src/view.cpp:294-308`). The
+earlier routing (Original glass, fixed colours opaque) was current before 2026-10-26; see
 CATEGORY-ICON-FIX.md for the evidence and fidelity limits.
 
 | Layer | Firmware source | Native status |
 |---|---|---|
 | Background gradient | `lines.qrc` moyou/background, back_colours0 + month_bg textures, BACKGROUND.mnu; custom_render_plugin clock mapping | **Ported**: firmware Cg translated RSX→GLSL, inputs traced |
 | Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; cloth in custom_render_plugin; geometry from the SPU spurs/moyou/spline/spline.elf | **Ported** (`ribbon.cpp`): PPU cloth, ffd_shader1 deformation lattice, spline.elf FFD + camera + bicubic sheet, each stage checked against RPCS3 captures (see "Ribbon port"); LINE1 presets follow the plugin's clock keyframes and boot schedule (see "Ribbon presets") |
-| Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Replaced**: linkev/PlayStation-3-XMB's sparkle layer (`particles.cpp`, THIRD-PARTY.md): additive point sprites, closed-form motion from per-particle seeds, drawn over the finished background; not a firmware port (the earlier CPU reconstruction of particles.elf drifted and jumped with the ribbon's arc length). The boot's GLOBAL ALPHA still applies |
+| Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Ported (2026-10-26)**: firmware-shaped pool in `src/particles.cpp` (1536 cap, 48-byte stride, fixed 0.0088883 s step, PARTICLES.mnu physics, Park-Miller seed), one indexed draw into the HDR scene before the tone map and a second draw into the glare source (`src/view.cpp:370-376`). Superseded reading (accurate before 2026-10-26): this layer was linkev/PlayStation-3-XMB's additive point sprites, not a firmware port. Still open: the real `particles_second` program (the glare draw reuses the same geometry with a fitted 0.045 halo), `proc_iridescent.tga`, and the `_Color`/`_Gamma`/spot packing (`audit/PARTICLES.md`) |
 | HDR tone map + glare | `lines.qrc` glutils ToneMap, GlareSource*, Gaussian, AccGlare, ApplyGlare, HDR.mnu | **Ported** |
-| Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n–70n normal maps + dif | **Ported** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo, the variant the firmware runs at 1080p; uniforms from ICONS.mnu by the packing read from an RPCS3 capture; matches RPCS3's frame side by side |
-| Item icons, labels, dialogs, info bar | explore_plugin / system_plugin via paf (RCO layouts and textures) | **Reconstructed** (item icons partly ported): `icontex` item icons and settings bullets now draw through the firmware glass program - captured sizes 77.616/184.800 (items) and 35.721/85.050 (bullets), row pitch 80, brightness 1.0 in the open column and 0.247/0.698 behind an open page, all confirmed in `ITEM-ICONS.md`; RCO/artwork/theme icons and the labels still use Qt |
-| Text | paf font renderer with the RD-R/B (SCE-PS3 Rodin) faces from dev_flash/data/font | **Partial**: native-resolution GL glyph atlas, Qt shaping/rasterization; PAF coverage/style trace in TEXT-RENDERER.md; hinting and glow parity open |
+| Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n–70n normal maps + dif | **Geometry ported; material is a stand-in** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo (the variant the firmware runs at 1080p) and ICONS.mnu uniforms from an RPCS3 capture. The visible surface is the opaque native normal-map material for every built-in colour (`src/icons.cpp:110-130`); the firmware glass program runs only behind the diagnostics. Side-by-side frame parity is not claimed. |
+| Item icons, labels, dialogs, info bar | explore_plugin / system_plugin via paf (RCO layouts and textures) | **Reconstructed** (item icons ported, labels moved to the GL atlas): `icontex` item icons and settings bullets draw through `IconRenderer` (firmware vertex program plus the opaque normal-map material, `src/icons.cpp:110-130,164-166`), with captured sizes 77.616/184.800 (items) and 35.721/85.050 (bullets), row pitch 80, brightness 1.0 in the open column and 0.247/0.698 behind an open page, all confirmed in `ITEM-ICONS.md`. Labels, dialogs, the info bar, the OSK and the options panel draw through the GL glyph atlas (`src/text_renderer.cpp`, called from `View::paintGL`); RCO, artwork and theme icons still use QPainter. |
+| Text | paf font renderer with the RD-R/B (SCE-PS3 Rodin) faces from dev_flash/data/font | **Partial**: native-resolution GL glyph atlas with FreeType coverage (firmware load flags 10) and Qt shaping only; PAF coverage/style trace in TEXT-RENDERER.md; PAF metric authority, per-style weight/slant and glow parity open. Per-phase coverage landed 2026-10-26 as a fit (TEXT-RASTER.md 2.4) |
 | Cold-boot intro | custom_render_plugin boot case + anim_coldboot2 events; raf.sprx playing vsh/resource/coldboot.raf (coldboot.jsx) with raf.qrc vert0/sce01; coldboot_stereo.ac3 | **Ported** (`coldboot.cpp`): RAF scene, script timeline, sound, event times, background boot presets; matches the RPCS3 capture (see "Cold boot") |
 
 `raf.qrc` (ubber shaders, ConeFilter), `rhm.qrc`, `canyon.qrc`/`earth.qrc` (visualiser themes) and `store.qrc` are
@@ -153,8 +156,9 @@ durations (3.82 s, 2.8 s) differ from the call arguments (3 s, 7.5 s). How qgl_b
 is not traced.
 
 gameboot1-5 run when a game launches (pages page_gameboot / anim_gameboot, 0xe950..0xf71c), and welcome_1/2 and
-music_1 run during first-time setup and music playback. The native app has none of those flows, so they are not
-scheduled.
+music_1 run during first-time setup and music playback. Updated 2026-10-26: the native app now launches games
+(`Shell::startTracked`) but still does not schedule gameboot1-5; it has no
+first-time-setup or background-music flow, so welcome_1/2 and music_1 are not scheduled either.
 
 ## Cold boot (ported 2026-10-25)
 
@@ -299,8 +303,10 @@ of the bright UI content per frame) and `work/region-luma.ts` (mean luma of a re
   frames, and there is no snap at frame 12. So this is not the 200 ms mode-5 ease (0.779, with a 5% snap on frame 12).
   This capture method reads about 0.014 below the model on moves whose timing is known (the category move: 0.765
   against 0.779). The page move therefore fits mode 4 at 300 ms: n = 18, k = 1/(3.775 + 0.217 × 3) = 0.226, so
-  0.774 per frame, and the 1% left snaps on frame 18. explore_plugin holds several 300 ms float constants, but I
-  have not traced which call drives the page move, so the mode and duration are a fit, not a trace.
+  0.774 per frame, and the 1% left snaps on frame 18. Updated 2026-10-26: explore_plugin's five 300.0f constants are
+  file-delete dialog, `user.info` dialog and list-label durations, not the page move (`audit/PAGE-MOVE.md:62-81`), and
+  the only captured 300 ms bar call passes mode 5 (`:99-101`). The page move lives in vsh.elf paf PhXmBar, so 300 ms at
+  mode 4 remains a fit, not a trace.
   `View::PafEase` gained mode 4, and the depth ease uses it at 300 ms. Native check: `XMB_MOTION_LOG` shows the
   depth position settling in 18 frames in each direction.
 - Capture notes: RPCS3's exclusive fullscreen leaves CopyFromScreen showing a frozen frame, so the scratch config
@@ -336,9 +342,9 @@ Translator fixes found by diffing against RPCS3's own GLSL for this program (`Lo
 - H registers are rounded to fp16. H and R are not aliased (RPCS3 keeps them apart).
 
 Clock inputs updated: `_ChangingColor` now samples amb.bmp and `_LuminanceParams` derives from GLASS; see
-`ICON-MATERIAL-CLOCK.md`. Daytime visual parity still needs a matched capture. Item
-icons in the open column still go through Qt. **Superseded by ITEM-ICONS.md**: icontex item icons and settings bullets now
-queue to `IconRenderer` (view.cpp) and only RCO, artwork and theme icons stay on the Qt path. The background is brighter
+`ICON-MATERIAL-CLOCK.md`. Daytime visual parity still needs a matched capture. Updated 2026-10-26: item
+icons in the open column no longer go through Qt. **Superseded by ITEM-ICONS.md**: icontex item icons and settings
+bullets queue to `IconRenderer` (the item-icon queue in `View::paintGL`) and only RCO, artwork and theme icons stay on the QPainter path. The background is brighter
 than RPCS3's at the same hour, which also
 lightens the refracted unfocused icons. Diagnosis: `XMB_ICON_UCODE=<capture>` runs on the firmware's captured
 constants; `XMB_ICON_DEBUG=0..4` shows a single input texture or the result.

@@ -34,8 +34,8 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Ribbon | Ported end to end (2026-10-25): plugin cloth, ffd_shader1 lattice, spline.elf FFD/camera/bicubic sheet, each stage matched to RPCS3 captures; LINE1 presets follow the plugin's clock keyframes and boot schedule (audit/PIPELINE.md "Ribbon port", "Ribbon presets") |
 | Particles | Firmware pool port (2026-10-26): the SPU `particles.elf` simulation with PARTICLES.mnu physics at the 8.8883 ms step, a 1536-record pool and the 48-byte vertex format, drawn additively into the HDR scene before the tone map plus a second draw into the glare source; deterministic from `--render-clock` (audit/PARTICLES.md) |
 | Category icons | All built-in colours use an opaque normal-map material; Original follows the firmware monthly palette. Six day/night pairs verified; firmware shader remains diagnostic. See audit/CATEGORY-ICON-FIX.md; full parity open |
-| Item icons, labels, columns, dialogs, info bar, options panel, OSK | `icontex` item icons and settings bullets draw through the firmware glass program - sizes 77.616/184.800 and 35.721/85.050, pitch 80, brightness 1.0/0.247/0.698 confirmed against decoded RSX captures (audit/ITEM-ICONS.md); labels, dialogs, the options panel, the OSK and RCO/artwork icons are still Qt drawing with measured layout |
-| Text | Original font faces rasterized with FreeType and recovered load flags 10 into the 2x GL atlas; label glow/idle fade are MaXMB observations; PAF metrics, pixel phase and full parity remain open (audit/FONT-MATCHING.md) |
+| Item icons, labels, columns, dialogs, info bar, options panel, OSK | `icontex` item icons and settings bullets draw through `IconRenderer` (firmware vertex program, opaque normal-map material) - sizes 77.616/184.800 and 35.721/85.050, pitch 80, brightness 1.0/0.247/0.698 confirmed against decoded RSX captures (audit/ITEM-ICONS.md); labels, dialogs, the info bar, the options panel and the OSK draw through the GL glyph atlas with Qt shaping, and only RCO/artwork/theme icons remain QPainter |
+| Text | Original font faces rasterized with FreeType and recovered load flags 10 into the 2x GL atlas; label glow/idle fade are MaXMB observations; PAF metrics, per-style weight/slant and full parity remain open (audit/FONT-MATCHING.md). Per-phase glyph coverage landed 2026-10-26 as a labelled fit (audit/TEXT-RASTER.md 2.4) |
 | Motion | paf's own eases (`View::PafEase`): category, item and cross-fade moves are 200 ms mode 5 (traced in vsh.elf PhXmBar); the page move is 300 ms mode 4 (fitted from RPCS3, not traced). Held-key repeat 300 ms then 66.7 ms; help text drawn on the selection with no delay (audit/PIPELINE.md "Menu motion") |
 | Cold boot | 4.93 intro ported: coldboot.raf scene and script, boot sound, anim_coldboot2 events, background boot presets; skippable, `--no-intro` (audit/PIPELINE.md "Cold boot") |
 | Themes | `.p3t` still background, icons and five menu-sound roles; RAF scenes and font/colour open |
@@ -45,16 +45,21 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Imported apps | Native editor and versioned importer add executables, browser apps and authenticated Jellyfin services. Jellyfin direct/HLS playback verified; see audit/JELLYFIN-NATIVE.md |
 | Host settings | System Information, network list, video/audio output and master volume read and write the real PC |
 
-## In flight (2026-10-25)
+## In flight (2026-10-25; updated 2026-10-26)
 
 - Third-party code (MaXMB, DeckyXMB, linkev/PlayStation-3-XMB) is credited in `THIRD-PARTY.md`.
-- `src/icons.cpp` has an uncommitted change from another agent. Leave it alone unless you are that agent.
+- `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
+  at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
 ## Next steps (recommended order)
 
 Latest user direction adds Steam games/Friends and future content tooling. The implemented first slice and its
-remaining requirements are in `audit/STEAM-INTEGRATION.md`: prioritize actual launch/return, permitted friends
-connection, per-game ICON0/PIC1 overrides and the importer editor (now integrated; see the latest continuation). Jellyfin is currently a URL app, not a native player.
+remaining requirements are in `audit/STEAM-INTEGRATION.md`: prioritize a recorded launch-return capture, permitted friends
+connection, per-game ICON0/PIC1 overrides and the importer editor (now integrated; see the latest continuation). Updated 2026-10-26:
+Jellyfin is a native service and player, not a URL app - local sign-in, library/folder pages, direct and
+server-negotiated HLS playback, pause/seek/Back, session reporting and sign-out are verified against Jellyfin
+12.4 (`audit/JELLYFIN-NATIVE.md`); posters, selectors and resume UI remain open. The superseded text ("Jellyfin
+is currently a URL app, not a native player") was accurate before the native work landed.
 Info-bar proportions and an analog clock now follow saved reference measurements (`audit/INFO-BAR.md`); exact
 firmware composition/projection remains open.
 
@@ -80,9 +85,13 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
    DAT_00270674 / DAT_002706c0 / DAT_00270658 / DAT_00270d30 / DAT_00271d0c are exactly 300.0f but drive content and
    dialog transitions, NOT the page move, so they cannot be cited as its evidence; the page move lives in vsh.elf paf
    PhXmBar (genuine 0.3 s bar constant DAT_0068f020). 300 ms at mode 4 remains a fit - the only model matching the
-   measured 17-18 frame ramp, with mode 5 excluded - not a traced call. The info-bar clock is a passive PhClock pushed
-   at one-minute resolution; its periodic writer is still open. See [PAGE-MOVE.md](audit/PAGE-MOVE.md).
-3. **Phase 5 particles:** port particles.elf. The current sparkles are linkev's, not the firmware's.
+   measured 17-18 frame ramp, with mode 5 excluded - not a traced call. Updated 2026-10-26: the XMB clock is a
+   `PhText` named `clock`, not a passive `PhClock`; the writer chain reaches vshcommon export 0x33FB58, where the
+   per-minute tick still sits outside the local artifacts (audit/INFO-BAR.md:77-227; the only `Clock` objects are
+   the Date and Time screens). See [PAGE-MOVE.md](audit/PAGE-MOVE.md).
+3. **Phase 5 particles:** done 2026-10-26 for pass 1 and the glare draw - firmware-shaped pool, PARTICLES.mnu physics,
+   48-byte records, HDR-scene placement, deterministic from `--render-clock` (audit/PARTICLES.md). Still open: the real
+   `particles_second` program, `proc_iridescent.tga`, and the untraced `_Color`/`_Gamma`/spot and darkness/life-bounds terms.
 4. **Phase 3 layout:** replace measured column, row and icon numbers with values traced from RCO objects and
    explore_plugin.
 
@@ -109,7 +118,7 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
 
 ## Phases to 100%
 
-### Phase 1: category icon renderer (done for category icons; item icons in the open column still Qt, see below)
+### Phase 1: category icon renderer (done for category and icontex item icons; RCO/artwork icons still QPainter, see below)
 - Item-icon parity: [ITEM-ICONS.md](audit/ITEM-ICONS.md). Item icons and settings bullets share the category program and
   material (quad.vpo + icons_no_ss_no_shad.fpo, night override); captured sizes 77.616/184.800 (items) and 35.721/85.050
   (bullets), row pitch 80 (+175 first row, level-0 row 385 above focus), brightness 1.0 in the open column and
@@ -153,8 +162,9 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
 - `_ChangingColor` now samples amb.bmp at firmware clock/season coordinates; `_LuminanceParams` now derives
   from the control-point curve scaled by preset GLASS. Both reproduce the prior night capture numerically;
   daytime capture parity is still pending. See `audit/ICON-MATERIAL-CLOCK.md` for proof and limitations.
-- Open-column item icons still take the Qt path, including original RCO images. Route the appropriate firmware
-  material inputs through the item renderer after its asset/UV mapping is understood.
+- Updated 2026-10-26: icontex item icons and settings bullets no longer take the Qt path (IconRenderer,
+  the item-icon queue in `View::paintGL`); original RCO artwork images still do. Route the opaque material's
+  remaining firmware inputs through the item renderer after its asset/UV mapping is understood.
 - **Resolved 2026-10-25: the "8x night brightness" was a clock-matching error, not a rendering bug.** The earlier
   comparison used `--background-clock 00:00` (midnight) against an RPCS3 capture whose console clock was actually
   **~10:00 daytime**. Dumping the real draw constants with RPCS3's `XMB_FP_DUMP` (`RSXThread.cpp` local patch) shows
@@ -182,13 +192,14 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
 ### Phase 4: motion and timing from firmware
 - Page-move duration and info-bar clock trace: [PAGE-MOVE.md](audit/PAGE-MOVE.md). The five explore_plugin constants are
   exactly 300.0f but belong to content/dialog transitions; the XMB page move is paf PhXmBar in vsh.elf (0.3 s bar
-  duration), and 300 ms at mode 4 is the only model matching the measured 17-18 frame ramp. The info-bar clock is a
-  passive PhClock written through an exported setter at one-minute resolution; its periodic writer is still open.
+  duration), and 300 ms at mode 4 is the only model matching the measured 17-18 frame ramp. Updated 2026-10-26: the
+  XMB clock is a `PhText` named `clock`, not a passive `PhClock`; the writer chain reaches vshcommon export 0x33FB58,
+  and the per-minute tick inside it is still outside the local artifacts (audit/INFO-BAR.md:77-227).
 - Smoothness correction (2026-10-25): repaint requests follow Qt swap callbacks instead of the 16 ms input timer;
   cumulative sampling preserves the canonical ease at 60/120/240 Hz. Matched navigation at 1920x1000 improved
   from 62.58 to 236.96 swap callbacks/s (p95 gap 17.37 to 4.20 ms). These are callback measurements;
   physical presentation and sustained workloads remain open. See `audit/ANIMATION-SMOOTHNESS.md` for evidence,
-  diagnostics and remaining limits. The rebuilt normal app is open; info-bar/clock work remains next.
+  diagnostics and remaining limits. The rebuilt normal app is open; the per-minute tick inside vshcommon 0x33FB58 remains next.
 - Done 2026-10-25: the menu ease is paf's own. The cross bar is vsh.elf's `PhXmBar`; its focus moves are 200 ms
   paf animations in acceleration mode 5, a per-frame ease with k = 0.2206 that lands on frame 12
   (audit/PIPELINE.md "Menu motion"; `View::PafEase`).
@@ -196,18 +207,22 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
   4 frames (66.7 ms), with no acceleration. The help text has no delay: it is drawn on the selected row from the frame
   the move starts. The category move fits the same 200 ms mode-5 ease. All three are implemented
   (audit/PIPELINE.md "Measured on the real XMB").
-- Done 2026-10-25: the page move is slower than the others. Captured in RPCS3, it fits paf mode 4 at 300 ms; this is a fit, not
-  yet traced to a call. `PafEase` has mode 4, and the depth move uses it.
-- Open: trace the page move's animate call in explore_plugin to confirm 300 ms and mode 4; info-bar clock updates.
+- Implemented 2026-10-25, still a fit rather than a trace: the page move is slower than the others. Captured in RPCS3,
+  it fits paf mode 4 at 300 ms; `PafEase` has mode 4 and the depth move uses it. The only captured 300 ms bar call
+  passes mode 5, and the explore_plugin 300.0f constants are content/dialog durations, so neither can confirm it.
+- Open: trace the page move's animate call in vsh.elf paf PhXmBar (not explore_plugin) to confirm 300 ms and mode 4.
+  The clock writer chain is bounded to vshcommon 0x33FB58 (audit/INFO-BAR.md); its per-minute tick is still open.
 
 ### Phase 5: remaining firmware renderers and states
 - Particle system analysed: [PARTICLES.md](audit/PARTICLES.md). The firmware runs SPU particles.elf over a 1536-record
   pool (1492 live at 7.979 spawns/frame, 3.116 s mean life) with 48-byte records (pos float4 carrying life alpha, quad
   corner, orientation quaternion) and physics entirely from PARTICLES.mnu (cone 51.87 deg, speed 0.287-0.394, aging
   0.00285223, DELTA TIME 0.0088883 s, friction 0.030551, gravity -6.8e-5, Brownian 0.225311, spin 2.74), drawn by two
-  shader passes: quads into the HDR scene, radial halo into the glare source. Today's sparkles are closed-form additive
-  point sprites drawn after tone mapping, so they never bloom; the port needs the simulation plus both passes.
-- Ribbon geometry from spline.elf is done. Next: particles from particles.elf exactly, including the wind response.
+  shader passes: quads into the HDR scene, radial halo into the glare source. Updated 2026-10-26: pass 1 and a glare
+  draw are ported (fixed 0.0088883 s step, 1536 records, 48-byte format, HDR-scene placement, deterministic from
+  `--render-clock`); the folded in-shader halo still stands in for the separate `particles_second` program, and
+  `proc_iridescent.tga` plus the untraced colour/alpha terms remain open.
+- Ribbon geometry from spline.elf is done. Next: the particles' `PARTICLES_UI` wind response, which is not wired.
   The same tools apply: `work/spu/` disassembler, the RPCS3 SPU DMA log, buffer watch and local-store snapshots
   (`rpcs3-rsx-capture.patch`).
 - Ribbon presets: the measured boot durations (3.82 s, 2.8 s) differ from the plugin's call arguments (3 s, 7.5 s);

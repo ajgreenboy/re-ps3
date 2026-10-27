@@ -234,6 +234,23 @@ These are not laziness or missing reference data; a PC reproduction cannot hones
 
 Each item was checked against the current source, not against another doc.
 
+> Status note added 2026-10-26: this section records the state at the time of the assessment, and the
+> corrections were applied to the affected docs with dated notes. Commits landed after the register made a
+> few of its own statements stale, so read them with these corrections: item 8's "item-level Triangle
+> menus do not [exist]" is superseded by the options API in `src/shell.h` and its panel in
+> `src/view.cpp:859-882,998-1004`; R15's "glyph origins snap to whole output pixels" is superseded by the
+> per-phase tiles (fit, `audit/TEXT-RASTER.md` 2.4); A1's "four cues" is superseded by nine loaded system
+> cues with six mapped slots (`src/interaction_audio.cpp:32-43,321-345`); item 8's "VIS-39 notifications
+> ... remain genuinely absent" is superseded by the in-flight notification queue and pop-up
+> (`Shell::notify`, `View::drawNotification`); R7's source line numbers moved. Section 1's parentheticals
+> ("the Triangle options system is absent", "notifications ... do not exist") were true at the
+> assessment; the options API and the notification queue now exist, while the section's scores are left
+> as the assessment recorded them.
+> Line numbers in this section are as read when it was written; the affected docs now cite current lines.
+> The numbered items below are the findings as recorded, including their present-tense wording ("still says",
+> "still reads"); read that tense as "said at the time of this pass". The quoted stale text may no longer be
+> present because the docs were corrected on 2026-10-26.
+
 1. **Particles row, `audit/PIPELINE.md:18`.** Still says the layer is "Replaced: linkev/PlayStation-3-XMB's
    sparkle layer ... additive point sprites ... not a firmware port". Contradicted: `src/particles.cpp`
    is a firmware-shaped pool (48-byte records, 1536 cap, PARTICLES.mnu constants, fixed 0.0088883 s

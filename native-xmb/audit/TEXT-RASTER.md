@@ -88,7 +88,7 @@ glyph-load sites in the draw function (primary `0x2236`, additional character
   anti-aliased mask and no LCD filter is imported.
 
 This matches what `FONT-MATCHING.md` already recorded and what the native FreeType
-path already does (`font_raster.cpp:229` passes the flag word, `text_renderer.cpp:106`
+path already does (`font_raster.cpp:241` passes the flag word, `text_renderer.cpp:140`
 passes 10). It is *not* a Qt hinting preference or a FreeType build option: it is a
 per-call flag.
 
@@ -130,7 +130,9 @@ What is not proven:
 
 Verdict for the audit item: subpixel pen phases of 1/64 pixel exist and affect
 placement rounding; per-phase outline translation is LIKELY BUT UNPROVEN. Do not
-implement it as firmware fact yet.
+implement it as firmware fact yet. (Updated 2026-10-26: the native renderer now
+implements the phase as a fit to the recovered 26.6 pen, labelled as such in 2.4;
+it is not claimed as a firmware value.)
 
 ### 1.4 Gamma and coverage-to-alpha: identity at this stage, later stage UNKNOWN
 
@@ -215,15 +217,15 @@ Native references below are to `native-xmb/src/text_renderer.cpp`,
 ### 2.1 Hinting
 
 - Native today: coverage comes from FreeType with the same flag word 10
-  (`font_raster.cpp:229`, `text_renderer.cpp:106`), so the *rasterised coverage* path
+  (`font_raster.cpp:241`, `text_renderer.cpp:140`), so the *rasterised coverage* path
   already matches the firmware. Shaping and glyph positions still come from
-  `QTextLayout`/`QGlyphRun` (`text_renderer.cpp:154-170`).
+  `QTextLayout`/`QGlyphRun` (`text_renderer.cpp:192-221`, glyph runs at `:215-218`).
 - Qt limit: `QFont::HintingPreference` only expresses a preference, and Qt documents
   that its effect is engine dependent. On Windows with DirectWrite,
   `PreferNoHinting` still produces vertical hinting; only Qt's FreeType engine maps
   it to no hinting (Qt 6 `QFont::HintingPreference` table:
   https://doc.qt.io/qt-6/qfont.html#HintingPreference-enum). So `draw()` cannot ask
-  the platform engine for unhinted metrics or positions (`text_renderer.cpp:183`).
+  the platform engine for unhinted metrics or positions (`text_renderer.cpp:232`).
 - Closest achievable mapping now: keep FreeType as the metric authority for both
   coverage and advances - replace `QGlyphRun::positions()` with advances obtained
   from FreeType (`FT_Get_Advance` / linear advance in 26.6) for matched faces; keep
@@ -234,7 +236,8 @@ Native references below are to `native-xmb/src/text_renderer.cpp`,
 ### 2.2 Gamma
 
 - Native today: none. The fragment shader uses coverage directly and premultiplies:
-  `fill = coverage.r * tint.a`, `result.rgb = tint.rgb * fill` (`text_renderer.cpp:56-59`).
+  `fill = coverage.r * tint.a`, `result.rgb = tint.rgb * fill` (`text_renderer.cpp:72-86`,
+  the fill at `:83-84`).
 - Qt limit: no public API renders glyph coverage through a caller-supplied curve;
   `QRawFont::alphaMapForGlyph` and QPainter both hand back linear coverage.
 - Achievable now: apply the curve in the existing shader - a 256-entry 1D LUT texture
@@ -246,7 +249,7 @@ Native references below are to `native-xmb/src/text_renderer.cpp`,
 ### 2.3 Max-coverage for overlap
 
 - Native today: one textured quad per glyph, drawn with
-  `glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)` (`text_renderer.cpp:195`). Overlapping
+  `glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)` (`text_renderer.cpp:244`). Overlapping
   coverage composes as alpha-over, so the native path does not follow the firmware's
   compare-and-keep-larger copy rule. Whether that rule governs glyph-to-glyph overlap
   is unproven (1.5), but the copy semantics are the closest evidence available.
@@ -263,17 +266,23 @@ Native references below are to `native-xmb/src/text_renderer.cpp`,
 
 ### 2.4 Subpixel phases and origin snapping
 
-- Native today: glyphs are rasterised at the layer scale and each glyph origin is
-  snapped to whole output pixels (`text_renderer.cpp:181`, `:218`). That is a
-  deliberate, defensible substitute for the firmware's rounded 26.6 placement, and it
-  fixed the soft-text defect recorded in `TEXT-RENDERER.md`.
-- Firmware: the blit origin is also rounded to a whole pixel, but from a fractional
-  26.6 position (`+0x3f` bias). Whether the outline is additionally shifted by the
-  phase is unproven (1.3).
-- Achievable now: if subpixel phases are later confirmed, feed
-  `FT_Set_Transform` a per-glyph delta in 26.6 before `FT_Load_Glyph` in
-  `FontRaster::rasterize`; the atlas tile identity would then need the phase in its
-  key. Do not do this on the current evidence.
+- Native before 2026-10-26: glyphs were rasterised at the layer scale and each glyph
+  origin was snapped to whole output pixels. That substitute fixed the soft-text
+  defect recorded in `TEXT-RENDERER.md`, but it did not use the firmware's phase.
+- **Changed 2026-10-26:** per-phase coverage tiles are the default. The glyph key
+  carries the pen phase; `FontRaster::rasterize` receives a 26.6 delta and installs it
+  with `FT_Set_Transform` before `FT_Load_Glyph`; there are two phases per layer pixel
+  per axis (the renderer comment at `src/text_renderer.cpp:62-63` calls this four
+  positions per output pixel). `XMB_TEXT_PHASE=0`
+  restores whole-pixel snapping (`src/text_renderer.cpp:62-66,126-140,259-287,313-318`;
+  `src/font_raster.cpp:230-242`). Measured: clock text 13.51 -> 13.66 dB / 0.6131 ->
+  0.6198 SSIM, info bar 17.12 -> 17.26 dB / 0.7046 -> 0.7098.
+- Firmware: the blit origin is rounded to a whole pixel from a fractional 26.6
+  position (`+0x3f` bias), and the transform operands are still unproven (1.3). The
+  native phase is therefore a fit to the recovered 26.6 pen, not traced firmware fact.
+- The older recommendation ("do not do this on the current evidence") is kept as the
+  record: the implementation is explicitly a fit, and the re-decompile in section 6
+  still decides the firmware side.
 
 ## 3. Open audit item: glow overrides
 
@@ -328,15 +337,15 @@ runtime conversion. Nothing here should be described as a firmware glow default.
 ### 3.3 Native today (for contrast)
 
 - Halo: a Gaussian of sigma `2.2 * rasterScale` and radius 6 is baked into each
-  glyph tile as a second channel (`text_renderer.cpp:17`, `:110-115`), then drawn
+  glyph tile as a second channel (`text_renderer.cpp:17`, `:144-149`), then drawn
   with `glowStrength = glow * 1.5` and tint RGB `(0.922, 0.961, 1.0)`
-  (`text_renderer.cpp:56-57`, `:199`).
+  (`text_renderer.cpp:72-86`, set at `:248`).
 - Breathing: `0.5 - 0.5*cos(2*pi*t/3400)` quantised to 24 steps, applied from 0.35
-  of the peak (`view.cpp:582-584`, `:890-894`).
+  of the peak (`View::paintGL` glow signature and label loop).
 - Shadow: one scene pixel right/down, black at 20% alpha
-  (`text_renderer.cpp:202-205`).
+  (`text_renderer.cpp:250-254`).
 - QPainter fallback (renderer not ready): draw the text in a ring of offsets
-  (`view.cpp:716-723`) and a 1 px black shadow at alpha 38 (`view.cpp:713`).
+  (`View::paintGL` fallback glow helper) and a 1 px black shadow at alpha 38 (`View::paintGL` fallback text helper).
 
 These are measured approximations, not recovered firmware values. Achievable now:
 none of the numbers; the honest step is to keep them labelled approximate and to
@@ -416,7 +425,7 @@ What stays UNKNOWN:
 - Native today: the OSK caret x is
   `QFontMetricsF(fieldFont).horizontalAdvance(osk_.text.left(osk_.cursor))` with a
   26 px field font, a 2 x 36 px rectangle and a 500 ms on/off toggle
-  (`view.cpp:1215-1217`).
+  (`View::drawOsk`).
 - Achievable now: replace that Qt metric call with the same FreeType 26.6 advance sum
   used for glyph placement, so the caret and the glyphs share one metric authority
   (the firmware's). Do not change only the caret while glyph positions still come
@@ -427,7 +436,7 @@ What stays UNKNOWN:
 ### 4.4 Native label elision today
 
 `QFontMetrics(labelFont).elidedText(entry.title, Qt::ElideRight, ...)` at a 27 px
-label font, with 1050 px or 640 px limits (`view.cpp:888`). This substitutes
+label font, with 1050 px or 640 px limits (the label loop in `View::paintGL`). This substitutes
 `U+2026` inside the string using the platform font engine's metrics (on Windows that
 is DirectWrite, which applies vertical hinting per Qt's own table), which is a
 different mechanism from the firmware's separate ellipsis object and a different
@@ -442,23 +451,23 @@ data, which has not been recovered.
 
 | Item | Firmware behaviour + evidence | Native today | Achievable now | Needs work |
 |---|---|---|---|---|
-| Hinting mode | None. `FT_Load_Glyph` flags 10 = `NO_HINTING` + `NO_BITMAP` at `cellFontFT_65E27CB3 @ 0x6aa4` (`fontft-bridge.c:2236`, `:2363`); no hinting/LCD/renderer imports in `fontft-imports.csv` | Coverage already FreeType flags 10 (`font_raster.cpp:229`); shaping/metrics from `QTextLayout` | Yes: keep FreeType coverage; take advances/positions from FreeType in 26.6 for matched faces | Move shaping metrics off Qt's platform engine; or build Qt with its FreeType engine |
+| Hinting mode | None. `FT_Load_Glyph` flags 10 = `NO_HINTING` + `NO_BITMAP` at `cellFontFT_65E27CB3 @ 0x6aa4` (`fontft-bridge.c:2236`, `:2363`); no hinting/LCD/renderer imports in `fontft-imports.csv` | Coverage already FreeType flags 10 (`font_raster.cpp:241`, `text_renderer.cpp:140`); shaping/metrics from `QTextLayout` | Yes: keep FreeType coverage; take advances/positions from FreeType in 26.6 for matched faces | Move shaping metrics off Qt's platform engine; or build Qt with its FreeType engine |
 | Stem snapping / grid fit | None (follows from flags 10) | None in the FreeType path; Qt fallback uses vertical hinting | Yes (already) | Nothing |
-| Subpixel positioning | 26.6 pen phases exist (`& 0x3f`, `+0x3f` rounding, `fontft-bridge.c:2529-2539`, `:1014-1038`); `FT_Set_Transform` called with matrix and optional delta (`:2193`, `:2222`). Phase source and outline translation UNKNOWN (operands uninitialised in export) | Glyph origins snapped to whole output pixels (`text_renderer.cpp:218`); rasterised per layer, no phase | Origin rounding is equivalent; per-glyph delta can be added if phases are confirmed | Prove the transform operands from disassembly before implementing subpixel rendering |
-| Gamma / coverage to alpha | Identity: rasteriser coverage copied unchanged; `FUN_004056d8 @ 0x4056d8` and `FUN_004057a0 @ 0x4057a0` apply no curve (`text-font-lowlevel.c:126-225`) | No curve; shader uses coverage directly, premultiplied (`text_renderer.cpp:56-59`) | Yes: 1D LUT or `pow()` in the fragment shader; no Qt dependency | Curve value UNKNOWN; fit only from reference crops, never call it firmware |
-| Overlap / max coverage | Compare-and-keep-larger copy rule: destination byte replaced only when the new coverage is larger (`FUN_004057a0`, `text-font-lowlevel.c:216-218`); no add, no over. Whether glyphs share one mask is UNPROVEN (1.5) | Per-glyph quads with `GL_ONE / ONE_MINUS_SRC_ALPHA` alpha-over (`text_renderer.cpp:195`) | Yes: render string to a mask with `GL_MAX`, composite once; `CompositionMode_Lighten` on the QPainter fallback | FBO/mask pass; decide halo/shadow membership in the mask |
+| Subpixel positioning | 26.6 pen phases exist (`& 0x3f`, `+0x3f` rounding, `fontft-bridge.c:2529-2539`, `:1014-1038`); `FT_Set_Transform` called with matrix and optional delta (`:2193`, `:2222`). Phase source and outline translation UNKNOWN (operands uninitialised in export) | Per-phase tiles since 2026-10-26: the 26.6 pen fraction feeds `FT_Set_Transform`, 2 phases/axis, default on (`text_renderer.cpp:126-140,259-287,313-318`); `XMB_TEXT_PHASE=0` reverts to whole-pixel origins | Implemented as a fit; measured clock text 13.51 -> 13.66 dB, info bar 17.12 -> 17.26 dB | Prove the transform operands from disassembly; keep the fit labelled until then |
+| Gamma / coverage to alpha | Identity: rasteriser coverage copied unchanged; `FUN_004056d8 @ 0x4056d8` and `FUN_004057a0 @ 0x4057a0` apply no curve (`text-font-lowlevel.c:126-225`) | No curve; shader uses coverage directly, premultiplied (`text_renderer.cpp:72-86`) | Yes: 1D LUT or `pow()` in the fragment shader; no Qt dependency | Curve value UNKNOWN; fit only from reference crops, never call it firmware |
+| Overlap / max coverage | Compare-and-keep-larger copy rule: destination byte replaced only when the new coverage is larger (`FUN_004057a0`, `text-font-lowlevel.c:216-218`); no add, no over. Whether glyphs share one mask is UNPROVEN (1.5) | Per-glyph quads with `GL_ONE / ONE_MINUS_SRC_ALPHA` alpha-over (`text_renderer.cpp:244`) | Yes: render string to a mask with `GL_MAX`, composite once; `CompositionMode_Lighten` on the QPainter fallback | FBO/mask pass; decide halo/shadow membership in the mask |
 | Weight / slant effects | Per-style weights 1.04/1.025/1.0/0.96/0.93 and slants 0.6/0.0 from VA `0x68e0a8-0x68e0c4` and `0x68e10c-0x68e128`; weight = `clamp(w-1,-0.07,0.04)` via `FT_Outline_Embolden`, clamp constants `0x6eebe4`, `0x6eebec`, `0x6eebf0` | Not applied per style; Qt bold/italic only | Weight via `FT_Outline_Embolden` could be added over the outline path | Slant channel unproven (transform matrix contents); do not apply one weight universally |
 | Glow / halo | No `Text` glow field, no glow texture for explore, no RCO animation on text; `Text(shadow)` surface exists (`paf-range.c:6039-6044`) but the copiers are hard-edged; code-driven PAF property animation exists (`FUN_0039af2c @ 0x39af2c`). Mechanism and override values UNKNOWN | Gaussian halo sigma 2.2, radius 6, breathing 3.4 s from 0.35, shadow 1 px black 20% | Nothing firmware-faithful | Firmware trace or a console measurement; both required before any value is claimed |
-| Elision | Plugin-managed separate `label2_text_ellipsis` Text object, positioned from the metric path (`explore_plugin_all.c:91929-92360`); PAF itself only draws a character range (`paf-range.c:12084-12087`) | `QFontMetrics::elidedText` with Qt hinted metrics (`view.cpp:888`) | Yes: draw the fitting glyphs with FreeType advances, then a separate ellipsis draw at that pen x | Truncation rule, ellipsis font/size/colour and exact placement formula UNKNOWN |
-| Text metrics | Integer 26.6 advance sums plus kerning (`_opd_FUN_00397e5c @ 0x397e5c`, `paf-range.c:14215-14223`) | Qt `QTextLayout` positions (`text_renderer.cpp:168-171`) | Yes: FreeType advances summed in 26.6, matching PAF's shape | One metric authority for glyphs, elision and caret |
-| Cursor | No cursor object in any OSK RCO (135/132/31 objects dumped); caret is code-drawn in the OSK plugin, not decompiled. Blink/width/colour UNKNOWN; per-char advance accessor exists (`FUN_0038f900 @ 0x38f900`) | `QFontMetricsF::horizontalAdvance` of the prefix, 2x36 px, 500 ms toggle (`view.cpp:1215-1217`) | Yes: caret x from the FreeType advance sum | Blink period, extent and colour; must come from OSK tracing or measurement |
+| Elision | Plugin-managed separate `label2_text_ellipsis` Text object, positioned from the metric path (`explore_plugin_all.c:91929-92360`); PAF itself only draws a character range (`paf-range.c:12084-12087`) | `QFontMetrics::elidedText` with Qt hinted metrics (the label loop in `View::paintGL`) | Yes: draw the fitting glyphs with FreeType advances, then a separate ellipsis draw at that pen x | Truncation rule, ellipsis font/size/colour and exact placement formula UNKNOWN |
+| Text metrics | Integer 26.6 advance sums plus kerning (`_opd_FUN_00397e5c @ 0x397e5c`, `paf-range.c:14215-14223`) | Qt `QTextLayout` positions (`text_renderer.cpp:215-218`) | Yes: FreeType advances summed in 26.6, matching PAF's shape | One metric authority for glyphs, elision and caret |
+| Cursor | No cursor object in any OSK RCO (135/132/31 objects dumped); caret is code-drawn in the OSK plugin, not decompiled. Blink/width/colour UNKNOWN; per-char advance accessor exists (`FUN_0038f900 @ 0x38f900`) | `QFontMetricsF::horizontalAdvance` of the prefix, 2x36 px, 500 ms toggle (`View::drawOsk`) | Yes: caret x from the FreeType advance sum | Blink period, extent and colour; must come from OSK tracing or measurement |
 
 ## 6. What would close the remaining unknowns
 
 1. Re-decompile `cellFontFT_65E27CB3 @ 0x6aa4` with the actual instruction stream
    (not the current export) to read the stores that fill the `FT_Set_Transform`
-   matrix and delta. That single item decides subpixel positioning and the slant
-   channel.
+   matrix and delta. That single item decides the firmware side of subpixel positioning and the slant
+   channel; the native phase is already implemented as a labelled fit (2.4).
 2. Trace the GCM/RSX blend used for PAF text (or capture the final framebuffer of a
    single known string) to get the display stage of the coverage-to-alpha curve.
 3. Find the code path that writes the text object's shadow fields at runtime
@@ -483,8 +492,10 @@ data, which has not been recovered.
   section 6.
 ## Applied: hinting disabled in the native renderer
 
-The three Qt font sites that had `PreferVerticalHinting` (`src/text_renderer.cpp:183` and the two
-label helpers in `src/view.cpp`) now set `QFont::PreferNoHinting`, matching the traced
-`FT_LOAD_NO_HINTING`. Measured effect on the canonical capture: none - `work/ab-layers.ts --capture`
-reports the clock text at 13.51 dB / 0.6131 SSIM and the info bar at 17.12 / 0.7046 both before and
-after, so the unhinted setting is behaviourally neutral at the 2x UI layer while matching the firmware.
+The Qt font sites that had `PreferVerticalHinting` now set `QFont::PreferNoHinting`: the glyph path
+(`src/text_renderer.cpp:232`, plus the shaped fallback at `:330`) and the two QPainter label helpers
+(`View::paintGL` and `View::drawOsk`). Measured at the time (2026-10-25, before the per-phase work): none - the
+canonical capture reported the clock text at 13.51 dB / 0.6131 SSIM and the info bar at 17.12 / 0.7046
+both before and after, so the unhinted setting was behaviourally neutral at the 2x UI layer while matching
+the firmware. The per-phase tiles added on 2026-10-26 later moved those numbers to 13.66 / 0.6198 and
+17.26 / 0.7098.

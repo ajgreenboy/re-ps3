@@ -4,13 +4,18 @@ This inventory contains 307 indexed guide topics/actions, including group headin
 
 Source: [Sony PS3 manual index](https://manuals.playstation.net/document/en/ps3/current/manualindex.html). The guide covers 4.80 and later; local 4.93 visibility must be checked per model, region, account, connected devices and installed applications. Native extras such as a host folder picker are not counted as proof of original feature completion.
 
+Status revision 2026-10-26: XMB-001, XMB-006, XMB-079, XMB-109, XMB-149, XMB-170, XMB-171, XMB-177,
+XMB-210 and XMB-218 were re-read against the source and now state the implemented part as well as what
+remains. Five native surfaces that are not Sony guide topics had no rows at all; they are listed in
+"Native surfaces outside the 307-topic index" near the end of this file.
+
 ## About the XMB™ menu
 
 Required backend: Menu state, input routing, overlays, text entry, concurrent activities.
 
 | ID | Original topic or action | Native status | Reference |
 |---|---|---|---|
-| XMB-001 | About the XMB™ (XrossMediaBar) menu | Partial: category/page navigation; context menu and PS overlay missing | [Guide](https://manuals.playstation.net/document/en/ps3/current/basicoperations/xmb.html) |
+| XMB-001 | About the XMB™ (XrossMediaBar) menu | Partial: category/page navigation, settings and item options panel, and the PS system menu; firmware panel animation and per-item actions open | [Guide](https://manuals.playstation.net/document/en/ps3/current/basicoperations/xmb.html) |
 | XMB-002 | Changing the way content is displayed | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/basicoperations/changeview.html) |
 | XMB-003 | Using the keyboard | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/basicoperations/keyboard.html) |
 | XMB-004 | Using the parental control settings | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/basicoperations/parentallock.html) |
@@ -22,7 +27,7 @@ Required backend: Profiles, session ownership, user-scoped storage, login lifecy
 | ID | Original topic or action | Native status | Reference |
 |---|---|---|---|
 | XMB-005 | Users category | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/users.html) |
-| XMB-006 | Turning off the system | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/turnoff.html) |
+| XMB-006 | Turning off the system | Partial: the PS menu closes the native application after one confirmation; it does not power off the host | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/turnoff.html) |
 | XMB-007 | Creating new users | Partial: local profiles implemented; PS3 session/account semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/newuser.html) |
 | XMB-008 | Logging in | Partial: local profiles implemented; PS3 session/account semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/login.html) |
 | XMB-009 | Logging out | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/logout.html) |
@@ -102,7 +107,7 @@ Required backend: Typed settings, capability queries, transaction/rollback, devi
 | XMB-076 | System Settings → System Information | Partial: native adapter implemented; exact PS3 behavior and workflow coverage open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/systeminfo.html) |
 | XMB-077 | System Settings → About PlayStation®3 (PS3™) | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/aboutps3.html) |
 | XMB-078 | Date and Time Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/date.html) |
-| XMB-079 | Date and Time Settings → Date and Time | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/date.html) |
+| XMB-079 | Date and Time Settings → Date and Time | Partial: read-only report of the host clock formatted through the saved date/hour format and time zone; the host clock is never written | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/date.html) |
 | XMB-080 | Date and Time Settings → Set Automatically | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/date.html) |
 | XMB-081 | Date and Time Settings → Date Format | Partial: native adapter implemented; exact PS3 behavior and workflow coverage open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/date.html) |
 | XMB-082 | Date and Time Settings → Time Format | Partial: native adapter implemented; exact PS3 behavior and workflow coverage open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/date.html) |
@@ -132,7 +137,7 @@ Required backend: Typed settings, capability queries, transaction/rollback, devi
 | XMB-106 | Printer Settings → Printer Selection | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/printersettings.html) |
 | XMB-107 | Display Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/index.html) |
 | XMB-108 | Display Settings → Video Output Settings | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/videooutput.html) |
-| XMB-109 | Display Settings → Screensaver | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/screensaver.html) |
+| XMB-109 | Display Settings → Screensaver | Partial: five Display Settings choices persist and native dim/wake is replayed; firmware brightness curve, fade and wake parity open (ISC-45.3) | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/screensaver.html) |
 | XMB-110 | Display Settings → Cross Color Reduction Filter | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/crosscolor.html) |
 | XMB-111 | Display Settings → RGB Full Range (HDMI) | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/rgbfullrange.html) |
 | XMB-112 | Display Settings → Y Pb / Cb Pr / Cr Super-White (HDMI) | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/superwhite.html) |
@@ -179,7 +184,7 @@ Required backend: Image decoder, metadata, transforms, image database, playlists
 | XMB-146 | Using the control panel → Set as Wallpaper | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/photo/panel.html) |
 | XMB-147 | Using the control panel → Delete | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/photo/panel.html) |
 | XMB-148 | Using the control panel → Display | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/photo/panel.html) |
-| XMB-149 | Using the control panel → Zoom In / Zoom Out | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/photo/panel.html) |
+| XMB-149 | Using the control panel → Zoom In / Zoom Out | Partial: native photo zoom in/out and reset work; the original control-panel presentation is open | [Guide](https://manuals.playstation.net/document/en/ps3/current/photo/panel.html) |
 | XMB-150 | Using the control panel → Rotate Left / Rotate Right | Partial: keyboard/native viewer route; original control panel and full workflow unobserved | [Guide](https://manuals.playstation.net/document/en/ps3/current/photo/panel.html) |
 | XMB-151 | Using the control panel → Up / Down / Left / Right | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/photo/panel.html) |
 | XMB-152 | Using the control panel → Previous / Next | Partial: keyboard/native viewer route; original control panel and full workflow unobserved | [Guide](https://manuals.playstation.net/document/en/ps3/current/photo/panel.html) |
@@ -207,14 +212,14 @@ Required backend: Audio decoder/mixer, media database, queue, DSP, visualization
 | XMB-167 | Using the control panel → Add to Playlist | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-168 | Using the control panel → Delete | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-169 | Using the control panel → Display | Partial: host player path; original panel and repeat-all/queue semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
-| XMB-170 | Using the control panel → Previous | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
-| XMB-171 | Using the control panel → Next | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
+| XMB-170 | Using the control panel → Previous | Partial: the owned playback queue provides Previous (`Shell::skipMedia`); original control-panel presentation open | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
+| XMB-171 | Using the control panel → Next | Partial: the owned playback queue provides Next (`Shell::skipMedia`); original control-panel presentation open | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-172 | Using the control panel → Fast Reverse / Fast Forward | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-173 | Using the control panel → Play | Partial: host player path; original panel and repeat-all/queue semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-174 | Using the control panel → Pause | Partial: host player path; original panel and repeat-all/queue semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-175 | Using the control panel → Stop | Partial: host player path; original panel and repeat-all/queue semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-176 | Using the control panel → Repeat | Partial: host player path; original panel and repeat-all/queue semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
-| XMB-177 | Using the control panel → Shuffle | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
+| XMB-177 | Using the control panel → Shuffle | Partial: queue shuffle is implemented and persisted (`src/playback_queue.cpp:58-67`); original control-panel presentation open | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/panel.html) |
 | XMB-178 | Using the mini-size control panel | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/minipanel.html) |
 | XMB-179 | Importing audio CDs to the system storage | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/cdimport.html) |
 | XMB-180 | Changing icons | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/music/icon.html) |
@@ -254,7 +259,7 @@ Required backend: Video decoder, tracks, subtitles, timeline/chapter/scene model
 | XMB-207 | Using the control panel → Change Icon | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-208 | Using the control panel → Delete | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-209 | Using the control panel → Display | Partial: host player path; original panel and format-specific semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
-| XMB-210 | Using the control panel → Previous (Return to Beginning) / Next | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
+| XMB-210 | Using the control panel → Previous (Return to Beginning) / Next | Partial: the owned queue provides Previous/Next (`Shell::skipMedia`); return-to-beginning and original panel semantics open | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-211 | Using the control panel → Fast Reverse / Fast Forward | Partial: host player path; original panel and format-specific semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-212 | Using the control panel → Play | Partial: host player path; original panel and format-specific semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-213 | Using the control panel → Pause | Partial: host player path; original panel and format-specific semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
@@ -262,7 +267,7 @@ Required backend: Video decoder, tracks, subtitles, timeline/chapter/scene model
 | XMB-215 | Using the control panel → Instant Replay / Instant Advance | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-216 | Using the control panel → Slow (Reverse) / Slow (Forward) | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-217 | Using the control panel → Frame Reverse / Frame Advance | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
-| XMB-218 | Using the control panel → A-B Repeat | Partial: host player path; original panel and format-specific semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
+| XMB-218 | Using the control panel → A-B Repeat | Not implemented: no A-B repeat code exists in `src/`; the earlier Partial status overstated it | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-219 | Using the control panel → Repeat | Partial: host player path; original panel and format-specific semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/panel.html) |
 | XMB-220 | Copying or moving video files | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/copy.html) |
 | XMB-221 | Backing up or restoring video files | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/video/videobackup.html) |
@@ -387,6 +392,19 @@ Required backend: Presence, profiles, relationships, messaging, chat and media s
 | XMB-305 | Message Box → Checking for new messages | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/checkmsg.html) |
 | XMB-306 | Message Box → Protecting messages | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/protectmsg.html) |
 | XMB-307 | Message Box → Deleting messages | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/deletemsg.html) |
+
+## Native surfaces outside the 307-topic index (added 2026-10-26)
+
+These are not Sony guide topics, so they are not counted in the 307 above and were missing from this
+catalogue until 2026-10-26. Statuses are read from the source; they are not runtime observations.
+
+| ID | Native surface | Status | Evidence |
+|---|---|---|---|
+| NATIVE-01 | Steam installed/owned titles in Game | Partial: installed titles render in the PKG slot, with owned-but-not-installed rows and one Not Installed folder, store sections and an install handoff; a real launch-return capture is still open (ISC-37) | `Shell::steamFolderEntries` / `Shell::startSteamTracked` and `src/steam_library.*`; audit/STEAM-INTEGRATION.md |
+| NATIVE-02 | Steam Friends | Partial: a signed-in local client helper returns real friends/presence without changing profile privacy; the Web API fallback currently returns 401 on the friend list | `src/steam_friends.cpp`; audit/STEAM-CLIENT-FRIENDS.md |
+| NATIVE-03 | Native Jellyfin service and player | Partial: local sign-in, library/folder pages, direct and server-negotiated HLS playback, pause/seek/Back and sign-out verified against Jellyfin 12.4; posters, selectors and resume UI open (ISC-46.6) | `src/jellyfin_*.cpp`; audit/JELLYFIN-NATIVE.md |
+| NATIVE-04 | Imported-app registry and editor | Done for the recorded checks: versioned JSON registry, atomic merge, executables/browser apps/Jellyfin services and a native editor; invalid input preserves the existing bytes | `src/content_registry.*`, `src/app_editor.cpp`; audit/APP-EDITOR.md, CONTENT-REGISTRY.md |
+| NATIVE-05 | PS system menu and global PS hook | Partial: a held PS button opens the system menu with Turn Off the System and Quit Game; a focus-independent 20 ms HID watcher brings the XMB forward from a running title; controller charge/slot data is still static | `src/ps_watcher.*`, `Shell::psMenuActivate`, `View::paintGL` PS menu; audit/PS-BUTTON.md, PS-INGAME-HOOK.md |
 
 ## Reference coverage limits
 

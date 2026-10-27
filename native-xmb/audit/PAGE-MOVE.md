@@ -26,6 +26,11 @@ PhClock widget written through an exported setter; its display resolution is one
 ticker exists, but the periodic writer (and therefore its exact cadence) was not found in the analyzed
 modules.
 
+Updated 2026-10-26 (Phase 4b below): the clock is not a passive `PhClock`. It is a `PhText` named `clock`
+under `page_xmb_indicator`, written through vshcommon export 0x33FB58 (section 3; `audit/INFO-BAR.md`).
+The page-move statement above stands, and the later pass adds a frame-count discriminator between
+mode 5 at 200 ms and mode 4 at 300 ms (section 1.4).
+
 (Link this file from `native-xmb/HANDOFF-PHASES.md` when editing that file; this task's write fence
 covered `native-xmb/audit/` and `work/` only.)
 
@@ -143,7 +148,10 @@ the cross bar. The page-move claim in HANDOFF-PHASES.md should be reworded as "f
 300 ms mode 4; explore_plugin's 300.0f constants are unrelated dialog durations" unless the page-move
 call is found later.
 
-## 4. Info-bar clock
+## 4. Info-bar clock (superseded 2026-10-26 by Phase 4b section 3)
+
+The `PhClock` identification below was wrong: the XMB clock is a `PhText` named `clock`. The text is
+kept as the 2026-10-25 record.
 
 Display (from the saved RPCS3 root capture `out/native-reference/ab-rpcs3-root.png`, cropped to the
 info bar at x=1280..1920, y=40..160): the bar shows `25/10 12:32` followed by a small analog clock icon.

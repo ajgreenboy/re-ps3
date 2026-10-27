@@ -96,6 +96,10 @@ These are not an improvement/regression comparison with the old pair. Firmware s
 native shows PS Vita System Application Utility, and the ribbon phase is unmatched. The shared-column crop
 avoids the differing left-side category sequence. Reference UI clock is 25/10 12:32; the background override
 uses the previously traced daytime mapping at 10:00. Full-frame state/content matching remains outstanding.
+Updated 2026-10-26: the stored RPCS3 frame is a DD/MM, 24-hour console, while the native clock now defaults
+to MM/DD and 12-hour (`src/settings_menu.cpp:19-21`, `src/shell.cpp:190-196`); the clock band is therefore a
+content difference by construction. Setting the preferences back to DD/MM and 24-hour reproduces the
+reference string (INFO-BAR.md:16-25, :68-71).
 
 ## Per-layer thresholds (2026-10-25)
 
