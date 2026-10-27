@@ -1077,6 +1077,20 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
                 mediaAlbum_=tags.value(QMediaMetaData::AlbumTitle).toString().trimmed();
                 if(!title.isEmpty()){mediaTitle_=artist.isEmpty()?title:title+" - "+artist;mediaTags_[mediaQueue_.currentIndex()]=mediaTitle_;}
             }
+            if(state==QMediaPlayer::LoadedMedia) {
+                // Sidecar subtitles belong to a local video file: the Video column's own library. Streamed
+                // Jellyfin media has no directory of the user's beside it, and a photo never reaches the
+                // player, so both clear the state rather than showing a previous file's track.
+                // The guard on the path matters: the ffmpeg backend reports LoadedMedia again on every
+                // seek (QFFmpegMediaPlayer::setPosition), and re-running discovery there would re-parse
+                // the sidecars and forget a refused audio track on each Left/Right.
+                const bool local=categories_[category_].id=="video" && !jellyfinQueue_;
+                const QString path=local?player_->source().toLocalFile():QString{};
+                if(path!=subtitleMediaPath_) {
+                    prepareSubtitles(path);
+                    refreshAudioTracks();
+                }
+            }
             if(state==QMediaPlayer::EndOfMedia) {
                 clearResumePosition(resumePath_);   // a finished file starts from the beginning next time
                 const auto request=mediaRequest_;QTimer::singleShot(0,this,[this,request]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(false);});
@@ -1113,6 +1127,10 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     notificationClock_.start();
     notificationTimer_.setInterval(100);
     connect(&notificationTimer_,&QTimer::timeout,this,&Shell::expireNotifications);
+    // Sidecar subtitle work is quiet by default; XMB_SUBTITLE_LOG=1 adds discovery, parse, cue and
+    // track-switch lines (audit/SUBTITLES.md). A sidecar this build cannot read is always named, because
+    // a file the user put next to the film and that silently does nothing is the report this answers.
+    subtitleLog_=qEnvironmentVariableIsSet("XMB_SUBTITLE_LOG");
     initJellyfin();
 }
 Shell::~Shell(){host::holdDisplayAwake(false);jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();disconnect(&steamFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
@@ -1402,6 +1420,7 @@ QString Shell::entryKind(const Entry& entry) const {
 void Shell::resetOptions() {
     optionsOpen_=optionsNested_=false;optionsSelection_=0;
     options_.clear();optionsParent_.clear();optionsTitle_.clear();
+    playerPanel_=false;
 }
 void Shell::buildOptions() {
     resetOptions();
@@ -1418,7 +1437,26 @@ void Shell::buildOptions() {
 void Shell::toggleOptions() {
     touch();
     if(optionsOpen_){dismissOptions();return;}
-    if(!message_.isEmpty() || mediaOpen_ || psMenu_ || loading_ || entries().isEmpty())return;
+    if(!message_.isEmpty() || psMenu_ || loading_)return;
+    if(mediaOpen_) {
+        // Triangle during video playback is the console's own control panel: subtitle, audio, repeat.
+        // Anything else that reaches the player (music, a photo slideshow) keeps its old binding, so a
+        // photo still rotates and a track still cycles Repeat.
+        if(!videoOpen())return;
+        buildPlayerOptions();
+        optionsOpen_=true;
+        // Open on the current choice rather than on the first row: a stray Cross on an untouched panel
+        // must not turn subtitles off when they are on.
+        optionsSelection_=0;
+        for(int i=0;i<options_.size();++i)if(options_[i].active){optionsSelection_=i;break;}
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        QStringList titles;for(const auto& option:options_)titles<<option.title;
+        qInfo().noquote()<<"shell: playback panel opened rows="<<options_.size()<<"subtitles="<<subtitleTracks_.size()
+            <<"audio="<<audioTracks_.size()<<titles.join('|');
+        emit changed();
+        return;
+    }
+    if(entries().isEmpty())return;
     // A settings choice column already is the options panel; Triangle there adds nothing.
     bool choiceColumn=true;
     for(const auto& e:entries())if(e.action!=Action::SetSetting){choiceColumn=false;break;}
@@ -1445,6 +1483,14 @@ void Shell::optionsActivate() {
     if(!optionsOpen_ || options_.isEmpty())return;
     const int index=std::clamp(optionsSelection_,0,int(options_.size())-1);
     const auto option=options_[index];
+    // A row this build cannot honour says so instead of pretending: it stays listed (so the reason is
+    // reachable) but Cross only reports it.
+    if(!option.enabled) {
+        interactionAudio_.play(InteractionAudio::Cue::Error);
+        qInfo().noquote()<<"shell: option unavailable"<<option.title<<option.note;
+        emit changed();
+        return;
+    }
     const auto entry=entries().value(std::clamp(selection(),0,std::max(0,int(entries().size())-1)));
     switch(option.command) {
     case OptionCommand::Activate:
@@ -1477,6 +1523,27 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     }
+    // The in-player rows. Choosing one keeps the panel open so the marker moves on the spot, which is
+    // also what makes the state checkable from a capture; Circle is what closes it.
+    case OptionCommand::SubtitlesOff:
+        chooseSubtitleTrack(-1);
+        refreshPlayerOptions();
+        break;
+    case OptionCommand::SubtitleTrack:
+        chooseSubtitleTrack(option.index);
+        refreshPlayerOptions();
+        break;
+    case OptionCommand::AudioTrack:
+        chooseAudioTrack(option.index);
+        break;
+    case OptionCommand::RepeatMode:
+        cycleMediaRepeat();
+        refreshPlayerOptions();
+        break;
+    case OptionCommand::ToggleShuffle:
+        toggleMediaShuffle();
+        refreshPlayerOptions();
+        break;
     case OptionCommand::Close:optionsClose();break;
     }
 }
@@ -1496,6 +1563,214 @@ void Shell::dismissOptions() {
     resetOptions();
     interactionAudio_.play(InteractionAudio::Cue::Back);
     qInfo().noquote()<<"shell: options closed";
+    emit changed();
+}
+// ---- The in-player panel: subtitles, audio tracks, repeat and shuffle -------------------------------
+// The firmware's own video control panel is a single row of buttons in videoplayer_plugin.rco and it
+// includes videoplayer_cp_subtitle_button, videoplayer_cp_audio_change_button and
+// videoplayer_cp_repeat_button. Those three things are exactly what this panel offers, drawn with the
+// XMB's right-hand options panel language (the item menu's own shape) instead of inventing a second
+// overlay: rows, a marker on the current choice, Up/Down + Cross, Circle closes, and it owns input
+// while it is up (view.cpp's key and pad blocks return early for it, exactly as for the item menu).
+void Shell::buildPlayerOptions() {
+    resetOptions();
+    playerPanel_=true;
+    optionsTitle_=QObject::tr("Playback");
+    options_.push_back({QObject::tr("Subtitles Off"),OptionCommand::SubtitlesOff,-1,true,subtitleTrackIndex_<0,{}});
+    if(subtitleTracks_.isEmpty()) {
+        MenuOption row{QObject::tr("Subtitles: none found"),OptionCommand::SubtitlesOff};
+        row.enabled=false;
+        row.note=mediaProvider()=="Jellyfin"
+            ?QObject::tr("Streamed media: sidecar subtitles are read for local video files only.")
+            :QObject::tr("No .srt or .vtt file beside this video. Embedded subtitle streams are not switched yet.");
+        options_.push_back(row);
+    } else {
+        for(int i=0;i<subtitleTracks_.size();++i) {
+            const auto& track=subtitleTracks_[i];
+            MenuOption row{QObject::tr("Subtitles: %1").arg(track.name),OptionCommand::SubtitleTrack};
+            row.index=i;row.active=i==subtitleTrackIndex_;
+            row.note=QObject::tr("%1 - %2 cues, %3").arg(QFileInfo(track.path).fileName())
+                .arg(track.cues.size()).arg(track.skipped>0?QObject::tr("%1 block(s) skipped").arg(track.skipped):QObject::tr("all blocks read"));
+            options_.push_back(row);
+        }
+    }
+    // What the player itself reports, never a list this build invents.
+    refreshAudioTracks();
+    if(audioTracks_.isEmpty()) {
+        MenuOption row{QObject::tr("Audio: not reported"),OptionCommand::AudioTrack};
+        row.enabled=false;
+        row.note=QObject::tr("The media backend reports no audio track for this file, so there is nothing to choose.");
+        options_.push_back(row);
+    } else {
+        for(int i=0;i<audioTracks_.size();++i) {
+            MenuOption row{QObject::tr("Audio %1: %2").arg(i+1).arg(audioTracks_[i].label),OptionCommand::AudioTrack};
+            row.index=i;row.active=i==activeAudioTrack_;
+            row.enabled=audioTracks_[i].switchable;row.note=audioTracks_[i].reason;
+            if(row.note.isEmpty() && audioTracks_.size()==1)
+                row.note=QObject::tr("The player reports one audio track, so there is no second track to switch to.");
+            options_.push_back(row);
+        }
+    }
+    // Repeat and Shuffle live here now, which is what frees Triangle for this panel.
+    static const char* const repeatNames[]={"Off","One","All"};
+    MenuOption repeat{QObject::tr("Repeat: %1").arg(QString::fromLatin1(repeatNames[std::clamp(mediaRepeatMode(),0,2)])),
+        OptionCommand::RepeatMode};
+    repeat.note=QObject::tr("Also on the R key while a video plays.");
+    options_.push_back(repeat);
+    MenuOption shuffle{QObject::tr("Shuffle: %1").arg(preferences_.value("media/shuffle").toBool()?QObject::tr("On"):QObject::tr("Off")),
+        OptionCommand::ToggleShuffle};
+    options_.push_back(shuffle);
+}
+void Shell::refreshPlayerOptions() {
+    if(!optionsOpen_ || !playerPanel_)return;
+    const int keepCommand=options_.isEmpty()?-1:int(options_.value(optionsSelection_).command);
+    const int keepIndex=options_.value(optionsSelection_).index;
+    buildPlayerOptions(); // resets the list (and with it the open flag); the panel stays up
+    optionsOpen_=true;
+    optionsSelection_=0;
+    for(int i=0;i<options_.size();++i)
+        if(int(options_[i].command)==keepCommand && options_[i].index==keepIndex){optionsSelection_=i;break;}
+    optionsSelection_=std::clamp(optionsSelection_,0,std::max(0,int(options_.size())-1));
+    emit changed();
+}
+// Sidecar subtitles. The file's own sidecar choice is remembered for the session, the cue is looked up
+// against the player's position on demand (so it is right even when the backend's position signals are
+// coarse), and a change is traced only when the cue actually changes.
+void Shell::prepareSubtitles(const QString& path) {
+    subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;subtitleMediaPath_=path;
+    audioTracks_.clear();audioRejected_.clear();activeAudioTrack_=-1;
+    if(path.isEmpty())return;
+    const auto discovery=subtitles::discover(path);
+    subtitleTracks_=discovery.tracks;
+    for(const auto& reason:discovery.rejected)qWarning().noquote()<<"subtitle: ignored"<<reason;
+    if(subtitleLog_) {
+        if(subtitleTracks_.isEmpty())qInfo().noquote()<<"subtitle: no sidecar beside"<<QFileInfo(path).fileName();
+        for(const auto& track:subtitleTracks_)
+            qInfo().noquote()<<"subtitle: sidecar"<<QFileInfo(track.path).fileName()<<track.format<<track.cues.size()
+                <<"cues"<<track.bytes<<"bytes; skipped"<<track.skipped<<"; name"<<track.name;
+    }
+    // The same file plays again: its own choice comes back. A file this session has not seen starts on
+    // the default sidecar (the untagged one, or the first), which is what a player does with one
+    // matching subtitle file, and never on nothing at all.
+    QString chosen;
+    if(subtitleChoice_.contains(path)) {
+        chosen=subtitleChoice_.value(path);
+        if(subtitleLog_)qInfo().noquote()<<"subtitle: session choice for this file is"
+            <<(chosen.isEmpty()?"Off":QFileInfo(chosen).fileName());
+    } else if(!subtitleTracks_.isEmpty()) {
+        chosen=subtitleTracks_.first().path;
+        if(subtitleLog_)qInfo().noquote()<<"subtitle: auto-selected"<<QFileInfo(chosen).fileName()
+            <<"(first time this file plays; Subtitles Off is remembered if chosen)";
+    }
+    int index=-1;
+    for(int i=0;i<subtitleTracks_.size();++i)if(subtitleTracks_[i].path==chosen){index=i;break;}
+    applySubtitleTrack(index);
+}
+void Shell::applySubtitleTrack(int index) {
+    if(index<0 || index>=subtitleTracks_.size())index=-1;
+    subtitleTrackIndex_=index;subtitleCueNumber_=0;
+    // Per-file memory for this session: a path, or empty for the explicit Off.
+    if(!subtitleMediaPath_.isEmpty())
+        subtitleChoice_.insert(subtitleMediaPath_,index<0?QString{}:subtitleTracks_[index].path);
+    if(subtitleLog_)
+        qInfo().noquote()<<(index<0?"subtitle: off":QString("subtitle: track %1 (%2)").arg(
+            QFileInfo(subtitleTracks_[index].path).fileName(),subtitleTracks_[index].name));
+    emit changed();
+}
+QString Shell::subtitleFile() const {
+    return subtitleTrackIndex_<0?QString{}:subtitleTracks_.value(subtitleTrackIndex_).path;
+}
+QString Shell::subtitleLabel() const {
+    return subtitleTrackIndex_<0?QString{}:subtitleTracks_.value(subtitleTrackIndex_).name;
+}
+QString Shell::subtitleCueText() {
+    if(subtitleTrackIndex_<0 || subtitleTrackIndex_>=subtitleTracks_.size()){subtitleCueNumber_=0;return {};}
+    const auto& cues=subtitleTracks_[subtitleTrackIndex_].cues;
+    const qint64 at=player_->position();
+    const int index=subtitles::cueAt(cues,at);
+    const int number=index<0?0:index+1;
+    if(number!=subtitleCueNumber_) {
+        subtitleCueNumber_=number;
+        if(subtitleLog_) {
+            if(index<0)qInfo().noquote()<<"subtitle: cue cleared at"<<at<<"ms";
+            else qInfo().noquote()<<"subtitle: cue"<<number<<"at"<<at<<"ms"
+                <<QString("(%1-%2 ms)").arg(cues[index].start).arg(cues[index].end)
+                <<cues[index].text.left(80).replace('\n',QChar(' '));
+        }
+    }
+    return index<0?QString{}:cues[index].text;
+}
+int Shell::subtitleCueNumber() {
+    subtitleCueText(); // the lookup above is the single authority for both the number and the text
+    return subtitleCueNumber_;
+}
+void Shell::chooseSubtitleTrack(int index) {
+    if(!mediaOpen_ || photoOpen())return;
+    if(index<-1 || index>=subtitleTracks_.size())return;
+    if(index==subtitleTrackIndex_)return; // already the choice: nothing to do, nothing to claim
+    applySubtitleTrack(index);
+    interactionAudio_.play(index<0?InteractionAudio::Cue::Back:InteractionAudio::Cue::Confirm);
+}
+// Audio tracks. QMediaPlayer reports them and takes setActiveAudioTrack(); whether the backend honours
+// it is a fact only the read-back can establish, so a row is marked unavailable the moment the player's
+// own activeAudioTrack() does not follow the request, and the reason is carried into the panel.
+void Shell::refreshAudioTracks() {
+    audioTracks_.clear();activeAudioTrack_=-1;
+    if(!mediaOpen_ || photoOpen())return;
+    const auto reported=player_->audioTracks();
+    for(int i=0;i<reported.size();++i) {
+        const auto& data=reported[i];
+        QString label=data.value(QMediaMetaData::Language).toString().trimmed();
+        const QString codec=data.value(QMediaMetaData::AudioCodec).toString().trimmed();
+        if(label.isEmpty())label=data.value(QMediaMetaData::Title).toString().trimmed();
+        if(label.isEmpty())label=codec;
+        else if(!codec.isEmpty())label+=" ("+codec+")";
+        if(label.isEmpty())label=QObject::tr("Track %1").arg(i+1);
+        AudioTrackInfo track;
+        track.label=label;
+        if(audioRejected_.contains(i)){track.switchable=false;track.reason=audioRejected_.value(i);}
+        audioTracks_.push_back(track);
+    }
+    activeAudioTrack_=player_->activeAudioTrack();
+    if(activeAudioTrack_>=audioTracks_.size())activeAudioTrack_=-1;
+    if(subtitleLog_) {
+        QStringList labels;for(const auto& track:audioTracks_)labels<<track.label;
+        qInfo().noquote()<<"audio: player reports"<<audioTracks_.size()<<"track(s); active"
+            <<(activeAudioTrack_<0?QString("not reported"):QString::number(activeAudioTrack_+1))
+            <<labels.join('|');
+    }
+}
+void Shell::chooseAudioTrack(int index) {
+    if(!mediaOpen_ || photoOpen() || index<0 || index>=audioTracks_.size())return;
+    if(index==activeAudioTrack_)return;
+    if(!audioTracks_[index].switchable)return;
+    player_->setActiveAudioTrack(index);
+    if(player_->activeAudioTrack()==index) {
+        activeAudioTrack_=index;
+        if(subtitleLog_)qInfo().noquote()<<"audio: switched to track"<<index+1<<audioTracks_[index].label;
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        refreshPlayerOptions();
+        return;
+    }
+    // A backend may apply the selection on its next demux step, so the failure is only declared after
+    // one more read rather than on the immediate one. The file is re-checked, so a rejection can never
+    // land on a track list that belongs to a different file.
+    const QString file=subtitleMediaPath_;
+    QTimer::singleShot(400,this,[this,index,file]{
+        if(!mediaOpen_ || file!=subtitleMediaPath_ || index>=audioTracks_.size())return;
+        const int after=player_->activeAudioTrack();
+        if(after==index) {
+            activeAudioTrack_=index;
+            if(subtitleLog_)qInfo().noquote()<<"audio: switched to track"<<index+1<<audioTracks_[index].label;
+        } else {
+            const QString reason=QObject::tr("This media backend did not switch: it still reports track %1.").arg(after+1);
+            audioRejected_.insert(index,reason);
+            audioTracks_[index].switchable=false;audioTracks_[index].reason=reason;
+            qWarning().noquote()<<"audio: cannot switch to track"<<index+1<<"- the player still reports"
+                <<(after<0?QString("no track"):QString::number(after+1));
+        }
+        refreshPlayerOptions();
+    });
     emit changed();
 }
 void Shell::showEntryInformation(const Entry& entry) {
@@ -1544,7 +1819,11 @@ void Shell::back() {
         if(!resumePath_.isEmpty() && worth)storeResumePosition(resumePath_,at);
         else clearResumePosition(resumePath_);
         resumePath_.clear();resumePending_=0;
-        ++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});}
+        ++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});
+        // Nothing is playing, so no subtitle file or audio track is current. The per-file choice stays in
+        // subtitleChoice_, which is what makes reopening the same file come back on the same track.
+        subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;subtitleMediaPath_.clear();
+        audioTracks_.clear();audioRejected_.clear();activeAudioTrack_=-1;}
     else if(!pages_.isEmpty()){library_.cancel();scanRequest_=0;jellyfinRequest_=0;loading_=false;status_.clear();pages_.removeLast();}
     emit changed();
 }
