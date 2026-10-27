@@ -1,7 +1,6 @@
 #include "view.h"
 #include "app_editor.h"
 #include "host.h"
-#include "jellyfin_signin.h"
 #include "pad.h"
 #include <QPainter>
 #include <QKeyEvent>
@@ -137,11 +136,13 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&shell_,&Shell::requestImportApps,this,[this]{AppEditor editor(shell_.appRegistryPath(),this);connect(&editor,&AppEditor::registryChanged,&shell_,&Shell::refreshContent);editor.exec();shell_.noteActivity();});
     connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){openOsk("System Name",value,[this](const QString& name){shell_.setSystemName(name);});});
     connect(&shell_,&Shell::requestNewUser,this,[this]{openOsk("Create New User",{},[this](const QString& name){shell_.createUser(name);});});
-    connect(&shell_,&Shell::requestJellyfinSignIn,this,[this](QUrl server){
-        JellyfinSignIn dialog(server,this);
-        connect(&dialog,&JellyfinSignIn::signInRequested,&dialog,[&]{dialog.setBusy(true);shell_.authenticateJellyfin(dialog.serverUrl(),dialog.username(),dialog.password());});
-        connect(&shell_,&Shell::jellyfinSignInFinished,&dialog,[&](bool ok,const QString& error){dialog.setBusy(false);if(ok)dialog.accept();else dialog.showError(error);});
-        if(dialog.exec()!=QDialog::Accepted)shell_.cancelJellyfinSignIn();shell_.noteActivity();
+    // The Jellyfin sign-in page's fields (audit/JELLYFIN-NATIVE.md): Cross on one of the page's field rows asks
+    // for the XMB keyboard. The password field is the masked case - the keyboard composes dots and its cached
+    // UI signature carries the dot count, never the characters - so no credential ever reaches this view's
+    // signature string, the frame's pixels, or the capture sidecar. There is no dialog here any more: the
+    // sign-in page itself is a normal XMB page, which is what keeps pollController live while it is open.
+    connect(&shell_,&Shell::requestJellyfinFieldEdit,this,[this](QString field,QString title,QString initial,bool masked){
+        openOsk(title,initial,[this,field](const QString& value){shell_.setJellyfinSignInField(field,value);},masked);
     });
     loadWallpaper();
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
@@ -730,7 +731,10 @@ void View::paintGL() {
         const double resting=double(focusTime());
         signature+=QString::asprintf(" glow %d idle %d",int((.5-.5*std::cos(2*std::numbers::pi*resting/3400.))*24),int(std::clamp((resting-4000)/800.,0.,1.)*16));
     }
-    if(osk_.open)signature+=QString::asprintf("osk %d %d %d %d %d %d ",osk_.row,osk_.column,osk_.cursor,osk_.shift,osk_.symbols,int((clock_.elapsed()/500)%2))+osk_.text;
+    // The keyboard's cached UI signature: the caret, the modifiers, and the text being composed. A masked field
+    // contributes its dot count only, so the plaintext never enters this cache string.
+    if(osk_.open)signature+=QString::asprintf("osk %d %d %d %d %d %d ",osk_.row,osk_.column,osk_.cursor,osk_.shift,osk_.symbols,int((clock_.elapsed()/500)%2))+
+        (osk_.masked?QString(osk_.text.size(),QChar(0x2022)):osk_.text);
     // The notification composite animates outside a shell change (slide/fade), so its amount and content are
     // part of the signature: quantised by 1/256, which is finer than the 2x layer can show.
     if(notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
@@ -1325,7 +1329,10 @@ void View::drawScene(QPainter& p) {
                 // One label column per level, as on the PS3 (reference: icon centre +99 at the top level, +57 inside a page).
                 const double labelX=kColumnX+(level==0?(tile?173:99):57)+ahead*250+offset;
                 const double alpha=(.72+.28*focus)*(entry.disabled?.55:1.);
-                const auto value=active?shell_.valueText(entry):QString{};
+                // A row's own value wins when it sets one (the sign-in page's fields: server URL, user name and
+                // the password as dots). Every other row leaves Entry::fieldValue empty, so this falls through to
+                // Shell::valueText() exactly as before and no existing frame changes.
+                const auto value=active?(entry.fieldValue.isEmpty()?shell_.valueText(entry):entry.fieldValue):QString{};
                 QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(27);
                 const auto label=QFontMetrics(labelFont).elidedText(entry.title,Qt::ElideRight,value.isEmpty()?1050:640);
                 const QRectF labelRect(labelX,y-28,value.isEmpty()?1100.:650.,56);
@@ -2029,8 +2036,9 @@ QString View::oskCharacter(int row,int column) const {
     const char* const* set=osk_.symbols?symbols:osk_.shift?upper:lower;
     return QString(QChar(set[row][column]));
 }
-void View::openOsk(const QString& title,const QString& initial,std::function<void(QString)> done) {
+void View::openOsk(const QString& title,const QString& initial,std::function<void(QString)> done,bool masked) {
     osk_=Osk{};osk_.open=true;osk_.title=title;osk_.text=initial;osk_.cursor=int(initial.size());osk_.done=std::move(done);
+    osk_.masked=masked;
     update();
 }
 void View::oskClose(bool accept) {
@@ -2087,8 +2095,11 @@ void View::drawOsk(QPainter& p) {
     label({540,291,800,37},osk_.title,20,QColor(30,30,30),Qt::AlignLeft|Qt::AlignVCenter);
     p.fillRect(QRectF(494,330,932,60),QColor(52,52,54));
     QFont fieldFont(shell_.fontFamily());fieldFont.setPixelSize(26);p.setFont(fieldFont);
-    const double before=QFontMetricsF(fieldFont).horizontalAdvance(osk_.text.left(osk_.cursor));
-    label({512,330,900,60},osk_.text,26,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+    // A masked field (the Jellyfin password) draws one bullet per character and measures the caret against those
+    // bullets, so the position stays right without the characters being drawn anywhere.
+    const QString composed=osk_.masked?QString(osk_.text.size(),QChar(0x2022)):osk_.text;
+    const double before=QFontMetricsF(fieldFont).horizontalAdvance(composed.left(osk_.cursor));
+    label({512,330,900,60},composed,26,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
     if((clock_.elapsed()/500)%2==0)p.fillRect(QRectF(512+before,342,2,36),QColor(140,220,120)); // blinking cursor
     for(int row=0;row<4;++row)for(int column=0;column<10;++column) {
         const QRectF r(500+column*72,oskRowY[row]-23,66,46);

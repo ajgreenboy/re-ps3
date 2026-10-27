@@ -226,9 +226,13 @@ private:
     void drawControllerHud(QPainter& painter);
     void grabIntroFrame();
     // PS3 on-screen keyboard (reference frame 64 s): 10x4 character grid, two function rows, prediction panel.
-    struct Osk { bool open=false,shift=false,symbols=false; QString title,text; int row=0,column=0,cursor=0; std::function<void(QString)> done; };
+    // `masked` is the password composition mode (audit/JELLYFIN-NATIVE.md): the field draws one dot per
+    // character and the UI signature carries the dot count instead of the text, so a secret cannot leak into
+    // the frame, the signature cache or a capture. Every other caller leaves it false and the keyboard behaves
+    // exactly as it did.
+    struct Osk { bool open=false,shift=false,symbols=false,masked=false; QString title,text; int row=0,column=0,cursor=0; std::function<void(QString)> done; };
     Osk osk_;
-    void openOsk(const QString& title,const QString& initial,std::function<void(QString)> done);
+    void openOsk(const QString& title,const QString& initial,std::function<void(QString)> done,bool masked=false);
     void drawOsk(QPainter& p);
     void oskMove(int dx,int dy);
     void oskPress();                 // the focused key
