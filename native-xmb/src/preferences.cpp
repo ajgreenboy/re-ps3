@@ -11,8 +11,10 @@
 
 namespace xmb {
 QVariant Preferences::defaultValue(const QString& key) {
-    if(key=="appearance/colour" || key=="appearance/background" || key=="appearance/font" ||
-       key=="clock/dateFormat" || key=="clock/hourFormat" || key=="photo/fit")return 0;
+    if(key=="appearance/colour" || key=="appearance/background" || key=="appearance/font" || key=="photo/fit")return 0;
+    // A fresh data directory is a US console: MM/DD/YYYY (the console's own middle option) and the
+    // 12-hour clock. Both are stored preferences, so Settings > Date and Time can still change them.
+    if(key=="clock/dateFormat" || key=="clock/hourFormat")return 1;
     if(key=="audio/volume")return 60;
     if(key=="photo/interval")return 5000;
     if(key=="media/repeatMode")return 0;
