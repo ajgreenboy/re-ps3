@@ -46,6 +46,10 @@ struct Entry {
     QString source;
     bool gameTile=false,friendRow=false;
     int presenceState=0;
+    // A row this build cannot act on but still lists, so the reason stays reachable and the state stays
+    // visible: drawn dimmed, and only the Continue Watching page sets it today (a remembered title whose
+    // file is gone). Everything else leaves it false, so no other row renders differently.
+    bool disabled=false;
 };
 struct Category { QString id,title,container,texture; QVector<Entry> entries; QString themeIcon; };
 // Item-level Triangle options menu: the PS3 shows a right-hand panel, not a level. Each row is a command
@@ -53,7 +57,10 @@ struct Category { QString id,title,container,texture; QVector<Entry> entries; QS
 // The same panel carries the in-player rows (subtitles, audio tracks, repeat, shuffle), which is where the
 // firmware's video control panel keeps its subtitle and audio-change buttons.
 enum class OptionCommand { Activate, Information, SortByNameAscending, SortByNameDescending, SortMenu, Close,
-    SubtitlesOff, SubtitleTrack, AudioTrack, RepeatMode, ToggleShuffle };
+    SubtitlesOff, SubtitleTrack, AudioTrack, RepeatMode, ToggleShuffle,
+    // The Continue Watching page's own command: forget the remembered position for this row. Only the
+    // page that lists resume points offers it (buildOptions gates on the row id).
+    RemoveResume };
 struct MenuOption {
     QString title;
     OptionCommand command=OptionCommand::Close;
@@ -286,7 +293,7 @@ private:
     int photoRotation_=0;
     QVector<Category> categories_;
     QVector<int> selections_;
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step
@@ -342,8 +349,19 @@ private:
     int mediaFailures_=0;
     void startQueuedMedia();
     qint64 resumePositionFor(const QString& path) const;
-    void storeResumePosition(const QString& path,qint64 positionMs);
+    void storeResumePosition(const QString& path,qint64 positionMs,qint64 durationMs,const QString& title);
     void clearResumePosition(const QString& path);
+    // ---- Continue Watching (audit/MEDIA-CONTROLS.md) ----
+    // media/resume holds one JSON object, {id: {path, ms, dur, title, at}}, where id is the same
+    // truncated SHA-1 of the path the earlier {id: milliseconds} map used. The old shape is still read
+    // (and is what the migration finds on an upgraded data directory); a record with no path is a
+    // legacy entry that has not been resolved yet and is never listed.
+    void migrateResumePoints();                  // once, at load: resolve or drop pathless entries
+    QVector<Entry> continueWatchingRows() const; // newest first, at most 20, nothing older than 30 days
+    void openContinueWatching();
+    void reloadContinueWatching();
+    void removeContinueEntry(const QString& id,const QString& title);
+    int rememberedResumeCount() const;
     void advanceMedia(bool failed,const QString& error={});
     int category_=6;
     std::unique_ptr<QMediaPlayer> player_;

@@ -1279,7 +1279,12 @@ void View::drawScene(QPainter& p) {
                 if(behind>.001 && tile){iconWidth=size;iconHeight=size;}
                 // Captured parent-column brightness (_Ambiant.w 0.698 focused, 0.247 unfocused, RPCS3 fpdump7): it
                 // belongs to the column, not to the glass row class, or the card behind a page stays at full strength.
-                const double iconAlpha=columnAlpha*(1.-behind*(1.-(.247+.451*focus)));
+                // A row this build still lists but cannot act on - the Continue Watching entry whose file is
+                // gone - is drawn dimmed, so the state reads from the couch; the row's own line says why.
+                // Every other row leaves Entry::disabled false, so this multiplies by exactly 1 and the
+                // rest of the frame is bit-identical.
+                const double dim=entry.disabled?.5:1.;
+                const double iconAlpha=columnAlpha*(1.-behind*(1.-(.247+.451*focus)))*dim;
                 // icontex items are glass icons like the categories: the firmware draws them with the same shader at
                 // brightness 1, behind an open page 0.247 (focused row 0.698) (RPCS3 capture, audit/PIPELINE.md);
                 // everything else is RCO or file artwork.
@@ -1319,7 +1324,7 @@ void View::drawScene(QPainter& p) {
                 p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus))*(1.-idleFade));
                 // One label column per level, as on the PS3 (reference: icon centre +99 at the top level, +57 inside a page).
                 const double labelX=kColumnX+(level==0?(tile?173:99):57)+ahead*250+offset;
-                const double alpha=.72+.28*focus;
+                const double alpha=(.72+.28*focus)*(entry.disabled?.55:1.);
                 const auto value=active?shell_.valueText(entry):QString{};
                 QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(27);
                 const auto label=QFontMetrics(labelFont).elidedText(entry.title,Qt::ElideRight,value.isEmpty()?1050:640);
@@ -1328,7 +1333,7 @@ void View::drawScene(QPainter& p) {
                 // 3.4 s ease-in-out from a faint halo, about 0.35 of the peak, to the full bloom, starting faint when
                 // the row takes focus). The peak is the static halo measured from the reference crop.
                 const double breath=.35+.65*(.5-.5*std::cos(2*std::numbers::pi*double(resting)/3400.));
-                if(focus>.5)glow(labelRect,label,27,(focus-.5)*2*breath);
+                if(focus>.5)glow(labelRect,label,27,(focus-.5)*2*breath*(entry.disabled?.45:1.));
                 text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
                 if(!value.isEmpty() && panelAmount<.5)text({1300+offset,y-25,440,50},value,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
                 const auto subtitle=shell_.subtitleText(entry);

@@ -47,8 +47,53 @@ bool Preferences::valid(const QString& key,const QVariant& value) {
     if(key=="system/name")return !text.trimmed().isEmpty() && text.size()<=64 && !text.contains('\n') && !text.contains('\r');
     if(key=="clock/timeZone")return text=="System" || QTimeZone::isTimeZoneIdAvailable(text.toUtf8());
     if(key=="appearance/wallpaper" || key=="appearance/theme" || key=="library/photo" || key=="library/music" || key=="library/video")return text.size()<=32768;
-    // Playback resume points: a small JSON map of file id -> milliseconds.
-    if(key=="media/resume")return text.size()<=8192;
+    // Playback resume points: one JSON object keyed by the truncated SHA-1 of the file path. Two shapes
+    // are accepted, because the second one is what this build writes and the first one is what an earlier
+    // build wrote - rejecting it here would throw the value away before Shell::migrateResumePoints() could
+    // resolve it (a preferences load keeps only the values that validate).
+    //   new: {"<id>": {"path": "...", "ms": 8768, "dur": 20000, "title": "...", "at": 1761...}}
+    //   old: {"<id>": 8768}
+    // Bounded in size *and* shape: an unbounded document, an over-long key, a non-finite or absurd
+    // timestamp and an over-long path all fail rather than reaching the shell. 64 records of at most
+    // 512 (path) + 200 (title) + 80 (numbers and keys) bytes stay below the 65536-byte string bound.
+    if(key=="media/resume") {
+        if(text.size()>65536)return false;
+        if(text.trimmed().isEmpty())return true;    // no entries yet: the empty value is a valid map
+        const auto document=QJsonDocument::fromJson(text.toUtf8());
+        if(!document.isObject())return false;
+        const auto map=document.object();
+        if(map.size()>64)return false;
+        const auto number=[](const QJsonValue& value,double maximum) {
+            if(!value.isDouble())return false;
+            const double n=value.toDouble();
+            return std::isfinite(n) && n>=0.0 && n<=maximum;
+        };
+        const auto milliseconds=[&](const QJsonValue& value) { return number(value,86400000.0); }; // one day past any title
+        const auto timestamp=[&](const QJsonValue& value) { return number(value,4102444800.0); };  // 2100-01-01
+        for(auto it=map.begin();it!=map.end();++it) {
+            // The id is a truncated SHA-1 in lower-case hex: 24 characters in this build. The wider range
+            // keeps an older or a later truncation loadable instead of silently dropping its data.
+            if(it.key().size()<16 || it.key().size()>40)return false;
+            for(const QChar c:it.key())if(!((c>='0' && c<='9') || (c>='a' && c<='f')))return false;
+            if(milliseconds(it.value()))continue;   // the old pathless shape
+            if(!it.value().isObject())return false;
+            const auto record=it.value().toObject();
+            if(record.size()>5)return false;
+            for(auto field=record.begin();field!=record.end();++field) {
+                const auto name=field.key();
+                if(name=="path") {
+                    if(!field.value().isString() || field.value().toString().size()>512)return false;
+                } else if(name=="title") {
+                    if(!field.value().isString() || field.value().toString().size()>200)return false;
+                } else if(name=="ms" || name=="dur") {
+                    if(!milliseconds(field.value()))return false;
+                } else if(name=="at") {
+                    if(!timestamp(field.value()))return false;
+                } else return false;                // an unknown field is a format this build must not write back
+            }
+        }
+        return true;
+    }
     return false;
 }
 Preferences::Preferences(const QString& directory,QObject* parent):QObject(parent),path_(QDir(directory).filePath("preferences.json")) {
