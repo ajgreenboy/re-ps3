@@ -608,3 +608,16 @@ dust does not cluster on the wave yet). Blending stays additive until qgl materi
 Because the dust now lands where the reference frame has its own particles at a different phase, the
 `work/ab-layers.ts` capture baselines for frame / background / icon row / item label row were re-measured
 (see `revisionNote` in the thresholds file); the gate passes 6/6 against the new numbers.
+## Tuned 2026-10-26: the dust was far too prominent
+
+The first port drew every one of the ~1500 live particles at full life alpha, so the frame read as a field
+of bright specks instead of the reference's few dozen faint ones. Two changes bring it back:
+
+- depth attenuation in the vertex stage (`vLife *= depthFade^2`, where `depthFade` falls from 1 at z=3 to
+  0.10 at z=13.5) - the untraced part of the firmware alpha chain (fresnel/life bounds/darkness, audit 6-B3);
+- photometry: the fitted lit gain 3.2 -> 1.05, the folded `particles_second` glare weight 0.159705 -> 0.045,
+  and the defocus dim 0.70 -> 0.85.
+
+Measured on the canonical capture (all six layers pass): frame **18.02 dB / 0.8301 SSIM** (was 17.89/0.8151),
+top background 20.24/0.9344, category icon row 21.05/0.8950, item label 11.94/0.3910. The tuning improves every
+dust-bearing layer, so it is both a look fix and a fidelity gain.
