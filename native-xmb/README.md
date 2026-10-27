@@ -240,3 +240,6 @@ be claimed.
 
 See the [full feature/presentation audit and new handoff](audit/README.md),
 [handoff](HANDOFF.md) and [completion criteria](ISA.md).
+
+**Current-state handoff (2026-10-26):** [HANDOFF-2026-10-26.md](HANDOFF-2026-10-26.md) - tree state, verified
+evidence, documentation drift, prioritized open work and ground rules.
