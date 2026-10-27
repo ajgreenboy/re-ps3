@@ -959,7 +959,16 @@ void Shell::psMenuActivate() {
     const QString item=items.value(std::clamp(psSelection_,0,int(items.size())-1));
     if(item==QObject::tr("Turn Off the System")) { psConfirmOff_=true; emit changed(); return; }
     if(item==QObject::tr("Quit Game")) {
-        if(!game_.isNull() && game_->state()!=QProcess::NotRunning) {
+        if(!steamGameId_.isEmpty()) {
+            // A Steam title is not our process: ask the client to stop it (audit/STEAM-CLI.md) and let the
+            // registry watcher report the return. Killing steam.exe would end the whole client.
+            QString stopError;
+            if(steamStopApp(steamGameId_,steamRoot_,&stopError))
+                qInfo().noquote()<<"shell: asked Steam to stop"<<steamGameId_;
+            else
+                qWarning().noquote()<<"shell: Steam stop failed:"<<stopError;
+        }
+        else if(!game_.isNull() && game_->state()!=QProcess::NotRunning) {
             game_->terminate();
             if(!game_->waitForFinished(3000))game_->kill();
             qInfo().noquote()<<"shell: quit game requested from the PS menu";

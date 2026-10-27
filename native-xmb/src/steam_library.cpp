@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
 #include <QSettings>
 #include <QSet>
 #include <QStandardPaths>
@@ -589,6 +590,27 @@ SteamInstallation scanSteam(const QString& explicitRoot) {
         return titleOrder == 0 ? left.appId < right.appId : titleOrder < 0;
     });
     return result;
+}
+
+bool steamStopApp(const QString& appId,const QString& steamRoot,QString* error) {
+    if (error) error->clear();
+#ifdef Q_OS_WIN
+    bool numeric = false;
+    appId.toULongLong(&numeric);
+    if (!numeric) { if (error) *error = QStringLiteral("Not a Steam app id."); return false; }
+    const QString roots[] = {steamRoot, rootsToTry(steamRoot).value(0)};
+    const QString exe = QDir(roots[0].isEmpty() ? roots[1] : roots[0]).filePath(QStringLiteral("steam.exe"));
+    if (!QFileInfo(exe).isFile()) { if (error) *error = QStringLiteral("Steam installation not found."); return false; }
+    // The console command is undocumented and prints nothing; the registry Running flag is the proof.
+    if (!QProcess::startDetached(exe, {QStringLiteral("+app_stop"), appId})) {
+        if (error) *error = QStringLiteral("Steam could not be started."); return false;
+    }
+    return true;
+#else
+    Q_UNUSED(appId); Q_UNUSED(steamRoot);
+    if (error) *error = QStringLiteral("Steam is only supported on Windows.");
+    return false;
+#endif
 }
 
 SteamAppState steamAppState(const QString& appId) {

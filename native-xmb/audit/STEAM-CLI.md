@@ -381,6 +381,43 @@ Steam session for library/friends/login UI. If the goal is specifically "the XMB
 in", that is not possible through any supported interface; the client's own sign-in window (or its
 `-login` restart path, which we should not use) is the only authenticator.
 
+### 8.6 Hosting the client's sign-in window in XMB
+
+Question: can the XMB show Steam's own sign-in window inside its UI?
+
+What the sign-in window actually is, from this installation:
+
+- The desktop client UI is CEF content hosted by `steamwebhelper.exe` in top-level `SDL_app`
+  windows (with `Chrome_WidgetWin_0` children). Window enumeration while signed in showed only those
+  classes; no login-specific window class exists at rest.
+- The login page is part of the client's own web bundle: `steamui\sp.js` contains
+  `#Login_SignIn_OrWithQRCode`, `#Login_UseMobileAppForQR_Inline`, the `bShowLoginQR` preference and
+  `LoginDialog`; `SteamUI.dll` contains `CUserLoginController::Startup`,
+  `User.SetLoginCredentials`, `Auth.StartSignInFromCache` and `Auth.ValidateCachedSignInPin`.
+- It is driven by client startup and cached credentials, not by a URL. `steam://open/login` and
+  `nav/login` do not exist in this build (zero hits in the JS bundle and the DLL strings), and the
+  browser protocol has no general login verb.
+
+So there are three different asks, with three different answers:
+
+1. Show Steam's own login window as a separate OS window (a handoff, not embedded). Feasible when the
+   client is signed out: quit the client and start it without a cached sign-in; the login window is a
+   normal top-level window that can be positioned/foregrounded over the XMB, and the XMB can take
+   focus back when it closes. It is still Steam's window with Steam's chrome; the XMB is behind it,
+   not drawing it. There is no way to summon it while already signed in without signing out.
+2. Embed/render it inside the XMB window (`SetParent`, DWM thumbnail, or capture plus synthetic
+   input). No supported path. The window belongs to another process and to CEF; reparenting may
+   attach it visually but breaks focus/input/DPI and Steam can recreate the window on UI-mode changes.
+   Capture plus input forwarding would mean the XMB proxies the user's Steam password through
+   synthetic input, which is both fragile and a security problem. Not tested here: it needs a live
+   signed-out login window and would have disturbed the logged-in client. Not recommended.
+3. Implement the login UI in XMB (the section 8.5 route). This is the only way to get an XMB-styled
+   sign-in (password, Steam Guard, QR) that the XMB owns. It does not sign the client in.
+
+Recommendation: if the product needs "login happens without leaving the XMB", build (3). If it only
+needs "the user can sign the client in from the couch", do (1) as a deliberate handoff and then bring
+focus back. Do not ship (2).
+
 ## 9. Not tested, deliberately
 
 - `app_stop` against a really running game.
@@ -390,6 +427,7 @@ in", that is not possible through any supported interface; the client's own sign
 - Firing any `steam://` URL, including `steam://open/console` and `steam://open/downloads`.
 - `-applaunch` end to end.
 - `-shutdown`, `-login`, `-console`, `-dev`, or any behavior with the client stopped.
+- Hosting, reparenting or capturing the client's sign-in window (would require signing the client out).
 - Reading account/session/credential files (`config\config.vdf`, `ssfn*`, connect caches).
 
 ## 10. Evidence appendix
