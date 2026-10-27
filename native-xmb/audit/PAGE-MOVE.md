@@ -238,3 +238,229 @@ powershell -File work/find-bl-callers.ps1 -Module basic 0x464ec
 
 Both machine reads and the Ghidra runs only read firmware-derived modules that are already local and
 gitignored. No `.cpp`/`.h` file was modified; no git command was run.
+
+---
+
+# Phase 4b - 2026-10-26: page-move timing, open-page layout, clock writer
+
+Second evidence pass over the same unknowns. Same write fence (audit files only), no source edit, no git
+command. Scope: (1) is the open/close page animation a paf `PhXmBar` call at all, and if so with which ease
+mode and duration; (2) the open-page layout (186 px faint pitch, icon-row y); (3) the periodic writer for the
+information-panel clock. Answers 2 and 3 are appended to `audit/LAYOUT-TRACE.md` and `audit/INFO-BAR.md`;
+this section carries all three answers so this file stays self-contained.
+
+## 0. Artifacts and provenance for this pass
+
+Firmware modules are unchanged from the first pass (same SHA-256, so the addresses below are comparable):
+`vsh.elf` = `54f6216dd498da243132377b830fa17c74cbe564ec8b8ebd40c0a2b071a525fa`,
+`explore_plugin.prx` = `80b08ea439bf4fdb18999facd058cb468576ef8437bd9141332300836755c5b9`,
+`xmb_plugin.prx` = `553b3e212cb4b343f98f20f52664a4ffd8993b75318a003d892284b18f0462c9`. All under
+`fw493/vsh_module/`, local only.
+
+New evidence classes used here (all local, all read-only):
+
+| Artifact | What it is | New use in this pass |
+|---|---|---|
+| `out/native-reference/rco-behavior/resources.json` | 122 resources / 8,070 objects / 0 errors, `animationEntries: 165` | RCO animation table (duration + accelMode are real RCO fields) and the object tree that names the XMB clock |
+| `out/native-reference/{fpdump6,fpdump7,fp-dump2,...}` decoded `*.params.txt` (2,852 files) | per-draw `_Eye` / `_Ambiant` / `_Color` values decoded from RPCS3 `XMB_FP_DUMP` `.vc` captures | exact animated values (distance and brightness) instead of pixel scoring |
+| machine `bl` scan of `vsh.elf` (PPC opcode 18, LK=1) | call-site search by branch target, not by decompiler symbol | who calls the clock setter / clock constructor / vshcommon writer; proves absences |
+| `rea/vsh_exports.csv`, `rea/plugins/*_imports.csv` | export OPD table and per-plugin imports | NID -> VA for the clock and indicator exports |
+
+The 0.1-0.2 px reading bias of the pixel tracker (PIPELINE.md "Measured on the real XMB") does not apply to
+these decoded values: they are the constants the firmware passed to the shader, before any projection.
+
+`src/view.cpp` citations in this section were re-checked at 2026-10-26 21:30 local; that file is being edited
+by another session, so the quoted expressions (`childAmount*262`, `distance*186`, `10*std::clamp(...)`,
+`290-10*focus`, `0.1*childAmount`) are the durable handle and the line numbers are a convenience.
+
+## 1. Page-move timing: is the open/close page animation a PhXmBar call?
+
+**Answer: not traceable with the artifacts available.** Two independent negative checks (the RCO animation
+tables, and the PhXmBar duration slots present in the decompile) plus one new measurement that is too coarse
+in time to settle a duration. What the artifacts do give now is the exact animated quantity and its start/end
+values; only the ease mode and the duration remain open.
+
+### 1.1 It is not an RCO animation
+
+RCO animation resources carry exactly the two fields the question asks for: `duration` (float, ms) and
+`accelMode` (int) - `out/native-reference/animattribdef-ps3.ini:8-13` (`MoveTo`), `:19-26` (`Recolour`),
+`:28-34` (`Rotate`), `:36-42` (`Resize`), `:44-48` (`Fade`). The dump decodes both
+(`durationRaw` / `accelModeRaw`, e.g. `resources.json` `gamelib_plugin.rco` offset 1132: `Resize`,
+`durationRaw: 863`, `accelModeRaw: 4`).
+
+- `vsh/resource/xmb_plugin_normal.rco` and `vsh/resource/xmb_ingame.rco`: **0 animation entries** each
+  (26 objects each). The XMB page RCO authors no timed move at all.
+- The 165 entries that exist are elsewhere: `custom_render_plugin.rco` 51 (cold boot), `premo_plugin.rco`
+  30, `system_plugin.rco` 17 (button-label fades, 100 ms / mode 0), `impose_plugin.rco` 16,
+  `gamelib_plugin.rco` 14, `friendim_plugin*.rco` 12 each, `bdp_plugin.rco` 5, `sacd_plugin.rco` 5,
+  `npsignin_plugin.rco` 3. None targets the cross bar.
+- Useful corroboration rather than evidence for the page move: mode 4 is a mode real RCO data uses
+  (`gamelib_plugin.rco` `Resize` 863 ms `accelModeRaw: 4` at offset 1132; `Fade` 863 ms mode 3 at
+  offset 1072), so a "mode 4 page move" is not implausible as an authoring choice - it is still unattested
+  for the page.
+
+### 1.2 It is not one of the PhXmBar duration slots that are in the decompile
+
+Re-confirmed from `out/native-reference/paf-range.c`: the only 0.3 s bar duration in `vsh.elf` is
+`DAT_0068f020` = 0x3E99999A (`work/page-move-constants.ps1 -Module vsh 0x68f020`, file offset 0x67F020).
+Its single user is `_opd_FUN_003accf4` (`paf-range.c:26530`, export NID `0xC94E8621`), which calls
+`FUN_003b4310` for the focused index and `_opd_FUN_003b0620(0.3, item)` for every other item
+(`:26541`, `:26545`); `_opd_FUN_003b0620` forwards to `FUN_003abc9c(..., 0x1000016, ..., 5, ...)`
+(`:28544`, `:28551`). So the 300 ms bar animation is a re-layout of the non-focused items, in the slot the
+decompiler renders as mode 5, and not a page/depth transition.
+
+Every other PhXmBar slot wrapper in the decompile also shows 5 in the mode slot
+(`paf-range.c:27726`, `:27736`, `:27781`, `:27868`, `:28517`, `:28744`, `:28776`, `:30165`, `:31891`,
+`:31901`, `:31911`, `:31972`, `:31986`, `:32000`, `:32014`, `:32445`, `:32447`, `:33340`), and
+the only wrappers that do not are mode 0 (`:33379`, `:33381`, slot 0x1000023/0x1000027) and the ones with no
+mode argument. **No mode-4 animate wrapper exists anywhere in the paf decompile**, and `explore_plugin.prx`'s
+five 300.0f constants are already excluded (section 1). Note the caveat from the first pass still stands: the
+`.opd` wrappers have mismatched prototypes in the decompile (e.g. `FUN_003abc9c` is declared with 7
+parameters and called with 9, `paf-range.c:25881` vs `:28551`), so the *position* of the 5 is not proof; a
+disassembly of one wrapper is still needed before "mode 5" can be asserted for these slots.
+
+### 1.3 The animated quantity is now known exactly
+
+The decoded per-draw values show the page transition moving the category bar itself: the focused category
+icon's `_Eye.x` goes from **-5.00** (root, 9 draws at `_Ambiant.w` 1.000) to **+257.00** (page open, 3 draws)
+in `out/native-reference/fpdump7` - a **262-unit shift**, which is the 262 the native already applies
+(`src/view.cpp:839`, `level0X-childAmount*262`). So the 262 is no longer only capture-derived: it is the
+difference of two decoded firmware draw constants. (Layout detail in `audit/LAYOUT-TRACE.md`, this pass.)
+
+The same capture series also decodes the *return* transition (page close) frame by frame, in two independent
+channels (`out/native-reference/fpdump7` and `fp-dump2`, identical values in both):
+
+| Step | `_Eye.z` (distance) | Remaining to 2700 | `_Ambiant.w` | Remaining to 0.698 |
+|---:|---:|---:|---:|---:|
+| 1 | 2483.53 | 216.47 | 0.067 | 0.631 |
+| 2 | 2504.75 | 195.25 | 0.129 | 0.569 |
+| 3 | 2523.89 | 176.11 | 0.184 | 0.514 |
+| 4 | 2541.16 | 158.84 | 0.235 | 0.463 |
+| 5 | 2544.09 / 2544.23 / 2544.78 | 155.91 | 0.243 | 0.455 |
+| settled | 2700.00 | 0 | 0.698 | 0 |
+
+Per-step retention: distance 195.25/216.47 = 0.90198, 176.11/195.25 = 0.90197, 158.84/176.11 = 0.90193;
+brightness 0.9017, 0.9033, 0.9008. Both channels agree on **0.9020** to better than 0.2%, and both sit at
+the same step index (step 1 of an exponential approach from 0 brightness / from about 2460 units), which is
+what makes it credible that these are consecutive frames even though the capture carries no timestamps.
+
+Against paf's per-frame modes (k from `audit/PAGE-MOVE.md:107-117`, retention = (1-k)*growth):
+
+| Model | k | retention/frame | measured 0.9020? |
+|---|---:|---:|---|
+| mode 4, 300 ms (n=18) | 0.22594 | 0.7741 | no |
+| mode 5, 200 ms (n=12) | 0.22059 | 0.7794 | no |
+| mode 5, 300 ms (n=18) | 0.15306 | 0.8469 | no |
+| mode 5, n=29 (int(ms*0.001*60)=29, 483 ms) | 0.09804 | 0.9020 | yes, to 4 decimals |
+| mode 4, solved for 0.9020 | 0.09809 | - | needs n = 44.6, not an integer frame count |
+
+So the transition captured in these dumps is a **slower** ease than the 300 ms / mode 4 pair, and it is the
+bar's distance and brightness (the page open/close of the bar), not the item-depth move that PIPELINE's pixel
+tracker measured at 0.760/frame over 17-18 frames. Two readings are possible and the artifacts do not
+discriminate: (a) the page move really is ~29 frames of mode 5 and the 0.760/frame measurement was of a
+different, faster channel; or (b) these steps are not single frames (they would have to be 2.3 frames apart
+for 0.902 to become 0.774, which the two-channel agreement makes unlikely but does not exclude). **Do not
+quote 483 ms as the page-move duration from this table.** It is a measurement of one transition's retention,
+with an unresolved frame-index assumption.
+
+### 1.4 What capture would settle 200 ms mode 5 vs 300 ms mode 4
+
+Pixel scoring cannot prove a duration - a settled frame scores the same whether it took 12 frames or 18, and
+`work/ab-layers.ts` scores still frames only. The discriminator has to be a *timestamped* sequence of frames
+across one page move.
+
+Capture (RPCS3, `vsh.self`, per `HANDOFF-PHASES.md:89-108`): disable Exclusive Fullscreen in the scratch
+config, map Cross to `PgDown`, CopyFromScreen at >= 100 fps (PrintWindow returns stale Vulkan frames), park
+on a category with the console clock pinned so the background is static, then send **one** `PgDown` and
+record about 1.5 s (approx. 150 frames) of the page opening - and a second run of the page closing (Back).
+Analyse with `bun work/motion-track.ts <dir> horizontal x0 x1 250 330 <threshold> <maxShift>` over the
+category-icon band, plus `bun work/region-luma.ts` on the same band for the brightness channel.
+
+Measure: the per-frame remaining fraction r of the tracking channel, and the **frame index at which the value
+stops changing**. The second number is the decisive one, for a reason worth stating precisely: both paf modes
+are geometric decays with a *constant* per-frame retention that depends only on the frame count, so
+
+- mode 5 at 200 ms (n=12) retains 0.7794 per frame and settles on frame 12;
+- mode 4 at 300 ms (n=18) retains 0.7741 per frame and settles on frame 18.
+
+Those two retentions differ by **0.7%**, which no pixel-fit can resolve and which even decoded `_Eye` values
+would struggle to separate on 3-4 samples. The two candidates are therefore *degenerate in shape* and separate
+only in **duration / frame count** (12 vs 18). That is the whole discriminating measurement, and it is also why
+the existing 300 ms / mode 4 claim has to stand or fall on its recorded 17-18 frame count rather than on its
+curve.
+
+Reference numbers for the same channel:
+
+| Candidate | retention/frame | frames to settle | settles at |
+|---|---:|---:|---|
+| 200 ms mode 5 (n=12) | 0.7794 | 12 | 200 ms |
+| 300 ms mode 4 (n=18) | 0.7741 | 18 | 300 ms |
+| 300 ms mode 5 (n=18) | 0.8469 | 18 | 300 ms |
+| captured bar transition in 1.3 | 0.9020 | ~29 if 60 Hz | ~483 ms |
+
+So the asking price is a burst with a *known* frame index per capture (frame counter or timestamp per PNG,
+which `ab-shot.ts`-style captures do not currently record), covering one page open and one page close, plus a
+note of the capture rate: a 12-frame ramp recorded at 40 fps would be mistaken for 18 frames. Sanity check on
+the same burst: the per-frame ratio r should be *constant* across frames 1-3 (0.774 for mode 4 at 300 ms, 0.779
+for mode 5 at 200 ms). A varying r in frames 1-3 means the capture mixed duplicate or dropped frames, and then
+the frame count cannot be trusted either.
+
+Because the native app can emit the same channel (`XMB_MOTION_LOG=1`, `HANDOFF-PHASES.md:107-108`), the same
+frame count can be produced natively and compared like for like: 12 native frames vs 18 captured frames is a
+clean, mechanical pass/fail.
+
+If that capture is taken, also record `_Eye` directly (add a burst-length `XMB_FP_DUMP` window): the decoded
+`_Eye.z` / `_Ambiant.w` pair is the cleanest possible record of the transition - it removes the pixel-tracker
+bias and gives r to 4 decimals, as in 1.3 - but it still does not remove the need for a frame-indexed burst.
+
+## 2. Open-page layout (summary; detail in `audit/LAYOUT-TRACE.md`)
+
+- **Traced:** category pitch 200 and the +/-10 focus padding, from decoded `_Eye.x` (1005.00, 805.00,
+  605.00, 405.00, 205.00, -5.00 focus, -215.00, -415.00, -615.00, -815.00, -1215.00).
+- **Traced:** the icon-row y, as a draw constant: `_Eye.y` = -250.00 (unfocused) / -260.00 (focused), which
+  is 540 + `_Eye.y` = 290 / 280. It is not an RCO attribute and not a scene transform. The
+  "untraceable row-y" item in `audit/LAYOUT-TRACE.md:45` and `:105-107` is closed.
+- **Not traceable:** the 186 px faint-category pitch. No decoded draw in the 2,852-file set places a
+  category-size quad on a compressed pitch, and the only captured open-state depth (the bar at 2483-2544,
+  i.e. *closer* than 2700) would make the projected pitch *wider* (200 x 2700/2483 = 217), not narrower.
+  186 has no support in these artifacts and should be re-measured before it is cited again.
+
+## 3. Information-panel clock writer (summary; detail in `audit/INFO-BAR.md`)
+
+- The XMB clock is **not** a paf `PhClock`. It is a `PhText` named `clock` under
+  `page_xmb_indicator -> indicator -> indi_adjust` in `xmb_plugin_normal.rco`
+  (`out/native-reference/rco-behavior/resources.json`); the only five `Clock` objects in all 122 RCOs are
+  in `sysconf_plugin.rco` (typeId 0x816, the Date and Time settings pages).
+- The writer entry point is found: `xmb_plugin.prx` `FUN_0000cb44` (`out/native-reference/xmb_plugin_all.c:6249-6291`)
+  looks `"clock"` up at `:6261`, type-checks it as `PhText` (`paf_B7DFCE90` returns
+  `PTR_s_PhText_006fb214`, `paf-range.c:22496`; called at `:6266`), then calls
+  `vshcommon_vshcommon_85AD7A58(clockText, state+0x18)` at `:6271`.
+- That export is `vsh.elf` VA **0x33FB58** (`rea/vsh_exports.csv`: `vshcommon,0x85AD7A58,0x006DE098,0x0033FB58`).
+  0x33FB58 is inside vshcommon (0x33xxxx) and is **not in any local decompile** - `paf-range.c` starts at
+  0x3800b0, and the only vsh.elf code in the local set below that is seven dialog/infobar helpers at 0x3406F8,
+  0x340BE0, 0x3415E8, 0x341870, 0x341BFC, 0x341D30, 0x343FFC (`phase3-system-layout.c:1,24,162,210,281`,
+  `phase3-infobar-common.c:1,16,37`). A `bl` scan of `vsh.elf` finds **zero in-module callers** of 0x33FB58,
+  so it is export-only and the per-minute behaviour is decided inside it.
+- Therefore: the call chain is found up to the module boundary, and the periodic tick is inside a function
+  that is missing from the artifact set. Obtaining it is a small, local, read-only job - see the reproduction
+  notes in `audit/INFO-BAR.md`.
+
+## 4. Reproduction for this pass
+
+```
+# decoded per-draw _Eye/_Ambiant tuples (no firmware read; reads the existing decode)
+node work/item-icon-eyes.js out/native-reference/fpdump7
+node work/item-icon-eyes.js work/item-icon-fp/decoded/fp-dump2
+# paf bar duration constants
+powershell -File work/page-move-constants.ps1 -Module vsh 0x68f018:0x50
+# RCO animation entries with duration/accelMode
+#   (read resources.json: resources[].animations[].durationRaw / accelModeRaw)
+# PPC bl call-site scans (opcode 18, LK=1; target = va + sign_extended(LI<<2))
+#   setter 0x3dedf4 -> 1 site (0x3e0d50, inside the clock constructor FUN_003e056c)
+#   constructor 0x3de988 -> 4 sites (0x3a985c, 0x3c8dec, 0x3d2e74, 0x3d7c64)
+#   vshcommon writer 0x33fb58 -> 0 sites
+```
+
+The scans read `fw493/vsh_module/vsh.elf` directly (PT_LOAD 0: file offset 0, vaddr 0x10000, size
+0x6ABEA8) and write nothing. Firmware-derived numbers stay in these audit notes; no dump, module or capture
+is committed.

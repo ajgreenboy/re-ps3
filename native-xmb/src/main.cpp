@@ -559,7 +559,8 @@ int main(int argc,char** argv) {
             static const QHash<QString,int> keys{{"LEFT",Qt::Key_Left},{"RIGHT",Qt::Key_Right},{"UP",Qt::Key_Up},{"DOWN",Qt::Key_Down},
                 {"ENTER",Qt::Key_Return},{"ESC",Qt::Key_Escape},{"PGUP",Qt::Key_PageUp},{"PGDN",Qt::Key_PageDown},{"BACKSPACE",Qt::Key_Backspace},
                 {"PREV",Qt::Key_BracketLeft},{"NEXT",Qt::Key_BracketRight},{"SHUFFLE",Qt::Key_M},{"REPEAT",Qt::Key_R},
-                {"ZOOMIN",Qt::Key_Plus},{"ZOOMOUT",Qt::Key_Minus},{"RESETVIEW",Qt::Key_0},{"ROTATELEFT",Qt::Key_Q},{"ROTATERIGHT",Qt::Key_E},{"REFRESH",Qt::Key_F5}};
+                {"ZOOMIN",Qt::Key_Plus},{"ZOOMOUT",Qt::Key_Minus},{"RESETVIEW",Qt::Key_0},{"ROTATELEFT",Qt::Key_Q},{"ROTATERIGHT",Qt::Key_E},{"REFRESH",Qt::Key_F5},
+                {"TRIANGLE",Qt::Key_T}}; // Triangle: the selected entry's options panel (T is its keyboard binding)
             if(token=="full")shell.setFullscreen(true);
             else if(token.startsWith("size=")) {
                 const auto dimensions=token.mid(5).split('x');bool widthOk=false,heightOk=false;

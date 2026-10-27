@@ -100,6 +100,10 @@ private:
     int previousCategory_=6;
     struct Column { QVector<Entry> entries; int selection=0; double position=0; PafEase ease; };
     PafEase categoryEase_,depthEase_,fadeEase_;
+    // Item-level Triangle options panel: its own open amount (slide-in) and focus position, animated with the
+    // same paf curve as the settings panel. Drawn only while Shell::optionsOpen().
+    PafEase optionsPanelEase_,optionsOpenEase_;
+    bool optionsWasOpen_=false;
     QVector<Column> columns_;
     QVector<Column> outgoing_;
     int outgoingCategory_=6;

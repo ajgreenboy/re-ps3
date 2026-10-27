@@ -42,6 +42,10 @@ struct Entry {
     int presenceState=0;
 };
 struct Category { QString id,title,container,texture; QVector<Entry> entries; QString themeIcon; };
+// Item-level Triangle options menu: the PS3 shows a right-hand panel, not a level. Each row is a command
+// this build really performs; the list is built from the selected entry so other surfaces inherit it.
+enum class OptionCommand { Activate, Information, SortByNameAscending, SortByNameDescending, SortMenu, Close };
+struct MenuOption { QString title; OptionCommand command=OptionCommand::Close; };
 class Shell final:public QObject {
     Q_OBJECT
 public:
@@ -126,6 +130,15 @@ public:
     void psMenuActivate();
     void psMenuClose();
     bool psMenuConfirmingOff() const { return psConfirmOff_; }
+    // Triangle options panel for the selected entry (a right-hand panel; the XMB behind it keeps its layout).
+    bool optionsOpen() const { return optionsOpen_; }
+    int optionsSelection() const { return optionsSelection_; }
+    const QVector<MenuOption>& options() const { return options_; }
+    QString optionsTitle() const { return optionsTitle_; }
+    void toggleOptions();          // Triangle: open, or dismiss the whole menu
+    void optionsMove(int delta);   // Up/Down inside the panel
+    void optionsActivate();        // Cross
+    void optionsClose();           // Circle: step back one level, then close
 signals:
     void changed();
     void requestLibrary();
@@ -219,6 +232,18 @@ private:
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step
     int psSelection_=0;
+    // Item options panel state: the list itself, one parent level (Sort By), and the selection.
+    bool optionsOpen_=false,optionsNested_=false;
+    int optionsSelection_=0;
+    QVector<MenuOption> options_,optionsParent_;
+    QString optionsTitle_;
+    void buildOptions();
+    void dismissOptions();
+    void resetOptions();
+    QString activateLabel(const Entry& entry) const;
+    QString entryKind(const Entry& entry) const;
+    void showEntryInformation(const Entry& entry);
+    void sortPageByName(bool ascending);
     QString message_,mediaTitle_,renderer_;
     QDateTime clockOverride_;
     // Only the decoded pieces are kept (the .p3t itself is read again when the theme changes); nothing is written to disk.
