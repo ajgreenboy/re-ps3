@@ -104,6 +104,17 @@ private:
     // same paf curve as the settings panel. Drawn only while Shell::optionsOpen().
     PafEase optionsPanelEase_,optionsOpenEase_;
     bool optionsWasOpen_=false;
+    // The console's notification pop-up (Shell's queue). The ease is its presence on screen: it slides and
+    // fades in over 200 ms (paf mode 5, the XMB's own move curve) and back out the same way. The last content
+    // is kept while it leaves, because Shell has already dropped the entry by then.
+    PafEase notificationEase_;
+    struct NotificationShown { QString title,detail,icon; };
+    NotificationShown notificationShown_;
+    bool notificationTextureWarned_=false;
+    void drawNotification(QPainter& painter,double amount);
+    // A 64x64 RCO tile (the notification plaque) stretched to any size without turning its rounded corners
+    // into ellipses: the corners keep their pixels, the edges and centre stretch.
+    void drawNineSlice(QPainter& painter,const QString& container,const QString& texture,const QRectF& rect,qreal inset,qreal opacity);
     QVector<Column> columns_;
     QVector<Column> outgoing_;
     int outgoingCategory_=6;

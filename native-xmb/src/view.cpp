@@ -600,6 +600,17 @@ void View::paintGL() {
     } else optionsOpenEase_.retarget(0,moveMilliseconds);
     optionsOpenEase_.advance(dt);optionsPanelEase_.advance(dt);
     optionsWasOpen_=shell_.optionsOpen();
+    // The notification pop-up: Shell decides when one exists (queue + 4 s lifetime); here it slides and fades
+    // in and out on the same 200 ms mode-5 curve the rest of the XMB uses. The content is latched so the last
+    // frame of the exit still draws the text after Shell has already expired the entry.
+    if(const auto* note=shell_.notification())notificationShown_={note->title,note->detail,note->icon};
+    notificationEase_.retarget(shell_.notification()?1.:0.,moveMilliseconds);
+    notificationEase_.advance(dt);
+    // Local diagnosis: XMB_NOTIFY_LOG=1 also traces the composite's own curve, one line per frame while it
+    // slides and fades, so the 200 ms mode-5 timing is measurable without scoring pixels.
+    if(static const bool notifyLog=qEnvironmentVariableIsSet("XMB_NOTIFY_LOG");notifyLog && notificationEase_.running())
+        qInfo().noquote()<<"notify: view slide/fade"<<QString::number(notificationEase_.value,'f',4)
+            <<"x"<<QString::number((1.-notificationEase_.value)*48.,'f',2)<<"px";
     // Local diagnosis: XMB_MOTION_LOG=1 logs the focused column's and the depth's eased positions each frame while they move.
     if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && !columns_.isEmpty() && columns_.back().ease.running())
         qInfo().noquote()<<"motion:"<<now<<"ms position"<<QString::number(columns_.back().position,'f',4)<<"target"<<columns_.back().selection;
@@ -645,6 +656,11 @@ void View::paintGL() {
         signature+=QString::asprintf(" glow %d idle %d",int((.5-.5*std::cos(2*std::numbers::pi*resting/3400.))*24),int(std::clamp((resting-4000)/800.,0.,1.)*16));
     }
     if(osk_.open)signature+=QString::asprintf("osk %d %d %d %d %d %d ",osk_.row,osk_.column,osk_.cursor,osk_.shift,osk_.symbols,int((clock_.elapsed()/500)%2))+osk_.text;
+    // The notification composite animates outside a shell change (slide/fade), so its amount and content are
+    // part of the signature: quantised by 1/256, which is finer than the 2x layer can show.
+    if(notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
+        signature+=QString::asprintf(" notify %d ",int(notificationEase_.value*256.))+notificationShown_.title+'|'+
+            notificationShown_.detail+'|'+notificationShown_.icon;
     if(shell_.mediaOpen())signature+=QString::number(now); // media frames change every frame
     bool rebuild=signature!=uiSignature_;
     if(!uiMsaa_ || uiMsaa_->size()!=pixels) {
@@ -730,6 +746,79 @@ void View::drawImage(QPainter& p,const QString& container,const QString& texture
     }
     const QSizeF size=QSizeF(bounds.size()).scaled(rect.size(),Qt::KeepAspectRatio);
     p.save();p.setOpacity(opacity);p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);p.restore();
+}
+void View::drawNineSlice(QPainter& p,const QString& container,const QString& texture,const QRectF& rect,qreal inset,qreal opacity) {
+    // tex_notification is a 64x64 tile: a dark fill with a lighter 1 px border and rounded corners. Scaling it
+    // to the plaque's aspect would stretch the corner arcs into ellipses, so the 3x3 parts are drawn with the
+    // corners at their own pixel size and only the edges and the centre stretched.
+    const auto& image=assets_.image(container,texture);
+    if(image.isNull())return;
+    const qreal i=std::min<qreal>(inset,std::min(image.width(),image.height())/2.);
+    if(rect.width()<2*i || rect.height()<2*i)return;
+    const qreal sx[4]={0.,i,qreal(image.width())-i,qreal(image.width())};
+    const qreal sy[4]={0.,i,qreal(image.height())-i,qreal(image.height())};
+    const qreal dx[4]={rect.left(),rect.left()+i,rect.right()-i,rect.right()};
+    const qreal dy[4]={rect.top(),rect.top()+i,rect.bottom()-i,rect.bottom()};
+    p.save();p.setOpacity(opacity);
+    for(int row=0;row<3;++row)for(int col=0;col<3;++col) {
+        const QRectF source(sx[col],sy[row],sx[col+1]-sx[col],sy[row+1]-sy[row]);
+        const QRectF target(dx[col],dy[row],dx[col+1]-dx[col],dy[row+1]-dy[row]);
+        if(source.width()<=0. || source.height()<=0. || target.width()<=0. || target.height()<=0.)continue;
+        p.drawImage(target,image,source);
+    }
+    p.restore();
+}
+// The console's notification pop-up, composed from the firmware's own pieces (system_plugin page_notification,
+// traced in out/native-reference/rco-behavior/resources.json and basic_plugins.prx FUN_0000773c):
+//   notification_a / notification_b  the plaque Plane; its texture is tex_notification (64x64 rounded tile)
+//   notification_icon_a / _b         the 100x100 tex_notification_<kind> glyph, one icon width left of the text
+//   notification_message_a           the single-line Text, posX 1 (one icon width right of the icon centre)
+//   notification_label0_b/_1_b/_2_b  the three-line Text set, posY 0.5 / -0.375 / -0.5
+// The plaque's on-screen rect is not traced: paf projects the page from vsh.elf, which is absent here. It is
+// fitted to the measured information panel (x 1329..1920, y 75..133), sitting under it with a 12 px gap.
+void View::drawNotification(QPainter& p,double amount) {
+    const double alpha=std::clamp(amount,0.,1.);
+    if(notificationShown_.title.isEmpty() || alpha<=.002)return;
+    const bool twoLines=!notificationShown_.detail.isEmpty();
+    // Slide in from the right by 48 px while it fades: the console's pop-ups enter from the edge, not from
+    // the centre, and the same curve carries them back out.
+    const double slide=(1.-alpha)*48.;
+    const qreal width=400.,height=twoLines?84.:58.;
+    const QRectF plaque(1920.-24.-width+slide,145.,width,height);
+    const auto& icon=assets_.bestImage("system_plugin",notificationShown_.icon);
+    // The plaque first: the icon and the text sit on it.
+    drawNineSlice(p,"system_plugin","tex_notification",plaque,16.,alpha*.94);
+    if(!icon.isNull()) {
+        // notification_icon_a/_b: the glyph fills the plaque's height less a 6 px margin, its centre 13 px in.
+        const qreal side=plaque.height()-12.;
+        drawImage(p,"system_plugin",notificationShown_.icon,
+            QRectF(plaque.left()+13.,plaque.center().y()-side/2.,side,side),alpha);
+    } else if(!notificationTextureWarned_) {
+        notificationTextureWarned_=true;
+        qWarning().noquote()<<"notify: texture missing system_plugin"<<notificationShown_.icon<<"(drawn without the icon)";
+    }
+    // Text starts one icon width to the right of the icon (posX 1 in the object tree). Without the glyph the
+    // text keeps the plaque's own left margin rather than an invented icon-sized hole.
+    const qreal textLeft=plaque.left()+(icon.isNull()?16.:13.+plaque.height()-12.+14.);
+    const qreal textRight=plaque.right()-16.;
+    const int titleSize=22,detailSize=18;
+    QFont titleFont(shell_.fontFamily());titleFont.setPixelSize(titleSize);
+    const QString title=QFontMetrics(titleFont).elidedText(notificationShown_.title,Qt::ElideRight,int(textRight-textLeft));
+    const auto label=[&](const QRectF& rect,const QString& value,int size,QColor colour) {
+        if(textRenderer_.ready()) {
+            QFont font(shell_.fontFamily());font.setPixelSize(size);
+            textRenderer_.draw(*this,p,rect,value,font,colour,Qt::AlignLeft|Qt::AlignVCenter);return;
+        }
+        QFont font(shell_.fontFamily());font.setPixelSize(size);font.setStyleStrategy(QFont::PreferAntialias);
+        font.setHintingPreference(QFont::PreferNoHinting);p.setFont(font);
+        p.setPen(QColor(0,0,0,38));p.drawText(rect.translated(1,1),Qt::AlignLeft|Qt::AlignVCenter,value);
+        p.setPen(colour);p.drawText(rect,Qt::AlignLeft|Qt::AlignVCenter,value);
+    };
+    if(twoLines) {
+        label(QRectF(textLeft,plaque.top()+10.,textRight-textLeft,titleSize+6.),title,titleSize,QColor(245,245,245));
+        label(QRectF(textLeft,plaque.top()+10.+titleSize+4.,textRight-textLeft,detailSize+6.),
+            notificationShown_.detail,detailSize,QColor(206,206,206));
+    } else label(QRectF(textLeft,plaque.top()+8.,textRight-textLeft,plaque.height()-16.),title,titleSize,QColor(245,245,245));
 }
 void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect) {
     const auto& original=assets_.bestImage(category.container,category.texture);
@@ -1062,6 +1151,11 @@ void View::drawScene(QPainter& p) {
         drawImage(p,"system_plugin","tex_cross",{902,895,24,24});text({936,887,160,40},"OK",21,QColor(235,235,235));
     }
     if(osk_.open)drawOsk(p);
+    // The console's notification pop-up, drawn last so it sits above the XMB, and never while the PS menu is
+    // up: that menu blacks the frame and owns the screen. It takes no input (nothing here reads keys), so it
+    // cannot steal a press from whatever is underneath.
+    if(!shell_.psMenuOpen() && notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
+        drawNotification(p,notificationEase_.value);
     // PS button: the console's system menu (RPCS3 capture 2026-10-26): the frame goes black except the clock,
     // a centred two-item menu, the controller/charge panel bottom left and the Enter/Back legend. A hold opens
     // it; "Turn Off the System" asks once before quitting.
