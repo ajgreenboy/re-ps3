@@ -1,5 +1,6 @@
 #include "view.h"
 #include "app_editor.h"
+#include "jellyfin_signin.h"
 #include "pad.h"
 #include <QPainter>
 #include <QKeyEvent>
@@ -56,6 +57,12 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&shell_,&Shell::requestImportApps,this,[this]{AppEditor editor(shell_.appRegistryPath(),this);connect(&editor,&AppEditor::registryChanged,&shell_,&Shell::refreshContent);editor.exec();shell_.noteActivity();});
     connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){openOsk("System Name",value,[this](const QString& name){shell_.setSystemName(name);});});
     connect(&shell_,&Shell::requestNewUser,this,[this]{openOsk("Create New User",{},[this](const QString& name){shell_.createUser(name);});});
+    connect(&shell_,&Shell::requestJellyfinSignIn,this,[this](QUrl server){
+        JellyfinSignIn dialog(server,this);
+        connect(&dialog,&JellyfinSignIn::signInRequested,&dialog,[&]{dialog.setBusy(true);shell_.authenticateJellyfin(dialog.serverUrl(),dialog.username(),dialog.password());});
+        connect(&shell_,&Shell::jellyfinSignInFinished,&dialog,[&](bool ok,const QString& error){dialog.setBusy(false);if(ok)dialog.accept();else dialog.showError(error);});
+        if(dialog.exec()!=QDialog::Accepted)shell_.cancelJellyfinSignIn();shell_.noteActivity();
+    });
     loadWallpaper();
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
     // Input polling is independent of presentation. A 16 ms repaint timer produced ~62.5 Hz even on a 239 Hz
@@ -115,8 +122,8 @@ void View::PafEase::advance(double seconds) {
 void View::syncColumns() {
     const int depth=shell_.depth();
     if(previousCategory_!=shell_.category()) {
-        outgoing_=columns_;outgoingCategory_=previousCategory_;categoryFade_=1.;columns_.clear();
-        fadeEase_=PafEase();fadeEase_.retarget(1);fadeEase_.retarget(0,moveMilliseconds); // the old column cross-fades out
+        outgoing_=columns_;outgoingCategory_=previousCategory_;categoryFade_=outgoing_.isEmpty()?0.:1.;columns_.clear();
+        fadeEase_=PafEase();fadeEase_.retarget(categoryFade_);fadeEase_.retarget(0,moveMilliseconds); // the old column cross-fades out
         previousCategory_=shell_.category();
     }
     // Keep the departed child until the return animation finishes. The shell's

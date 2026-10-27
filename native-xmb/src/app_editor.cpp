@@ -52,7 +52,7 @@ AppEditor::AppEditor(QString registryPath, QWidget* parent)
         "QPushButton:disabled { color: #77808e; }"));
 
     auto* root = new QVBoxLayout(this);
-    auto* heading = new QLabel(QStringLiteral("Register games and web apps for the XMB"), this);
+    auto* heading = new QLabel(QStringLiteral("Register games and media apps for the XMB"), this);
     heading->setObjectName(QStringLiteral("appEditorHeading"));
     QFont headingFont = heading->font();
     headingFont.setPointSize(14);
@@ -89,6 +89,7 @@ AppEditor::AppEditor(QString registryPath, QWidget* parent)
     kindCombo_->setObjectName(QStringLiteral("appKindCombo"));
     kindCombo_->addItem(QStringLiteral("Game"), QStringLiteral("game"));
     kindCombo_->addItem(QStringLiteral("Web app"), QStringLiteral("web"));
+    kindCombo_->addItem(QStringLiteral("Jellyfin"), QStringLiteral("jellyfin"));
     form->addRow(QStringLiteral("Kind"), kindCombo_);
     categoryCombo_ = new QComboBox(this);
     categoryCombo_->setObjectName(QStringLiteral("appCategoryCombo"));
@@ -263,9 +264,12 @@ void AppEditor::populateEditor(const QString& id) {
 
 void AppEditor::updateFieldState() {
     const bool game = kindCombo_->currentData().toString() == QStringLiteral("game");
-    targetLabel_->setText(game ? QStringLiteral("Executable") : QStringLiteral("URL"));
+    const bool jellyfin = kindCombo_->currentData().toString() == QStringLiteral("jellyfin");
+    targetLabel_->setText(game ? QStringLiteral("Executable")
+                               : (jellyfin ? QStringLiteral("Server URL") : QStringLiteral("URL")));
     targetEdit_->setPlaceholderText(game ? QStringLiteral("Path to an existing executable")
-                                         : QStringLiteral("https://example.com"));
+                                         : (jellyfin ? QStringLiteral("https://jellyfin.example.com")
+                                                     : QStringLiteral("https://example.com")));
     const auto* targetRow = qobject_cast<QWidget*>(targetEdit_->parent());
     if (targetRow) {
         const auto buttons = targetRow->findChildren<QPushButton*>();
@@ -321,26 +325,35 @@ void AppEditor::addGame() {
 }
 
 void AppEditor::addWebApp() {
+    const QStringList types = {QStringLiteral("Jellyfin"), QStringLiteral("Browser web app")};
     bool accepted = false;
+    const QString chosenType = QInputDialog::getItem(this, QStringLiteral("Add media app"),
+                                                       QStringLiteral("App type"), types, 0, false, &accepted);
+    if (!accepted) return;
+    const bool jellyfin = chosenType == types.first();
     const QString name = QInputDialog::getText(this, QStringLiteral("Add media app"), QStringLiteral("App name"),
                                                 QLineEdit::Normal, QString(), &accepted).trimmed();
     if (!accepted) return;
     if (name.isEmpty()) { showError(QStringLiteral("App name must not be empty.")); return; }
-    const QString url = QInputDialog::getText(this, QStringLiteral("Add media app"), QStringLiteral("HTTP(S) URL"),
+    const QString url = QInputDialog::getText(this, QStringLiteral("Add media app"),
+                                               jellyfin ? QStringLiteral("Jellyfin Server URL") : QStringLiteral("HTTP(S) URL"),
                                                QLineEdit::Normal, QStringLiteral("https://"), &accepted).trimmed();
-    if (!accepted) return;
-    const QStringList labels = {QStringLiteral("TV & video"), QStringLiteral("Music"),
-                                QStringLiteral("Video"), QStringLiteral("Network")};
-    const QStringList values = {QStringLiteral("tv"), QStringLiteral("music"),
-                                QStringLiteral("video"), QStringLiteral("network")};
-    const QString chosen = QInputDialog::getItem(this, QStringLiteral("Add media app"), QStringLiteral("Category"),
-                                                  labels, 0, false, &accepted);
     if (!accepted) return;
     ContentApp app;
     app.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     app.title = name;
-    app.kind = QStringLiteral("web");
-    app.category = values.value(labels.indexOf(chosen), QStringLiteral("tv"));
+    app.kind = jellyfin ? QStringLiteral("jellyfin") : QStringLiteral("web");
+    app.category = QStringLiteral("tv");
+    if (!jellyfin) {
+        const QStringList labels = {QStringLiteral("TV & video"), QStringLiteral("Music"),
+                                    QStringLiteral("Video"), QStringLiteral("Network")};
+        const QStringList values = {QStringLiteral("tv"), QStringLiteral("music"),
+                                    QStringLiteral("video"), QStringLiteral("network")};
+        const QString chosen = QInputDialog::getItem(this, QStringLiteral("Add media app"), QStringLiteral("Category"),
+                                                      labels, 0, false, &accepted);
+        if (!accepted) return;
+        app.category = values.value(labels.indexOf(chosen), QStringLiteral("tv"));
+    }
     app.url = url;
     apps_.append(app);
     unsavedIds_.insert(app.id);

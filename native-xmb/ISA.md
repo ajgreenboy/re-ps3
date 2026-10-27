@@ -94,7 +94,7 @@ Use Steam and imported content as explicitly identified native providers for the
 - [x] ISC-39.1: An invalid app import leaves the existing registry byte-identical.
 - [x] ISC-40: An imported executable receives its structured argument array and produces the expected diagnostic marker.
 - [x] ISC-41: An imported Jellyfin URL appears as an app in the selected XMB category.
-- [ ] ISC-41.1: Jellyfin playback and authentication work within the native app.
+- [x] ISC-41.1: Jellyfin playback and authentication work within the native app.
 - [x] ISC-42: All six built-in colour captures have a focused icon-interior luma above 130 in the named probe.
 - [x] ISC-42.1: The same icon-interior RGB differs by at most one channel level between day and night captures for each built-in colour.
 
@@ -108,6 +108,14 @@ Use Steam and imported content as explicitly identified native providers for the
 - [x] ISC-45.2: Paused video remains pixel-identical under a forced idle age.
 - [x] ISC-45.4: An XMB message overlay suppresses additional screensaver dimming during a forced idle replay.
 - [ ] ISC-45.3: Screensaver brightness, fade and wake behavior match measured firmware evidence.
+
+- [x] ISC-46: Native Jellyfin library/folder pages load from a real server using its configured base subpath.
+- [x] ISC-46.1: Real compatible video decodes through authenticated native direct play.
+- [x] ISC-46.2: Real unsupported-source video decodes through negotiated server HLS transcoding.
+- [x] ISC-46.3: Pause, network seek and Back restore native browsing after both direct and HLS playback.
+- [x] ISC-46.4: Sign-out/reconnect keeps the new session usable and cancels stale browse results.
+- [x] ISC-46.5: Anti: native player logs contain no Jellyfin token query parameters after nested HLS playback.
+- [ ] ISC-46.6: Native Jellyfin posters, track/subtitle selectors and resume UI are verified.
 
 ## Test Strategy
 
@@ -124,6 +132,9 @@ Build logs establish compilation. Requested window observations establish specif
 | Content providers | SteamLibrary/SteamFriends/SteamArtwork/ContentRegistry | Verified Steam lifecycle, connected friends, custom game artwork editor and embedded media services |
 
 ## Decisions
+
+- 2026-10-26: refined: added typed native Jellyfin service registrations and reusable API/stream/player modules. Session tokens stay in memory and authenticated stream requests pass through a loopback gateway. Current routes were verified against the Jellyfin 12.4 schema and a real disposable server. See audit/JELLYFIN-NATIVE.md.
+
 
 - 2026-10-26: refined: user requested continuing functionality across phases, beyond Steam Friends. Added phase-6 registration/media slices and phase-5 native idle dimming. Exact firmware player rendering/timing, native Jellyfin playback and remaining screen states stay open. See audit/PHASE-CONTINUATION.md.
 
@@ -259,3 +270,5 @@ Back restoring selection. The broad transition-parity criterion remains unchecke
 - ISC-43–45.2: 2026-10-26 Release build; 17 disposable component checks; actual editor rename/save; five-option Display Settings replay and persistence; video hide/pause/seek replay; dim/wake and paused-idle pixel comparisons. Existing three named-state gates remain pixel-identical. Detailed local evidence and remaining limits: audit/PHASE-CONTINUATION.md.
 
 - ISC-43.2/45.4: Focused lower-cost reviews found draft removal and internal-message suppression gaps. Corrections passed six QApplication editor component checks and a message idle replay (RGB ratio 1.000007; unchanged bottom crop). See audit/PHASE-CONTINUATION.md.
+
+- ISC-41.1/46–46.5: Real Jellyfin 12.4 native replay passed 20 checks including direct/HLS decoding, pause/seek/Back and four stage captures. Six additional auth lifecycle checks passed. Live HLS exposed an ApiKey spelling missing from the initial URL filter; corrected, revoked the disposable exposed session, and repeated playback/log containment successfully. Existing three named-state pixel gates passed. Details and remaining selectors/artwork/resume scope: audit/JELLYFIN-NATIVE.md.

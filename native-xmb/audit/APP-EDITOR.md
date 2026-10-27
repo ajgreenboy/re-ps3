@@ -4,9 +4,9 @@ The native content-registration editor provides a Qt Widgets window for maintain
 
 ## Features
 
-- Lists imported game and web app registrations and edits their title, kind, category, target, arguments, working directory, and artwork path.
+- Lists imported game, web app and native Jellyfin registrations and edits their title, kind, category, target, arguments, working directory, and artwork path.
 - Adds games by browsing to an executable and uses its filename as the initial title.
-- Adds media apps by entering a name, an HTTP(S) URL, and a category.
+- Adds native Jellyfin servers or browser media apps by entering a name and HTTP(S) URL. Jellyfin defaults to TV/Video Services; browser apps offer a category choice.
 - Imports existing version 1 JSON registry files through the validated merge-by-ID import path.
 - Saves registrations by merging on the stable app ID; IDs remain unchanged while editing.
 - Removes only a registry entry. It does not delete app files.
@@ -25,3 +25,5 @@ Release build passed. Computer Use opened the editor, changed an isolated servic
 ## Focused review follow-up
 
 A lower-cost source review found that removing a new unsaved row incorrectly tried the disk registry. The editor now tracks unsaved IDs and removes draft rows locally. A disposable QApplication component replay passed six checks: add draft without disk write; remove draft without disk write; no removal error; add/save new service; generated stable ID; remove saved service through the editor. Evidence: editor-probe.log under the local phase-continuation directory.
+
+Native Jellyfin setup and playback verification: [JELLYFIN-NATIVE.md](JELLYFIN-NATIVE.md). The editor stores only registration metadata; sign-in happens in a separate local dialog.

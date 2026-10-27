@@ -60,7 +60,7 @@ Run from the repository root:
 
 The reports/importer do not open a window or require dev_flash. Reports contain local personal/library data and stay outside Git. Friends failures and invalid imports return exit 2. Games launch through the discovered `steam.exe -applaunch <numeric-ID>`; imported games use an executable plus argument array, without a command shell. Accepting a handoff does not prove the game finished starting.
 
-`examples/jellyfin.json` is a source-only starter. Replace localhost with the user's server, then import it. It adds a TV/Video Services app that opens the server in the system browser. It does not discover a Jellyfin server, authenticate, or provide an embedded player. Registry details, custom artwork and executable examples are in [CONTENT-REGISTRY.md](CONTENT-REGISTRY.md). Future tooling should edit this same schema and providers rather than maintain a second menu catalog.
+`examples/jellyfin.json` is now a native service starter: replace localhost with your server and import it. It uses kind jellyfin for local sign-in, XMB library browsing and native direct/HLS playback. See [native Jellyfin handoff](JELLYFIN-NATIVE.md). Other web registrations retain browser behavior. Registry details are in [CONTENT-REGISTRY.md](CONTENT-REGISTRY.md).
 
 `XMB_STEAM_ARTWORK=0` disables online header retrieval for offline runs. Missing store headers still fall back safely. The store `appdetails` metadata endpoint is undocumented and must remain replaceable; no browser session/cookies or API key are attached. Remote images and caches remain local.
 

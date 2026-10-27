@@ -532,7 +532,7 @@ int main(int argc,char** argv) {
                     {"entryId",shell.entries().isEmpty()?QString{}:shell.entries()[shell.selection()].id},
                     {"entryTitle",shell.entries().isEmpty()?QString{}:shell.entries()[shell.selection()].title},
                     {"entryCount",shell.entries().size()},{"mediaOpen",shell.mediaOpen()},{"mediaPaused",shell.mediaPaused()},
-                    {"mediaPosition",shell.mediaPosition()},{"mediaDuration",shell.mediaDuration()},{"idleMilliseconds",shell.idleMilliseconds()},{"screensaverMinutes",shell.screensaverMinutes()}};
+                    {"mediaProvider",shell.mediaProvider()},{"playMethod",shell.mediaPlayMethod()},{"mediaPosition",shell.mediaPosition()},{"mediaDuration",shell.mediaDuration()},{"idleMilliseconds",shell.idleMilliseconds()},{"screensaverMinutes",shell.screensaverMinutes()}};
                 QFile stateFile(token.mid(5)+".json");const auto bytes=QJsonDocument(state).toJson();
                 if(!stateFile.open(QIODevice::WriteOnly) || stateFile.write(bytes)!=bytes.size())qWarning()<<"script: state save FAILED"<<stateFile.errorString();
                 qInfo()<<"script: state"<<state;
