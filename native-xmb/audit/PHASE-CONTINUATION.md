@@ -4,7 +4,7 @@
 
 This continuation implements app-registration tooling (phase 6), video-control behavior (phase 6), and a native idle display state (phase 5). These are verified functional slices; the exact-firmware phases remain open.
 
-- Game → Import Games and Apps opens the [native registration editor](APP-EDITOR.md). Add an executable or HTTP(S) service, select a category/artwork, and save. Registrations use stable IDs, latest-registry merge and atomic writes. Removal only changes the registration. Jellyfin remains a browser service app; native authentication/streaming is not implemented.
+- Game → Import Games and Apps opens the [native registration editor](APP-EDITOR.md). Add an executable or HTTP(S) service, select a category/artwork, and save. Registrations use stable IDs, latest-registry merge and atomic writes. Removal only changes the registration. Jellyfin is now a native service (sign-in, paged browse, direct/HLS playback); see [JELLYFIN-NATIVE.md](JELLYFIN-NATIVE.md).
 - [Media controls](MEDIA-CONTROLS.md) fade after three seconds of video playback over 250 ms, return on input, and remain visible on pause/loading. Music/photo information remains visible. Seek targets clamp safely to the media duration.
 - Settings → Display Settings → Screensaver offers 5, 10, 20, 30 minutes or Do Not Use, matching the [official PS3 guide](https://manuals.playstation.net/document/en/ps3/current/settings/screensaver.html). The native default is off, preserving prior app behavior. Persisted key: display/screensaverMinutes.
 
