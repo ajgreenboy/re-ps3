@@ -29,7 +29,7 @@ class QVideoSink;
 namespace xmb {
 class Assets;
 class SteamArtwork;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, SteamStoreSection, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps, JellyfinApp, JellyfinFolder, JellyfinPlay, JellyfinMore, JellyfinSignOut };
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, SteamStoreSection, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps, JellyfinApp, JellyfinFolder, JellyfinPlay, JellyfinMore, JellyfinSignOut, SteamDownloads };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -241,6 +241,12 @@ private:
     int steamTitleCount() const;
     QVector<Entry> steamFolderEntries(const QString& mode) const;
     void openSteamFolder(const QString& mode);
+    // Download Management (the firmware's seg_dlctrl row): the page's rows are Steam's own download
+    // queue through scanSteamDownloads(), kept in the scanner's order and rebuilt in place by F5
+    // (audit/STEAM-DOWNLOADS.md section 10).
+    QVector<Entry> steamDownloadRows(QString& error) const;
+    void openSteamDownloads();
+    void reloadSteamDownloads();
     quint64 scanRequest_=0,photoRequest_=0;
     bool loading_=false;
     QString status_;
@@ -252,7 +258,7 @@ private:
     int photoRotation_=0;
     QVector<Category> categories_;
     QVector<int> selections_;
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false; QString jellyfinParent; int jellyfinStart=0; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step

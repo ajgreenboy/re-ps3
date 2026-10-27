@@ -27,6 +27,12 @@ RowKind XmbmlRow::kind() const {
     if(itemClass==QLatin1String("type:x-xmb/module-action"))return RowKind::ModuleAction;
     if(itemClass==QLatin1String("type:x-xmb/xmlpremo"))return RowKind::RemotePlay;
     if(itemClass==QLatin1String("type:x-xmb/xmlgameexit"))return RowKind::InGameExit;
+    // The download queue is the one provider query whose rows this build can produce itself: the
+    // firmware names the list by the query's type field (the view defines no item class to read), and
+    // the data it lists - which apps are downloading and how far along they are - has a native
+    // counterpart in Steam's own manifests (audit/STEAM-DOWNLOADS.md).
+    if(provider==QLatin1String("ese") && source.contains(QLatin1String("type=download_control")))
+        return RowKind::DownloadControl;
     // No local view and a plugin scheme: the rows exist only after that provider answers a query.
     if(!hasView && !provider.isEmpty())return RowKind::DynamicProvider;
     return RowKind::Unknown;

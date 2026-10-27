@@ -3,8 +3,9 @@
 Status: `src/steam_downloads.{h,cpp}` implements the scanner and the UI text helper. It is compiled
 into the app (`CMakeLists.txt`, main executable and the optional `xmb-steam-client` target) and is
 exposed as a report-only CLI in `main.cpp`: `--steam-root <dir>` plus
-`--steam-downloads-report <file.json>`, with `XMB_STEAM_DOWNLOADS_LOG=1` for the qInfo dump. It is not
-wired into the XMB download page UI yet - that is the shell side of the integration (section 7).
+`--steam-downloads-report <file.json>`, with `XMB_STEAM_DOWNLOADS_LOG=1` for the qInfo dump. It is now
+wired into the XMB's Download Management page (section 10): the firmware's `seg_dlctrl` Network row
+opens a page listing Steam's queue.
 Everything below was probed on this machine on 2026-10-26 (America/Chicago), read-only: no writes to
 Steam's files or registry, no network, no Steam API key, no process access.
 
@@ -285,3 +286,265 @@ then by title.
 - `src/steam_downloads.cpp` - bounded VDF reader, library discovery, registry hints, classification.
 - This file. No other file was modified by this work; the `CMakeLists.txt` and `main.cpp` integration
   (report CLI, `--steam-root`, env-gated log) was done by the lead on top of these three files.
+
+## 10. Wired into the XMB: the Download Management page
+
+Implemented 2026-10-26. The firmware's Network column row `seg_dlctrl` (title "Download Management",
+icon `tex_dl_manage`) is now `Action::SteamDownloads` and opens a page built from
+`scanSteamDownloads()`. Nothing was added to the scanner: the page uses its ordering, its state text,
+its byte counters and its `fraction()`.
+
+### 10.1 The mapping, end to end
+
+| Stage | Where | What it does |
+|---|---|---|
+| 1 | `src/xmbml_view.cpp`, `XmbmlRow::kind()` | Returns `RowKind::DownloadControl` when the query's provider is `ese` and its src carries `type=download_control`. This is the only provider query the reader classifies by the query's own type field, because the XMBML defines no `<Item class=...>` for it (there is no local view). |
+| 2 | `src/shell.cpp`, `resolveNetworkColumn` / `actionFor` | `RowKind::DownloadControl` -> `Action::SteamDownloads`, with the reason logged: "the console's download plugin lists its queue; this build lists Steam's own download queue from the manifests Steam writes ...". |
+| 3 | `src/shell.cpp`, `activate` | `Action::SteamDownloads` -> `openSteamDownloads()`. |
+| 4 | `src/shell.h` | `Action::SteamDownloads` appended to the enum (value 30, so no existing action changed value), `Page::downloads`, `steamDownloadRows`, `openSteamDownloads`, `reloadSteamDownloads`. |
+
+The column row itself is unchanged: same id `dlctrl`, same title, same `tex_dl_manage` icon, same
+position (5th), still `source=rco` because the label comes from the plugin's RCO string. The one change
+in the catalogue dump is that row's action: `0` -> `30`.
+
+`XMB_XMBML_LOG=1` line from the verified build:
+
+```
+xmbml: network row dlctrl key=seg_dlctrl class=- title="Download Management" titleSource=rco texture=tex_dl_manage action=30 source=rco reason="the console's download plugin lists its queue; this build lists Steam's own download queue from the manifests Steam writes (src/steam_downloads.cpp, audit/STEAM-DOWNLOADS.md)"
+```
+
+The other four Network rows keep their existing `Unavailable` decisions and reasons.
+
+The built-in fallback row (`src/shell.cpp`, the constructor's Network list, id `downloads`) carries
+`Action::SteamDownloads` too, so the page still opens when `category_network.xml` cannot be read and
+the column keeps its literals. Checked with the scratch dev_flash from the column audit (87-byte
+truncated `category_network.xml`): the column reports `keeps its built-in rows: Line 1: Premature end
+of document.`, the dump lists `downloads ... action=30 source=fallback`, and the same page opens with
+the same row dump.
+
+### 10.2 What the page shows
+
+One row per `SteamDownload`, in exactly the order the scanner returns (active -> paused -> queued ->
+pending, then title). Nothing is re-sorted.
+
+- Title: `download.title`.
+- Second line under the title, drawn for every row: `steamDownloadStateText(download)` followed by the
+  progress figure - `Update pending - 0% (0 B of 313.7 MB)`, `Downloading 43% - 410.1 MB of 953.7 MB`,
+  `Paused - 50% (238.4 MB of 476.8 MB)`, `Queued - no progress published`.
+  The percentage is `qRound(fraction()*100)`; the byte pair is the scanner's counters for the phase the
+  state names (the staged pair while staging, the downloaded pair otherwise). When the scanner
+  publishes no counters for the phase the line says `no progress published`: a percentage is never
+  invented. When the state text already ends with the percentage ("Downloading 43%") the number is not
+  printed twice.
+- Icon: the app's cached Steam header (`<data>/cache/steam/<appid>.jpg`), decoded the way the Steam
+  library folder rows decode it (bounded to 64 decodes, 512x288, centre-cropped square). No cache ->
+  the build's default `game_tex_default_ps3` glyph.
+- Row id: `download:<appid>`.
+
+Real machine (the same item the scanner reports, one pending update):
+
+| field | value |
+|---|---|
+| title | `skate.` |
+| state text | `Update pending` |
+| detail | `Update pending - 0% (0 B of 313.7 MB)` |
+| app / counters | `3354750`, `bytesDownloaded 0`, `bytesToDownload 328909824` (313.7 MiB), staged 0/0 |
+| fraction | `0` |
+| artwork | cached, `hasArtwork: true` |
+| scan time | 6-8 ms |
+
+A synthetic Steam tree (four manifests under `C:\dev\out\dl-scratch\fake`, outside the repo, reached
+through `XMB_STEAM_ROOT`) proves the ordering and the figures. The titles are chosen so rank order and
+alphabetical order disagree:
+
+| # | title | state | text | detail line | fraction |
+|---|---|---|---|---|---|
+| 1 | Zulu Active | downloading | Downloading 43% | `Downloading 43% - 410.1 MB of 953.7 MB` | 0.43 |
+| 2 | Alpha Paused | paused | Paused | `Paused - 50% (238.4 MB of 476.8 MB)` | 0.50 |
+| 3 | Mike Queued | queued | Queued | `Queued - no progress published` | 0 |
+| 4 | Bravo Pending | update-pending | Update pending | `Update pending - 0% (0 B of 313.7 MB)` | 0 |
+
+### 10.3 Nothing downloading, and no Steam
+
+Both are one dialog over the Network column, with the page title as its heading, and both still write
+the page dump:
+
+- A resolvable Steam root whose `steamapps` holds no interesting manifest: `Nothing is downloading.`
+  (that exact sentence). Log: `steam downloads: page empty (nothing is downloading)`; dump `count 0`,
+  `error ""`, `message "Nothing is downloading."`.
+- No `steamapps` under any root: the scanner's own sentence, `Steam installation not found (no
+  steamapps directory under the configured roots).` Log: `steam downloads: page unavailable: ...`;
+  dump `count 0` with `error` and `message` both set to that text.
+
+Neither pushes an empty page, the same convention the Steam library folders use ("This folder is
+empty."). A refresh that finds the queue empty, or Steam gone, also closes an open page and says so
+rather than leaving rows that no longer describe anything.
+
+### 10.4 Refresh
+
+`F5` -> `Shell::refreshDirectory()` -> `reloadSteamDownloads()` when the open page is the download page
+(`Page::downloads`). One rescan, and the page's row vector is assigned, never appended, so repeated
+presses cannot grow the list. A row that is still present keeps the selection by id. There is no
+automatic timer: the page scans when it opens and when F5 is pressed.
+
+Evidence with `--ui-clock 2026-10-25T12:32:00` pinned so the live clock hand cannot differ:
+
+```
+steam downloads: scanned 1 row(s) in 6 ms
+steam downloads: page opened with 1 row(s)
+steam downloads: scanned 1 row(s) in 6 ms
+steam downloads: page refreshed to 1 row(s), selection 0
+```
+
+`dl-pinned-open.png` and `dl-pinned-refresh.png` are byte-identical (sha256 prefix `DAB7C90BCAF04C83`),
+and the state sidecar after the refresh is `depth 1, entryCount 1, entryId download:3354750`.
+
+### 10.5 The page dump
+
+`XMB_DUMP_ENTRIES=<file>` writes `<file>.dl.json` on every scan (page open and each refresh), next to
+the existing `.folder.json` and `.store.json` dumps:
+
+```json
+{
+    "page": "dl",
+    "title": "Download Management",
+    "count": 1,
+    "error": "",
+    "message": "",
+    "rows": [
+        {
+            "id": "download:3354750", "appId": "3354750", "title": "skate.",
+            "state": "update-pending", "text": "Update pending",
+            "detail": "Update pending - 0% (0 B of 313.7 MB)",
+            "note": "Pause/resume is not supported: Steam has no per-title pause or resume command.",
+            "bytesDownloaded": 0, "bytesToDownload": 328909824,
+            "bytesStaged": 0, "bytesToStage": 0,
+            "fraction": 0, "active": false, "paused": false, "queued": false,
+            "hasArtwork": true
+        }
+    ]
+}
+```
+
+The per-row names mirror `--steam-downloads-report` (`appId`, `state`, `text`, the four counters,
+`fraction`, `active`/`paused`/`queued`), so a script can compare the page against the report. `error`
+and `message` state what the page says, so the empty and error cases are dump-checkable too.
+
+### 10.6 The per-row action: no pause, no resume
+
+Cross on a row opens the row's own information page (`Action::Information`):
+
+```
+skate.
+
+App: 3354750
+State: Update pending
+Progress: 0% (0 B of 313.7 MB)
+Bytes: downloaded 0 B of 313.7 MB
+Steam state: update-pending
+Pause/resume: not supported
+Note: Steam has no per-title pause or resume command (audit/STEAM-CLI.md)
+```
+
+Triangle on the row lists `View`, `Information`, `Close`; no Start/Pause row is manufactured. The
+panel's `Information` shows the same page, because the row's value already is that page. The claim
+behind the note is `audit/STEAM-CLI.md`: no `steam://` verb pauses, resumes or throttles a download,
+and the only download switch is the global `app_download_enable`, which affects every title and
+auto-update, so this build does not offer it either.
+
+### 10.7 Verification
+
+Build (the mandated command, last run after the last source edit; exe 2026-10-26 22:35:37):
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-dlpage
+```
+
+Exit 0; `shell.cpp` and `xmbml_view.cpp` compile with no warnings (the warnings in the log are the
+pre-existing ones in `view.cpp`, `main.cpp`, `host.cpp` and `interaction_audio.cpp`).
+
+Captures (in `C:\dev\out\dl-scratch\caps`, local, not committed), all with `--dev-flash
+C:/dev/rpcs3/bin/dev_flash --data-dir C:/dev/xmb/out/native-reference/store/ui3-data --render-clock 20
+--background-clock 2026-10-25T10:00:00 --focus-time 2000` and the route `LEFT x9, RIGHT x7, DOWN x4,
+ENTER`. The category index came from a catalogue dump: `network` is index 7 (`game` is 6, the start),
+and the Network rows are `manual, premo, browser, kensaku, dlctrl`, so `dlctrl` is row index 4.
+
+| file | shows |
+|---|---|
+| `dl-open.png` | the page: `skate.` with `Update pending - 0% (0 B of 313.7 MB)` under it |
+| `dl-refresh.png`, `dl-refresh2.png` | after one and two F5 presses: same page, still one row (byte-identical to each other) |
+| `dl-pinned-open.png`, `dl-pinned-refresh.png` | the same with a pinned UI clock: byte-identical |
+| `dl-fake.png` | four rows in scanner order with the figures in the table above |
+| `dl-empty.png` | `Download Management` / `Nothing is downloading.` |
+| `dl-error.png` | `Download Management` / `Steam installation not found (no steamapps directory under the configured roots).` |
+| `dl-opt-panel.png` | Triangle: `View / Information / Close` |
+| `dl-opt-info.png`, `dl-row-info.png` | the information page above (byte-identical: panel and Cross reach the same page) |
+
+`dl-open.png` and `dl-refresh.png` differ only in the live clock's minute hand (276 pixels at x
+1695-1793, y 94-117), which is why the pinned pair above is the byte-identity evidence.
+
+Layer gate (the mandated command):
+
+```
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --capture --exe C:/dev/out/native-dlpage/re-ps3-native.exe
+```
+
+| layer | PSNR | baseline | delta | SSIM | baseline | delta | gate |
+|---|---:|---:|---:|---:|---:|---:|---|
+| frame | 18.29 | 18.02 | +0.27 | .8295 | .8301 | -.0006 | PASS |
+| top background | 20.24 | 20.24 | +0.00 | .9344 | .9344 | +.0000 | PASS |
+| category icon row | 20.91 | 21.05 | -0.14 | .8947 | .8950 | -.0003 | PASS |
+| item label row | 11.94 | 11.94 | +0.00 | .3913 | .3910 | +.0003 | PASS |
+| clock text | 11.39 | 11.39 | +0.00 | .4105 | .4105 | +.0000 | PASS |
+| info bar | 14.78 | 14.78 | +0.00 | .6117 | .6117 | +.0000 | PASS |
+
+`PASS: 6/6 layers within budget`.
+
+Named states:
+
+```
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --states --exe C:/dev/out/native-dlpage/re-ps3-native.exe
+```
+
+`states: 4/4 pass`, every region `inf / 1.0000` (pixel-identical), every state assertion unchanged
+(`steam-game-root`, `steam-all-games`, `steam-store-sections`, `steam-not-installed`).
+
+One honest note on that baseline: while this work was in progress another agent changed the item-glyph
+rendering (`view.cpp` and `view.h`, outside this change's write fence) and re-saved
+`out/native-reference/layers/*.png` at 22:32-22:33. A run of the same command on the 22:26 build,
+against the previous 21:24 references, failed 0/4; that run's pixel difference was confined to
+x 251-592, y 469-1055 - the folder glyphs on the All Games page - with no other region changed, so the
+delta belonged to that glyph work, not to this page (no download row exists in any named state). No
+harness file, threshold or reference was edited by this work.
+
+### 10.8 Limits
+
+- No per-row progress bar: the figure is the row's second line, because `view.cpp` (the draw code that
+  owns row layout) is another agent's write fence for this change. A bar is a renderer change, not a
+  shell change.
+- The scan runs on the UI thread when the page opens or refreshes: 6-8 ms here (11 manifests, 5
+  library roots, 39 registry apps). The scanner's own caps bound the worst case; if a large library
+  ever makes that visible, the store/folder pattern (`QtConcurrent` plus a page fill) is the next
+  step.
+- No automatic refresh timer: the page reflects the queue at the moment it was opened or refreshed.
+- No pause/resume/start/cancel; see 10.6. Starting an install stays on the store row's
+  `steam://install/<id>` path, a different action (`Action::InstallSteam`).
+- English only, like the rest of the shell's pages.
+- The second line uses the one-line slot the view draws under every row (`Shell::subtitleText`), and
+  only for `download:` ids, so no other column changes.
+
+### 10.9 Files touched by this integration
+
+- `src/xmbml_view.h`: `RowKind::DownloadControl`.
+- `src/xmbml_view.cpp`: the `ese:// ... type=download_control` classification in `XmbmlRow::kind()`.
+- `src/shell.h`: `Action::SteamDownloads`, `Page::downloads`, `steamDownloadRows`,
+  `openSteamDownloads`, `reloadSteamDownloads`.
+- `src/shell.cpp`: the `actionFor` case and its comment, the built-in fallback row's action, the page
+  builder (`steamDownloadRows`), `openSteamDownloads`, `reloadSteamDownloads`, the `activate` case,
+  `activateLabel`, `entryKind`, `subtitleText`, `showEntryInformation`'s download branch and
+  `refreshDirectory`'s download branch.
+- This file (section 10 and the status line above).
+
+Not touched: `view.cpp`/`view.h`, `main.cpp`, `steam_downloads.{h,cpp}`, `CMakeLists.txt`, the harness
+(`work/ab-layers.ts`, its thresholds and references), and anything under the firmware.
+
