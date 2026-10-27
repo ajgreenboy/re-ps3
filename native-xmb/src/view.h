@@ -54,6 +54,9 @@ public:
     void setIntroEnabled(bool enabled) { introEnabled_=enabled; }
     // Verification taps dispatch synchronously, independent of foreground focus and the physical input poll.
     void replayKeyTap(int key);
+    // Verification taps for the PS button (no physical controller in scripted runs).
+    void replayPsTap() { shell_.psTapped(); }
+    void replayPsHold() { shell_.psHeld(); }
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -76,6 +79,9 @@ private:
     QVector<FrameSample> frameTrace_;
     void saveFrameTrace();
     qint64 previousFrameNs_=0,reportAt_=0;
+    // PS button: pressed-time and hold latch, plus the short controller-indicator window a tap opens.
+    qint64 psDownAt_=-1,psHudUntil_=0;
+    bool psHoldFired_=false;
     quint64 frames_=0;
     double categoryPosition_=6;
     int previousCategory_=6;
@@ -155,6 +161,8 @@ private:
     QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     double secondsOverride_=-1;                                       // fixed animation time for A/B captures, -1 = now
     void drawScene(QPainter& painter);
+    void drawPsMenu(QPainter& painter);
+    void drawControllerHud(QPainter& painter);
     void grabIntroFrame();
     // PS3 on-screen keyboard (reference frame 64 s): 10x4 character grid, two function rows, prediction panel.
     struct Osk { bool open=false,shift=false,symbols=false; QString title,text; int row=0,column=0,cursor=0; std::function<void(QString)> done; };

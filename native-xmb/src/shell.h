@@ -114,6 +114,18 @@ public:
     void authenticateJellyfin(QUrl server,QString username,QString password);
     void cancelJellyfinSignIn();
     void createUser(const QString& name);
+    // PS button (DualSense/DualShock over HID, keyboard substitute): a tap shows the controller indicator
+    // and returns focus to the XMB; a hold opens the system menu the console shows (captured in RPCS3:
+    // Turn Off the System / Turn Off the Controller, plus Quit Game while a title runs).
+    void psTapped();
+    void psHeld();
+    bool psMenuOpen() const { return psMenu_; }
+    int psMenuSelection() const { return psSelection_; }
+    QStringList psMenuItems() const;
+    void psMenuMove(int delta);
+    void psMenuActivate();
+    void psMenuClose();
+    bool psMenuConfirmingOff() const { return psConfirmOff_; }
 signals:
     void changed();
     void requestLibrary();
@@ -122,6 +134,7 @@ signals:
     void requestTheme();
     void requestSystemName(const QString& value);
     void requestQuit();
+    void psTapIndicator();
     void requestNewUser();
     void requestImportApps();
     void requestJellyfinSignIn(QUrl server);
@@ -202,6 +215,9 @@ private:
     QVector<int> selections_;
     struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false; QString jellyfinParent; int jellyfinStart=0; };
     QVector<Page> pages_;
+    bool psMenu_=false;              // the PS-button system menu is showing
+    bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step
+    int psSelection_=0;
     QString message_,mediaTitle_,renderer_;
     QDateTime clockOverride_;
     // Only the decoded pieces are kept (the .p3t itself is read again when the theme changes); nothing is written to disk.

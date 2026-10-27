@@ -912,6 +912,66 @@ void Shell::activate() {
     }
     emit changed();
 }
+// --- PS button -----------------------------------------------------------------------------------
+// The console's behaviour, captured from RPCS3 on 2026-10-26 (audit/PS-BUTTON.md): a tap returns to the
+// XMB and flashes the controller indicator; a hold opens a black system menu with Turn Off the System and
+// Turn Off the Controller (and Quit Game while a title runs). A power action asks once before doing it.
+void Shell::psTapped() {
+    if(psMenu_) { psMenuClose(); return; }
+    // Bring the XMB back over whatever the user was doing; the indicator itself is drawn by the view.
+    message_.clear();status_.clear();
+    emit psTapIndicator();
+    emit changed();
+}
+void Shell::psHeld() {
+    if(psMenu_)return;
+    psMenu_=true;psConfirmOff_=false;psSelection_=0;
+    qInfo().noquote()<<"shell: PS menu opened";
+    emit changed();
+}
+QStringList Shell::psMenuItems() const {
+    QStringList items;
+    if(gameRunning())items<<QObject::tr("Quit Game");
+    items<<QObject::tr("Turn Off the System")<<QObject::tr("Turn Off the Controller");
+    return items;
+}
+void Shell::psMenuMove(int delta) {
+    if(!psMenu_ || delta==0)return;
+    if(psConfirmOff_){psSelection_=0;emit changed();return;}
+    const int count=psMenuItems().size();
+    psSelection_=(psSelection_+delta%count+count)%count;
+    qInfo().noquote()<<"shell: PS menu selection"<<psSelection_;
+    emit changed();
+}
+void Shell::psMenuActivate() {
+    if(!psMenu_)return;
+    if(psConfirmOff_){ emit requestQuit(); return; }
+    const auto items=psMenuItems();
+    if(items.isEmpty())return;
+    const QString item=items.value(std::clamp(psSelection_,0,int(items.size())-1));
+    if(item==QObject::tr("Turn Off the System")) { psConfirmOff_=true; emit changed(); return; }
+    if(item==QObject::tr("Quit Game")) {
+        if(!game_.isNull() && game_->state()!=QProcess::NotRunning) {
+            game_->terminate();
+            if(!game_->waitForFinished(3000))game_->kill();
+            qInfo().noquote()<<"shell: quit game requested from the PS menu";
+        }
+        message_=gameTitle_+"\n\n"+QObject::tr("The game was closed.");
+        psMenu_=false;
+        emit changed();
+        return;
+    }
+    // The console powers the controller off itself; a Bluetooth/USB pad on a PC is owned by Windows, so
+    // say so instead of pretending.
+    message_=QObject::tr("Turn Off the Controller")+"\n\n"+QObject::tr("A controller connected to this PC is managed by Windows and stays on. Disconnect or power it off from the system.");
+    psMenu_=false;
+    emit changed();
+}
+void Shell::psMenuClose() {
+    if(!psMenu_ && !psConfirmOff_)return;
+    psMenu_=false;psConfirmOff_=false;
+    emit changed();
+}
 void Shell::back() {
     touch();
     if(!message_.isEmpty() || mediaOpen_ || !pages_.isEmpty())interactionAudio_.play(InteractionAudio::Cue::Back);
