@@ -32,4 +32,10 @@ struct SteamAppState {
 };
 SteamAppState steamAppState(const QString& appId);
 
+// Ask the running Steam client to stop a title through its console command line. The client executes
+// "+<command>" arguments handed to steam.exe, so this is the supported-by-observation way to quit a
+// Steam game without killing processes (audit/STEAM-CLI.md). Returns false when the client cannot be
+// started or the id is not a number; the caller still has to wait for Apps\<id>\Running to clear.
+bool steamStopApp(const QString& appId,const QString& steamRoot = {}, QString* error = nullptr);
+
 }
