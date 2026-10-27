@@ -328,3 +328,187 @@ depth (Game > All Games > Not Installed, decode `_Eye.w` for the focused row and
 settled rows measure 85.554 the factor is a level scale (A); if only transition frames do, it is page-entry (B).
 The bullet branch needs its own check either way: the settings-page focused bullet captures at 85.05 with no
 1.1022 factor, so if A is chosen bullets may have to stay unscaled.
+
+## Phase 5, 2026-10-26: the folder glyph and the open-page item-icon hierarchy (view.cpp landed)
+
+Reported bug: "the folder icon when you go to video files has the subfolder a big icon and looks wack". Reproduced
+on the Video Library page (`out/native-reference/store/video-data`, script in the reproduction section below):
+at the focus row the page drew a 56 px grey folder at x 565 while a 320x180 opaque album card sat at x 303,505
+under the open Video film-strip icon at x 303,280. The two read as one large folder carrying a large film strip.
+
+### 1. The firmware's folder textures (full RCO inventory, 4.93 dev_flash)
+
+Every image name in every `vsh/resource/*.rco` was dumped with
+`re-ps3-native --dev-flash <dev_flash> --rco-images <out.txt>` (122 RCOs). There is no `page_tex_*` family in 4.93.
+The folder glyphs are:
+
+| Texture | RCO(s) | Size | Decoded mean colour of the covered mask |
+|---|---|---|---|
+| `item_tex_plain_folder` | `explore_plugin_full`, `explore_category_game`, `explore_category_video` | 314x178 | (237,237,237) white |
+| `item_tex_ps3game_folder` | `explore_plugin_full`, `explore_category_game` | 314x178 | (240,240,240) white, gamepad emblem |
+| `item_tex_ps3sd_folder` | `explore_plugin_full` | 314x178 | (238,238,238) white, memory-card slots |
+| `item_tex_pspgame_folder` | `explore_plugin_full` | 314x178 | (239,239,239) white |
+| `item_tex_ps2game_folder` | `explore_plugin_full` | 314x178 | **(176,208,229) blue**, gamepad emblem |
+| `item_tex_ps1game_folder` | `explore_plugin_full` | 314x178 | (180,178,183) silver, gamepad emblem |
+| `item_tex_ps1game_plain_folder` | `explore_plugin_full` | 314x178 | (150,147,154) darker silver |
+| `item_tex_ps3util` / `ps12util` / `psputil` | `explore_plugin_full` (178x178 / 146x146), `explore_category_game` (128x128) | square | (236..240) white |
+
+Three findings that decide the texture question:
+
+1. **The plain white folder is the firmware's Video-column folder.** `explore_category_video.rco` ships exactly one
+   folder glyph, `item_tex_plain_folder`; `explore_category_music.rco` and `explore_category_photo.rco` ship no
+   plain folder at all (their folder placeholder is the album glyph, `music_tex_album_default` /
+   `photo_tex_album_default`). So for a Video library folder the name `item_tex_plain_folder` is right, and the
+   grey look was not a wrong texture name.
+2. **The blue glass folder is `item_tex_ps2game_folder`** (`explore_plugin_full.rco`), and it is a PS2 game-data
+   folder with a gamepad cut-out baked into a blue tint - not a generic storage glyph. `item_tex_ps_store`
+   (160x160, (128,161,203)) is the only other coloured item texture. Using the PS2 folder for a Video folder would
+   put a gamepad inside it.
+3. **Where the blue really comes from.** The folder masks are white because the icon program tints them from the
+   frame (see 3 below). The only genuinely blue-green folder artwork in the firmware is the theme's: `01.p3t`
+   ("Air Paint") carries `icon_gamedata`, `icon_savedata`, `icon_vmc` and friends as cyan/teal outlined folders
+   (`--p3t-dump`, 128x128); `Shell` already points `game/data`, `game/ps3`, `game/memory` at those names. With no
+   theme selected the column draws the RCO glyph, which is what the captures show.
+
+Chosen, and landed in `src/view.cpp` only (shell.cpp untouched): local-library folders keep
+`item_tex_plain_folder`; the Steam folder rows (All Games, its collections, Not Installed, Family Shared) take
+`item_tex_ps3game_folder` from `explore_category_game.rco` / `explore_plugin_full.rco`, matching the firmware's
+Game-column folder-of-games row - the stored RPCS3 root frame's Game Data Utility row is that folder-plus-gamepad
+glyph, not a bare storage folder. The remap is one expression in `drawColumns` and should move into `shell.cpp`
+when that file is next open.
+
+### 2. What the open page draws now, and why (the layering decision)
+
+The captures decide the hierarchy, and they decide it against the "make the focused row's icon 184.8 px" reading:
+
+| Object | Captured value | Native before | Native now |
+|---|---|---|---|
+| Open category icon | (303, 280), 167.328, `_Ambiant.w` 1.000 | 167.33, brightness 1 | unchanged |
+| Parent column, focused row | (303, 505), 184.800, 2857.2 is the *unfocused* row, `_Ambiant.w` 0.698 | the row's wide album card (320x180) at **1.0** | the row's item-icon box at **0.698** |
+| Parent column, other rows | distance 2857.2, 77.616, x 455.5, `_Ambiant.w` 0.247 | 0.22 for cards, 0.247 for glass | 0.247 for every row class |
+| Page row, focused | 184.800, `_Ambiant.w` 1.0 | 40+16*focus = 56 px (Qt fallback) | unchanged (56 px) |
+| Page row, other | 77.616, `_Ambiant.w` 1.0 | 40 px | unchanged (40 px) |
+
+Why the page's own focused row keeps the small 56 px icon: the captured 77.616/184.800 are *quads* of the glass
+program whose visible glyph only fills part of the quad. Measured on the stored RPCS3 root frame (905x575 crop,
+alpha-tracked bounding boxes): the unfocused `item_tex_ps3game_folder` row glyph is 54 px wide and the PS Store bag
+46 px, i.e. the 77.616 quad shows ~0.7 of itself; an RCO folder plane fills its box, so drawing it at 184.8 would
+be 3x the row's own label distance (the deeper-level label sits 57 px right of the icon centre, 622 vs a 184.8
+glyph reaching 657). The captured parent-row quad is therefore expressed as the same *visible* item box the column
+already uses (`size`), not as 184.8.
+
+Landed in `view.cpp`:
+- `iconAlpha` for every row class behind a page is the captured parent brightness
+  `1-behind*(1-(.247+.451*focus))` (was `1-behind*.78*(1-focus)`, which left a focused card at 1.0 and is the
+  reason the album card outshone the page).
+- A row behind a page is drawn at its own level's item box (`size`) instead of the 140x90/320x180 card. This is
+  what removes the "big folder with a film strip": the Video Library card at 303,505 went 320x180 -> 104x59 and
+  1.0 -> 0.698 brightness.
+- The category icon is unchanged: the open category was captured at 167.328 px and `_Ambiant.w` 1.000, so it is
+  not dimmed or shrunk. The hierarchy in the capture is "bright category icon above, dim parent row below", not
+  "dim category icon".
+
+### 3. The material: why the folder read as a plain grey slab (measured)
+
+The masks are white with a translucent body (`item_tex_plain_folder`: body alpha 196/255). A plain alpha blend
+therefore paints `0.77` white over the frame, and white over a warm frame desaturates to grey. Measured on the
+stored pairs, at the folder body (1024-level RGB means, background sampled beside the glyph):
+
+| Frame | Background | Folder body | Implied white coverage |
+|---|---|---|---|
+| RPCS3 `ab-rpcs3-root.png` (Game Data Utility) | (106,86,42) | (132,114,71) | **0.18** |
+| native before (`before-video.png`, Movies) | (175,152,124) | (217,212,204) | **0.70** |
+
+So the native was ~3.9x too opaque, and the firmware's glass keeps the frame's hue where the native's copy
+flattens it. `drawItemGlyph` / `itemGlyph` now prepare each translucent mask once per texture
+(`View::itemGlyphs_`): an RCO image whose covered-pixel median alpha is below 230 is a glass glyph, and its
+coverage becomes `k*(255-alpha)` with k = 0.78, which reproduces the measured 0.18 for the plain folder's 196
+body and makes a thicker region (the gamepad emblem, alpha 248) nearly disappear into the frame - the polarity the
+reference frame shows. The icon program's Fresnel rim has no counterpart in the mask, so the silhouette pixels
+(those touching the transparent outside, found by a flood fill from the border, grown 3 texture px so it survives
+the downscale) keep the mask's own alpha. Opaque artwork (PS Store bag, ICON0 stills) is passed through unchanged;
+`drawImage` (dialogs, notifications, info pages) is untouched.
+
+Canonical gate `work/ab-layers.ts --capture --exe C:/dev/out/native-foldericon/re-ps3-native.exe`:
+
+| layer | before this pass | after | delta |
+|---|---|---|---|
+| frame | 18.02 / 0.8301 | 18.29 / 0.8295 | **+0.27 dB** / -0.0006 |
+| category icon row | 20.91 / 0.8947 | 20.91 / 0.8947 | 0 / 0 |
+| item label row | 11.94 / 0.3913 | 11.94 / 0.3913 | 0 / 0 |
+| other layers | unchanged | unchanged | 0 / 0 |
+
+PASS 6/6, and the whole-frame score improves: the glass glyph is measurably closer to the RPCS3 frame than the
+opaque slab it replaced.
+
+### 4. The 1.1022x size wiring: applied, measured, reverted
+
+Wiring A from the section above was landed exactly as written (`base*(level>0?1.10223:1.)`) and A/B'd.
+
+- Video Settings page (depth 1, bullets): 1463 pixels change, bounding box x 541..588 (the bullet column at 565),
+  y 480..769 (the focused bullet and the rows below). It scales the captured 85.05 focused bullet to 93.7.
+- Video Library page (depth 1, folders): **0** pixels change. The item rows the wiring is meant to help carry RCO
+  glyphs, which do not go through `itemIconSize`.
+
+At level>0 the only icontex items in this build are the settings bullets (`settings_menu.cpp` uses `qgl/icontex`
+`23n` for every option), and the settings page's focused bullet is the one state in which the 1.1022 class was
+*not* observed (85.05, no factor). So wiring A inflates the only state we can check and does nothing for the rows
+it was proposed for. Reverted; `itemIconSize` is back to the two captured pairs and the reason is recorded in
+`src/view.cpp`. Wiring B (page-entry scale on the incoming column) was not landed either: it only touches frames
+mid transition, which no still capture can score.
+
+### 5. Named-state references that moved (harness not edited)
+
+`work/ab-layers.ts --states` now fails its 55 dB self-baselines for the states whose captures contain folder rows
+or a parent column, because the glyph material, the parent-column brightness and the parent-row size all changed
+by design. Measured with the final build:
+
+| state | frame | rows/sections |
+|---|---|---|
+| steam-game-root | 31.20 dB / 0.9963 | (none) |
+| steam-all-games | 30.73 dB / 0.9937 | 26.80 dB / 0.9801 |
+| steam-store-sections | 35.42 dB / 0.9965 | 28.38 dB / 0.9913 |
+| steam-not-installed | 39.40 dB / 0.9985 | 47.03 dB / 0.9989 |
+
+These are self-baseline regression gates, not fidelity numbers, so the references need a deliberate
+`--states --save-reference` refresh by whoever owns the harness. The canonical gate above is unaffected and passes.
+
+### 6. Open question and the capture that would settle it
+
+Unresolved: **what the firmware draws for an artwork row (album placeholder, ICON0) in the parent column**, and
+whether a deeper page's RCO folder plane is the same visible size as a glass item icon. The captures give the
+parent row's quad (184.800) and brightness (0.698) but every captured parent row is an *icon* row; no capture
+contains a wide artwork plane behind a page, so the native draws the artwork at the item box and dims it to 0.698
+(geometry - x 303, y 505 - is unchanged and captured).
+
+The capture that would settle it: an RPCS3 `XMB_FP_DUMP` + screen grab of Game > (an installed game) > its
+submenu, i.e. a depth-2 state whose parent row is a 16:9 ICON0 tile, decoded with
+`re-ps3-native --decode-fp icons:lib/icons/icons_no_ss_no_shad.fpo@<dir>` and read with
+`work/item-icon-eyes.js`, plus the frame itself to measure the artwork plane's projected width. If the plane stays
+320x180 at 0.698, the parent-row cap should apply to icon rows only.
+
+### 7. Reproduction for this pass
+
+```
+# build (fence: src/view.cpp, src/view.h, this file)
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-foldericon
+
+# Video Library page, before/after (0.3 s per token after a 2.5 s settle)
+C:\dev\out\native-foldericon\re-ps3-native.exe --dev-flash C:\dev\rpcs3\bin\dev_flash ^
+  --data-dir C:\dev\xmb\out\native-reference\store\video-data --render-clock 20 ^
+  --background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-26T21:50:00 --focus-time 2000 ^
+  --script "full,wait,wait,LEFT,LEFT,LEFT,LEFT,LEFT,LEFT,LEFT,LEFT,LEFT,wait,wait,RIGHT,RIGHT,RIGHT,RIGHT,wait,wait,ENTER,wait,wait,wait,wait,wait,grab=out\folder-icon\after-video.png,quit"
+
+# Game > All Games (row 1 of the Game column; XMB_STEAM_ROOT unset so the local Steam library is read)
+... --data-dir out\native-reference\store\ui3-data --render-clock 30 --ui-clock 2026-10-25T12:32:00 ^
+  --script "full,wait,wait,wait,wait,wait,wait,wait,wait,DOWN,ENTER,wait,wait,wait,wait,wait,grab=out\folder-icon\after-allgames.png,quit"
+
+# texture inventory and exports used for the table above
+... --rco-images out\folder-icon\rco-images.txt
+... --export-image "explore_plugin_full:item_tex_plain_folder,...@out\folder-icon\tex\full"
+... --p3t-dump "C:\dev\rpcs3\bin\dev_flash\vsh\resource\theme\01.p3t@out\folder-icon\theme"
+
+# gates
+bun work\ab-layers.ts --capture --exe C:/dev/out/native-foldericon/re-ps3-native.exe   # PASS 6/6
+bun work\ab-layers.ts --states  --exe C:/dev/out/native-foldericon/re-ps3-native.exe   # self-baselines need a refresh (5)
+```
