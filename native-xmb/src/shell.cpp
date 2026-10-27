@@ -11,6 +11,7 @@
 #include "steam_collections.h"
 #include "steam_overrides.h"
 #include "steam_family.h"
+#include "steam_downloads.h"
 #include <QDesktopServices>
 #include <QAudioOutput>
 #include <QMediaPlayer>
@@ -172,12 +173,17 @@ void Shell::resolveNetworkColumn() {
         {"seg_browser",{"Internet Browser","tex_browser"}},
         {"seg_kensaku",{"Internet Search","tex_kensaku"}},
         {"seg_dlctrl",{"Download Management","tex_dl_manage"}}};
-    // The XMBML item class decides the native action. Every Network row in 4.93 is a browser handoff, a
-    // browser plugin action, Remote Play, an in-game row or a console-owned list; none of them has a PC
-    // equivalent this build can honestly perform, and the XMBML carries no URL, so an Action::OpenUrl
-    // target would have to be invented. The reason is logged per row and recorded in the audit.
+    // The XMBML item class decides the native action. Almost every Network row in 4.93 is a browser
+    // handoff, a browser plugin action, Remote Play, an in-game row or a console-owned list; the one
+    // exception is the download queue, which Steam keeps in a form this build can read. The XMBML
+    // carries no URL, so an Action::OpenUrl target would have to be invented. The reason is logged per
+    // row and recorded in the audit.
     const auto actionFor=[](RowKind kind,const XmbmlRow& row)->std::pair<Action,QString> {
         switch(kind) {
+        case RowKind::DownloadControl:
+            return {Action::SteamDownloads,QStringLiteral("the console's download plugin lists its queue; "
+                "this build lists Steam's own download queue from the manifests Steam writes "
+                "(src/steam_downloads.cpp, audit/STEAM-DOWNLOADS.md)")};
         case RowKind::WebBrowser:
             return {Action::Unavailable,QStringLiteral("the firmware hands this node to the PS3 Internet Browser; "
                 "this build has no browser and the XMBML carries no URL to hand to the host one")};
@@ -537,6 +543,176 @@ void Shell::openSteamFolder(const QString& mode) {
     pages_.push_back(std::move(page));
     emit changed();
 }
+// --- Download Management --------------------------------------------------------------------------
+// The firmware's Network column carries seg_dlctrl, an ese://download_control query the console's
+// download plugin answers with its queue (audit/XMBML-NETWORK.md). This build has no console queue,
+// but Steam writes the same facts into its own files (audit/STEAM-DOWNLOADS.md), so the row opens a
+// page built from scanSteamDownloads(): one row per download in the scanner's order (active -> paused
+// -> queued -> pending), with the scanner's own state text and its byte counters. Nothing is invented:
+// no counters means no percentage, an empty queue says so, and a scan that cannot find Steam reports
+// the scanner's error. F5 rebuilds the page in place (Shell::reloadSteamDownloads).
+namespace {
+QString downloadSize(qint64 bytes) {
+    if(bytes<=0)return QStringLiteral("0 B");
+    static const char* const units[]={"B","KB","MB","GB","TB"};
+    double value=double(bytes);int unit=0;
+    while(value>=1024.0 && unit<4){value/=1024.0;++unit;}
+    if(unit==0)return QStringLiteral("%1 B").arg(bytes);
+    return QStringLiteral("%1 %2").arg(QString::number(value,'f',unit>=2?1:0)).arg(QString::fromLatin1(units[unit]));
+}
+// The counters the scanner keeps for the phase the state names, turned into the same fraction() the
+// scanner exposes: staged/toStage while staging, otherwise downloaded/toDownload. No counters means
+// Steam published none for this phase, so no percentage is shown rather than a made-up zero.
+QString downloadProgressText(const SteamDownload& download) {
+    qint64 done=download.bytesDownloaded,total=download.bytesToDownload;
+    if(download.state==QLatin1String("staging")){done=download.bytesStaged;total=download.bytesToStage;}
+    if(total<=0)return QStringLiteral("no progress published");
+    return QStringLiteral("%1% (%2 of %3)").arg(qRound(download.fraction()*100.0))
+        .arg(downloadSize(done),downloadSize(total));
+}
+// The line under a row's title, as the console's own download list shows it: the scanner's state text
+// plus the progress figure. An active phase's state text already ends with its percentage
+// ("Downloading 43%"), so the same number is not printed twice.
+QString downloadRowDetail(const SteamDownload& download) {
+    const QString state=steamDownloadStateText(download);
+    QString progress=downloadProgressText(download);
+    const QString percent=QStringLiteral("%1%").arg(qRound(download.fraction()*100.0));
+    if(state.endsWith(percent) && progress.startsWith(percent))
+        progress=progress.mid(percent.size()).trimmed();
+    return progress.isEmpty()?state:state+QStringLiteral(" - ")+progress;
+}
+// Why the row has no pause/resume control: Steam's command surface has none per title
+// (audit/STEAM-CLI.md), so none is offered rather than a button that could not work.
+QString downloadControlNote() {
+    return QStringLiteral("Pause/resume is not supported: Steam has no per-title pause or resume command.");
+}
+// The information page a row opens: "Title", blank line, then the "Key: value" rows the existing
+// information layout detects (src/view.cpp, drawScene).
+QString downloadInformationText(const SteamDownload& download) {
+    const bool staging=download.state==QLatin1String("staging");
+    const qint64 done=staging?download.bytesStaged:download.bytesDownloaded;
+    const qint64 total=staging?download.bytesToStage:download.bytesToDownload;
+    QStringList rows;
+    rows<<QStringLiteral("App: ")+download.appId;
+    rows<<QStringLiteral("State: ")+steamDownloadStateText(download);
+    rows<<QStringLiteral("Progress: ")+downloadProgressText(download);
+    rows<<QStringLiteral("Bytes: ")+(staging?QStringLiteral("staged "):QStringLiteral("downloaded "))
+        +downloadSize(done)+QStringLiteral(" of ")+downloadSize(total);
+    rows<<QStringLiteral("Steam state: ")+download.state;
+    rows<<QStringLiteral("Pause/resume: not supported");
+    rows<<QStringLiteral("Note: Steam has no per-title pause or resume command (audit/STEAM-CLI.md)");
+    return download.title+QStringLiteral("\n\n")+rows.join('\n');
+}
+}
+QVector<Entry> Shell::steamDownloadRows(QString& error) const {
+    error.clear();
+    QElapsedTimer timer;timer.start();
+    QVector<SteamDownload> downloads=scanSteamDownloads(QString(),&error);
+    QVector<Entry> rows;
+    rows.reserve(downloads.size());
+    const QString cache=QDir(dataDirectory_).filePath("cache/steam");
+    int decoded=0;
+    for(const auto& download:downloads) {
+        // A Steam download can be watched but not started, stopped, paused or resumed from here: Steam's
+        // command surface has no per-title command for any of those (audit/STEAM-CLI.md), so the row
+        // opens its own facts instead of a fabricated control.
+        auto e=item("download:"+download.appId,download.title,"game_tex_default_ps3","explore_plugin_full",
+            Action::Information);
+        e.detail=downloadRowDetail(download);
+        e.value=downloadInformationText(download);
+        // The row icon is the app's own cached Steam header, exactly as the library folder rows get it:
+        // bounded, centre-cropped to a square, and simply absent when nothing is cached.
+        if(decoded<64) {
+            QImageReader reader(SteamArtwork::cachePath(cache,download.appId));
+            if(reader.canRead()) {
+                const auto size=reader.size();
+                if(size.isValid() && size.width()<=16384 && size.height()<=16384) {
+                    reader.setScaledSize(size.scaled(512,288,Qt::KeepAspectRatio));
+                    const auto image=reader.read();
+                    if(!image.isNull()) {
+                        const int side=std::min(image.width(),image.height());
+                        e.artwork=image.copy((image.width()-side)/2,(image.height()-side)/2,side,side);
+                        ++decoded;
+                    }
+                }
+            }
+        }
+        rows.push_back(std::move(e));
+    }
+    const QString message=!error.isEmpty()?error:rows.isEmpty()?QObject::tr("Nothing is downloading."):QString{};
+    qInfo().noquote()<<QStringLiteral("steam downloads: scanned %1 row(s) in %2 ms%3")
+        .arg(downloads.size()).arg(timer.elapsed())
+        .arg(error.isEmpty()?QString{}:QStringLiteral(", error: ")+error);
+    // Verification hook: the download page dumps next to the catalogue and the store/folder pages
+    // (<dump>.dl.json), including the honest empty and error cases so a script can check them.
+    if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
+        QJsonArray list;
+        for(int i=0;i<downloads.size();++i) {
+            const auto& download=downloads[i];
+            list.push_back(QJsonObject{{"id","download:"+download.appId},{"appId",download.appId},
+                {"title",download.title},{"state",download.state},{"text",steamDownloadStateText(download)},
+                {"detail",downloadRowDetail(download)},{"note",downloadControlNote()},
+                {"bytesDownloaded",double(download.bytesDownloaded)},
+                {"bytesToDownload",double(download.bytesToDownload)},
+                {"bytesStaged",double(download.bytesStaged)},{"bytesToStage",double(download.bytesToStage)},
+                {"fraction",download.fraction()},{"active",download.active},
+                {"paused",download.paused},{"queued",download.queued},
+                {"hasArtwork",!rows.value(i).artwork.isNull()}});
+        }
+        QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".dl.json");
+        if(file.open(QIODevice::WriteOnly))file.write(QJsonDocument(QJsonObject{{"page","dl"},
+            {"title",QObject::tr("Download Management")},{"rows",list},{"count",list.size()},
+            {"error",error},{"message",message}}).toJson());
+    }
+    return rows;
+}
+void Shell::openSteamDownloads() {
+    QString error;
+    auto rows=steamDownloadRows(error);
+    const QString title=QObject::tr("Download Management");
+    if(!error.isEmpty()) {
+        qWarning().noquote()<<"steam downloads: page unavailable:"<<error;
+        message_=title+"\n\n"+error;
+        emit changed();
+        return;
+    }
+    if(rows.isEmpty()) {
+        qInfo().noquote()<<"steam downloads: page empty (nothing is downloading)";
+        message_=title+"\n\n"+QObject::tr("Nothing is downloading.");
+        emit changed();
+        return;
+    }
+    qInfo().noquote()<<QStringLiteral("steam downloads: page opened with %1 row(s)").arg(rows.size());
+    Page page;page.title=title;page.entries=std::move(rows);page.downloads=true;
+    pages_.push_back(std::move(page));
+    emit changed();
+}
+void Shell::reloadSteamDownloads() {
+    if(pages_.isEmpty() || !pages_.last().downloads)return;
+    const QString title=pages_.last().title;
+    const QString selected=pages_.last().entries.isEmpty()?QString{}
+        :pages_.last().entries[std::clamp(pages_.last().selection,0,int(pages_.last().entries.size())-1)].id;
+    QString error;
+    auto rows=steamDownloadRows(error);
+    // A refresh replaces the page's rows with the fresh scan, never appends to them, so repeated F5
+    // presses cannot grow the list. A queue that emptied meanwhile closes the page and says so rather
+    // than leaving rows that no longer describe anything.
+    if(!error.isEmpty() || rows.isEmpty()) {
+        pages_.removeLast();
+        message_=title+"\n\n"+(error.isEmpty()?QObject::tr("Nothing is downloading."):error);
+        qInfo().noquote()<<"steam downloads: refresh emptied the page"
+            <<(error.isEmpty()?QStringLiteral("(nothing is downloading)"):QStringLiteral("(error: ")+error+QStringLiteral(")"));
+        emit changed();
+        return;
+    }
+    auto& page=pages_.last();
+    page.entries=std::move(rows);
+    page.selection=0;
+    for(int i=0;i<page.entries.size();++i)if(page.entries[i].id==selected){page.selection=i;break;}
+    qInfo().noquote()<<QStringLiteral("steam downloads: page refreshed to %1 row(s), selection %2")
+        .arg(page.entries.size()).arg(page.selection);
+    emit changed();
+}
 void Shell::refreshContent() {
     if(contentScanning_){contentRefreshPending_=true;return;}
     contentScanning_=true;
@@ -718,7 +894,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("remote","Remote Play","tex_premo","explore_category_network"),
             item("browser","Internet Browser","tex_browser","explore_category_network"),
             item("search","Internet Search","tex_kensaku","explore_category_network"),
-            item("downloads","Download Management","tex_dl_manage","explore_category_network")}},
+            item("downloads","Download Management","tex_dl_manage","explore_category_network",Action::SteamDownloads)}},
         {"psn","PlayStation Network","xmb_plugin_normal","tex_psn", /* 128x128; explore_plugin_full holds a 46x46 copy */{item("signin","Sign In","tex_Sign_In"),item("trophy","Trophy Collection","item_tex_trophy"),item("store","PlayStation Store","item_tex_ps_store")}},
         {"friends","Friends","qgl/icontex","8n",{
             // category_friend.xml: items, icons and titles are the firmware's (explore_category_friend); PSN-backed
@@ -1063,6 +1239,7 @@ void Shell::activate() {
     case Action::Launch:launch(entry);break;
     case Action::LaunchSteam:startSteamTracked(entry.value,entry.title);break;
     case Action::SteamFolder:openSteamFolder(entry.value);break;
+    case Action::SteamDownloads:openSteamDownloads();break;
     case Action::SteamStoreBrowse: {
         // Sections first: no request until a section is chosen, so opening the store is instant.
         Page page;page.title=QObject::tr("Steam Store");
@@ -1195,6 +1372,7 @@ QString Shell::activateLabel(const Entry& entry) const {
     switch(entry.action) {
     case Action::Folder:case Action::SteamFolder:case Action::JellyfinFolder:
     case Action::Library:case Action::SteamStoreBrowse:case Action::SteamStoreSection:
+    case Action::SteamDownloads:
         return QObject::tr("Open");
     case Action::File:
         return categories_[category_].id=="photo"?QObject::tr("View"):QObject::tr("Play");
@@ -1215,6 +1393,8 @@ QString Shell::entryKind(const Entry& entry) const {
     case Action::LaunchSteam:return QObject::tr("Steam game");
     case Action::SettingsPage:case Action::SettingChoices:return QObject::tr("Settings");
     case Action::Unavailable:return QObject::tr("Unavailable");
+    case Action::SteamDownloads:return QObject::tr("Downloads");
+    case Action::Information:return entry.id.startsWith("download:")?QObject::tr("Download"):QObject::tr("Item");
     case Action::JellyfinApp:case Action::JellyfinPlay:return QObject::tr("Jellyfin media");
     default:return QObject::tr("Item");
     }
@@ -1319,6 +1499,13 @@ void Shell::dismissOptions() {
     emit changed();
 }
 void Shell::showEntryInformation(const Entry& entry) {
+    // A Download Management row already carries its own information page (State, Progress, the pause/
+    // resume note), so the panel shows that page rather than wrapping it in Kind/Detail/Value rows.
+    if(entry.id.startsWith("download:")) {
+        message_=entry.value;
+        qInfo().noquote()<<"shell: options information title="<<entry.title<<"(download page)";
+        return;
+    }
     QStringList rows;
     rows<<QObject::tr("Kind: ")+entryKind(entry);
     if(!entry.detail.isEmpty())rows<<QObject::tr("Detail: ")+entry.detail;
@@ -1557,6 +1744,8 @@ void Shell::refreshDirectory(){
     if(!mediaOpen_ && !pages_.isEmpty() && pages_.last().jellyfin) {
         const auto page=pages_.last();loadJellyfinPage(page.jellyfinParent,page.title,page.jellyfinStart,page.jellyfinViews,true);return;
     }
+    // The download page has no directory to rescan: F5 is another Steam scan, rebuilt into the same page.
+    if(!mediaOpen_ && !pages_.isEmpty() && pages_.last().downloads){reloadSteamDownloads();return;}
     if(pages_.isEmpty() && !mediaOpen_) {
         if(categories_[category_].id=="friends")refreshSteamFriends(true);else refreshContent();
         return;
@@ -1581,6 +1770,10 @@ void Shell::rebuildUsers(){
 void Shell::createUser(const QString& name){profiles_.create(name);}
 QString Shell::subtitleText(const Entry& entry) const {
     // User-scoped data carries the active user's name, as in the reference (Trophy Collection, PS3 saved data).
-    return entry.id=="trophy" || entry.id=="ps3"?profiles_.activeName():QString();
+    if(entry.id=="trophy" || entry.id=="ps3")return profiles_.activeName();
+    // A Download Management row shows its state and progress under the title, which is the one line the
+    // page draws for every row (the row's own detail string). The information page carries the rest.
+    if(entry.id.startsWith("download:"))return entry.detail;
+    return {};
 }
 }

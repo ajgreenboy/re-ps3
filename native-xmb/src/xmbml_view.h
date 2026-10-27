@@ -15,6 +15,7 @@ enum class RowKind {
     RemotePlay,      // type:x-xmb/xmlpremo - Remote Play, needs console hardware
     InGameExit,      // type:x-xmb/xmlgameexit - only the in-game XMB shows it
     DynamicProvider, // a Query with no local view: sel/ese/xcb produces its rows at run time
+    DownloadControl, // ese://...type=download_control - the download queue the console's plugin lists
 };
 struct XmbmlRow {
     QString id;        // stable native id: the query key without the firmware's "seg_" namespace
