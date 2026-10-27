@@ -243,3 +243,5 @@ Known differences by surface today:
 
 Not touched: `settings_menu.cpp`, `preferences.cpp`, `INFO-BAR.md` (another agent's fence), and the
 verification harness.
+
+**Note (2026-10-27):** Continue Watching is now the first row of the Video column, so the repro scripts that say 9 LEFT, 4 RIGHT, ENTER reach Video Library only with one extra DOWN before ENTER. Those runs were captured before the row existed; the evidence in this file is otherwise unchanged.
