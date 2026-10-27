@@ -97,15 +97,26 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     // The reconstructed background is not the glass shader's captured input surface: refraction can produce
     // near-black interiors in Original as well as fixed colours. Use the opaque theme material normally;
     // keep the firmware program available through the explicit diagnostics below.
+    //
+    // Lighting direction comes from the material, not from a hand-picked vector: in the captured constants of this
+    // same program (fpdump7/fp_0199, the focused item icon) the two light vectors sit in columns 1 and 2 of
+    // _PackedLightParams[0..2], and column 1 is exactly (sin Z cos X, sin Z sin X, cos Z) for ICONS.mnu
+    // LIT1 ANG Z/X = 22.4976/92.4901, i.e. (-0.0166, 0.3823, 0.9239) at night - one shared vector for category
+    // icons, item icons and bullets. render() already derives it for the glass path, so the opaque stand-in takes
+    // that same QVector3D instead of the -0.35, 0.4, 0.85 three-quarter key it used to invent. Everything else here
+    // (ambient level, matte weight, edge bevel) is still a fitted stand-in: the glass terms (refraction, env map,
+    // _LuminanceParams tone curve, EXPOSE, the LIT2 specular) have no opaque counterpart, so the fit stays until the
+    // icons are drawn through the glass path.
     static const char* opaqueFragment=R"(#version 330 core
 in vec4 v_tc[10];out vec4 colour;
 uniform sampler2D tex0;uniform vec3 tint;uniform float brightness,opacity,tintStrength;
+uniform vec3 light1;
 void main(){
     vec4 material=texture(tex0,v_tc[0].xy);
     if(material.a<=0.)discard;
     vec2 xy=material.rg*2.-1.;
     vec3 normal=normalize(vec3(xy,sqrt(max(0.,1.-dot(xy,xy)))));
-    float diffuse=max(0.,dot(normal,normalize(vec3(-.35,.4,.85))));
+    float diffuse=max(0.,dot(normal,light1));
     float bevel=pow(1.-max(normal.z,0.),2.)*.10;
     float light=(.58+.26*diffuse+bevel)*mix(.70,1.,clamp(brightness,0.,1.));
     // Tint the surface, not its opacity; only shape coverage and page transitions fade.
@@ -162,6 +173,9 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
     };
     const QVector3D l1=direction("LIT1 ANG Z","LIT1 ANG X"),l2=direction("LIT2 ANG Z","LIT2 ANG X");
     const float expose=value("EXPOSE",light),refract=value("REFR SCL",light);
+    // _Ambiant rgb of the captured program is the MNU AMB triple verbatim (1.05025 1.05025 1.05025 at night, both
+    // for category icons and for the focused item icon in fpdump7/fp_0199); its w is the per-draw state brightness.
+    const QVector3D ambientColour(value("AMB R",light),value("AMB G",light),value("AMB B",light));
     const double envAngle=qDegreesToRadians(-147.+30.*seconds);
     QVector<QVector4D> fc=fragmentCg_.constants;
     const auto set=[&](const char* name,const QVector4D& v){for(int slot:fragmentCg_.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=v;};
@@ -233,6 +247,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
             opaque_.bind();opaque_.setUniformValueArray("vc",vc.data(),int(vc.size()));
             const float peak=std::max({fixedTint_.x(),fixedTint_.y(),fixedTint_.z()});
             opaque_.setUniformValue("tint",fixedTint_/peak);opaque_.setUniformValue("brightness",float(icon.brightness));
+            opaque_.setUniformValue("light1",l1);
             opaque_.setUniformValue("tintStrength",tintStrength_);
             opaque_.setUniformValue("opacity",float(icon.opacity));opaque_.setUniformValue("tex0",0);
             gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,normals);
@@ -241,7 +256,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
             gl.glDisable(GL_BLEND);opaque_.release();continue;
         }
         set("_Eye",{float(-worldX-400),float(-worldY),float(distance),float(icon.size)});
-        set("_Ambiant",{value("AMB R",light),value("AMB G",light),value("AMB B",light),float(icon.brightness)});
+        set("_Ambiant",{ambientColour.x(),ambientColour.y(),ambientColour.z(),float(icon.brightness)});
         if(qEnvironmentVariableIsSet("XMB_ICON_LOG_CONSTANTS")) {
             static bool reported=false;
             if(!reported) {
