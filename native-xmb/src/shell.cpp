@@ -37,6 +37,8 @@
 #include <QtConcurrent/QtConcurrentRun>
 #include <QTransform>
 #include <algorithm>
+#include <functional>
+#include <limits>
 
 namespace xmb {
 namespace {
@@ -62,6 +64,125 @@ QHash<QString,QString> readSfo(const QString& path) {
         else if(format==0x0404)values.insert(key,QString::number(u32(dataAt)));
     }
     return values;
+}
+}
+// ---- Resume points and Continue Watching ---------------------------------------------------------
+// One preferences string holds them, so they survive a restart without a second state file:
+//   {"<id>": {"path": "...", "ms": 8768, "dur": 20000, "title": "...", "at": 1761...}}
+// id is the first 24 hex characters of the SHA-1 of the path, i.e. exactly the key the earlier build's
+// {"<id>": milliseconds} map used. That is why an upgraded data directory can still be matched: the id
+// is unchanged, only the value grew from a number into a record that remembers enough to be *listed*.
+// A record with an empty path is a legacy entry whose file has not been found yet; it is never listed,
+// and migrateResumePoints() either fills its path in or drops it with the reason in the log.
+// A finished file is removed (EndOfMedia) and a position inside the existing thresholds is not stored,
+// so the map only ever holds titles that are genuinely half-watched.
+namespace {
+constexpr int kResumeMapLimit=64;                 // the cap the map has always had; only the eviction is smarter
+constexpr int kContinueRowLimit=20;               // what the Continue Watching page lists
+constexpr qint64 kContinueMaxAgeSeconds=30*86400; // older than this is left off the page
+constexpr int kResumePathLimit=512;               // 64 records of this size stay inside Preferences' bound
+constexpr int kResumeTitleLimit=200;
+QString resumeIdFor(const QString& path) {
+    return QString::fromLatin1(QCryptographicHash::hash(path.toUtf8(),QCryptographicHash::Sha1).toHex().left(24));
+}
+QJsonObject resumeMap(const QString& json) {
+    const auto document=QJsonDocument::fromJson(json.toUtf8());
+    return document.isObject()?document.object():QJsonObject{};
+}
+QString resumeJson(const QJsonObject& map) {
+    return QString::fromUtf8(QJsonDocument(map).toJson(QJsonDocument::Compact));
+}
+qint64 resumeSecondsNow() { return QDateTime::currentSecsSinceEpoch(); }
+// The stored milliseconds of one entry, in either shape: a record's "ms" or the old bare number.
+qint64 resumeMilliseconds(const QJsonValue& value) {
+    const double ms=value.isObject()?value.toObject().value("ms").toDouble(0):value.toDouble(0);
+    return std::isfinite(ms)&&ms>0?qint64(ms):0;
+}
+QJsonObject resumeRecord(const QString& path,qint64 positionMs,qint64 durationMs,const QString& title,qint64 at) {
+    QJsonObject record;
+    if(!path.isEmpty())record.insert("path",path.left(kResumePathLimit));
+    record.insert("ms",double(positionMs));
+    if(durationMs>0)record.insert("dur",double(durationMs));
+    if(!title.trimmed().isEmpty())record.insert("title",title.trimmed().left(kResumeTitleLimit));
+    record.insert("at",double(at));
+    return record;
+}
+// One remembered item, newest first. A record that has no path yet sorts last and is never listed.
+struct ResumePoint { QString id,path,title; qint64 ms=0,dur=0,at=0; };
+QVector<ResumePoint> resumePoints(const QJsonObject& map) {
+    QVector<ResumePoint> points;
+    points.reserve(map.size());
+    for(auto it=map.begin();it!=map.end();++it) {
+        if(!it.value().isObject())continue;   // a legacy number that has not been migrated: no path to show
+        const auto record=it.value().toObject();
+        ResumePoint point;
+        point.id=it.key();
+        point.path=record.value("path").toString();
+        point.title=record.value("title").toString();
+        point.ms=qint64(record.value("ms").toDouble(0));
+        point.dur=qint64(record.value("dur").toDouble(0));
+        point.at=qint64(record.value("at").toDouble(0));
+        points.push_back(std::move(point));
+    }
+    std::stable_sort(points.begin(),points.end(),[](const ResumePoint& left,const ResumePoint& right){
+        return left.at>right.at;   // newest first; an entry with no time (at 0) falls to the end
+    });
+    return points;
+}
+// Keeps the map bounded exactly as before (64 entries) but evicts the least recently updated record
+// instead of whichever key happened to sort first, so the newest Continue Watching list survives.
+void boundResumeMap(QJsonObject& map,QStringList* evicted=nullptr) {
+    while(map.size()>kResumeMapLimit) {
+        QString oldest;qint64 oldestAt=std::numeric_limits<qint64>::max();
+        for(auto it=map.begin();it!=map.end();++it) {
+            const auto at=qint64(it.value().toObject().value("at").toDouble(0));
+            if(oldest.isEmpty() || at<oldestAt){oldest=it.key();oldestAt=at;}
+        }
+        if(oldest.isEmpty())break;
+        map.remove(oldest);
+        if(evicted)*evicted<<oldest;
+    }
+}
+// Resolves pathless (legacy) ids back to files by hashing the playable files under the configured
+// media libraries with the same truncation the writer used, so a match is exact and not a guess.
+// Bounded twice - 5000 files and 12 levels - and it stops as soon as every wanted id is found, so an
+// upgrade cannot turn the start-up into a full library scan.
+QHash<QString,QString> resolveResumePaths(const QSet<QString>& wanted,const QStringList& roots,
+                                          int& scanned,bool& capped) {
+    static const QSet<QString> suffixes{QStringLiteral("mp4"),QStringLiteral("mkv"),QStringLiteral("avi"),
+        QStringLiteral("mov"),QStringLiteral("webm"),QStringLiteral("m4v"),QStringLiteral("mpg"),
+        QStringLiteral("mpeg"),QStringLiteral("wmv"),QStringLiteral("ts"),QStringLiteral("m2ts"),
+        QStringLiteral("mp3"),QStringLiteral("flac"),QStringLiteral("wav"),QStringLiteral("m4a"),
+        QStringLiteral("ogg"),QStringLiteral("aac"),QStringLiteral("wma"),QStringLiteral("opus")};
+    constexpr int kFileLimit=5000,kDepthLimit=12;
+    QHash<QString,QString> found;
+    QSet<QString> remaining=wanted,visited;
+    scanned=0;capped=false;
+    std::function<void(const QString&,int)> walk=[&](const QString& directory,int depth) {
+        if(remaining.isEmpty() || capped || depth>kDepthLimit || scanned>=kFileLimit)return;
+        const auto canonical=QFileInfo(directory).canonicalFilePath();
+        const QString key=canonical.isEmpty()?QDir::cleanPath(directory):canonical;
+        if(visited.contains(key))return;    // a directory link back up the tree cannot loop
+        visited.insert(key);
+        const QDir dir(key);
+        for(const auto& info:dir.entryInfoList(QDir::Files|QDir::Dirs|QDir::NoDotAndDotDot)) {
+            if(capped || remaining.isEmpty())return;
+            if(info.isDir()) {
+                if(info.isSymLink() && info.canonicalFilePath().isEmpty())continue;
+                walk(info.absoluteFilePath(),depth+1);
+                continue;
+            }
+            if(!info.isFile() || !suffixes.contains(info.suffix().toLower()))continue;
+            if(scanned>=kFileLimit){capped=true;return;}
+            const QString path=QDir::cleanPath(QDir::fromNativeSeparators(info.absoluteFilePath()));
+            ++scanned;
+            const QString id=resumeIdFor(path);
+            if(!remaining.remove(id))continue;
+            found.insert(id,path);
+        }
+    };
+    for(const auto& root:roots)if(!remaining.isEmpty())walk(root,0);
+    return found;
 }
 }
 QString Shell::emulatorPath() const {
@@ -756,7 +877,7 @@ void Shell::refreshContent() {
             for(const auto& app:contentApps_)if(app.category==category.id) {
                 auto e=item("custom:"+app.id,app.title,app.kind=="game"?"game_tex_default_ps3":"tex_video","explore_plugin_full",
                     app.kind=="game"?Action::LaunchApp:app.kind=="jellyfin"?Action::JellyfinApp:Action::OpenUrl,app.kind=="web"?app.url:app.id);
-                e.detail=app.kind=="game"?QString{}:app.kind=="jellyfin"?"Jellyfin":"Service app · Opens in your browser";
+                e.detail=app.kind=="game"?QString{}:app.kind=="jellyfin"?"Jellyfin":"Service app Â· Opens in your browser";
                 e.artwork=result.art.value("custom:"+app.id);e.gameTile=app.kind=="game";providers.push_back(std::move(e));
             }
             category.entries=providers+category.entries;
@@ -837,7 +958,7 @@ void Shell::importApps(const QString& file) {
 }
 void Shell::refreshSteamFriends(bool showErrors,bool force) {
     if(friendsRefreshing_ && !force)return;
-    showFriendsErrors_=showErrors;friendsRefreshing_=true;steamFriendsError_="Refreshing Steam friends…";rebuildFriends();emit changed();
+    showFriendsErrors_=showErrors;friendsRefreshing_=true;steamFriendsError_="Refreshing Steam friendsâ€¦";rebuildFriends();emit changed();
     steamFriends_.refresh(qEnvironmentVariable("XMB_STEAM_ID",steamId_));
 }
 void Shell::rebuildFriends() {
@@ -867,6 +988,10 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     steamArtwork_(std::make_unique<SteamArtwork>(QDir(dataDirectory).filePath("cache/steam"))),
     player_(std::make_unique<QMediaPlayer>()),audio_(std::make_unique<QAudioOutput>()),video_(std::make_unique<QVideoSink>()) {
     QDir().mkpath(dataDirectory);
+    // The resume-point format change (audit/MEDIA-CONTROLS.md): a data directory written by the earlier
+    // build holds {id: milliseconds} with no path, so those entries are resolved or dropped here, once,
+    // before anything can list or resume them.
+    migrateResumePoints();
     const QString sys="explore_category_sysconf",full="explore_plugin_full";
     const auto friendText=[&assets](const QString& id,const QString& fallback){return assets.text("explore_category_friend",id,fallback);};
     categories_={
@@ -882,7 +1007,17 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("remote","Remote Play Settings","tex_remote",sys,Action::SettingsPage,"remote"),item("network","Network Settings","tex_network",sys,Action::SettingsPage,"network")}},
         {"photo","Photo","qgl/icontex","3n",{item("library","Photo Library","photo_tex_album_pic",full,Action::Library),item("options","Photo Settings","tex_photo",full,Action::SettingsPage,"photo"),item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
         {"music","Music","qgl/icontex","4n",{item("library","Music Library","music_tex_album_pic",full,Action::Library),item("options","Music Settings","tex_music",full,Action::SettingsPage,"music"),item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
-        {"video","Video","qgl/icontex","5n",{item("library","Video Library","video_tex_album_default",full,Action::Library),item("options","Video Settings","tex_video",full,Action::SettingsPage,"video"),item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
+        {"video","Video","qgl/icontex","5n",{
+            // Continue Watching is the first row of the Video column: it is the surface a couch user wants
+            // first, it needs no new category or menu level, and it is the one row that works before any
+            // library folder has been chosen. Action::Library is the existing "open a collection of this
+            // column's own content" action (labelled Open, no new enum member), and Shell::activate()
+            // recognises this row by id and builds the page from the remembered resume points instead of
+            // reading a folder (audit/MEDIA-CONTROLS.md).
+            item("continue","Continue Watching","video_tex_album_default",full,Action::Library),
+            item("library","Video Library","video_tex_album_default",full,Action::Library),
+            item("options","Video Settings","tex_video",full,Action::SettingsPage,"video"),
+            item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
         {"tv","TV/Video Services","qgl/icontex","35n", /* normal-mapped like the others; tex_video is 46 px */{item("services","My Channels","tex_video")}},
         {"game","Game","qgl/icontex","6n",{
             item("vita","PS Vita System Application Utility","item_tex_vitaformat"),item("data","Game Data Utility","item_tex_ps3game_folder"),
@@ -1047,7 +1182,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         for(const auto& file:files) {
             page.entries.push_back(item(file.path,file.title,file.isDirectory?"item_tex_plain_folder":kind=="photo"?"photo_tex_album_pic":kind=="music"?"music_tex_album_pic":"video_tex_album_default","explore_plugin_full",file.isDirectory?Action::Folder:Action::File,file.path));
             auto& entry=page.entries.last();
-            entry.detail=file.isDirectory?QString{}:QString::number(file.size/1024)+" KB  ·  "+file.modified.toString("yyyy/MM/dd");
+            entry.detail=file.isDirectory?QString{}:QString::number(file.size/1024)+" KB  Â·  "+file.modified.toString("yyyy/MM/dd");
             if(entry.id==previous)page.selection=int(page.entries.size())-1;
         }
         status_=truncated?"Showing the first 5,000 matching items.":page.entries.isEmpty()?"There are no supported files.":QString{};
@@ -1248,6 +1383,10 @@ void Shell::activate() {
             entry.value.isEmpty()?host::systemInformation(renderer_,label,preferences_.value("system/name").toString()):entry.value;break;
     }
     case Action::Library: {
+        // The Video column's Continue Watching row: a page built from this shell's own resume points, not a
+        // folder on disk. Keyed by id rather than by a new Action member, so every existing switch over the
+        // action enum (labels, kinds, the information page) keeps its meaning.
+        if(entry.id=="continue"){openContinueWatching();break;}
         const auto path=preferences_.value("library/"+categories_[category_].id).toString();
         if(!path.isEmpty())openDirectory(path);else emit requestLibrary();break;
     }
@@ -1307,7 +1446,13 @@ void Shell::activate() {
     case Action::JellyfinPlay:openJellyfinMedia(entry);break;
     case Action::JellyfinMore:loadJellyfinPage(entry.value,entry.detail,entry.option.toInt());break;
     case Action::JellyfinSignOut:signOutJellyfin();break;
-    case Action::Unavailable:message_=entry.title+"\n\nThis feature is not available in the native recreation yet.";break;
+    case Action::Unavailable:
+        // A Continue Watching row whose file has gone says why, instead of the generic line, which would be
+        // false: the feature exists, the file does not.
+        message_=entry.id.startsWith("continue:") && !entry.detail.isEmpty()
+            ?entry.title+"\n\n"+entry.detail
+            :entry.title+"\n\nThis feature is not available in the native recreation yet.";
+        break;
     }
     emit changed();
 }
@@ -1401,6 +1546,11 @@ QString Shell::activateLabel(const Entry& entry) const {
     }
 }
 QString Shell::entryKind(const Entry& entry) const {
+    // A Continue Watching row is always a remembered playable file, so the kind comes from the column it
+    // is listed in rather than from the action (which is Unavailable on a stale row, and that is already
+    // said in the row's own line and its Information page).
+    if(entry.id=="continue")return QObject::tr("In progress");
+    if(entry.id.startsWith("continue:"))return categories_[category_].id=="music"?QObject::tr("Music"):QObject::tr("Video");
     switch(entry.action) {
     case Action::Folder:case Action::Library:case Action::SteamFolder:case Action::JellyfinFolder:return QObject::tr("Folder");
     case Action::File: {
@@ -1429,6 +1579,11 @@ void Shell::buildOptions() {
     // No Play/Start row for a row the shell itself cannot act on; Information stays honest for those.
     if(entry.action!=Action::Unavailable)options_.push_back({activateLabel(entry),OptionCommand::Activate});
     options_.push_back({QObject::tr("Information"),OptionCommand::Information});
+    // A remembered Continue Watching row can be forgotten right where it is listed; nothing else in the
+    // XMB owns that state, so the row is offered on this page only. It stays offered for a stale row,
+    // which is the one thing such a row can still do.
+    if(entry.id.startsWith("continue:"))
+        options_.push_back({QObject::tr("Remove from Continue Watching"),OptionCommand::RemoveResume});
     // Sort By reorders the rows actually on this page, which is exactly the firmware's promise.
     if(!pages_.isEmpty() && !pages_.last().directory.isEmpty() && entries().size()>1)
         options_.push_back({QObject::tr("Sort By"),OptionCommand::SortMenu});
@@ -1519,6 +1674,15 @@ void Shell::optionsActivate() {
         const bool ascending=option.command==OptionCommand::SortByNameAscending;
         resetOptions();
         sortPageByName(ascending);
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        emit changed();
+        break;
+    }
+    // Forget this row's remembered position and rebuild the page it was listed on. The entry itself is a
+    // copy taken above, so it stays valid across the reset and the rebuild.
+    case OptionCommand::RemoveResume: {
+        resetOptions();
+        removeContinueEntry(entry.id.mid(QStringLiteral("continue:").size()),entry.title);
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
         emit changed();
         break;
@@ -1781,6 +1945,34 @@ void Shell::showEntryInformation(const Entry& entry) {
         qInfo().noquote()<<"shell: options information title="<<entry.title<<"(download page)";
         return;
     }
+    // Continue Watching carries the facts this page should show from its own record: when the position was
+    // written, how long the title is, and - for a row whose file is gone - why it cannot be played.
+    if(entry.id=="continue" || entry.id.startsWith("continue:")) {
+        QStringList rows;
+        rows<<QObject::tr("Kind: ")+entryKind(entry);
+        if(entry.id=="continue") {
+            rows<<QObject::tr("Items: %1").arg(rememberedResumeCount());
+            rows<<QObject::tr("Note: a position is kept only while a title is half-watched, and a finished title is removed.");
+        } else {
+            if(!entry.value.isEmpty())rows<<QObject::tr("Path: ")+QDir::toNativeSeparators(entry.value);
+            const auto record=resumeMap(preferences_.value("media/resume").toString())
+                .value(entry.id.mid(QStringLiteral("continue:").size())).toObject();
+            if(!record.isEmpty()) {
+                rows<<QObject::tr("Position: %1").arg(MediaControls::formatTime(qint64(record.value("ms").toDouble(0))));
+                if(record.value("dur").toDouble(0)>0)
+                    rows<<QObject::tr("Duration: %1").arg(MediaControls::formatTime(qint64(record.value("dur").toDouble(0))));
+                const auto at=QDateTime::fromSecsSinceEpoch(qint64(record.value("at").toDouble(0)));
+                if(at.isValid())rows<<QObject::tr("Recorded: ")+at.toString("yyyy/MM/dd HH:mm");
+                rows<<QObject::tr("Remembered as: %1").arg(entry.id.mid(QStringLiteral("continue:").size()));
+            }
+            rows<<QObject::tr("State: ")+(QFileInfo::exists(entry.value)
+                ?QObject::tr("the file is on disk and resumes at this position")
+                :QObject::tr("the file is no longer on disk; Triangle removes this row"));
+        }
+        message_=entry.title+"\n\n"+rows.join('\n');
+        qInfo().noquote()<<"shell: options information title="<<entry.title<<"rows="<<rows.size()<<"(continue watching)";
+        return;
+    }
     QStringList rows;
     rows<<QObject::tr("Kind: ")+entryKind(entry);
     if(!entry.detail.isEmpty())rows<<QObject::tr("Detail: ")+entry.detail;
@@ -1816,7 +2008,7 @@ void Shell::back() {
         const qint64 at=player_->position(),total=player_->duration();
         bool worth=total>0 && at>std::max<qint64>(10000,total/20) && at<total-std::max<qint64>(15000,total/20);
         if(!worth && total>0 && total<=60000)worth=at>total/10 && at<total*9/10;
-        if(!resumePath_.isEmpty() && worth)storeResumePosition(resumePath_,at);
+        if(!resumePath_.isEmpty() && worth)storeResumePosition(resumePath_,at,total,mediaTitle_);
         else clearResumePosition(resumePath_);
         resumePath_.clear();resumePending_=0;
         ++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});
@@ -1836,7 +2028,7 @@ void Shell::openDirectory(const QString& path) {
     Page page;page.title=QFileInfo(path).fileName();page.directory=path;
     const QString kind=categories_[category_].id;
     pages_.push_back(std::move(page));
-    loading_=true;status_="Reading media folder…";
+    loading_=true;status_="Reading media folderâ€¦";
     scanRequest_=library_.scan(path,kind=="photo"?MediaKind::Photo:kind=="music"?MediaKind::Music:MediaKind::Video);
 }
 void Shell::openFile(const Entry& entry) {
@@ -1874,36 +2066,194 @@ int Shell::mediaRepeatMode() const {
     if(!preferences_.contains("media/repeatMode") && preferences_.value("media/repeat").toBool())return 1;
     return preferences_.value("media/repeatMode").toInt();
 }
-// Resume points: a small map of file id -> milliseconds in one preferences string. They are cleared
-// when a file reaches its end, so a finished title starts from the beginning next time.
-namespace {
-QString resumeIdFor(const QString& path) {
-    return QString::fromLatin1(QCryptographicHash::hash(path.toUtf8(),QCryptographicHash::Sha1).toHex().left(24));
-}
-QJsonObject resumeMap(const QString& json) {
-    const auto document=QJsonDocument::fromJson(json.toUtf8());
-    return document.isObject()?document.object():QJsonObject{};
-}
-}
 qint64 Shell::resumePositionFor(const QString& path) const {
     if(path.isEmpty())return 0;
-    const auto value=resumeMap(preferences_.value("media/resume").toString()).value(resumeIdFor(path));
-    return qint64(value.toDouble(0));
+    // Both shapes answer: a migrated record and a legacy bare number resume identically.
+    return resumeMilliseconds(resumeMap(preferences_.value("media/resume").toString()).value(resumeIdFor(path)));
 }
-void Shell::storeResumePosition(const QString& path,qint64 positionMs) {
+void Shell::storeResumePosition(const QString& path,qint64 positionMs,qint64 durationMs,const QString& title) {
     if(path.isEmpty()||positionMs<=0)return;
     auto map=resumeMap(preferences_.value("media/resume").toString());
-    map.insert(resumeIdFor(path),double(positionMs));
-    // Keep the map bounded: drop entries once it grows past a playlist's worth of files.
-    while(map.size()>64)map.erase(map.begin());
-    preferences_.setValue("media/resume",QString::fromUtf8(QJsonDocument(map).toJson(QJsonDocument::Compact)));
+    const QString id=resumeIdFor(path);
+    map.insert(id,resumeRecord(path,positionMs,durationMs,title,resumeSecondsNow()));
+    QStringList evicted;boundResumeMap(map,&evicted);
+    for(const auto& lost:evicted)qWarning().noquote()<<"continue: dropped resume point"<<lost<<"(the map is capped at 64)";
+    preferences_.setValue("media/resume",resumeJson(map));
+    qInfo().noquote()<<QString("continue: stored %1 ms%2 for %3")
+        .arg(positionMs).arg(durationMs>0?QString(" of %1 ms").arg(durationMs):QString{})
+        .arg(title.isEmpty()?QFileInfo(path).fileName():title);
 }
 void Shell::clearResumePosition(const QString& path) {
     if(path.isEmpty())return;
     auto map=resumeMap(preferences_.value("media/resume").toString());
-    if(!map.contains(resumeIdFor(path)))return;
-    map.remove(resumeIdFor(path));
-    preferences_.setValue("media/resume",QString::fromUtf8(QJsonDocument(map).toJson(QJsonDocument::Compact)));
+    const QString id=resumeIdFor(path);
+    if(!map.contains(id))return;
+    map.remove(id);
+    preferences_.setValue("media/resume",resumeJson(map));
+    qInfo().noquote()<<QString("continue: cleared the resume point for %1; %2 still remembered")
+        .arg(QFileInfo(path).fileName()).arg(map.size());
+}
+// Migration, run once at load (the Shell constructor). The old map held {id: milliseconds} with no path,
+// so nothing could be listed: each such entry is re-keyed as a record with no path (marked pathless),
+// resolved against the configured media libraries by hashing their playable files, and dropped with a
+// logged reason when no file matches. A data directory that is already in the new shape is not rewritten.
+void Shell::migrateResumePoints() {
+    const QString key="media/resume";
+    const auto raw=preferences_.value(key).toString();
+    if(raw.trimmed().isEmpty())return;
+    const auto map=resumeMap(raw);
+    if(map.isEmpty())return;
+    QJsonObject next;QSet<QString> pathless;QStringList unreadable;int legacy=0;
+    for(auto it=map.begin();it!=map.end();++it) {
+        QJsonObject record;
+        if(it.value().isObject())record=it.value().toObject();
+        else if(it.value().isDouble() && std::isfinite(it.value().toDouble()) &&
+                it.value().toDouble()>=0.0 && it.value().toDouble()<=86400000.0) {
+            // The old shape. It carries no path, no title and no time; the time it is given is the
+            // migration time, because an invented earlier one would be a history this build does not have.
+            record=resumeRecord({},qint64(it.value().toDouble()),0,{},resumeSecondsNow());
+            ++legacy;
+        } else { unreadable<<it.key();continue; }   // neither shape this build accepts
+        if(record.value("path").toString().isEmpty())pathless.insert(it.key());
+        next.insert(it.key(),record);
+    }
+    for(const auto& id:unreadable)
+        qWarning().noquote()<<"continue: dropped resume point"<<id
+            <<":the value is neither a record nor a 0-24 h millisecond count";
+    if(pathless.isEmpty() && unreadable.isEmpty())return;   // nothing to migrate: leave the stored bytes alone
+    // The roots to resolve against: the same three media libraries the columns read. Nothing else on disk
+    // is touched, and a folder that is not configured is not guessed at.
+    QStringList roots;QSet<QString> seen;
+    for(const QString& name:{"library/video","library/music","library/photo"}) {
+        const auto path=preferences_.value(name).toString().trimmed();
+        if(path.isEmpty())continue;
+        const QFileInfo info(path);
+        QString root=info.canonicalFilePath();
+        if(root.isEmpty())root=QDir::cleanPath(QDir::fromNativeSeparators(info.absoluteFilePath()));
+        if(root.isEmpty() || !QFileInfo(root).isDir() || seen.contains(root))continue;
+        seen.insert(root);roots<<root;
+    }
+    QHash<QString,QString> resolved;int scanned=0;bool capped=false;
+    if(!pathless.isEmpty() && !roots.isEmpty()) {
+        QElapsedTimer timer;timer.start();
+        resolved=resolveResumePaths(pathless,roots,scanned,capped);
+        qInfo().noquote()<<QString("continue: resolving %1 pathless resume point(s) against %2 media library folder(s); %3 file(s) hashed in %4 ms%5")
+            .arg(pathless.size()).arg(roots.size()).arg(scanned).arg(timer.elapsed())
+            .arg(capped?QString(", stopped at the 5000-file cap"):QString{});
+    }
+    int kept=0,dropped=0;
+    for(const auto& id:pathless) {
+        const auto record=next.value(id).toObject();
+        const qint64 ms=qint64(record.value("ms").toDouble(0));
+        if(resolved.contains(id)) {
+            auto filled=record;
+            const QString path=resolved.value(id);
+            filled.insert("path",path);
+            if(filled.value("title").toString().isEmpty())filled.insert("title",QFileInfo(path).completeBaseName());
+            next.insert(id,filled);++kept;
+            qInfo().noquote()<<"continue: migrated pathless resume point"<<id<<"("+QString::number(ms)+" ms) ->"
+                <<QDir::toNativeSeparators(path);
+        } else {
+            next.remove(id);++dropped;
+            const QString reason=roots.isEmpty()
+                ?QStringLiteral("no media library is configured, so the file behind this id could not be found")
+                :QStringLiteral("%1 file(s) under %2 configured media library folder(s) were hashed and none matched%3")
+                    .arg(scanned).arg(roots.size())
+                    .arg(capped?QStringLiteral(", and the scan stopped at its 5000-file cap"):QString{});
+            qWarning().noquote()<<"continue: dropped pathless resume point"<<id<<"("+QString::number(ms)+" ms):"<<reason;
+        }
+    }
+    QStringList evicted;boundResumeMap(next,&evicted);
+    for(const auto& lost:evicted)qWarning().noquote()<<"continue: dropped resume point"<<lost<<"(the map is capped at 64)";
+    if(next==map)return;
+    if(!preferences_.setValue(key,resumeJson(next)))
+        qWarning().noquote()<<"continue: the migrated resume points could not be written:"<<preferences_.error();
+    else
+        qInfo().noquote()<<QString("continue: resume points migrated - %1 resolved, %2 dropped, %3 remembered%4")
+            .arg(kept).arg(dropped).arg(next.size())
+            .arg(legacy?QString(" (%1 of them came from the old format)").arg(legacy):QString{});
+}
+int Shell::rememberedResumeCount() const {
+    int count=0;
+    for(const auto& point:resumePoints(resumeMap(preferences_.value("media/resume").toString())))
+        if(!point.path.isEmpty())++count;
+    return count;
+}
+// The page itself: newest first, at most 20 rows, nothing older than 30 days. An age-hidden entry is
+// only hidden - the stored map keeps its own 64-entry bound, so replaying the title refreshes it rather
+// than this page quietly deleting a position the user may still want.
+QVector<Entry> Shell::continueWatchingRows() const {
+    const auto points=resumePoints(resumeMap(preferences_.value("media/resume").toString()));
+    const qint64 now=resumeSecondsNow();
+    QVector<Entry> rows;int old=0,over=0,missing=0;
+    for(const auto& point:points) {
+        if(point.path.isEmpty())continue;
+        if(point.at>0 && now-point.at>kContinueMaxAgeSeconds){++old;continue;}
+        if(rows.size()>=kContinueRowLimit){++over;continue;}
+        const bool present=QFileInfo::exists(point.path);
+        const QString title=point.title.isEmpty()?QFileInfo(point.path).completeBaseName():point.title;
+        auto row=item("continue:"+point.id,title,"video_tex_album_default","explore_plugin_full",
+            present?Action::File:Action::Unavailable,point.path);
+        row.disabled=!present;
+        if(!present) {
+            ++missing;
+            // The reason is the row's own line, so it is visible on the couch without opening anything;
+            // Triangle still offers Remove, which is the only thing a row with no file can do.
+            row.detail=QObject::tr("Missing - this file is not on disk any more. Triangle removes it.");
+        } else {
+            const QString at=MediaControls::formatTime(point.ms);
+            row.detail=point.dur>point.ms
+                ?QObject::tr("Resuming at %1 of %2 (%3 left)").arg(at,MediaControls::formatTime(point.dur),
+                                                                  MediaControls::formatTime(point.dur-point.ms))
+                :QObject::tr("Resuming at %1").arg(at);
+        }
+        rows.push_back(std::move(row));
+    }
+    if(old||over||missing)
+        qInfo().noquote()<<QString("continue watching: %1 row(s) listed; %2 older than 30 days, %3 past the %4-row cap, %5 missing on disk")
+            .arg(rows.size()).arg(old).arg(over).arg(kContinueRowLimit).arg(missing);
+    return rows;
+}
+void Shell::openContinueWatching() {
+    if(pages_.size()>=32){message_=QObject::tr("The maximum folder depth has been reached.");return;}
+    auto rows=continueWatchingRows();
+    const QString title=QObject::tr("Continue Watching");
+    if(rows.isEmpty()) {
+        qInfo().noquote()<<"continue watching: nothing to continue";
+        message_=title+"\n\n"+QObject::tr("Nothing to continue.");
+        return;
+    }
+    qInfo().noquote()<<QString("continue watching: page opened with %1 row(s)").arg(rows.size());
+    Page page;page.title=title;page.entries=std::move(rows);page.continuePage=true;
+    pages_.push_back(std::move(page));
+}
+// Rebuilds the open page in place after a removal, and closes it when the last row goes: the list the
+// user is looking at must be the list that exists, and an empty list says so instead of showing zero rows.
+void Shell::reloadContinueWatching() {
+    if(pages_.isEmpty() || !pages_.last().continuePage)return;
+    auto rows=continueWatchingRows();
+    if(rows.isEmpty()) {
+        pages_.removeLast();
+        qInfo().noquote()<<"continue watching: the list is empty; the page closed";
+        message_=QObject::tr("Continue Watching")+"\n\n"+QObject::tr("Nothing to continue.");
+        return;
+    }
+    auto& page=pages_.last();
+    const QString previous=page.entries.value(page.selection).id;
+    page.entries=std::move(rows);
+    page.selection=0;
+    for(int i=0;i<page.entries.size();++i)if(page.entries[i].id==previous){page.selection=i;break;}
+    qInfo().noquote()<<QString("continue watching: page rebuilt with %1 row(s)").arg(page.entries.size());
+}
+void Shell::removeContinueEntry(const QString& id,const QString& title) {
+    auto map=resumeMap(preferences_.value("media/resume").toString());
+    if(!map.contains(id)){qWarning().noquote()<<"continue: nothing to remove for"<<id;return;}
+    const QString path=map.value(id).toObject().value("path").toString();
+    map.remove(id);
+    preferences_.setValue("media/resume",resumeJson(map));
+    qInfo().noquote()<<QString("continue: removed %1 (%2) from Continue Watching; %3 still remembered")
+        .arg(title.isEmpty()?QFileInfo(path).fileName():title,QDir::toNativeSeparators(path)).arg(map.size());
+    reloadContinueWatching();
 }
 void Shell::startQueuedMedia() {
     if(jellyfinQueue_){startJellyfinMedia();return;}
@@ -1963,10 +2313,10 @@ void Shell::toggleMediaShuffle() {
 QString Shell::mediaQueueSummary() const {
     if(!mediaOpen_ || photoOpen() || mediaQueue_.empty())return {};
     QString result=QString("Track %1 of %2").arg(mediaQueue_.currentIndex()+1).arg(mediaQueue_.items().size());
-    if(preferences_.value("media/shuffle").toBool())result+="  ·  Shuffle";
-    if(mediaRepeatMode()==1)result+="  ·  Repeat One";else if(mediaRepeatMode()==2)result+="  ·  Repeat All";
-    if(player_->playbackState()==QMediaPlayer::PausedState)result+="  ·  Paused";
-    if(!status_.isEmpty())result+="  ·  "+status_;
+    if(preferences_.value("media/shuffle").toBool())result+="  Â·  Shuffle";
+    if(mediaRepeatMode()==1)result+="  Â·  Repeat One";else if(mediaRepeatMode()==2)result+="  Â·  Repeat All";
+    if(player_->playbackState()==QMediaPlayer::PausedState)result+="  Â·  Paused";
+    if(!status_.isEmpty())result+="  Â·  "+status_;
     return result;
 }
 bool Shell::photoOpen()const{return mediaOpen_ && !jellyfinQueue_ && categories_[category_].id=="photo";}
@@ -2025,12 +2375,15 @@ void Shell::refreshDirectory(){
     }
     // The download page has no directory to rescan: F5 is another Steam scan, rebuilt into the same page.
     if(!mediaOpen_ && !pages_.isEmpty() && pages_.last().downloads){reloadSteamDownloads();return;}
+    // The Continue Watching page has nothing on disk to rescan either: F5 rebuilds it from the remembered
+    // positions, which is also what picks up a file that has reappeared or gone since the page opened.
+    if(!mediaOpen_ && !pages_.isEmpty() && pages_.last().continuePage){reloadContinueWatching();emit changed();return;}
     if(pages_.isEmpty() && !mediaOpen_) {
         if(categories_[category_].id=="friends")refreshSteamFriends(true);else refreshContent();
         return;
     }
     if(pages_.isEmpty() || pages_.last().directory.isEmpty() || mediaOpen_)return;
-    loading_=true;status_="Reading media folder…";
+    loading_=true;status_="Reading media folderâ€¦";
     const auto kind=categories_[category_].id;
     // A rescan of a page that is already open (F5 / Refresh Directory) is reported when it lands.
     directoryRefresh_=true;
@@ -2053,6 +2406,8 @@ QString Shell::subtitleText(const Entry& entry) const {
     // A Download Management row shows its state and progress under the title, which is the one line the
     // page draws for every row (the row's own detail string). The information page carries the rest.
     if(entry.id.startsWith("download:"))return entry.detail;
+    // A Continue Watching row shows its position, or why it cannot be played, in the same place.
+    if(entry.id.startsWith("continue:"))return entry.detail;
     return {};
 }
 }
