@@ -641,7 +641,21 @@ int main(int argc,char** argv) {
                     {"subtitleCueText",shell.subtitleCueText().left(160)},
                     {"audioTrack",shell.activeAudioTrack()>=0?shell.activeAudioTrack()+1:0},
                     {"audioTrackCount",shell.audioTracks().size()},
-                    {"audioTrackName",shell.audioTracks().value(shell.activeAudioTrack()).label}};
+                    {"audioTrackName",shell.audioTracks().value(shell.activeAudioTrack()).label},
+                    // The page model and the in-XMB Jellyfin sign-in page (audit/JELLYFIN-NATIVE.md). pageKind
+                    // names what the page under the cursor is; focusedRow repeats entryId as the explicit
+                    // oracle T1 asked for; signInState is idle/signingIn/failed while the page is up and empty
+                    // otherwise, and signInError is the client's own message. No credential is reported here:
+                    // the password is not a field of this object and the user name is not either.
+                    {"pageKind",shell.pageKind()},{"focusedRow",shell.focusedRowId()},
+                    {"signInOpen",shell.jellyfinSignInOpen()},
+                    {"signInState",shell.jellyfinSignInState()},
+                    {"signInError",shell.jellyfinSignInError()},
+                    // The widget class of the application's active modal, or "" when none is up. This is the
+                    // oracle for "no modal widget blocks pollController": the sign-in page and its keyboard
+                    // capture with an empty value, where the retired QDialog reported "JellyfinSignIn".
+                    {"modalWidget",QApplication::activeModalWidget()?
+                        QString::fromLatin1(QApplication::activeModalWidget()->metaObject()->className()):QString{}}};
                 QFile stateFile(token.mid(5)+".json");const auto bytes=QJsonDocument(state).toJson();
                 if(!stateFile.open(QIODevice::WriteOnly) || stateFile.write(bytes)!=bytes.size())qWarning()<<"script: state save FAILED"<<stateFile.errorString();
                 qInfo()<<"script: state"<<state;

@@ -1267,6 +1267,23 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     // a file the user put next to the film and that silently does nothing is the report this answers.
     subtitleLog_=qEnvironmentVariableIsSet("XMB_SUBTITLE_LOG");
     initJellyfin();
+    // The sign-in surface is this shell's own page, not a modal dialog: openJellyfin() emits
+    // requestJellyfinSignIn, which used to reach a QDialog in the view. Connecting it here keeps one sign-in
+    // surface and leaves jellyfin_shell.cpp (outside this change's fence) as the owner of the app entry.
+    connect(this,&Shell::requestJellyfinSignIn,this,&Shell::openJellyfinSignInPage);
+    connect(this,&Shell::jellyfinSignInFinished,this,[this](bool ok,const QString& error){
+        if(ok) {
+            qInfo()<<"jellyfin: sign-in accepted";
+            signInError_.clear();status_.clear();closeJellyfinSignInPage();
+            emit changed();
+            return;
+        }
+        // The client's own message, shown on the page instead of a throwaway dialog line.
+        signInError_=error.isEmpty()?QObject::tr("Jellyfin sign-in failed."):error;
+        status_=signInError_;
+        qWarning().noquote()<<"jellyfin: sign-in failed:"<<signInError_;
+        refreshJellyfinSignInPage();emit changed();
+    });
 }
 Shell::~Shell(){host::holdDisplayAwake(false);jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();disconnect(&steamFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
 // --- Notifications --------------------------------------------------------------------------------
@@ -1446,6 +1463,16 @@ void Shell::activate() {
     case Action::JellyfinPlay:openJellyfinMedia(entry);break;
     case Action::JellyfinMore:loadJellyfinPage(entry.value,entry.detail,entry.option.toInt());break;
     case Action::JellyfinSignOut:signOutJellyfin();break;
+    // The sign-in page's own rows. A field asks the view for the XMB keyboard on that field's current value,
+    // masked for the password; Submit sends, Cancel leaves the page and aborts a request still running.
+    case Action::JellyfinSignInField: {
+        const QString field=entry.value;
+        const QString initial=field=="server"?signInServer_:field=="username"?signInUser_:signInPassword_;
+        emit requestJellyfinFieldEdit(field,entry.title,initial,field=="password");
+        break;
+    }
+    case Action::JellyfinSignInSubmit:submitJellyfinSignIn();break;
+    case Action::JellyfinSignInCancel:cancelJellyfinSignInPage();break;
     case Action::Unavailable:
         // A Continue Watching row whose file has gone says why, instead of the generic line, which would be
         // false: the feature exists, the file does not.
@@ -1593,6 +1620,10 @@ void Shell::toggleOptions() {
     touch();
     if(optionsOpen_){dismissOptions();return;}
     if(!message_.isEmpty() || psMenu_ || loading_)return;
+    // The sign-in page is a form, not a content list: its five rows have no item-level options, and a panel
+    // offering "Start"/"Information" over a password field is exactly the kind of noise a credential page
+    // should not have. Triangle therefore does nothing there.
+    if(!pages_.isEmpty() && pages_.last().signIn)return;
     if(mediaOpen_) {
         // Triangle during video playback is the console's own control panel: subtitle, audio, repeat.
         // Anything else that reaches the player (music, a photo slideshow) keeps its old binding, so a
@@ -2016,6 +2047,9 @@ void Shell::back() {
         // subtitleChoice_, which is what makes reopening the same file come back on the same track.
         subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;subtitleMediaPath_.clear();
         audioTracks_.clear();audioRejected_.clear();activeAudioTrack_=-1;}
+    // Circle on a sign-in page is the page's Cancel row: it leaves the page and aborts a request still in
+    // flight, so Back can never strand an authentication the user has walked away from.
+    else if(!pages_.isEmpty() && pages_.last().signIn)cancelJellyfinSignInPage();
     else if(!pages_.isEmpty()){library_.cancel();scanRequest_=0;jellyfinRequest_=0;loading_=false;status_.clear();pages_.removeLast();}
     emit changed();
 }
@@ -2409,5 +2443,141 @@ QString Shell::subtitleText(const Entry& entry) const {
     // A Continue Watching row shows its position, or why it cannot be played, in the same place.
     if(entry.id.startsWith("continue:"))return entry.detail;
     return {};
+}
+// ---- In-XMB Jellyfin sign-in (audit/JELLYFIN-NATIVE.md) -------------------------------------------------
+// The one credential surface, and it is a page of the ordinary page/column model: rows are Entries, moves go
+// through vertical()/activate()/back(), the column cross-fade and Back work unchanged, and no modal widget is
+// created - so view.cpp's pollController never zeroes the pad while someone is signing in.
+//
+// Row set (the order audit/HTPC-IDEAS.md T1 asks for):
+//   Server URL  Cross -> the XMB keyboard on the server this app was registered with
+//   Username    Cross -> the XMB keyboard
+//   Password    Cross -> the XMB keyboard, composing dots; the row itself draws dots
+//   Sign In     sends Users/AuthenticateByName through JellyfinClient
+//   Cancel      leaves the page and aborts a request that is still running
+//
+// Nothing is written to disk. The password is held in this process's memory while the page is up, cleared
+// when the page closes, and never appears in a row, a log line or the capture sidecar; the only trace is
+// "value masked" plus the field that changed.
+namespace {
+// The password's on-row and on-keyboard rendering: one bullet per character, never the characters.
+QString maskedValue(const QString& value) { return QString(value.size(),QChar(0x2022)); }
+}
+bool Shell::jellyfinSignInOpen() const {
+    for(const auto& page:pages_)if(page.signIn)return true;
+    return false;
+}
+QString Shell::jellyfinSignInState() const {
+    if(!jellyfinSignInOpen())return {};
+    if(jellyfinSigningIn_)return QStringLiteral("signingIn");
+    return signInError_.isEmpty()?QStringLiteral("idle"):QStringLiteral("failed");
+}
+QString Shell::pageKind() const {
+    if(pages_.isEmpty())return QStringLiteral("root");
+    const auto& page=pages_.last();
+    if(page.signIn)return QStringLiteral("jellyfinSignIn");
+    if(page.jellyfin)return page.jellyfinViews?QStringLiteral("jellyfinViews"):QStringLiteral("jellyfinFolder");
+    if(page.downloads)return QStringLiteral("downloads");
+    if(page.continuePage)return QStringLiteral("continueWatching");
+    if(!page.directory.isEmpty())return QStringLiteral("folder");
+    return QStringLiteral("page");
+}
+QString Shell::focusedRowId() const {
+    const auto& rows=entries();
+    if(rows.isEmpty())return {};
+    return rows.value(std::clamp(selection(),0,int(rows.size())-1)).id;
+}
+void Shell::openJellyfinSignInPage(QUrl server) {
+    if(jellyfinSignInOpen()){refreshJellyfinSignInPage();emit changed();return;}
+    signInServer_=server.toString();
+    signInUser_.clear();
+    signInPassword_.fill(QChar(0));signInPassword_.clear();
+    signInError_.clear();status_.clear();
+    Page page;page.title=jellyfinServiceTitle_.isEmpty()?QObject::tr("Jellyfin"):jellyfinServiceTitle_;
+    page.signIn=true;
+    // Focus starts on Username, not on the server line: the address came from the registration and is usually
+    // already right, so the first Cross is the one the couch actually needs.
+    page.selection=1;
+    pages_.push_back(std::move(page));
+    refreshJellyfinSignInPage();
+    qInfo().noquote()<<"jellyfin: sign-in page opened rows= Server URL|Username|Password|Sign In|Cancel focus= Username";
+    emit changed();
+}
+void Shell::refreshJellyfinSignInPage() {
+    int index=-1;
+    for(int i=0;i<pages_.size();++i)if(pages_[i].signIn){index=i;break;}
+    if(index<0)return;
+    auto& page=pages_[index];
+    const QString focused=page.entries.isEmpty()?QString{}:page.entries.value(page.selection).id;
+    page.entries.clear();
+    // A field is drawn like a settings row: the same small round bullet, the label, and the value on the right
+    // (Entry::fieldValue). `key` is the Entry::value the activate() branch reads; `shown` is what that value
+    // looks like on screen, which for the password is one dot per character.
+    const auto field=[&](const QString& id,const QString& title,const QString& key,const QString& help,
+                         const QString& shown) {
+        auto e=item(id,title,"23n","qgl/icontex",Action::JellyfinSignInField,key);
+        e.detail=help;e.fieldValue=shown;page.entries.push_back(std::move(e));
+    };
+    field(QStringLiteral("jellyfin-signin:server"),QObject::tr("Server URL"),QStringLiteral("server"),
+        QObject::tr("Cross to type the server address this app was registered with."),signInServer_);
+    field(QStringLiteral("jellyfin-signin:username"),QObject::tr("Username"),QStringLiteral("username"),
+        QObject::tr("Cross to type your Jellyfin user name."),signInUser_);
+    field(QStringLiteral("jellyfin-signin:password"),QObject::tr("Password"),QStringLiteral("password"),
+        QObject::tr("Cross to type your password. It is shown as dots."),maskedValue(signInPassword_));
+    {
+        auto e=item(QStringLiteral("jellyfin-signin:submit"),QObject::tr("Sign In"),"tex_Sign_In","explore_plugin_full",
+            Action::JellyfinSignInSubmit);
+        // One place carries the outcome: the page's own status line (drawn under the rows), where the loading
+        // line already lives. The focused row keeps its static help, so a failure is stated once, in full.
+        e.detail=QObject::tr("Sends the sign-in request to this server.");
+        page.entries.push_back(std::move(e));
+    }
+    {
+        auto e=item(QStringLiteral("jellyfin-signin:cancel"),QObject::tr("Cancel"),"23n","qgl/icontex",
+            Action::JellyfinSignInCancel);
+        e.detail=QObject::tr("Leaves sign-in and cancels a request that is still running.");
+        page.entries.push_back(std::move(e));
+    }
+    if(!focused.isEmpty())for(int i=0;i<page.entries.size();++i)if(page.entries[i].id==focused){page.selection=i;break;}
+    page.selection=std::clamp(page.selection,0,std::max(0,int(page.entries.size())-1));
+}
+void Shell::setJellyfinSignInField(const QString& field,const QString& value) {
+    if(!jellyfinSignInOpen())return;
+    if(field=="server")signInServer_=value;
+    else if(field=="username")signInUser_=value;
+    else if(field=="password")signInPassword_=value;
+    else return;
+    signInError_.clear();status_.clear();
+    // The field and the number of characters only: the value itself never reaches the log.
+    qInfo().noquote()<<QString("jellyfin: sign-in field %1 set to %2 character(s), value masked (not logged)")
+        .arg(field).arg(value.size());
+    refreshJellyfinSignInPage();emit changed();
+}
+void Shell::submitJellyfinSignIn() {
+    if(!jellyfinSignInOpen())return;
+    if(jellyfinSigningIn_){qInfo()<<"jellyfin: sign-in ignored, a request is already in flight";return;}
+    signInError_.clear();status_=QObject::tr("Signing in to Jellyfin...");
+    // No credentials here either: the server, and whether a user name and a password were supplied.
+    qInfo().noquote()<<QString("jellyfin: sign-in request to %1 (username %2, password %3; values masked)")
+        .arg(signInServer_,signInUser_.isEmpty()?QStringLiteral("empty"):QStringLiteral("set"),
+             signInPassword_.isEmpty()?QStringLiteral("empty"):QStringLiteral("set"));
+    authenticateJellyfin(QUrl(signInServer_.trimmed(),QUrl::StrictMode),signInUser_,signInPassword_);
+    refreshJellyfinSignInPage();emit changed();
+}
+void Shell::cancelJellyfinSignInPage() {
+    if(!jellyfinSignInOpen() && !jellyfinSigningIn_)return;
+    qInfo().noquote()<<(jellyfinSigningIn_?"jellyfin: sign-in cancelled, the request in flight is aborted"
+                                            :"jellyfin: sign-in cancelled");
+    // cancelJellyfinSignIn() drops jellyfinSigningIn_, bumps the client's generation (which invalidates the
+    // reply) and signs the client out, so a late answer cannot land on the page the user has left.
+    cancelJellyfinSignIn();
+    status_.clear();signInError_.clear();
+    closeJellyfinSignInPage();
+    emit changed();
+}
+void Shell::closeJellyfinSignInPage() {
+    signInPassword_.fill(QChar(0));signInPassword_.clear();
+    signInError_.clear();
+    for(int i=pages_.size()-1;i>=0;--i)if(pages_[i].signIn){pages_.removeAt(i);break;}
 }
 }
