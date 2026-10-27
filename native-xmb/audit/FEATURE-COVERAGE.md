@@ -6,6 +6,10 @@ or interactive session was performed for it, and no Git command was run. Runtime
 statements below are labelled as records from the existing audit documents, not
 as observations made here.
 
+> **Re-checked 2026-10-27**, after the features below landed: the ISC-17 correction block, the ISC-16
+> resume sentence and the two "next work" items were updated, and nothing else in this audit's verdicts
+> changed. The ISC-13/14/15/20 findings still match the source at HEAD `81958e4`.
+
 ## Method and evidence classes
 
 Read for this audit:
@@ -44,7 +48,7 @@ code is `View::PafEase` (menu easing) in `src/view.cpp:81-112`.
 | ISC-14 | partial | Theme/sound/date-time/power/fullscreen have real backends; display/input/output are read-only or absent, 6 of 16 groups have no working setting, one field is cosmetic. |
 | ISC-15 | supported (narrow) | Browse, view, rotate and slideshow all exist end to end; the original Photo panel, EXIF, effects, playlists and device sources are absent. |
 | ISC-16 | partial | Playback, queue, repeat/shuffle, seek and volume are real; the now-playing line uses player title/artist tags, but library rows carry no tags and playlists are absent. |
-| ISC-17 | partial | Playback, queue, seek and volume are real; subtitles are enumerated by the criterion and absent. |
+| ISC-17 | partial | Playback, queue, seek and volume are real, and since 2026-10-26 sidecar SRT/WebVTT subtitles, an in-player Triangle panel and resume/Continue Watching exist; embedded and disc subtitle options and a proven multi-track switch are absent. |
 | ISC-20 | partial | RPCS3 and imported-app launch is a tracked QProcess with a return report, rescan and idle guard; Steam launch is watched through Steam's registry. No configured backend setting. |
 
 Counts: 1 supported, 5 partial, 0 unsupported.
@@ -375,8 +379,10 @@ work.
   player and Back stops it (`src/shell.cpp:581-603,684-691`). No "music keeps
   playing while browsing".
 - Controls are host-player grade: no stop command, no accelerated or variable
-  fast forward/reverse, no resume position, no sorting/grouping, no queue
-  editing.
+  fast forward/reverse, no sorting/grouping, no queue editing. Resume points are no
+  longer absent (corrected 2026-10-27): Back stores a record in `media/resume` and the
+  Video column's Continue Watching page lists it (`openContinueWatching()`,
+  `migrateResumePoints()`; audit/MEDIA-CONTROLS.md "Continue Watching").
 - Extension list includes formats the host stack may not decode; behavior is
   queue-level skip rather than capability reporting.
 - `audit/MEDIA-CONTINUATION.md:40-51` records five GUI replays that verify
@@ -392,6 +398,18 @@ stays partial.
 ## ISC-17: local video browsing, playback, subtitles and controls
 
 **Claim.** Local video browsing, playback, subtitles and controls work.
+
+> **Correction, 2026-10-27 (supersedes the "subtitles absent" statements below).** Subtitles now exist, for
+> local files with sidecars: `xmb::subtitles::discover()` finds `<name>.srt` / `<name>.<tag>.srt` / `.vtt`
+> beside the media (16 candidates, 4 MB each), `xmb::subtitles::parseFile()` parses them bounded and
+> tolerantly, `View::drawSubtitle()` draws the active cue through the GL glyph atlas in the lower third, and
+> Triangle opens `Shell::buildPlayerOptions()` - `Subtitles Off`, one row per file, the audio tracks
+> `QMediaPlayer::audioTracks()` reports, `Repeat` and `Shuffle` - with a read-back before an audio switch is
+> claimed (`Shell::chooseAudioTrack()`). `XMB_SUBTITLE_LOG=1` traces it. Evidence: audit/SUBTITLES.md
+> (fixtures, disabled-row frame, gates). Also since this audit: resume points (`media/resume` records) and
+> the Video column's Continue Watching page (audit/MEDIA-CONTROLS.md "Continue Watching"). Still absent and
+> why the criterion stays partial: embedded `QMediaPlayer::subtitleTracks` streams, disc/BD subtitle options,
+> Jellyfin-side subtitles, and a proven switch between two real audio tracks.
 
 **Where implemented.**
 
@@ -418,13 +436,17 @@ stays partial.
 
 **Untested or missing.**
 
-- **Subtitles: absent.** No subtitle or track API use exists in `src/` (no
-  `QMediaMetaData`, `setActiveSubtitleTrack`, `setActiveAudioTrack` or
-  chapter/timeline model). ISC-17 enumerates subtitles, so the criterion is not
-  met.
-- No audio-track/angle selection, chapters/scene search, A-B repeat, frame
-  step, slow motion, instant replay/advance, time/go-to, screen-mode or aspect
-  control, resume position, disc navigation, or protected-content handling.
+- **Subtitles: superseded 2026-10-27.** The original finding was "no subtitle or
+  track API use exists in `src/` (no `QMediaMetaData`, `setActiveSubtitleTrack`,
+  `setActiveAudioTrack` or chapter/timeline model)", and that was accurate for this
+  audit's tree. Sidecar subtitles and the player panel now exist; see the correction
+  at the head of this section. Embedded streams are still not read, which is the part
+  ISC-17's wording still fails on.
+- Audio-track/angle selection exists only for the tracks the player reports (the
+  ffmpeg backend reports one here), so a switch between real alternative tracks is
+  unproven. Chapters/scene search, A-B repeat, frame step, slow motion, instant
+  replay/advance, time/go-to, screen-mode or aspect control, disc navigation and
+  protected-content handling are absent.
 - No metadata: titles are file names; no thumbnails in the list.
 - Catalog drift: `XMB-218` (A-B Repeat) is marked partial but no A-B code
   exists; `XMB-211` (Fast Reverse/Forward) is a fixed 10-second seek, not
@@ -603,7 +625,8 @@ Ordered by how likely a user probing the app is to hit them.
    carry no tags; the now-playing line uses the player's title/artist when the
    file is tagged (the `LoadedMedia` handler in `Shell::Shell`). The overlay is a
    host player with a title line and progress bar; MKVs with unsupported codecs or
-   subtitles disappoint; seeking is fixed 10 seconds.
+   embedded subtitle streams disappoint, while sidecar SRT/VTT beside a local file now
+   render (audit/SUBTITLES.md); seeking is fixed 10 seconds.
 7. **Back stops playback.** There is no music-while-browsing model, no mini
    player, no PS overlay, so any demo of "listen while using XMB" fails
    (`src/shell.cpp:684-691`).
@@ -649,12 +672,13 @@ Ordered by how likely a user probing the app is to hit them.
    Information read `system/name`; document which rows write the host. Files:
    `src/settings_menu.cpp:48-142`, `src/preferences.cpp:27-47`,
    `src/host.cpp:89-112`.
-5. **Video/audio capability layer and evidence (raises ISC-16/17).** Add
-   subtitle/audio-track selection where the backend supports it, a track/chapter
-   model, resume position, a real stop, and background playback with a mini
-   panel; then record runs over real files rather than synthetic WAVs. Files:
-   `src/shell.cpp:720-831`, `src/playback_queue.cpp`, `src/view.cpp:732-750`,
-   `audit/MEDIA-CONTINUATION.md`.
+5. **Video/audio capability layer and evidence (raises ISC-16/17).** Sidecar
+   subtitles, the player panel and resume/Continue Watching landed 2026-10-26
+   (audit/SUBTITLES.md, MEDIA-CONTROLS.md). What remains: embedded subtitle and
+   audio-track streams, a track/chapter model, a real stop, and background playback
+   with a mini panel; then record runs over real files rather than synthetic WAVs.
+   Files: `src/shell.cpp`, `src/subtitles.*`, `src/playback_queue.cpp`,
+   `src/view.cpp`, `audit/MEDIA-CONTINUATION.md`.
 
 ## Limits of this audit
 

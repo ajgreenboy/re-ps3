@@ -26,8 +26,9 @@ Font coverage also requires FreeType: CMake uses an installed FreeType package o
 library/header targets. The recovered glyph-load settings and remaining parity work are in
 `audit/FONT-MATCHING.md`.
 
-Keyboard: arrows navigate, Enter activates, Escape or Backspace returns, F11 toggles full
-screen, Space pauses/resumes media. XInput D-pad and A/B share the same actions.
+Keyboard: arrows navigate, Enter activates, Escape or Backspace returns, T opens the item options menu
+(Triangle), F11 toggles full screen, Space pauses/resumes media; the volume media keys drive the volume HUD.
+XInput D-pad and A/B share the same actions.
 
 Local named-state captures and layer scoring: [verification harness](audit/VERIFICATION-HARNESS.md).
 The harness keeps user preferences separate, checks category/page state and reports failures; repeatable native
@@ -58,6 +59,24 @@ slideshow. Preferences migrate legacy color/library paths to `preferences.json`;
 profiles are stored in `profiles.json`. Preferences remain shared between local
 profiles. These source implementations are not complete original workflows;
 see the audit's feature-specific gaps and observed-evidence distinctions.
+
+Surfaces added on 2026-10-26/27, in the same presentation:
+
+- **Continue Watching** is the Video column's first row: remembered positions newest first (at most 20, 30 days
+  back) with resume, Information and Remove, and rows kept but disabled when the file has gone
+  ([audit/MEDIA-CONTROLS.md](audit/MEDIA-CONTROLS.md)).
+- Local video reads **sidecar subtitles** (`<name>.srt`, `<name>.<tag>.srt`, `.vtt` beside the file) and draws
+  the active cue over the picture; Triangle opens the **player panel** for subtitles, the audio tracks the
+  player reports, Repeat and Shuffle ([audit/SUBTITLES.md](audit/SUBTITLES.md)).
+- Triangle on a content row opens the **item options menu** - Open/Play/View, Information, Sort By (which really
+  reorders the page) and Close ([audit/OPTIONS-MENU.md](audit/OPTIONS-MENU.md)).
+- **Notifications** composed from `system_plugin`'s own plaque and glyphs pop up top-right for a tracked launch
+  that returns and for a library rescan ([audit/NOTIFICATIONS.md](audit/NOTIFICATIONS.md)).
+- L2/R2 or the volume media keys drive the real Windows master volume, with a **volume HUD** in the band left of
+  the info bar ([audit/HTPC-IDEAS.md](audit/HTPC-IDEAS.md) section 6).
+- The Network column's **Download Management** row opens a real page over Steam's own download queue
+  ([audit/STEAM-DOWNLOADS.md](audit/STEAM-DOWNLOADS.md) section 10), and Jellyfin **signs in on an XMB page**
+  with a masked keyboard instead of a dialog ([audit/JELLYFIN-NATIVE.md](audit/JELLYFIN-NATIVE.md)).
 
 ## Original assets
 
@@ -157,8 +176,11 @@ override wins over the cached Steam header and the manifest icon; `XMB_STEAM_ART
 & .\out\native-xmb\re-ps3-native.exe --steam-store-report .\out\steam-store.json [--steam-store-query portal]
 ```
 
-Edit `examples/jellyfin.json` (or `examples/media-apps.json` for Jellyfin, Plex, YouTube and Spotify) for your setup before importing it. This adds a TV/Video Services app that opens
-in your browser; embedded Jellyfin playback is future work. See [content schema](audit/CONTENT-REGISTRY.md) and
+Edit `examples/jellyfin.json` (or `examples/media-apps.json` for Jellyfin, Plex, YouTube and Spotify) for your
+setup before importing it. This adds a TV/Video Services app: Jellyfin is a native service with library/folder
+pages, direct play and server-negotiated HLS, and it signs in on an XMB page with a masked keyboard
+(audit/JELLYFIN-NATIVE.md); the Plex, YouTube and Spotify entries are URL apps that still open in your browser.
+See [content schema](audit/CONTENT-REGISTRY.md) and
 [Steam handoff, verification and limits](audit/STEAM-INTEGRATION.md). No firmware or installed game files are changed.
 
 ## PS3 themes
@@ -241,5 +263,7 @@ be claimed.
 See the [full feature/presentation audit and new handoff](audit/README.md),
 [handoff](HANDOFF.md) and [completion criteria](ISA.md).
 
-**Current-state handoff (2026-10-26):** [HANDOFF-2026-10-26.md](HANDOFF-2026-10-26.md) - tree state, verified
-evidence, documentation drift, prioritized open work and ground rules.
+**Previous handoff snapshot (2026-10-26, historical):** [HANDOFF-2026-10-26.md](HANDOFF-2026-10-26.md) - the tree at
+`937227d`, with what was verified then, the drift it found and its open work. It is no longer the current state; for
+current state read this README, [ISA.md](ISA.md), [the feature catalogue](audit/FEATURE-CATALOG.md),
+[the verification harness](audit/VERIFICATION-HARNESS.md) and [the parity register](audit/FIRMWARE-PARITY-GAPS.md).

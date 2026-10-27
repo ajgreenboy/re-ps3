@@ -85,10 +85,12 @@ Why no fallback was kept: the dialog was the exact thing T1 asks to remove. `vie
 returns early with every button zeroed while `QApplication::activeModalWidget()` is non-null, so a modal
 sign-in page switches the controller off for the whole time someone is typing - the audit's "biggest impedance
 to controller-only use". There is now exactly one sign-in surface, and `activeModalWidget()` is null at every
-capture of it (the sidecar reports the widget class, see section 6). The `JellyfinSignIn` class itself is still
-in the tree and still compiles, only because `CMakeLists.txt` lists `src/jellyfin_signin.cpp` and that file is
-outside this change's fence; its header now says RETIRED and that it must be deleted together with its CMake
-entry. Nothing references it: a grep for `JellyfinSignIn` in `native-xmb/src` matches only its own two files.
+capture of it (the sidecar reports the widget class, see section 6). **Superseded 2026-10-27:** at the time of
+writing the retired `JellyfinSignIn` class was still in the tree because `CMakeLists.txt` listed
+`src/jellyfin_signin.cpp` and that file was outside this change's fence. The follow-up commit (`81958e4`) deleted
+`src/jellyfin_signin.{h,cpp}` and its CMake entry, so the class is gone: a grep for `JellyfinSignIn` in
+`native-xmb/src` now matches only the per-process sign-in state (`jellyfinSigningIn_`), the
+`cancelJellyfinSignIn()` call and the comment that records the retired name - not a widget.
 
 ### 2. The page
 

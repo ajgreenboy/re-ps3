@@ -123,6 +123,21 @@ Use Steam and imported content as explicitly identified native providers for the
 > backend exists, so it stays unchecked. ISC-6, ISC-10, ISC-11, ISC-12 and ISC-30 likewise have partial
 > sub-behaviours; read them with the detail in `audit/FEATURE-COVERAGE.md` and `audit/VISUAL-BEHAVIOR.md`
 > rather than as an absence list.
+>
+> Criteria evidence note (2026-10-27), three unchecked criteria that now have partial evidence:
+>
+> - **ISC-11** (interaction sounds): all nine `system_plugin.rco` cues are decoded and six native slots map
+>   onto them (`src/interaction_audio.cpp`; audit/INTERACTION-AUDIO.md). Measured, not guessed - but there is
+>   no firmware latency or mixing reference to compare against, and `snd_trophy`/`snd_category_decide` have no
+>   native action yet, so the criterion stays unchecked.
+> - **ISC-16** (audio browsing, playback, metadata, playlists): playback, queue, seek and volume were already
+>   real; since 2026-10-26 Back stores a position in `media/resume` and the Video column lists it in Continue
+>   Watching (`Shell::migrateResumePoints()`, `openContinueWatching()`; audit/MEDIA-CONTROLS.md). Unchecked
+>   because library rows still carry no tags and playlists do not exist.
+> - **ISC-17** (video browsing, playback, subtitles, controls): sidecar SRT/WebVTT subtitles, the in-player
+>   Triangle panel and resume now exist (`src/subtitles.cpp`, `Shell::buildPlayerOptions()`,
+>   `View::drawSubtitle()`; audit/SUBTITLES.md). Unchecked because embedded/disc subtitle streams and Jellyfin
+>   subtitles are not read and a switch between real alternative audio tracks is unproven.
 
 ## Test Strategy
 
@@ -286,3 +301,5 @@ Back restoring selection. The broad transition-parity criterion remains unchecke
 - ISC-41.1/46–46.5: Real Jellyfin 12.4 native replay passed 20 checks including direct/HLS decoding, pause/seek/Back and four stage captures. Six additional auth lifecycle checks passed. Live HLS exposed an ApiKey spelling missing from the initial URL filter; corrected, revoked the disposable exposed session, and repeated playback/log containment successfully. Existing three named-state pixel gates passed. Details and remaining selectors/artwork/resume scope: audit/JELLYFIN-NATIVE.md.
 
 - ISC-20 (still partial): source review 2026-10-26 - tracked `QProcess` for RPCS3 and imported apps with exit/crash report, library rescan and idle suppression (`Shell::startTracked` / `Shell::gameRunning`), Steam registry watcher (`Shell::startSteamTracked` / `Shell::pollSteamGame`), Quit Game and the PS system menu (`Shell::psMenuActivate`), and a focus-independent PS watcher (`src/ps_watcher.*`). No configured backend preference and no recorded real launch-return capture, so the criterion stays open; see audit/FEATURE-COVERAGE.md (ISC-20).
+
+- ISC-11/16/17 (partial evidence, 2026-10-27): nine firmware cues decoded and six slots mapped, no firmware latency reference (audit/INTERACTION-AUDIO.md); resume records migrated and Continue Watching listed, playlists still absent (audit/MEDIA-CONTROLS.md "Continue Watching"); sidecar SRT/VTT subtitles with an in-player panel and a verified read-back, embedded/disc subtitles still absent (audit/SUBTITLES.md). Criteria stay unchecked for the reasons in the note above; none of these notes is a completion claim.

@@ -11,6 +11,13 @@ Latest continuations (2026-10-25): [Steam and installed-PKG content](STEAM-INTEG
 [import registry](CONTENT-REGISTRY.md), [all-theme icon correction](CATEGORY-ICON-FIX.md),
 [info bar](INFO-BAR.md) and [animation smoothness](ANIMATION-SMOOTHNESS.md).
 
+Latest continuations (2026-10-26/27): [notifications](NOTIFICATIONS.md), [Triangle options
+menu](OPTIONS-MENU.md), [sidecar subtitles and the player panel](SUBTITLES.md), [Continue
+Watching](MEDIA-CONTROLS.md), [volume HUD and the couch volume path](HTPC-IDEAS.md), [Download
+Management](STEAM-DOWNLOADS.md), [the XMBML-driven Network column](XMBML-NETWORK.md), [Jellyfin
+sign-in inside the XMB](JELLYFIN-NATIVE.md) and [the PS button while a game runs](PS-INGAME-HOOK.md).
+This index itself is the October 24 set; per-feature status is in [FEATURE-CATALOG.md](FEATURE-CATALOG.md).
+
 1. [Functional analysis](FUNCTIONS.md): behavior, data ownership, state variants
    and implementation requirements across every category.
 2. [Feature catalog](FEATURE-CATALOG.md): 307 indexed guide topics/actions,
