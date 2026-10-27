@@ -19,7 +19,8 @@ qt_add_executable(re-ps3-native
     src/text_renderer.cpp src/text_renderer.h
     src/font_raster.cpp src/font_raster.h
     src/profiles.cpp src/profiles.h
-    src/steam_library.cpp src/steam_library.h src/steam_friends.cpp src/steam_friends.h
+    src/steam_library.cpp src/steam_library.h
+    src/steam_downloads.cpp src/steam_downloads.h src/steam_accounts.cpp src/steam_accounts.h src/steam_friends.cpp src/steam_friends.h
     src/steam_artwork.cpp src/steam_artwork.h src/steam_store.cpp src/steam_store.h src/steam_owned.cpp src/steam_owned.h src/steam_collections.cpp src/steam_collections.h src/steam_overrides.cpp src/steam_overrides.h src/steam_family.cpp src/steam_family.h
     src/content_registry.cpp src/content_registry.h src/app_editor.cpp src/app_editor.h
     src/media_controls.cpp src/media_controls.h
@@ -51,7 +52,8 @@ if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND XMB_STEAMWORKS_HEADERS)
     if(NOT EXISTS "${XMB_STEAMWORKS_HEADERS}/isteamclient.h")
         message(FATAL_ERROR "XMB_STEAMWORKS_HEADERS must contain the Steamworks public headers")
     endif()
-    add_executable(xmb-steam-client src/steam_client_helper.cpp src/steam_library.cpp src/steam_library.h)
+    add_executable(xmb-steam-client src/steam_client_helper.cpp src/steam_library.cpp src/steam_library.h
+    src/steam_downloads.cpp src/steam_downloads.h src/steam_accounts.cpp src/steam_accounts.h)
     target_include_directories(xmb-steam-client PRIVATE "${XMB_STEAMWORKS_HEADERS}")
     target_compile_definitions(xmb-steam-client PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(xmb-steam-client PRIVATE Qt6::Core)
