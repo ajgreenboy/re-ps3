@@ -187,6 +187,7 @@ private:
     bool startSteamTracked(const QString& appId,const QString& title);
     void pollSteamGame();
     void restoreFocus();
+    int steamTitleCount() const;
     QVector<Entry> steamFolderEntries(const QString& mode) const;
     void openSteamFolder(const QString& mode);
     quint64 scanRequest_=0,photoRequest_=0;
