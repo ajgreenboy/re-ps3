@@ -154,3 +154,223 @@ before/after timestamps differ. This verifies the reported visual defect, not PS
 The user also identified material issues: clock inputs have since been traced and implemented (see
 ICON-MATERIAL-CLOCK.md); item icons in the open column and a background that is too bright relative to RPCS3
 remain open. Correct background sampling before tuning unfocused icons.
+
+## Rasteriser-level work: pen phase, coverage union, glow product, elision rule (2026-10-26)
+
+Bounded to `src/text_renderer.cpp`, `src/text_renderer.h`, `src/font_raster.cpp`,
+`src/font_raster.h` and this section. `view.cpp` and `shell.cpp` were read, never edited.
+
+Build and score, exactly:
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-text
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --capture --exe C:/dev/out/native-text/re-ps3-native.exe
+```
+
+Every number below is from that command on this machine, one capture per configuration. Baseline
+reproduced bit-exactly before any edit (frame 18.02/0.8301, category icon row 21.05/0.8950, item label
+row 11.94/0.3910, clock text 13.51/0.6131, info bar 17.12/0.7046).
+
+### 1. Pen phase: quantised before this change; implemented; measured an improvement on both clock layers
+
+What the native path did: `view.cpp`'s `text()` hands the renderer a scene rect, `draw()` mapped each
+glyph's tile origin into layer pixels and snapped it to `pixelGrid_` (2 layer pixels = 1 output pixel).
+With the UI layer at twice the window, that quantises every pen position to whole output pixels, so the
+fraction of PAF's 26.6 pen never reached the rasteriser even though `text_renderer.cpp` already had the
+sub-pixel phase in hand after `QTextLayout` shaping.
+
+Implementation, all in the two owned source pairs:
+
+- `FontRaster::rasterize(font, glyph, flags, QPoint delta26_6)` installs `FT_Set_Transform` with an
+  identity matrix and that delta before `FT_Load_Glyph`. This is the mechanism `cellFontFT_65E27CB3 @
+  0x6aa4` uses: both pen phases are masked with `0x3f` and the transform is set at `0x2193`/`0x2222`
+  (`TEXT-RASTER.md` 1.3). The delta is re-installed only when it changes, and every rasterisation states
+  its own, so call order cannot leak a previous phase. `advance()` clears it for the same reason.
+- Because FreeType renders the translated outline, the returned `bearing` is the shifted
+  `bitmap_left`/`bitmap_top`; the tile origin is `floor(pen) + bearing` and the fraction lives in the
+  coverage. No separate UV offset is needed and the shadow sample stays consistent.
+- Cache: a glyph's identity is `(index << 4) | (phaseY << 2) | phaseX` with `phaseSteps = 2` per
+  layer pixel on each axis (phase 0 and 0.5 layer px, i.e. four pen positions per output pixel at the
+  2x layer). Worst case is 4x the glyph tiles; the key is a pure function of the pen. When the 16
+  atlas pages fill, `glyph()` falls back to the phase-0 tile rather than dropping the glyph from the
+  string, and logs one warning.
+- Byte-identical across two runs of the canonical capture (`SHA-256 43C230D089B7E37E...` both times),
+  so the path is deterministic for `--render-clock` captures. No atlas fallback warning occurred in
+  the canonical state, so the 16 pages still hold the menu at 4x tiles.
+
+Measured on the canonical capture, same executable, one run per configuration. The first attempt
+phased x only and kept y snapped, which measured neutral-to-negative; the vertical quantisation
+dominated. The final configuration phases both axes:
+
+| layer | snapping (XMB_TEXT_PHASE=0) | x-phase, y snapped | two-axis phases (default) |
+|---|---|---|---|
+| frame | 18.01 dB / 0.8301 | 18.01 / 0.8301 | 18.01 / 0.8301 |
+| top background | 20.24 / 0.9344 | 20.24 / 0.9344 | 20.24 / 0.9344 |
+| category icon row | 20.91 / 0.8947 | 20.91 / 0.8947 | 20.91 / 0.8947 |
+| item label row | 11.94 / 0.3910 | 11.94 / 0.3913 | 11.94 / 0.3913 |
+| clock text | 13.51 / 0.6131 | 13.50 / 0.6119 | **13.66 / 0.6198** |
+| info bar | 17.12 / 0.7046 | 17.11 / 0.7037 | **17.26 / 0.7098** |
+
+Verdict: two-axis phases are a measured improvement on exactly the two layers that contain the clock
+string (+0.15 dB / +0.0067 SSIM on clock text, +0.13 dB / +0.0052 on the info bar), with no layer
+worse. They are the default; `XMB_TEXT_PHASE=0` restores the previous whole-output-pixel snapping and
+reproduces 13.51/0.6131, 17.12/0.7046 and 11.94/0.3910 bit-for-bit on the text layers.
+
+This is worth noting against `TEXT-RASTER.md` 2.4, which said not to implement sub-pixel phases on
+the evidence then available. The reference now matches the per-phase outline translation better than
+the rounded-origin-only model, so the LIKELY reading of section 1.3 is supported by measurement as
+well. It is still not proven by the transform operands, so the switch stays as the way back.
+
+Note on the category icon row: it reads 20.91 rather than the stored 21.05 because `icons.cpp` and
+`view.cpp` in this shared checkout were modified after the stored feature build was made (source
+mtimes 20:59 and 21:00 against exe mtime 20:20); every text layer is pixel-identical to the
+pre-change build, and the differing pixels are confined to the icon band x 112..1212, y 246..325.
+Enabling phases changes every native render, so the named-state self-baselines need
+`... --states --save-reference` before those gates pass again.
+
+### 2. Coverage union: today it is alpha-over, not keep-larger; helper and evidence in place; the draw path needs a shared mask
+
+Verified: `draw()` still emits one textured quad per glyph with
+`glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)` and `GL_FUNC_ADD`, so two glyphs whose coverage overlaps
+compose by alpha-over. The firmware's copy rules overwrite only when the new byte is larger
+(`FUN_004057a0 @ 0x4057a0`, `FUN_004056d8 @ 0x4056d8`), which is a saturating union. So the native
+composition does not follow it.
+
+What was added: `unionCoverage()` in `text_renderer.cpp` is the literal keep-larger copy, and
+`XMB_TEXT_CHECK=1` runs deterministic assertions over it. Output from the current build:
+
+```
+text check: PASS union-rule overlapping coverage 90 px, keep-larger below alpha-over at 41 px
+text check: accent pair e+U+0301 overlap 0 px at one pen
+text check: PASS metric-authority PAF advance 147.19 px vs Qt shaped 147.13 px at 21 px font
+```
+
+Two findings from that. First, on overlapping coverage the two rules genuinely differ (41 of 90 shared
+pixels are darker under keep-larger), so this is a real behavioural difference, not a wording one.
+Second, `e` plus U+0301 at one pen share zero coverage pixels, so a combining accent in Rodin does not
+touch its base: for ordinary accented pairs the union rule is inert, which is why nothing in the
+canonical capture can measure it (no overlapping coverage pair occurs in the English UI).
+
+Not wired into composition, deliberately. Doing it inside the renderer needs a shared mask, and the
+contract is now exact:
+
+1. Add an R8 `GL_TEXTURE_2D` mask target of `target_` size plus an FBO, created in `beginFrame` when
+   `target_` changes and released in `release()`.
+2. In `draw()`, when a string's glyph boxes actually intersect, scissor to the string's layer-space box,
+   clear it to 0, and draw every glyph quad of the string into the mask with `glBlendEquation(GL_MAX)`
+   (valid for a single-channel target) using the existing vertex layout and a coverage-only fragment
+   output.
+3. Composite the mask once over the UI layer with the existing tint and `GL_ONE/GL_ONE_MINUS_SRC_ALPHA`,
+   and let the shadow pass sample the same mask at the offset instead of per-tile `shadowBounds`.
+4. Decide halo membership explicitly: the halo channel is a linear blur, so a max-union of per-glyph
+   halos is not the same image as one blur of the unioned coverage. The firmware gives no evidence
+   either way (`TEXT-RASTER.md` 1.5 leaves the scope of the destination mask unproven), so either keep
+   the halo per tile or accept the change and measure it.
+5. On the QPainter fallback path, `QPainter::CompositionMode_Lighten` is the closest built-in per-channel
+   max.
+
+No `view.cpp` wiring is involved in any of that; it is renderer-internal state.
+
+### 3. Glow: already a text-renderer product; what is left is view-level timing
+
+The halo is already generated from the same glyph at raster time: `tileFor()` writes coverage into the
+tile's red channel and a Gaussian of that coverage into green, with sigma `2.2 * rasterScale` truncated
+at 3 sigma, inside a pad of `ceil(6 * rasterScale) + 2` layer pixels. The fragment shader reads it as
+`halo = clamp(coverage.g * glow * 1.5, 0, 1) * tint.a` and composites `tint.rgb * fill + (0.922,
+0.961, 1.0) * halo * (1 - fill)`. So the shape, the falloff and the tint are renderer products; nothing
+about them needs `view.cpp` beyond the strength value.
+
+The contract `view.cpp` must keep (and which the renderer relies on):
+
+- Focused label = two calls in this order, as today at `view.cpp:773` (the `glow` lambda), `:861` and
+  `:957`: `draw(rect, text, font, white, flags, strength, /*shadow*/false, /*ink*/false)` for the halo,
+  then `draw(rect, text, font, labelColour, flags, 0, /*shadow*/true, /*ink*/true)` for the ink. Both
+  calls hit the same atlas tiles, so the second pass costs no extra rasterisation or atlas space.
+- `strength` is the peak fraction in [0, 1] and the renderer multiplies it by 1.5; the breathing curve
+  (`0.35 + 0.65 * (0.5 - 0.5 * cos(2*pi*t/3400))`, `view.cpp:956-957`) and the idle label fade
+  (`view.cpp:943-944`) are view timing and stay where they are. No firmware value exists for either
+  (`TEXT-RASTER.md` 3.2), so the renderer must not bake them in.
+- A single combined glow+ink call would need a mask to keep a later glyph's halo off an earlier glyph's
+  ink, i.e. the same shared-mask work as section 2. Until then the two-call order is the contract.
+
+### 4. Elision: firmware shape implemented as a pure renderer helper; `view.cpp` wiring listed, not applied
+
+Firmware evidence is unchanged (`TEXT-RASTER.md` 4.2): PAF draws a character range only, and
+explore_plugin positions a separate `label2_text_ellipsis` Text object after the last visible character.
+So the rule is metric plus a second draw, not a substituted U+2026.
+
+Added `TextRenderer::elideToWidth(font, text, maxWidth)` and `measure(font, text)`. Both shape exactly as
+`draw()` does (layer-scale pixel size, `PreferNoHinting`, same fallback faces, `mapSymbols` applied) and
+return scene-unit widths, so the prefix width and the drawn glyph positions cannot disagree. The helper
+reserves the ellipsis advance, takes the widest whole-glyph prefix that fits, and refuses to split a
+surrogate pair or detach a combining mark from its base. It touches no GL state, no atlas page and no
+cache. Deterministic assertion (`XMB_TEXT_CHECK=1`, same run as section 2):
+
+```
+text check: PASS elision-fits prefix=Corrupted Data width=206.53 elided=0
+text check: PASS elision-width prefix="Corr" width=57.38 + ellipsis 27.00 <= 100
+text check: PASS elision-empty empty=0
+text check: all assertions passed
+```
+
+The second line is the unit check of the width rule: at a 100 px limit the prefix is "Corr" (57.38 px),
+the ellipsis is 27.00 px in Rodin at 21 px, the sum stays inside the limit, and the next character would
+exceed it. Note the ellipsis is a full em in this face, which any future elision budget must account for.
+
+Wiring `view.cpp` needs, at `:951`:
+
+```cpp
+const QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(27);
+const auto elided=textRenderer_.elideToWidth(labelFont,entry.title,value.isEmpty()?1050.:640.);
+const auto label=elided.elided?elided.prefix:entry.title;
+...
+text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
+if(elided.elided)
+    text(QRectF(labelRect.left()+elided.ellipsisX,labelRect.top(),40,labelRect.height()),
+         QString(QChar(0x2026)),27,QColor(255,255,255,int(255*alpha)));
+```
+
+and keep `QFontMetrics::elidedText` only as the QPainter fallback branch. This was not applied because
+`view.cpp` is outside the write fence. It also cannot change the canonical capture: no label at 1050 px
+or 640 px overflows in that state, so the prefix equals the full string and nothing is elided.
+
+### 5. The clock layer's gap is string content, not the text pipeline
+
+`elideToWidth` and the phase work both pointed at the clock text, so the metric source was measured
+instead of assumed. With both sides at the same pixel size, the firmware's unhinted 26.6 advance sum and
+Qt's shaped width agree:
+
+```
+text check: PASS metric-authority PAF advance 147.19 px vs Qt shaped 147.13 px at 21 px font
+```
+
+So there is no metric-source gap at this size, and the clock layer's 13.51 dB is not an advance-width
+error. What it is, measured on the two frames:
+
+| quantity | reference | native |
+|---|---|---|
+| clock glyph bbox width | 169 px | 185 px |
+| gap between "25/10" and "12:32" | 14 px | 24 px |
+
+`Shell::clockText()` builds `date + "  " + time` with two spaces (`settings_menu.cpp:185`) while the
+reference shows one. One space is about 13.4 px at 27 px, which accounts for almost all of the 16 px
+width difference and for the 10 px word gap. This is a `settings_menu.cpp`/`view.cpp` change (one
+character in the format string), outside this task's write fence, and it is the largest single text
+difference left in the clock layer.
+
+### 6. Summary
+
+| item | state | measured effect | owner if not closed |
+|---|---|---|---|
+| Pen phase | Per-axis phase tiles rasterised at the pen phase, keyed and bounded; default on | clock 13.51 -> 13.66 dB, 0.6131 -> 0.6198 SSIM; info bar 17.12 -> 17.26 dB; no layer worse | closed; `XMB_TEXT_PHASE=0` is the bit-exact way back, named-state baselines need refreshing |
+| Coverage union | Verified native is alpha-over; keep-larger helper plus assertions in place; composition needs a shared mask | not measurable in the canonical state (no overlapping coverage pair); e+U+0301 overlap is 0 px | renderer-internal shared-mask pass, contract in section 2 |
+| Glow | Already a renderer product (second tile channel, Gaussian, same glyph) | unchanged numbers by design | view-level breathing/fade timing only |
+| Elision | Pure helper plus deterministic assertions; not wired | none (no label overflows in the capture) | `view.cpp:951` as listed in section 4 |
+| Clock metric | Metric authority agrees with PAF at equal size | n/a | `settings_menu.cpp:185` single space |
+
+Open, in order of expected value for the clock and item label layers: the clock string's second space
+(section 5), then the shared-mask union if a state with accented or overlapping glyphs is ever gated. The
+per-phase tiles change every native render, so refresh the named-state self-baselines with
+`bun work/ab-layers.ts --states --save-reference` (a deliberate step for a rendering change, not a
+fidelity claim). Their 55 dB self-baseline still catches accidental drift afterwards.
+

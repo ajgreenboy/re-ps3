@@ -35,10 +35,35 @@ QImage tileFor(const QImage& coverage,int pad,qreal sigma) {
     }
     return tile;
 }
+// PAF's coverage copy: FUN_004057a0 @ 0x4057a0 stores an incoming coverage byte only when it is
+// larger than the stored one; FUN_004056d8 @ 0x4056d8 does the same for the coloured variant. Never
+// an add, never an alpha-over (audit/TEXT-RASTER.md 1.4-1.5). Pixels outside `into` are dropped;
+// the caller sizes the canvas.
+void unionCoverage(QImage& into,const QImage& add,int dx,int dy) {
+    if(into.isNull() || add.isNull() || into.format()!=QImage::Format_Grayscale8
+        || add.format()!=QImage::Format_Grayscale8)
+        return;
+    for(int y=0;y<add.height();++y) {
+        const int ty=y+dy;
+        if(ty<0 || ty>=into.height())continue;
+        const uchar* source=add.constScanLine(y);
+        uchar* destination=into.scanLine(ty);
+        for(int x=0;x<add.width();++x) {
+            const int tx=x+dx;
+            if(tx<0 || tx>=into.width())continue;
+            if(destination[tx]<source[x])destination[tx]=source[x];
+        }
+    }
+}
 }
 
 bool TextRenderer::init(QOpenGLFunctions_3_3_Core& gl,const QString& fontDirectory) {
     useFreeType_=raster_.configure(fontDirectory) && !qEnvironmentVariableIntValue("XMB_TEXT_QT");
+    // Per-phase coverage tiles are on by default: two phases per layer pixel on each axis, i.e. four
+    // positions per output pixel. XMB_TEXT_PHASE=0 restores whole-output-pixel snapping.
+    const bool phasesEnabled=qEnvironmentVariableIsSet("XMB_TEXT_PHASE")
+        ?qEnvironmentVariableIntValue("XMB_TEXT_PHASE")!=0:true;
+    phases_=useFreeType_ && phasesEnabled;
     const char* vertex=R"(#version 330 core
 layout(location=0) in vec2 position;layout(location=1) in vec2 texcoord;layout(location=2) in vec4 bounds;
 uniform vec2 viewport;out vec2 uv;flat out vec4 tileBounds;
@@ -70,7 +95,8 @@ void main(){
     gl.glEnableVertexAttribArray(2);gl.glVertexAttribPointer(2,4,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(4*sizeof(float)));
     gl.glBindVertexArray(0);gl.glBindBuffer(GL_ARRAY_BUFFER,0);ready_=true;
     qInfo()<<"text atlas:"<<(useFreeType_?raster_.version()+"; firmware flags 10 (no hinting/no bitmap)":QString("Qt coverage fallback; vertical hinting"))
-           <<"grayscale coverage; measured Gaussian halo";
+           <<"grayscale coverage; measured Gaussian halo;"
+           <<(phases_?"per-phase tiles (XMB_TEXT_PHASE)":"whole-output-pixel glyph origins");
     return true;
 }
 void TextRenderer::release(QOpenGLFunctions_3_3_Core& gl) {
@@ -97,23 +123,31 @@ int TextRenderer::face(const QRawFont& font) {
     if(useFreeType_ && source.isEmpty())qWarning()<<"text: unmatched font uses Qt coverage"<<font.familyName()<<font.styleName();
     return int(faces_.size())-1;
 }
-const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int faceIndex,quint32 index) {
-    auto& f=faces_[size_t(faceIndex)];const auto found=f.glyphs.constFind(index);
+const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int faceIndex,quint32 index,int phaseX,int phaseY) {
+    auto& f=faces_[size_t(faceIndex)];
+    // The phase is part of a glyph's identity: the same outline at a different pen phase rasterises
+    // to different coverage, so it gets its own tile. Two phases per layer pixel per axis keeps the
+    // atlas bounded (4x glyph tiles at worst) and every tile is deterministic for a fixed draw order.
+    const quint64 key=(quint64(index)<<4)|(quint64(phaseY&3)<<2)|quint64(phaseX&3);
+    const auto found=f.glyphs.constFind(key);
     if(found!=f.glyphs.cend())return *found;
-    Glyph value;
+    Glyph value;value.phaseX=phaseX;value.phaseY=phaseY;
     // libfontFT.prx cellFontFT_65E27CB3 @ 0x6aa4 loads outlines with flags 10, then uses
     // FT_Outline_Get_Bitmap. FT_RENDER_MODE_NORMAL uses FreeType's same grayscale outline rasterizer.
-    const auto raster=useFreeType_?raster_.rasterize(f.font,index,10):FontRaster::RasterGlyph{};
+    // The delta is the masked 26.6 pen phase that the same function feeds FT_Set_Transform.
+    const int step=qRound(64.0/phaseSteps);
+    const QPoint phaseDelta(phaseX*step,phaseY*step);
+    const auto raster=useFreeType_?raster_.rasterize(f.font,index,10,phaseDelta):FontRaster::RasterGlyph{};
     if(useFreeType_ && !raster.valid)qWarning()<<"text: Qt glyph coverage fallback"<<f.font.familyName()<<index;
     const auto raw=raster.valid?raster.coverage:f.font.alphaMapForGlyph(index,QRawFont::PixelAntialiasing);
-    if(raw.isNull())return f.glyphs.insert(index,value).value(); // spaces retain their shaped advance
+    if(raw.isNull())return f.glyphs.insert(key,value).value(); // spaces retain their shaped advance
     const int pad=std::max(2,int(std::ceil(haloRadius*rasterScale_))+2);
     QImage coverage(raw.size(),QImage::Format_Grayscale8);
     for(int y=0;y<raw.height();++y)for(int x=0;x<raw.width();++x)
         coverage.scanLine(y)[x]=raw.format()==QImage::Format_Alpha8 || raw.format()==QImage::Format_Grayscale8
             ?raw.constScanLine(y)[x]:uchar(raw.hasAlphaChannel()?raw.pixelColor(x,y).alpha():raw.pixelColor(x,y).red());
     const auto tile=tileFor(coverage,pad,std::max(.5,haloSigma*rasterScale_));
-    if(tile.width()>atlasSize || tile.height()>atlasSize)return f.glyphs.insert(index,value).value();
+    if(tile.width()>atlasSize || tile.height()>atlasSize)return f.glyphs.insert(key,value).value();
     // QPainter's image engine may leave sub-rectangle unpack state behind. Reset
     // it before allocation as well as subimage uploads; otherwise glyph spans vanish.
     gl.glPixelStorei(GL_UNPACK_ALIGNMENT,1);gl.glPixelStorei(GL_UNPACK_ROW_LENGTH,0);
@@ -122,7 +156,20 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
         auto& p=pages_.back();if(p.x+tile.width()>atlasSize){p.x=0;p.y+=p.rowHeight+1;p.rowHeight=0;}
     }
     if(pages_.empty() || pages_.back().y+tile.height()>atlasSize) {
-        if(pages_.size()>=maxPages)return f.glyphs.insert(index,value).value();
+        // A phased tile is an enhancement: when the atlas is full, fall back to the phase-0 tile
+        // rather than dropping the glyph from the string. Draw order is deterministic, so the
+        // capture is reproducible either way.
+        if(pages_.size()>=maxPages) {
+            if(phaseX || phaseY) {
+                static bool warned=false;
+                if(!warned){warned=true;qWarning()<<"text atlas: phased tile fell back to phase 0; the atlas pages are full";}
+                // Remember the phase-0 tile under the phased key too, so a full atlas does not force
+                // a FreeType rasterisation and halo build on every frame for every glyph.
+                const Glyph zero=glyph(gl,faceIndex,index,0,0);
+                return f.glyphs.insert(key,zero).value();
+            }
+            return f.glyphs.insert(key,value).value();
+        }
         Page p;gl.glGenTextures(1,&p.texture);gl.glBindTexture(GL_TEXTURE_2D,p.texture);
         // Empty areas and gutters must be zero for bilinear sampling at tile edges.
         QImage empty(atlasSize,atlasSize,QImage::Format_RGBA8888);empty.fill(Qt::transparent);
@@ -140,7 +187,7 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
     gl.glPixelStorei(GL_UNPACK_SKIP_PIXELS,0);gl.glPixelStorei(GL_UNPACK_SKIP_ROWS,0);
     gl.glTexSubImage2D(GL_TEXTURE_2D,0,p.x,p.y,tile.width(),tile.height(),GL_RGBA,GL_UNSIGNED_BYTE,tile.constBits());
     p.x+=tile.width()+1;p.rowHeight=std::max(p.rowHeight,tile.height());
-    return f.glyphs.insert(index,value).value();
+    return f.glyphs.insert(key,value).value();
 }
 TextRenderer::Layout& TextRenderer::layout(const QString& text,const QFont& font,qreal width,int flags) {
     const QString display=FontRaster::mapSymbols(text);
@@ -209,16 +256,37 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
     gl.glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);
     struct Batch {int page,first,count;};
     QVector<Vertex> vertices;QVector<Batch> batches;
+    // Glyph origins are resolved in layer pixels. The pen's fraction of a layer pixel selects a
+    // coverage tile that was rasterised at that phase, so a glyph no longer has to land on a whole
+    // output pixel. The UI painter transform is a uniform scale plus translation (view.cpp), so a
+    // glyph quad stays axis-aligned in layer space.
+    const QPointF layerOrigin=transform.map(QPointF(0,0));
+    const QPointF layerUnitX=transform.map(QPointF(1,0)),layerUnitY=transform.map(QPointF(0,1));
+    const qreal scaleX=layerUnitX.x()-layerOrigin.x(),scaleY=layerUnitY.y()-layerOrigin.y();
     // Batch consecutive glyphs on the same page without changing shaped order.
     for(const auto& placed:shaped.glyphs) {
-        const auto& g=glyph(gl,placed.face,placed.index);if(g.page<0)continue;
-        const QPointF at=rect.topLeft()+QPointF((placed.position.x()+g.bearing.x())/rasterScale_,(placed.position.y()+offset+g.bearing.y())/rasterScale_);
-        const QRectF box(at,QSizeF(g.atlas.size())/rasterScale_);
-        // Each glyph's origin snaps to whole output pixels (pixelGrid_ layer pixels), so a one-pixel stem does not
-        // straddle two output pixels after the 2x2 resolve.
-        const QPointF origin=transform.map(box.topLeft());
-        const QPointF snap(std::round(origin.x()/pixelGrid_)*pixelGrid_-origin.x(),std::round(origin.y()/pixelGrid_)*pixelGrid_-origin.y());
-        const QPointF tl=origin+snap,tr=transform.map(box.topRight())+snap,bl=transform.map(box.bottomLeft())+snap,br=transform.map(box.bottomRight())+snap;
+        const qreal penX=transform.map(QPointF(rect.left()+placed.position.x()/rasterScale_,0)).x();
+        const qreal penY=transform.map(QPointF(0,rect.top()+(placed.position.y()+offset)/rasterScale_)).y();
+        const auto& g=glyph(gl,placed.face,placed.index,
+                            phases_?penPhase(penX):0,phases_?penPhase(penY):0);if(g.page<0)continue;
+        // The unphased origin is the same layer-pixel tile origin this renderer used before per-phase
+        // tiles existed: the whole tile is snapped to the output-pixel grid, which is what the
+        // firmware's ((phase+pen)+0x3f)>>6 blit origin does. A phase-shifted tile instead sits on the
+        // whole-pixel part of the pen, because its bearing already carries the phase.
+        const bool phased=phases_ && (g.phaseX || g.phaseY);
+        qreal originX=0,originY=0;
+        if(phased) {
+            originX=std::floor(penX)+scaleX*g.bearing.x()/rasterScale_;
+            originY=std::floor(penY)+scaleY*g.bearing.y()/rasterScale_;
+        } else {
+            const QPointF at=rect.topLeft()+QPointF((placed.position.x()+g.bearing.x())/rasterScale_,
+                                                    (placed.position.y()+offset+g.bearing.y())/rasterScale_);
+            const QPointF origin=transform.map(at);
+            originX=std::round(origin.x()/pixelGrid_)*pixelGrid_;
+            originY=std::round(origin.y()/pixelGrid_)*pixelGrid_;
+        }
+        const qreal width=scaleX*g.atlas.width()/rasterScale_,height=scaleY*g.atlas.height()/rasterScale_;
+        const QPointF tl(originX,originY),tr(originX+width,originY),bl(originX,originY+height),br(originX+width,originY+height);
         const float u=float(g.atlas.x())/atlasSize,v=float(g.atlas.y())/atlasSize,r=float(g.atlas.x()+g.atlas.width())/atlasSize,b=float(g.atlas.y()+g.atlas.height())/atlasSize;
         if(batches.isEmpty() || batches.back().page!=g.page)batches.push_back({g.page,int(vertices.size()),0});
         const auto vertex=[&](const QPointF& p,float s,float t){return Vertex{float(p.x()),float(p.y()),s,t,u,v,r,b};};
@@ -239,5 +307,140 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
     drawPass(false);
     gl.glBindVertexArray(0);gl.glBindBuffer(GL_ARRAY_BUFFER,0);gl.glBindTexture(GL_TEXTURE_2D,0);program_.release();
     painter.endNativePainting();
+    if(!checked_ && qEnvironmentVariableIntValue("XMB_TEXT_CHECK")){checked_=true;selfCheck();}
+}
+
+int TextRenderer::penPhase(qreal penX) {
+    // The firmware's pen is a 26.6 position; the phase it masks with 0x3f is that fraction of a
+    // pixel. Two phases per layer pixel are what the 2x supersampled layer can express, so the
+    // residual after quantisation is at most 1/4 layer pixel (1/8 output pixel).
+    const qreal fraction=penX-std::floor(penX);
+    return std::clamp(int(std::lround(fraction*phaseSteps)),0,phaseSteps-1);
+}
+
+qreal TextRenderer::measure(const QFont& font,const QString& text) const {
+    // The drawn width of one line, measured by shaping exactly the way draw() shapes: same pixel
+    // size at layer scale, same hinting preference, same fallback faces. Returned in scene units.
+    if(text.isEmpty())return 0;
+    const qreal scale=std::max(1.,rasterScale_);
+    QFont shaped=font;
+    if(shaped.styleName().isEmpty() && shaped.weight()==QFont::Normal && !shaped.italic())shaped.setStyleName("Regular");
+    shaped.setPixelSize(std::max(1,int(std::lround(font.pixelSize()*scale))));
+    shaped.setStyleStrategy(QFont::PreferAntialias);
+    shaped.setHintingPreference(QFont::PreferNoHinting);
+    qreal width=0;
+    for(const auto& paragraph:FontRaster::mapSymbols(text).split('\n')) {
+        QTextLayout lay(paragraph,shaped);
+        QTextOption option;option.setWrapMode(QTextOption::NoWrap);lay.setTextOption(option);
+        lay.beginLayout();
+        auto line=lay.createLine();
+        if(line.isValid()){line.setLineWidth(1e9);line.setPosition({0,0});}
+        lay.endLayout();
+        if(line.isValid())width=std::max(width,line.naturalTextWidth());
+    }
+    return width/scale;
+}
+
+TextRenderer::Elision TextRenderer::elideToWidth(const QFont& font,const QString& text,qreal maxWidth) const {
+    // Firmware shape (audit/TEXT-RASTER.md 4.2): explore_plugin measures the label, finds the last
+    // visible character, and puts a separate label2_text_ellipsis Text object there. PAF itself
+    // only draws a character range, so this returns the prefix and the pen x; the caller draws the
+    // ellipsis as its own text, never as a substituted U+2026 inside the string.
+    Elision result;result.prefix=text;
+    if(text.isEmpty() || maxWidth<=0)return result;
+    const qreal whole=measure(font,text);
+    if(whole<=maxWidth){result.width=whole;result.ellipsisX=whole;return result;}
+    result.elided=true;
+    const qreal limit=maxWidth-measure(font,QString(QChar(0x2026)));
+    int best=0;qreal bestWidth=0;
+    for(int i=1;i<=text.size();++i) {
+        const qreal width=measure(font,text.left(i));
+        if(width>limit)break;
+        best=i;bestWidth=width;
+    }
+    // Keep the boundary on a whole cluster: never split a surrogate pair, and never cut a base
+    // letter away from a combining mark that follows it.
+    while(best>0 && (text.at(best-1).isHighSurrogate() ||
+                     (best<text.size() && text.at(best).isMark()))) {
+        --best;bestWidth=best?measure(font,text.left(best)):0;
+    }
+    result.prefix=text.left(best);result.width=bestWidth;result.ellipsisX=bestWidth;
+    return result;
+}
+
+void TextRenderer::selfCheck() {
+    // Deterministic assertions for the two renderer-level rules that can be checked without a
+    // capture: the elision width rule (4.2) and the keep-larger coverage union (1.5). Run with
+    // XMB_TEXT_CHECK=1; every line is logged, so a scripted run is the evidence.
+    if(faces_.empty()){qInfo().noquote()<<"text check: no shaped face yet; skipped";return;}
+    const auto& raw=faces_.front().font;
+    QFont font(raw.familyName());
+    if(!raw.styleName().isEmpty())font.setStyleName(raw.styleName());
+    font.setPixelSize(27);
+    bool pass=true;
+    const auto report=[&](const char* name,bool ok,const QString& detail) {
+        pass&=ok;qInfo().noquote()<<QString("text check: %1 %2 %3").arg(ok?"PASS":"FAIL",name,detail);
+    };
+    // Elision must leave a fitting string untouched and, when it does elide, leave the prefix plus
+    // the reserved ellipsis inside the limit.
+    const QString longText=QStringLiteral("Corrupted Data");
+    const auto fits=elideToWidth(font,longText,1100);
+    report("elision-fits",!fits.elided && fits.prefix==longText && fits.width<=1100,
+           QString("prefix=%1 width=%2 elided=%3").arg(fits.prefix).arg(fits.width,0,'f',2).arg(fits.elided));
+    const auto cut=elideToWidth(font,longText,100);
+    const qreal ellipsis=measure(font,QString(QChar(0x2026)));
+    report("elision-width",cut.elided && cut.prefix.size()<longText.size()
+               && longText.startsWith(cut.prefix) && cut.width+ellipsis<=100
+               && (cut.prefix.size()==longText.size() || measure(font,longText.left(cut.prefix.size()+1))+ellipsis>100),
+           QString("prefix=\"%1\" width=%2 + ellipsis %3 <= 100").arg(cut.prefix).arg(cut.width,0,'f',2).arg(ellipsis,0,'f',2));
+    const auto empty=elideToWidth(font,QString(),100);
+    report("elision-empty",!empty.elided && empty.prefix.isEmpty() && empty.width==0,"empty=0");
+    // Metric-source evidence: PAF sums unhinted 26.6 advances (_opd_FUN_00397e5c @ 0x397e5c). Compare
+    // that sum with the width the renderer actually shapes *at the same pixel size*, so any
+    // difference is a metric difference and not a size difference.
+    const QString clock=QStringLiteral("25/10  12:32");
+    QFont same=font;
+    same.setPixelSize(std::max(1,int(std::lround(raw.pixelSize()/std::max(1.,rasterScale_)))));
+    qreal paf=0;
+    for(const quint32 glyph:raw.glyphIndexesForString(clock))paf+=raster_.advance(raw,glyph);
+    const qreal shaped=measure(same,clock);
+    report("metric-authority",std::abs(paf-shaped)<=1.0,
+           QString("PAF advance %1 px vs Qt shaped %2 px at %3 px font").arg(paf,0,'f',2).arg(shaped,0,'f',2)
+               .arg(raw.pixelSize()));
+    // Keep-larger union versus the alpha-over this renderer's per-glyph quads actually produce.
+    // e + U+0301 at one pen first: if the accent's ink does not touch the base there is nothing for
+    // the union rule to change in an accented pair.
+    const auto baseGlyphs=raw.glyphIndexesForString(QStringLiteral("e"));
+    const auto markGlyphs=raw.glyphIndexesForString(QString(QChar(0x301)));
+    const auto base=baseGlyphs.isEmpty()?FontRaster::RasterGlyph{}:raster_.rasterize(raw,baseGlyphs.front(),10);
+    const auto mark=markGlyphs.isEmpty()?FontRaster::RasterGlyph{}:raster_.rasterize(raw,markGlyphs.front(),10);
+    int accentOverlap=0;
+    if(base.valid && mark.valid) {
+        const QRect baseBox(base.bearing,QSize(base.coverage.size()));
+        const QRect markBox(mark.bearing,QSize(mark.coverage.size()));
+        for(int y=0;y<mark.coverage.height();++y)for(int x=0;x<mark.coverage.width();++x) {
+            const int bx=x+markBox.x()-baseBox.x(),by=y+markBox.y()-baseBox.y();
+            if(bx<0 || by<0 || bx>=base.coverage.width() || by>=base.coverage.height())continue;
+            if(base.coverage.constScanLine(by)[bx] && mark.coverage.constScanLine(y)[x])++accentOverlap;
+        }
+    }
+    qInfo().noquote()<<QString("text check: accent pair e+U+0301 overlap %1 px at one pen").arg(accentOverlap);
+    // The rule itself needs masks that overlap: shift a copy of the same glyph one pixel right, which
+    // is what a tight kerned pair or a combining mark drawn back over its base produces.
+    if(base.valid && base.coverage.width()>1) {
+        QImage unioned=base.coverage.convertToFormat(QImage::Format_Grayscale8);
+        unionCoverage(unioned,base.coverage,1,0);
+        int overlap=0,strict=0;
+        for(int y=0;y<base.coverage.height();++y)for(int x=1;x<base.coverage.width();++x) {
+            const int a=base.coverage.constScanLine(y)[x],b=base.coverage.constScanLine(y)[x-1];
+            if(!a || !b)continue;
+            ++overlap;
+            const int over=255-((255-a)*(255-b)+127)/255; // what alpha-over produces today
+            if(unioned.constScanLine(y)[x]<over)++strict;
+        }
+        report("union-rule",overlap>0 && strict>0,
+               QString("overlapping coverage %1 px, keep-larger below alpha-over at %2 px").arg(overlap).arg(strict));
+    } else report("union-rule",false,"no coverage for e");
+    qInfo().noquote()<<QString("text check: %1").arg(pass?"all assertions passed":"assertion failure");
 }
 }
