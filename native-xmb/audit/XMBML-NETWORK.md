@@ -241,3 +241,5 @@ The definition is read once, in the `Shell` constructor. There is no per-frame o
 
 Not touched: `view.cpp`/`view.h`, `main.cpp`, `settings_menu.cpp`, `preferences.cpp`, `catalog.cpp`
 (used as-is), the harness, and anything under the firmware the app reads.
+
+**Update (2026-10-27):** seg_dlctrl is no longer Unavailable - the row is classified as RowKind::DownloadControl from its ese://...type=download_control provider and maps to Action::SteamDownloads, which opens the Steam download queue page (see STEAM-DOWNLOADS.md section 10). The other four rows stay Unavailable for the reasons above.
