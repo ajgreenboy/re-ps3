@@ -1,9 +1,12 @@
 # Steam download state: verified local sources for the XMB download page
 
-Status: `src/steam_downloads.{h,cpp}` implements the scanner and the UI text helper. The module is
-**not wired into the shell or CMakeLists yet** - the lead integrates it. Everything below was probed
-on this machine on 2026-10-26 (America/Chicago), read-only: no writes to Steam's files or registry, no
-network, no Steam API key, no process access.
+Status: `src/steam_downloads.{h,cpp}` implements the scanner and the UI text helper. It is compiled
+into the app (`CMakeLists.txt`, main executable and the optional `xmb-steam-client` target) and is
+exposed as a report-only CLI in `main.cpp`: `--steam-root <dir>` plus
+`--steam-downloads-report <file.json>`, with `XMB_STEAM_DOWNLOADS_LOG=1` for the qInfo dump. It is not
+wired into the XMB download page UI yet - that is the shell side of the integration (section 7).
+Everything below was probed on this machine on 2026-10-26 (America/Chicago), read-only: no writes to
+Steam's files or registry, no network, no Steam API key, no process access.
 
 Machine facts: Windows, NT 10.0.26200 (25H2), Steam installed at `C:\Program Files (x86)\Steam`,
 HKLM `Version=1792618285`, `SteamPID=11580` (client running), one logged-in user (`AutoLoginUser` is
@@ -228,9 +231,9 @@ then by title.
 
 ## 7. Integration notes
 
-- Add `src/steam_downloads.cpp src/steam_downloads.h` to the `qt_add_executable` list in
-  `CMakeLists.txt`. The module needs Qt6::Core only (`QSettings`, `QDir`, `QFile`, `QString`); it
-  adds no link libraries, no CLI option and no new thread.
+- Already listed in `CMakeLists.txt` (main executable and the optional `xmb-steam-client` target). The
+  module needs Qt6::Core only (`QSettings`, `QDir`, `QFile`, `QString`); it adds no link libraries, no
+  new thread, and its only CLI surface is the report option `main.cpp` provides.
 - From the shell, on entering the download management page and at most about once a second while it
   is visible (not per frame):
   `QString error; const QVector<xmb::SteamDownload> downloads = xmb::scanSteamDownloads(steamRoot, &error);`
@@ -265,10 +268,20 @@ then by title.
   installed-only app (mask 4), a garbage ACF and an ACF without `StateFlags` were all ignored.
   `XMB_STEAM_ROOT` and the explicit-root argument both resolved; a nonexistent root returned the
   "Steam installation not found" error.
+- Full project build with the module compiled in:
+  `build.ps1 -OutputDirectory C:\dev\out\native-downloads` - exit 0, ninja compiles
+  `steam_downloads.cpp.obj` with no warnings from that file (the warnings in the log are pre-existing
+  ones in `main.cpp`, `host.cpp`, `view.cpp` and `interaction_audio.cpp`). The integrated CLI was then
+  run three ways: `--steam-root "C:\Program Files (x86)\Steam" --steam-downloads-report
+  report-real.json`, the same without `--steam-root` (registry discovery), and `--steam-root <fake>
+  --steam-downloads-report report-fake.json`. The JSON matched the standalone driver: 1 entry
+  (`skate.`, `update-pending`, 0/328909824) on the real install, and all five synthetic states with
+  the expected order (active -> paused -> queued).
 
 ## 9. Files
 
 - `src/steam_downloads.h` - `SteamDownload`, `scanSteamDownloads`, `steamDownloadStateText`,
   `logSteamDownloads`.
 - `src/steam_downloads.cpp` - bounded VDF reader, library discovery, registry hints, classification.
-- This file. No other file was modified; nothing was wired into the application.
+- This file. No other file was modified by this work; the `CMakeLists.txt` and `main.cpp` integration
+  (report CLI, `--steam-root`, env-gated log) was done by the lead on top of these three files.
