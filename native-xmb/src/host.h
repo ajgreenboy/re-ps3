@@ -15,4 +15,8 @@ int masterVolume();
 bool setMasterVolume(int percent);
 bool masterMuted();
 bool setMasterMuted(bool muted);
+// Holds one system-wide request that the display and the machine may not idle-sleep, for as long as a film or
+// a launched title runs. Returns the state now in effect; the previous flags are logged so a released hold
+// proves the earlier request was live. Never changes a power plan or a setting.
+bool holdDisplayAwake(bool hold);
 }

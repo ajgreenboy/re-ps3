@@ -772,6 +772,14 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         emit changed();
     });
     connect(&idle_,&QTimer::timeout,this,[this]{
+        // The host power plan must not end the evening in the middle of a film. One place asks for the
+        // display-awake hold and drops it again, so every way playback stops is covered.
+        // The player's own state decides this, not mediaOpen_: the overlay stays open (paused at 0:00) after a
+        // title reaches its end, and holding on that would keep the display awake until Back. A photo slideshow
+        // does not hold it, since the XMB is expected to dim over photos.
+        const bool playing=mediaOpen_ && !photoOpen() && player_->playbackState()!=QMediaPlayer::StoppedState;
+        const bool active=playing || gameRunning();
+        if(active!=sessionHold_)sessionHold_=host::holdDisplayAwake(active);
         const int minutes=preferences_.value("power/idleMinutes").toInt();
         // Never close the XMB while a title it launched is still running.
         if(minutes && !mediaOpen_ && !gameRunning() && !QApplication::activeModalWidget() && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
@@ -788,7 +796,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     });
     initJellyfin();
 }
-Shell::~Shell(){jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();disconnect(&steamFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
+Shell::~Shell(){host::holdDisplayAwake(false);jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();disconnect(&steamFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
 const QVector<Entry>& Shell::entries()const {return pages_.isEmpty()?categories_[category_].entries:pages_.last().entries;}
 const QVector<Entry>& Shell::entriesAt(int depth)const {return depth==0?categories_[category_].entries:pages_.at(depth-1).entries;}
 int Shell::selectionAt(int depth)const {return depth==0?selections_[category_]:pages_.at(depth-1).selection;}

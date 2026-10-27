@@ -209,6 +209,7 @@ private:
     QTimer slideshow_,idle_;
     QElapsedTimer activity_;
     qint64 idleTimeOverride_=-1;
+    bool sessionHold_=false;         // the host display-awake request currently in effect
     QImage photo_;
     int photoRotation_=0;
     QVector<Category> categories_;

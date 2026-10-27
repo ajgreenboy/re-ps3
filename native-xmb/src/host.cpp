@@ -8,6 +8,7 @@
 #include <QVector>
 #include <QStringList>
 #include <QSysInfo>
+#include <QDebug>
 #include <algorithm>
 #include <cmath>
 #ifdef Q_OS_WIN
@@ -175,6 +176,25 @@ bool setMasterMuted(bool muted) {
     return withEndpoint([&](IAudioEndpointVolume* v){return SUCCEEDED(v->SetMute(muted,nullptr));});
 #else
     Q_UNUSED(muted);return false;
+#endif
+}
+// ES_CONTINUOUS makes the request persist until it is cleared; ES_DISPLAY_REQUIRED additionally keeps the
+// screen on, which is what a two-hour film needs. SetThreadExecutionState answers with the flags that were in
+// effect before the call, so a release reporting ES_SYSTEM_REQUIRED|ES_DISPLAY_REQUIRED proves the hold was live.
+// A zero return is documented as failure but is also what a thread with no outstanding request can report, so
+// it is logged rather than treated as fatal: the release line is the reliable evidence either way.
+bool holdDisplayAwake(bool hold) {
+#ifdef Q_OS_WIN
+    static bool held=false;
+    if(hold==held)return held;
+    const EXECUTION_STATE previous=SetThreadExecutionState(hold?(ES_CONTINUOUS|ES_SYSTEM_REQUIRED|ES_DISPLAY_REQUIRED):ES_CONTINUOUS);
+    held=hold;
+    if(previous)qInfo().noquote()<<QString("session: display-awake %1 (previous 0x%2)")
+        .arg(hold?"held":"released").arg(quint32(previous),8,16,QChar('0'));
+    else qWarning().noquote()<<"session: display-awake"<<(hold?"held":"released")<<"(previous state unreported)";
+    return held;
+#else
+    Q_UNUSED(hold);return false;
 #endif
 }
 }

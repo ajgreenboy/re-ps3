@@ -411,6 +411,30 @@ the app asked.
 Never: call any shutdown, restart or suspend API (that is a separate, confirmed task);
 change host brightness or power settings; quietly rename the existing Auto-Off behaviour.
 
+**Landed 2026-10-26: the first half only.** `host::holdDisplayAwake` plus one call site in
+the idle timer; System Auto-Off still quits. The hold is keyed on
+`QMediaPlayer::playbackState()` rather than `mediaOpen_`, because the overlay stays open and
+paused at 0:00 after a title reaches its end. Built and run from an isolated copy of HEAD
+plus the four changed files, because `view.cpp` was mid-edit in another agent's working tree
+at the time. Evidence in `out/native-reference/htpc-session`:
+
+- Run A (play, then Back): `session: display-awake held (previous 0x80000000)` and
+  `released (previous 0x80000003)`, the release falling between the two grabs, with the
+  first sidecar showing `mediaOpen: true, mediaPaused: false, mediaPosition: 650` and the
+  second `mediaOpen: false`.
+- Run B (play to the natural end): held, then released before the grab at the end, while the
+  sidecar still reported `mediaOpen: true, mediaPaused: true, mediaPosition: 0`. This run is
+  what caught the bug in the first cut: keyed on `mediaOpen_`, the hold outlived the film
+  and only dropped at process exit.
+- Run C (no media): no session line at all, so the request is not unconditional.
+
+The release line is the useful part: `previous 0x80000003` is the OS reporting
+`ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED` was in effect, which is stronger
+than a log of the call having been made. Not proven: that a host power plan honours the
+request across a 90-minute film (`powercfg /requests` needs an elevated shell the harness
+does not have, so that claim still needs one manual run), and the `gameRunning()` half of
+the predicate, which shares the path but was not exercised here.
+
 ### T3 - Subtitles and audio tracks
 
 Row 7. Read first: the `QMediaPlayer` wiring in `src/shell.cpp`, the media overlay in
