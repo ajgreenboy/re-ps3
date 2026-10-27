@@ -1,6 +1,7 @@
 # Phase 7 — repeatable native captures and layer comparisons
 
-Updated 2026-10-25. The capture/scoring foundation is implemented and exercised. Firmware presentation parity remains open.
+Updated 2026-10-26. The capture/scoring foundation is implemented and exercised, including named Steam/XMB states
+and per-layer regression gates. Firmware presentation parity remains open.
 
 ## What changed
 
@@ -135,24 +136,33 @@ with pinned clocks and an empty Steam root.
 
 | Layer | Crop (x,y,w,h) | Stored pair PSNR / SSIM | Canonical capture PSNR / SSIM |
 |---|---|---:|---:|
-| Whole frame | 0,0,1920,1080 | 18.20 / 0.8388 | 17.96 / 0.8171 |
-| Top background | 0,0,700,200 | 19.02 / 0.9251 | 20.20 / 0.9303 |
-| Category icon row | 0,240,1920,120 | 20.13 / 0.9022 | 20.99 / 0.8865 |
-| Item label row | 400,425,800,100 | 11.86 / 0.3791 | 11.93 / 0.3832 |
+| Whole frame | 0,0,1920,1080 | 18.20 / 0.8388 | 18.02 / 0.8301 |
+| Top background | 0,0,700,200 | 19.02 / 0.9251 | 20.24 / 0.9344 |
+| Category icon row | 0,240,1920,120 | 20.13 / 0.9022 | 21.05 / 0.8950 |
+| Item label row | 400,425,800,100 | 11.86 / 0.3791 | 11.94 / 0.3910 |
 | Clock text | 1570,80,260,50 | 10.33 / 0.3504 | 13.51 / 0.6131 |
 | Info bar | 1329,75,591,58 | 13.40 / 0.4973 | 17.12 / 0.7046 |
 
-The capture recipe pins `--render-clock 30 --background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00
+The canonical column was re-measured on 2026-10-26 after the particle layer was toned down (fewer specks, matched to
+the reference): frame, top background, category icon row and item label row moved; clock and info bar did not. The
+capture recipe pins `--render-clock 30 --background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00
 --focus-time 2000`, uses the `full,wait,wait,wait` script tokens and points `XMB_STEAM_ROOT` at an empty directory
 so the Game column keeps the reference's pre-Steam dev_flash content. The stored-pair row reproduces the earlier
 whole-frame 18.20 dB / 0.8388 and category-row 20.13 dB / 0.9022 baselines; the older top-background 19.03 dB /
 0.9248 used an unrecorded crop and is re-measured here as 19.02 / 0.9251.
 
-## Named Steam/XMB states (2026-10-25)
+## Named Steam/XMB states (2026-10-26)
 
-The new Steam pages have no RPCS3 capture, so each named state's reference is the deterministic native render of
-that same state. These are self-baseline regression gates: they catch drawing, layout and content changes, and they
-say nothing about firmware fidelity.
+The Steam pages have no RPCS3 capture, so each named state's reference is the deterministic native render of that
+same state. These are self-baseline regression gates: they catch drawing, layout and content changes, and they say
+nothing about firmware fidelity.
+
+Two deliberate changes on 2026-10-26 forced a refresh. The Game column was reshaped to Steam Store plus a single
+All Games folder: the inline installed rows and the top-level Not Installed row are gone, and Not Installed is now
+reached through All Games. The particle layer was also toned down to fewer specks to match the reference frame.
+The recipes below describe the new shape; the references were regenerated from it with
+`--states --save-reference` and the canonical-capture baselines in the table above were re-measured on the same
+build.
 
 ```powershell
 # every gate in one command: stored pair + canonical capture + all named states
@@ -160,13 +170,13 @@ bun work/ab-layers.ts --all
 
 # only the named states, or one of them
 bun work/ab-layers.ts --states
-bun work/ab-layers.ts --state steam-store-sections
+bun work/ab-layers.ts --state steam-all-games
 
 # recipes and machine-readable reports
 bun work/ab-layers.ts --list-states
 bun work/ab-layers.ts --states --json
 
-# deliberately refresh the references after an intended rendering change
+# deliberately refresh the references after an intended rendering or layout change
 bun work/ab-layers.ts --states --save-reference
 ```
 
@@ -175,37 +185,43 @@ different state than the recipe expects) or an input/runtime error.
 
 ### Recipes and assertions
 
-One discovery capture of the Game column root reads the `XMB_DUMP_ENTRIES` catalogue dump to find each target's
-row index; the page recipes then script `DOWN` taps to that index and press ENTER. Every recipe copies its data
-directory from `out/native-reference/store/ui3-data` (preferences, profiles, settings, `family-shared.json`, cached
-Steam headers, artwork overrides), pins all clocks, and sets `XMB_STEAM_ARTWORK=0` so background artwork fetches
-cannot change a frame mid-capture. References and their state sidecars live under `out/native-reference/layers/`
-(gitignored local reference data, never committed).
+One discovery capture of the Game column root reads the `XMB_DUMP_ENTRIES` catalogue dump to find the root row
+indices. A multi-stage recipe then opens its parent page and reads that page's `<dump>.folder.json` to resolve the
+child row, so the scripted navigation follows the rebuilt column instead of fixed offsets. Every recipe copies its
+data directory from `out/native-reference/store/ui3-data` (preferences, profiles, settings, `family-shared.json`,
+cached Steam headers, artwork overrides), pins all clocks, and sets `XMB_STEAM_ARTWORK=0` so background artwork
+fetches cannot change a frame mid-capture. References and their state sidecars live under
+`out/native-reference/layers/` (gitignored local reference data, never committed).
 
 | State | Navigation and assertions | Regions |
 |---|---|---|
-| `steam-game-root` | Game column root, no input. Asserts depth 0; catalogue has `steam-store` and `steam-folder-library`; every row before `steam-store` is an inline `steam:*` title and their count equals `installedSteam`; the Not Installed detail equals owned - installed + familyShared (275). | whole frame; item column 340,380,1080,600 |
-| `steam-store-sections` | Select `steam-store` (index 10) and press ENTER. Asserts depth 1, `entryId=store-section:top_sellers`, title Top Sellers, 3 rows, and no `<dump>.store.json` (the sections page must make no store request). | whole frame; sections 440,400,640,320 |
-| `steam-not-installed` | Select `steam-folder-library` (index 11) and press ENTER. Asserts the `<dump>.folder.json` mode `library`, row count = owned - installed + 3 family-shared apps (275), every row `steam:*` with a "Not installed" detail, and the sidecar count equal to the folder count. | whole frame; rows 430,420,640,560 |
+| `steam-game-root` | Game column root, no input. Asserts depth 0 and the exact 11-row column: `steam-store`, `steam-folder-all-games` (detail = owned titles, 282), then `vita`, `data`, `memory`, `ps2`, `psp`, `ps3`, `store`, `content:refresh`, `content:import`. | whole frame; item column 340,380,1080,600 |
+| `steam-all-games` | Select `steam-folder-all-games` (root index 1) and press ENTER. Asserts depth 1, `entryId=steam-folder-all-titles`, 14 rows, folder mode `all`, and the ordered row list: All Titles (owned titles, 282), the 11 non-empty collection folders in name order (Apps 6, Canyon Dogshit 1, Favorites 1, Fighting 16, Hidden 41, HTPC 3, Idle/CLicker/Shit 2, Lego 21, Multiplayer 99, Singleplayer 91, Valve 19), Not Installed (owned - installed + familyShared, 275), Family Shared (3). | whole frame; rows 430,420,700,560 |
+| `steam-store-sections` | Select `steam-store` (root index 0) and press ENTER. Asserts depth 1, `entryId=store-section:top_sellers`, title Top Sellers, 3 rows, and no `<dump>.store.json` (the sections page must make no store request). | whole frame; sections 440,400,640,320 |
+| `steam-not-installed` | All Games (root index 1), then the `Not Installed` row (index 12, resolved from the All Games folder dump) and press ENTER. Asserts depth 2, folder mode `library`, row count = owned - installed + 3 family-shared apps (275), every row `steam:*` with a "Not installed" detail, and the sidecar count equal to the folder count. | whole frame; rows 430,420,640,560 |
 
 ### Determinism and measured numbers
 
 Each recipe was captured twice and the frames were byte-identical (PSNR Infinity, SSIM 1.0000), including the
 275-row folder page: cached artwork comes from the seed data and asynchronous fetches are disabled. The fixed gate
 is `PSNR >= 55 dB and SSIM >= 0.9995` against the stored reference. One changed 255-level pixel already costs about
-68 dB on a 1080p frame, so any deterministic drawing change fails while GPU/driver noise has room.
+68 dB on a 1080p frame, so any deterministic drawing change fails while GPU/driver noise has room. A host-level key
+event can move the selection while the app has focus, so an assertion-mismatched capture is retried once before the
+state is reported as failed; that keeps a single external flake from reading as a regression.
 
 | State | Captured state (observed) | Whole frame PSNR / SSIM | Content region PSNR / SSIM |
 |---|---|---:|---:|
-| `steam-game-root` | game, depth 0, selection 0, 21 rows | inf / 1.0000 | inf / 1.0000 |
+| `steam-game-root` | game, depth 0, 11 rows | inf / 1.0000 | inf / 1.0000 |
+| `steam-all-games` | game, depth 1, 14 folder rows | inf / 1.0000 | inf / 1.0000 |
 | `steam-store-sections` | game, depth 1, Top Sellers, 3 rows | inf / 1.0000 | inf / 1.0000 |
-| `steam-not-installed` | game, depth 1, folder 275 rows | inf / 1.0000 | inf / 1.0000 |
+| `steam-not-installed` | game, depth 2, folder 275 rows | inf / 1.0000 | inf / 1.0000 |
 
-Limits: the owned-games list comes from the existing Steam Web API key path, so a changed account or library makes
-the dump assertions fail loudly (exit 2) instead of scoring a different state; update recipe and reference
-deliberately then. The store *section content* pages (Top Sellers list and friends) are not covered because they
-need a live store request; only the network-free sections page is. State captures use the phase-2 executable by
-default; pass `--exe` for another build.
+Limits: the owned list and the collection names/counts are host data (Steam Web API key plus `family-shared.json`
+seed), so a changed account, library or collection set makes the dump assertions fail loudly (exit 2) instead of
+scoring a different state; update recipe and reference deliberately then. The store *section content* pages (Top
+Sellers list and friends) are not covered because they need a live store request; only the network-free sections
+page is. State captures use the feature build named in the thresholds file (`C:/dev/out/native-folders` at the time
+of writing); pass `--exe` when the integration build moves.
 
 ## Continuation
 

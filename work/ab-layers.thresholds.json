@@ -1,7 +1,7 @@
 {
   "schema": "xmb-per-layer-thresholds/1",
-  "updated": "2026-10-25",
-  "revisionNote": "The capture baselines for frame, top background, category icon row and item label row were re-measured after the firmware particle simulation landed (src/particles.cpp pool port): the dust now renders where the reference frame has its own particles at a different phase, so those four layers moved by <0.011 SSIM and <0.1 dB. The stored-pair baselines above remain the historical numbers.",
+  "updated": "2026-10-26",
+  "revisionNote": "2026-10-26: two deliberate changes. (1) The particle layer was toned down (fewer visible dust specks, matched to the reference frame), so the canonical-capture baselines for frame, top background, category icon row and item label row were re-measured on the current feature build: frame 18.02/0.8301, top background 20.24/0.9344, category icon row 21.05/0.8950, item label row 11.94/0.3910; clock and info bar are unchanged. (2) The Game column was reshaped: Steam Store, then one All Games folder (detail = distinct Steam titles, 282), then the dev_flash utilities. The inline installed rows and the top-level Not Installed row are gone; Not Installed is now reached through All Games (folder mode library, 275 rows). The named-state recipes and their self-baseline references were refreshed for that shape. The stored-pair baselines above remain the historical RPCS3 comparison numbers and are unchanged.",
   "reference": "out/native-reference/ab-rpcs3-root.png",
   "baselinePair": {
     "native": "out/native-reference/ab-native-root.png",
@@ -13,7 +13,7 @@
     "rationale": "Two canonical capture runs are pixel-identical (PSNR Infinity, SSIM 1.0000), so run-to-run jitter contributes nothing. The budget therefore only absorbs GPU/driver shader noise and small environment drift. 0.5 dB PSNR is a 12% MSE increase, while a visible layer regression (a moved icon, a dropped label row, a shifted gradient) moves a layer score by more than 1 dB; 0.004 SSIM is likewise far above observed noise and far below a visible regression."
   },
   "capture": {
-    "exe": "C:/dev/out/native-phase2/re-ps3-native.exe",
+    "exe": "C:/dev/out/native-folders/re-ps3-native.exe",
     "flash": "C:/dev/rpcs3/bin/dev_flash",
     "tokens": "full,wait,wait,wait",
     "renderClock": 30,
@@ -21,7 +21,7 @@
     "uiClock": "2026-10-25T12:32:00",
     "focusTimeMs": 2000,
     "timeoutMs": 120000,
-    "note": "Canonical capture recipe. All animation clocks are pinned, so two runs are pixel-identical. XMB_STEAM_ROOT points at an empty directory: the stored RPCS3 reference frame's Game column predates this PC's Steam library and shows the dev_flash XMBML entries only. backgroundClock 10:00 is the traced daytime mapping used by the stored baseline; uiClock matches the reference frame's 25/10 12:32."
+    "note": "Canonical capture recipe. All animation clocks are pinned, so two runs are pixel-identical. XMB_STEAM_ROOT points at an empty directory: the stored RPCS3 reference frame's Game column predates this PC's Steam library and shows the dev_flash XMBML entries only. backgroundClock 10:00 is the traced daytime mapping used by the stored baseline; uiClock matches the reference frame's 25/10 12:32. The default exe is the feature build that carries the reshaped Game column and the toned-down particles; pass --exe when the integration build moves."
   },
   "layers": [
     {
@@ -29,28 +29,28 @@
       "description": "Whole 1920x1080 frame (aggregate; not a layer by itself)",
       "crop": [0, 0, 1920, 1080],
       "baseline": { "psnr": 18.2027, "ssim": 0.8388 },
-      "captureBaseline": { "psnr": 17.9603, "ssim": 0.8171 }
+      "captureBaseline": { "psnr": 18.0173, "ssim": 0.8301 }
     },
     {
       "name": "top background",
       "description": "Upper-left background gradient and glare, no clock, no category icons",
       "crop": [0, 0, 700, 200],
       "baseline": { "psnr": 19.0241, "ssim": 0.9251 },
-      "captureBaseline": { "psnr": 20.2004, "ssim": 0.9303 }
+      "captureBaseline": { "psnr": 20.2377, "ssim": 0.9344 }
     },
     {
       "name": "category icon row",
       "description": "Full-width band across the category icons and their spacing",
       "crop": [0, 240, 1920, 120],
       "baseline": { "psnr": 20.1304, "ssim": 0.9022 },
-      "captureBaseline": { "psnr": 20.9900, "ssim": 0.8865 }
+      "captureBaseline": { "psnr": 21.0530, "ssim": 0.8950 }
     },
     {
       "name": "item label row",
-      "description": "Focused item row: icon plus glowing label. Content still differs (reference 'Corrupted Data' vs native PS Vita entries), so this is a regression gate, not a fidelity pass",
+      "description": "Focused item row: icon plus glowing label. Content still differs from the reference, so this is a regression gate, not a fidelity pass",
       "crop": [400, 425, 800, 100],
       "baseline": { "psnr": 11.8619, "ssim": 0.3791 },
-      "captureBaseline": { "psnr": 11.9300, "ssim": 0.3832 }
+      "captureBaseline": { "psnr": 11.9415, "ssim": 0.3910 }
     },
     {
       "name": "clock text",
@@ -70,12 +70,12 @@
   "stateSelfBaseline": {
     "psnrDb": 55.0,
     "ssim": 0.9995,
-    "rationale": "Named states have no RPCS3 frame: their reference is the deterministic native render itself, so a fresh capture must reproduce that frame (self-baseline regression gate, not firmware fidelity). Two runs of every state are byte-identical on this machine (PSNR Infinity, SSIM 1.0000). 55 dB still catches any deterministic drawing change (one changed 255-level pixel already costs ~68 dB on a 1080p frame) while leaving room for GPU/driver shader noise; 0.9995 SSIM is the same margin. Refresh a reference deliberately after an intended rendering change with --states --save-reference."
+    "rationale": "Named states have no RPCS3 frame: their reference is the deterministic native render itself, so a fresh capture must reproduce that frame (self-baseline regression gate, not firmware fidelity). Two runs of every state are byte-identical on this machine (PSNR Infinity, SSIM 1.0000). 55 dB still catches any deterministic drawing change (one changed 255-level pixel already costs ~68 dB on a 1080p frame) while leaving room for GPU/driver shader noise; 0.9995 SSIM is the same margin. Refresh a reference deliberately after an intended rendering or layout change with --states --save-reference."
   },
   "states": [
     {
       "name": "steam-game-root",
-      "description": "Game column root with the rebuilt Steam rows: installed titles inline, then Steam Store and Not Installed, then the dev_flash utilities.",
+      "description": "Game column root after the reshape: Steam Store, one All Games folder (detail = distinct Steam titles), then the dev_flash utilities. No inline installed rows and no top-level Not Installed row.",
       "reference": "out/native-reference/layers/steam-game-root.png",
       "dataSeed": "out/native-reference/store/ui3-data",
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
@@ -84,14 +84,53 @@
       "expect": {
         "category": "game",
         "depth": 0,
-        "catalogueHas": ["steam-store", "steam-folder-library"],
-        "steamRowsBeforeStore": true,
-        "folderDetailFormula": "owned-installed+familyShared",
+        "catalogueRowIds": ["steam-store", "steam-folder-all-games", "vita", "data", "memory", "ps2", "psp", "ps3", "store", "content:refresh", "content:import"],
+        "catalogueDetails": [{ "id": "steam-folder-all-games", "formula": "ownedGames" }],
         "noStoreDump": true
       },
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "item column", "crop": [340, 380, 1080, 600] }
+      ]
+    },
+    {
+      "name": "steam-all-games",
+      "description": "All Games page: All Titles, then one folder per non-empty Steam collection (collection-name order), then Not Installed and Family Shared. Only the 14 folder rows are asserted, not the title lists inside them.",
+      "reference": "out/native-reference/layers/steam-all-games.png",
+      "dataSeed": "out/native-reference/store/ui3-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
+      "waits": 8,
+      "settleWaits": 3,
+      "path": [{ "catalogueId": "steam-folder-all-games" }],
+      "expect": {
+        "category": "game",
+        "depth": 1,
+        "entryId": "steam-folder-all-titles",
+        "entryTitle": "All Titles",
+        "entryCount": 14,
+        "folderMode": "all",
+        "folderTitle": "All Games",
+        "folderRows": [
+          { "idPrefix": "steam-folder-all-titles", "title": "All Titles", "detailFormula": "ownedGames" },
+          { "idPrefix": "steam-folder-collection:", "title": "Apps", "detail": "6" },
+          { "idPrefix": "steam-folder-collection:", "title": "Canyon Dogshit", "detail": "1" },
+          { "idPrefix": "steam-folder-collection:", "title": "Favorites", "detail": "1" },
+          { "idPrefix": "steam-folder-collection:", "title": "Fighting", "detail": "16" },
+          { "idPrefix": "steam-folder-collection:", "title": "Hidden", "detail": "41" },
+          { "idPrefix": "steam-folder-collection:", "title": "HTPC", "detail": "3" },
+          { "idPrefix": "steam-folder-collection:", "title": "Idle/CLicker/Shit", "detail": "2" },
+          { "idPrefix": "steam-folder-collection:", "title": "Lego", "detail": "21" },
+          { "idPrefix": "steam-folder-collection:", "title": "Multiplayer", "detail": "99" },
+          { "idPrefix": "steam-folder-collection:", "title": "Singleplayer", "detail": "91" },
+          { "idPrefix": "steam-folder-collection:", "title": "Valve", "detail": "19" },
+          { "idPrefix": "steam-folder-library", "title": "Not Installed", "detailFormula": "notInstalled" },
+          { "idPrefix": "steam-folder-family", "title": "Family Shared", "detailFormula": "familyShared" }
+        ],
+        "noStoreDump": true
+      },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "rows", "crop": [430, 420, 700, 560] }
       ]
     },
     {
@@ -102,8 +141,7 @@
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
       "waits": 8,
       "settleWaits": 3,
-      "targetCatalogueId": "steam-store",
-      "pressEnter": true,
+      "path": [{ "catalogueId": "steam-store" }],
       "expect": {
         "category": "game",
         "depth": 1,
@@ -119,18 +157,18 @@
     },
     {
       "name": "steam-not-installed",
-      "description": "Not Installed folder page: owned-but-not-installed rows plus the seeded family-shared titles. Only the visible first rows are scored; the catalogue and folder dumps bound the row count.",
+      "description": "Not Installed folder opened through All Games: owned-but-not-installed rows plus the seeded family-shared titles. Only the visible first rows are scored; the folder dump bounds the row count.",
       "reference": "out/native-reference/layers/steam-not-installed.png",
       "dataSeed": "out/native-reference/store/ui3-data",
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
       "waits": 8,
       "settleWaits": 3,
-      "targetCatalogueId": "steam-folder-library",
-      "pressEnter": true,
+      "path": [{ "catalogueId": "steam-folder-all-games" }, { "folderRowTitle": "Not Installed" }],
       "expect": {
         "category": "game",
-        "depth": 1,
+        "depth": 2,
         "folderMode": "library",
+        "folderTitle": "Not Installed",
         "folderCountFormula": "owned-installed+familyShared",
         "folderRowsPrefix": "steam:",
         "folderRowsDetailContains": "Not installed",
