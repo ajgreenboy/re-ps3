@@ -12,6 +12,8 @@
 #include "p3t.h"
 #include "content_registry.h"
 #include "steam_library.h"
+#include "steam_downloads.h"
+#include "steam_accounts.h"
 #include "steam_store.h"
 #include "steam_owned.h"
 #include "steam_collections.h"
@@ -102,6 +104,8 @@ int main(int argc,char** argv) {
     parser.addOption({"steam-library-report","Write this account's Steam library organised by its own collections (names, install/launch handoffs) without opening a window","json-file"});
     parser.addOption({"steam-collections-report","Write this account's Steam library collections and their app ids without opening a window","json-file"});
     parser.addOption({"owned-games-report","Write the games this Steam account owns, with an install/launch handoff each, without opening a window","json-file"});
+    parser.addOption({"steam-downloads-report","Write Steam's own download/update queue without opening a window","json-file"});
+    parser.addOption({"steam-accounts-report","Write the remembered Steam accounts and the honest switch plan, without opening a window","json-file"});
     parser.addOption({"import-apps","Validate and merge a games/service-app manifest into the native library, then exit","json-file"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
@@ -144,6 +148,49 @@ int main(int argc,char** argv) {
     }
     const QString data=parser.isSet("data-dir")?parser.value("data-dir"):QDir(QCoreApplication::applicationDirPath()).filePath("data");
     if(parser.isSet("steam-root"))qputenv("XMB_STEAM_ROOT",parser.value("steam-root").toUtf8());
+    if(parser.isSet("steam-downloads-report")) {
+        QString error;
+        const auto downloads=xmb::scanSteamDownloads(parser.value("steam-root"),&error);
+        QJsonArray rows;
+        for(const auto& download:downloads)
+            rows.push_back(QJsonObject{{"appId",download.appId},{"title",download.title},
+                {"state",download.state},{"text",xmb::steamDownloadStateText(download)},
+                {"bytesDownloaded",double(download.bytesDownloaded)},{"bytesToDownload",double(download.bytesToDownload)},
+                {"bytesStaged",double(download.bytesStaged)},{"bytesToStage",double(download.bytesToStage)},
+                {"fraction",download.fraction()},{"active",download.active},{"paused",download.paused},{"queued",download.queued}});
+        const auto bytes=QJsonDocument(QJsonObject{{"downloads",rows},{"count",rows.size()},{"error",error}}).toJson();
+        QFile file(parser.value("steam-downloads-report"));
+        if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();return 2;}
+        qInfo().noquote()<<QString("steam downloads: %1 entr%2%3").arg(rows.size()).arg(rows.size()==1?"y":"ies")
+            .arg(error.isEmpty()?QString():QStringLiteral(" (")+error+QStringLiteral(")"));
+        if(qEnvironmentVariableIsSet("XMB_STEAM_DOWNLOADS_LOG"))xmb::logSteamDownloads(downloads);
+        return 0;
+    }
+    if(parser.isSet("steam-accounts-report")) {
+        QString error;
+        const auto accounts=xmb::scanSteamAccounts(parser.value("steam-root"),&error);
+        QJsonArray rows;
+        int activeCount=0;
+        QString steamExe;
+        for(const auto& account:accounts) {
+            const auto plan=xmb::steamAccountSwitchPlan(account,parser.value("steam-root"));
+            if(account.active)++activeCount;
+            if(steamExe.isEmpty())steamExe=plan.steamExe;
+            rows.push_back(QJsonObject{{"steamId64",account.steamId64},{"accountName",account.accountName},
+                {"personaName",account.personaName},{"active",account.active},{"autoLogin",account.autoLogin},
+                {"hasUserdata",account.hasUserdata},{"lastLoginUnix",double(account.lastLoginUnix)},
+                {"switchPossible",plan.possible},{"alreadyActive",plan.alreadyActive},
+                {"clientSignedIn",plan.clientSignedIn}});
+        }
+        const auto bytes=QJsonDocument(QJsonObject{{"accounts",rows},{"count",rows.size()},{"steamExe",steamExe},
+            {"shutdownArguments",QJsonArray::fromStringList(xmb::steamShutdownArguments())},
+            {"relaunchArguments",QJsonArray::fromStringList(xmb::steamRelaunchArguments())},
+            {"error",error}}).toJson();
+        QFile file(parser.value("steam-accounts-report"));
+        if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();return 2;}
+        qInfo().noquote()<<QString("steam accounts: %1 remembered, %2 active").arg(rows.size()).arg(activeCount);
+        return 0;
+    }
     if(parser.isSet("import-apps")) {
         QString error;
         if(!xmb::ContentRegistry::importFile(parser.value("import-apps"),QDir(data).filePath("apps.json"),error)){qCritical().noquote()<<error;return 2;}
