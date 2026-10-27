@@ -569,6 +569,8 @@ int main(int argc,char** argv) {
                 } else qWarning()<<"script: invalid size"<<token;
             }
             else if(token.startsWith("idle=")) {bool ok=false;const auto age=token.mid(5).toLongLong(&ok);if(ok && age>=0)shell.setIdleTimeOverride(age);else qWarning()<<"script: invalid idle age";}
+            else if(token=="ps")view->replayPsTap();       // PS button tap: controller indicator
+            else if(token=="pshold")view->replayPsHold();   // PS button hold: system menu
             else if(token=="quit")app.quit();
             else if(token.startsWith("grab=")) {
                 const auto image=view->grabFramebuffer();

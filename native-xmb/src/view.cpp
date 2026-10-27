@@ -999,6 +999,46 @@ void View::drawScene(QPainter& p) {
         drawImage(p,"system_plugin","tex_cross",{902,895,24,24});text({936,887,160,40},"OK",21,QColor(235,235,235));
     }
     if(osk_.open)drawOsk(p);
+    // PS button: the console's system menu (RPCS3 capture 2026-10-26): the frame goes black except the clock,
+    // a centred two-item menu, the controller/charge panel bottom left and the Enter/Back legend. A hold opens
+    // it; "Turn Off the System" asks once before quitting.
+    if(shell_.psMenuOpen()) {
+        // The console's system menu (RPCS3 capture, audit/PS-BUTTON.md): black frame, clock still top right,
+        // the menu centred, the controller/charge panel bottom left, Cross/O legend along the bottom.
+        p.save();
+        p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0));   // the console blacks the whole frame
+        text({1500,95,420,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        const auto psItems=shell_.psMenuItems();
+        const double psFirst=psItems.size()>1?500.:520.;
+        for(int i=0;i<psItems.size();++i) {
+            const bool focused=!shell_.psMenuConfirmingOff() && i==shell_.psMenuSelection();
+            const QString label=shell_.psMenuConfirmingOff() && i==0?QObject::tr("Turn Off the System?"):psItems[i];
+            text({360,psFirst+i*40.,1200,34},label,22,focused?Qt::white:QColor(160,160,160),Qt::AlignHCenter|Qt::AlignVCenter);
+        }
+        if(shell_.psMenuConfirmingOff())
+            text({360,psFirst+80,1200,34},QObject::tr("X turns the XMB off; the PC stays on   O cancels"),20,QColor(150,150,150),Qt::AlignHCenter|Qt::AlignVCenter);
+        for(int i=0;i<4;++i) {
+            const QRectF slot(157+i*26.,682,20,20);
+            p.fillRect(slot,i==0?QColor(214,72,72):QColor(68,68,68));
+            text(slot,QString::number(i+1),14,QColor(235,235,235),Qt::AlignCenter);
+        }
+        text({260,675,140,32},QObject::tr("Controller"),20,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+        text({400,675,220,32},"1",20,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+        text({260,707,140,32},QObject::tr("Charge Level"),20,QColor(215,215,215),Qt::AlignLeft|Qt::AlignVCenter);
+        text({400,707,220,32},"-",20,QColor(215,215,215),Qt::AlignLeft|Qt::AlignVCenter);
+        drawImage(p,"system_plugin","tex_cross",{856,858,26,26});text({890,850,140,40},QObject::tr("Enter"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+        drawImage(p,"system_plugin","tex_circle",{1010,858,26,26});text({1044,850,140,40},QObject::tr("Back"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+        p.restore();
+    }
+    else if(psHudUntil_>0 && clock_.elapsed()<psHudUntil_) {
+        // A PS tap flashes the controller indicator beside the clock, then fades.
+        const double fade=std::clamp(double(psHudUntil_-clock_.elapsed())/600.,0.,1.);
+        p.save();p.setOpacity(fade);
+        drawImage(p,"system_plugin","tex_controller",{1230,92,34,34});
+        text({1270,88,150,42},"1",22,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+        text({1430,88,90,42},"-",22,QColor(210,210,210),Qt::AlignRight|Qt::AlignVCenter);
+        p.restore();
+    }
 }
 void View::zoomPhoto(int direction) {
     if(!shell_.photoOpen() || !photoViewport_.valid())return;
@@ -1044,6 +1084,16 @@ bool View::eventFilter(QObject* watched,QEvent* event) {
 void View::keyPressEvent(QKeyEvent* e) {
     shell_.noteActivity();mediaControls_.activity(clock_.elapsed());
     if(introRunning()){coldboot_.skip();e->accept();return;}
+    // The PS system menu owns the keyboard while it is open: arrows move, Return confirms, Escape backs out.
+    if(shell_.psMenuOpen()) {
+        if(e->key()==Qt::Key_Up)shell_.psMenuMove(-1);
+        else if(e->key()==Qt::Key_Down)shell_.psMenuMove(1);
+        else if(e->key()==Qt::Key_Return || e->key()==Qt::Key_Enter)shell_.psMenuActivate();
+        else if(e->key()==Qt::Key_Escape)shell_.psMenuClose();
+        e->accept();return;
+    }
+    // Keyboard substitute for the PS button (controllers send 0x400 over HID): F10 opens the system menu.
+    if(e->key()==Qt::Key_F10){shell_.psHeld();e->accept();return;}
 #ifdef Q_OS_WIN
     // Arrows go through pollController's repeat (the firmware's, not the OS's), so auto-repeats are dropped here.
     if(const auto bit=arrowBit(e->key());bit && !replayingInput_) {
@@ -1108,6 +1158,27 @@ void View::pollController() {
     XINPUT_STATE state{};const bool xinput=XInputGetState(0,&state)==ERROR_SUCCESS;
     pad::State hid;const bool playstation=pad::latest(hid);
     quint16 buttons=quint16((xinput?state.Gamepad.wButtons:0)|(playstation?hid.buttons:0)|keyHeld_);
+    // PS button: a tap returns to the XMB and flashes the controller indicator; holding it for a second opens
+    // the system menu, exactly as the console does (RPCS3 capture, audit/PS-BUTTON.md).
+    {
+        const bool psDown=(buttons&0x400)!=0;
+        const qint64 psNow=clock_.elapsed();
+        if(psDown && psDownAt_<0){psDownAt_=psNow;psHoldFired_=false;}
+        else if(psDown && !psHoldFired_ && psNow-psDownAt_>=1000){psHoldFired_=true;shell_.psHeld();}
+        else if(!psDown && psDownAt_>=0){
+            if(!psHoldFired_ && psNow-psDownAt_<1000){psHudUntil_=psNow+2500;shell_.psTapped();}
+            psDownAt_=-1;psHoldFired_=false;
+        }
+        buttons=quint16(buttons&~0x400);   // consumed here: the menu owns its own input
+    }
+    if(shell_.psMenuOpen()) {
+        const auto edgePs=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;buttons_=buttons;
+        if(edgePs&XINPUT_GAMEPAD_DPAD_UP)shell_.psMenuMove(-1);
+        if(edgePs&XINPUT_GAMEPAD_DPAD_DOWN)shell_.psMenuMove(1);
+        if(edgePs&XINPUT_GAMEPAD_A)shell_.psMenuActivate();
+        if(edgePs&XINPUT_GAMEPAD_B)shell_.psMenuClose();
+        return;
+    }
     if(xinput || playstation) {
         const float lx=xinput?state.Gamepad.sThumbLX/32767.f:hid.lx,ly=xinput?-state.Gamepad.sThumbLY/32767.f:hid.ly; // +y down, as HID
         if(lx<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_LEFT;if(lx>.5f)buttons|=XINPUT_GAMEPAD_DPAD_RIGHT;
