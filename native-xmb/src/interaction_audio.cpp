@@ -29,7 +29,18 @@ namespace {
 // https://github.com/kakaroto/RCOMage/blob/master/src/vaghandler.c
 // Channel byte layout and VAG version/header were inspected in local firmware.
 
-constexpr std::array<const char*, 4> Labels{"snd_cursor", "snd_decide", "snd_cancel", "snd_error"};
+// Every original XMB cue in vsh/resource/system_plugin.rco. The table is
+// 0x0600/0x0601, nine entries; each entry carries a 28-byte VAG descriptor and
+// no gain or pan field. snd_error is a real entry, but its PCM is silent; see
+// audit/INTERACTION-AUDIO.md for the raw bytes.
+enum class System : size_t {
+    Cursor, Decide, CategoryDecide, Cancel, Option, Error, SystemOk, SystemNg, Trophy, Count
+};
+constexpr size_t SystemCount = size_t(System::Count);
+constexpr std::array<const char*, SystemCount> Labels{
+    "snd_cursor", "snd_decide", "snd_category_decide", "snd_cancel", "snd_option",
+    "snd_error", "snd_system_ok", "snd_system_ng", "snd_trophy"};
+constexpr std::array<const char*, 6> CueNames{"Move", "Confirm", "Back", "Error", "Options", "Accept"};
 constexpr qsizetype MaximumFile = 64 * 1024 * 1024;
 constexpr quint32 MaximumTables = 8 * 1024 * 1024;
 
@@ -119,7 +130,34 @@ Channel decodeVag(const QByteArray& file, quint64 start, quint32 length) {
 struct Clip {
     QAudioFormat format;
     QByteArray pcm;
+    QString source;
+    qsizetype sourceBytes = 0;
+    qint64 frames = 0;
+    double peak = 0;
+    double rms = 0;
+
+    qint64 milliseconds() const {
+        return format.sampleRate() > 0 ? frames * 1000 / format.sampleRate() : 0;
+    }
 };
+
+// Peak and RMS of the interleaved PCM that will actually reach QAudioSink.
+// This is an unweighted full-scale measurement (1.0 == 32767), not a listening
+// level: the firmware's own sample data carries the per-cue mix.
+void measure(Clip& clip) {
+    const int channels = clip.format.channelCount();
+    const qsizetype values = clip.pcm.size() / qsizetype(sizeof(qint16));
+    clip.frames = channels > 0 ? values / channels : 0;
+    double peak = 0, sum = 0;
+    const auto* pcm = reinterpret_cast<const qint16*>(clip.pcm.constData());
+    for (qsizetype i = 0; i < values; ++i) {
+        const double value = double(pcm[i]) / 32768.0;
+        peak = std::max(peak, std::abs(value));
+        sum += value * value;
+    }
+    clip.peak = peak;
+    clip.rms = values > 0 ? std::sqrt(sum / double(values)) : 0;
+}
 
 Clip themeWav(const QByteArray& wav) {
     if(wav.size()<44 || wav.size()>8*1024*1024 || !wav.startsWith("RIFF") || wav.mid(8,4)!="WAVE")
@@ -180,6 +218,7 @@ Clip decodeClip(const QByteArray& file, const QByteArray& tree, quint64 extra,
     if (entryOffset > soundLength || total > soundLength - entryOffset)
         throw std::runtime_error("RCO sound entry exceeds its data section");
     std::array<Channel, 2> channels;
+    qsizetype encodedBytes = 0;
     for (int i = 0; i < count; ++i) {
         const auto length = be32(tree, extra + 12 + i * 8), offset = be32(tree, extra + 16 + i * 8);
         // Per-channel offsets are relative to the whole RCO sound-data section,
@@ -187,6 +226,7 @@ Clip decodeClip(const QByteArray& file, const QByteArray& tree, quint64 extra,
         if (offset < entryOffset || offset - entryOffset > total || length > total - (offset - entryOffset))
             throw std::runtime_error("RCO sound channel exceeds its entry");
         channels[size_t(i)] = decodeVag(file, quint64(soundBase) + offset, length);
+        encodedBytes += qsizetype(length);
         if (i && (channels[size_t(i)].rate != channels[0].rate || channels[size_t(i)].samples.size() != channels[0].samples.size()))
             throw std::runtime_error("VAG stereo channels have different rates or sample counts");
     }
@@ -194,6 +234,7 @@ Clip decodeClip(const QByteArray& file, const QByteArray& tree, quint64 extra,
     clip.format.setSampleRate(channels[0].rate);
     clip.format.setChannelCount(count);
     clip.format.setSampleFormat(QAudioFormat::Int16);
+    clip.sourceBytes = encodedBytes;
     clip.pcm.resize(channels[0].samples.size() * count * qsizetype(sizeof(qint16)));
     for (qsizetype frame = 0; frame < channels[0].samples.size(); ++frame)
         for (int channel = 0; channel < count; ++channel) {
@@ -204,8 +245,8 @@ Clip decodeClip(const QByteArray& file, const QByteArray& tree, quint64 extra,
     return clip;
 }
 
-std::array<Clip, 4> loadClips(const QString& flashRoot) {
-    std::array<Clip, 4> clips;
+std::array<Clip, SystemCount> loadClips(const QString& flashRoot) {
+    std::array<Clip, SystemCount> clips;
     QFile file(QDir(flashRoot).filePath("vsh/resource/system_plugin.rco"));
     if (!file.open(QIODevice::ReadOnly)) throw std::runtime_error(file.errorString().toStdString());
     if (file.size() < 0xa4 || file.size() > MaximumFile) throw std::runtime_error("RCO sound file exceeds size limits");
@@ -231,14 +272,19 @@ std::array<Clip, 4> loadClips(const QString& flashRoot) {
         if (end < 0 || quint64(end) >= quint64(labels) + labelsLength || quint64(end) - start > 256)
             throw std::runtime_error("RCO sound label is unterminated or too long");
         const auto label = tree.mid(qsizetype(start), end - qsizetype(start));
-        for (size_t cue = 0; cue < Labels.size(); ++cue) if (label == Labels[cue]) {
+        for (size_t cue = 0; cue < SystemCount; ++cue) if (label == Labels[cue]) {
             try {
                 clips[cue] = decodeClip(bytes, tree, at + 40, soundBase, soundLength);
+                clips[cue].source = QString::fromLatin1(Labels[cue]);
+                measure(clips[cue]);
                 qInfo().noquote() << "interaction audio: decoded original" << label
                     << clips[cue].format.sampleRate() << "Hz" << clips[cue].format.channelCount()
-                    << "channels," << clips[cue].pcm.size() << "PCM bytes";
-                if (std::all_of(clips[cue].pcm.cbegin(), clips[cue].pcm.cend(), [](char byte) { return byte == 0; }))
-                    qInfo().noquote() << "interaction audio: original" << label << "contains silent PCM; preserving the source";
+                    << "channels," << clips[cue].pcm.size() << "PCM bytes from" << clips[cue].sourceBytes
+                    << "VAG bytes, peak" << QString::number(clips[cue].peak, 'f', 6)
+                    << "rms" << QString::number(clips[cue].rms, 'f', 6);
+                if (clips[cue].peak == 0)
+                    qInfo().noquote() << "interaction audio: original" << label
+                        << "contains genuinely silent PCM; preserving the source entry rather than substituting a cue";
             } catch (const std::exception& error) {
                 qWarning().noquote() << "interaction audio:" << label << error.what();
             }
@@ -249,34 +295,62 @@ std::array<Clip, 4> loadClips(const QString& flashRoot) {
             at += next;
         }
     }
-    for (size_t cue = 0; cue < Labels.size(); ++cue)
+    for (size_t cue = 0; cue < SystemCount; ++cue)
         if (clips[cue].pcm.isEmpty()) qWarning() << "interaction audio: original cue unavailable" << Labels[cue];
     return clips;
 }
 
+bool loggingEnabled() {
+    return qEnvironmentVariable("XMB_AUDIO_LOG") == "1" || qEnvironmentVariableIsSet("XMB_AUDIO_TRACE");
 }
 
+} // namespace
+
 struct InteractionAudio::Impl {
-    std::array<Clip, 4> clips;
+    std::array<Clip, SystemCount> clips;
     std::array<Clip, 6> theme;
+    std::array<qint64, 6> lastPlay{{-1000000, -1000000, -1000000, -1000000, -1000000, -1000000}};
     std::unique_ptr<QAudioSink> sink;
     QBuffer buffer;
     QElapsedTimer clock;
-    qint64 lastMove = -1000;
     bool enabled = true;
     bool outputWarningLogged = false;
+    bool trace = loggingEnabled();
     float volume = 0.6f;
 
+    // Cue-to-source map. snd_error is deliberately not used for Cue::Error: the
+    // original entry is a 1.8 ms silent stub, while snd_system_ng is the
+    // negative cue in the same table. snd_trophy has no native action yet.
+    size_t slot(Cue cue) const {
+        switch (cue) {
+        case Cue::Move: return size_t(System::Cursor);
+        case Cue::Confirm: return size_t(System::Decide);
+        case Cue::Back: return size_t(System::Cancel);
+        case Cue::Error: return size_t(System::SystemNg);
+        case Cue::Options: return size_t(System::Option);
+        case Cue::Accept: return size_t(System::SystemOk);
+        }
+        return SystemCount;
+    }
+
     const Clip* selected(Cue cue) const {
-        auto index=size_t(cue);if(index>=theme.size())return nullptr;
-        if(!theme[index].pcm.isEmpty())return &theme[index];
-        if(cue==Cue::Accept)index=size_t(Cue::Confirm);
-        return index<clips.size() && !clips[index].pcm.isEmpty()?&clips[index]:nullptr;
+        const auto index = size_t(cue);
+        if (index < theme.size() && !theme[index].pcm.isEmpty()) return &theme[index];
+        auto system = slot(cue);
+        if (cue == Cue::Accept && (system >= clips.size() || clips[system].pcm.isEmpty()))
+            system = size_t(System::Decide);
+        if (cue == Cue::Options && (system >= clips.size() || clips[system].pcm.isEmpty()))
+            system = size_t(System::Decide);
+        return system < clips.size() && !clips[system].pcm.isEmpty() ? &clips[system] : nullptr;
     }
 
     void stop() {
         if (sink) sink->stop();
         buffer.close();
+    }
+
+    void forgetHistory() {
+        lastPlay.fill(-1000000);
     }
 };
 
@@ -302,10 +376,16 @@ int InteractionAudio::setThemeSounds(const QHash<QString,QByteArray>& sounds) {
     std::array<Clip,6> next;int count=0;
     for(const auto& [id,cue]:roles) {
         const auto found=sounds.constFind(QString::fromLatin1(id));if(found==sounds.cend())continue;
-        try {next[size_t(cue)]=themeWav(*found);++count;}
+        try {
+            next[size_t(cue)]=themeWav(*found);
+            next[size_t(cue)].source=QStringLiteral("theme:")+QString::fromLatin1(id);
+            next[size_t(cue)].sourceBytes=found->size();
+            measure(next[size_t(cue)]);
+            ++count;
+        }
         catch(const std::exception& error){qWarning().noquote()<<"interaction audio: rejected theme cue"<<id<<error.what();}
     }
-    impl_->stop();impl_->lastMove=-1000;impl_->theme=std::move(next);
+    impl_->stop();impl_->forgetHistory();impl_->theme=std::move(next);
     qInfo()<<"interaction audio: theme overrides"<<count;
     return count;
 }
@@ -325,10 +405,22 @@ void InteractionAudio::setVolume(float volume) {
 void InteractionAudio::play(Cue cue) {
     Q_ASSERT(QThread::currentThread() == thread());
     if (!impl_->enabled || impl_->volume <= 0 || !available(cue)) return;
-    const auto now = impl_->clock.elapsed();
-    if (cue == Cue::Move && now - impl_->lastMove < 45) return;
-    if (cue == Cue::Move) impl_->lastMove = now;
     const auto& clip = *impl_->selected(cue);
+    const qsizetype index = size_t(cue);
+    const auto now = impl_->clock.elapsed();
+    // The firmware does not stack a second copy of a cue on top of itself.
+    // Until this cue's own sample has finished, retriggers are dropped; a
+    // different cue still interrupts it. Move additionally has a 45 ms floor
+    // because its 39 ms system sample is shorter than the 67 ms repeat interval.
+    const qint64 guard = cue == Cue::Move ? std::max<qint64>(45, clip.milliseconds())
+                                          : std::max<qint64>(1, clip.milliseconds());
+    if (now - impl_->lastPlay[size_t(index)] < guard) {
+        if (impl_->trace)
+            qInfo().noquote() << "interaction audio: skip" << CueNames[size_t(index)]
+                << (now - impl_->lastPlay[size_t(index)]) << "ms of" << guard
+                << "ms at" << now << "ms";
+        return;
+    }
     if (!impl_->sink || impl_->sink->format() != clip.format) {
         impl_->stop();
         impl_->sink.reset();
@@ -355,8 +447,15 @@ void InteractionAudio::play(Cue cue) {
         return;
     }
     impl_->sink->start(&impl_->buffer);
-    if(qEnvironmentVariableIsSet("XMB_AUDIO_TRACE"))qInfo()<<"interaction audio: play"<<int(cue)
-        <<(impl_->theme[size_t(cue)].pcm.isEmpty()?"system":"theme")<<clip.pcm.size()<<"PCM bytes";
+    impl_->lastPlay[size_t(index)] = now;
+    if (impl_->trace)
+        qInfo().noquote() << "interaction audio: play" << CueNames[size_t(index)]
+            << "source" << clip.source << clip.format.sampleRate() << "Hz"
+            << clip.format.channelCount() << "channels" << clip.pcm.size() << "bytes"
+            << "peak" << QString::number(clip.peak, 'f', 6)
+            << "rms" << QString::number(clip.rms, 'f', 6)
+            << "duration" << QString::number(clip.milliseconds() / 1000.0, 'f', 3) + "s"
+            << "at" << now << "ms";
 }
 
 }
