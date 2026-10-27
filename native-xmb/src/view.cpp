@@ -25,6 +25,7 @@
 #include <numbers>
 #include <QSet>
 #include <QScopedValueRollback>
+#include <QWindow>
 #include <algorithm>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -34,6 +35,32 @@
 #endif
 
 namespace xmb {
+namespace {
+#ifdef Q_OS_WIN
+// The window manager's own answer to "who is in front"; Qt's activeWindow follows the same foreground
+// window but lags a focus change by an event hop, and the log wants the pre-raise owner precisely.
+QString windowProcessName(HWND window) {
+    DWORD pid=0;GetWindowThreadProcessId(window,&pid);
+    if(!pid)return {};
+    const HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
+    if(!process)return {};
+    wchar_t path[1024]{};DWORD length=DWORD(std::size(path));
+    QString name;
+    if(QueryFullProcessImageNameW(process,0,path,&length))name=QFileInfo(QString::fromWCharArray(path,length)).fileName();
+    CloseHandle(process);
+    return name;
+}
+QString foregroundDescription() {
+    const HWND window=GetForegroundWindow();
+    if(!window)return QStringLiteral("none");
+    wchar_t title[256]{};GetWindowTextW(window,title,int(std::size(title)));
+    return QStringLiteral("process=\"%1\" title=\"%2\"")
+        .arg(windowProcessName(window),QString::fromWCharArray(title));
+}
+#else
+QString foregroundDescription() { return QStringLiteral("unsupported"); }
+#endif
+}
 View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),shell_(shell),assets_(assets) {
     setFocusPolicy(Qt::StrongFocus);setMinimumSize(800,450);
     setMouseTracking(true);qApp->installEventFilter(this);
@@ -68,6 +95,14 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     // Input polling is independent of presentation. A 16 ms repaint timer produced ~62.5 Hz even on a 239 Hz
     // display. Request the next frame after Qt finishes composition/swap; swapInterval=1 remains in effect.
     connect(&timer_,&QTimer::timeout,this,[this]{pollController();});timer_.start();pad::start();
+    // The PS button is watched globally: its own 20 ms HID poll keeps working while a game owns the
+    // foreground, unlike pollController which is limited to the active XMB window.
+    connect(&psWatcher_,&PsWatcher::pressed,this,&View::psPressed);
+    connect(&psWatcher_,&PsWatcher::held,this,&View::psHeldEvent);
+    connect(&psWatcher_,&PsWatcher::tapped,this,&View::psTappedEvent);
+    connect(&psWatcher_,&PsWatcher::released,this,&View::psReleasedEvent);
+    connect(&psWatcher_,&PsWatcher::cancelled,this,[this]{psPressActionable_=false;});
+    psWatcher_.start();
     connect(this,&QOpenGLWidget::frameSwapped,this,[this]{if(isVisible())update();},Qt::QueuedConnection);
     frameTracePath_=qEnvironmentVariable("XMB_FRAME_TRACE");
     if(!frameTracePath_.isEmpty()) {
@@ -1074,7 +1109,144 @@ void View::replayKeyTap(int key) {
     QKeyEvent press(QEvent::KeyPress,key,Qt::NoModifier);keyPressEvent(&press);
     QKeyEvent release(QEvent::KeyRelease,key,Qt::NoModifier);keyReleaseEvent(&release);
 }
+// Scripted PS tokens feed the global watcher exactly like a HID press: the tap keeps the button down
+// briefly, the hold long enough for the watcher's 1 s rule to fire on its own.
+void View::replayPsTap() {
+    psLog("script: token ps (tap)");
+    psWatcher_.replayPress();
+    QTimer::singleShot(120,this,[this]{psWatcher_.replayRelease();});
+}
+void View::replayPsHold() {
+    psLog("script: token pshold (hold)");
+    psWatcher_.replayPress();
+    QTimer::singleShot(1200,this,[this]{psWatcher_.replayRelease();});
+}
+bool View::titleRunning() const {
+    // The only public, side-effect-free window onto Shell's tracked-title state (shell.h is owned by
+    // another change): psMenuItems() adds Quit Game exactly when Shell::gameRunning() is true, for a
+    // tracked QProcess title or a Steam handoff. The console menu is two rows otherwise.
+    return shell_.psMenuItems().size()>2;
+}
+bool View::xmbOwnsForeground() const {
+    // Qt's activeWindow follows the Win32 foreground window with an event hop; after a programmatic
+    // raise the two can disagree for a frame. The window manager is the authority here.
+#ifdef Q_OS_WIN
+    QWidget* top=window();
+    if(top && GetForegroundWindow()==reinterpret_cast<HWND>(top->winId()))return true;
+#endif
+    return isActiveWindow();
+}
+void View::psPressed() {
+    const bool modal=QApplication::activeModalWidget()!=nullptr;
+    psPressActionable_=!modal && (xmbOwnsForeground() || titleRunning());
+    psLog(QString("event: press xmbActive=%1 xmbForeground=%2 titleRunning=%3 menuOpen=%4 modal=%5 foreground=%6")
+        .arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(titleRunning()?1:0)
+        .arg(shell_.psMenuOpen()?1:0).arg(modal?1:0).arg(foregroundDescription()));
+    if(!psPressActionable_)psLog(modal?"event: press not actionable (a modal dialog owns input)"
+        :"event: press not actionable (XMB not in front and no tracked title running)");
+}
+void View::psHeldEvent() {
+    const bool running=titleRunning();
+    psLog(QString("event: hold xmbActive=%1 xmbForeground=%2 titleRunning=%3 foreground=%4")
+        .arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(running?1:0).arg(foregroundDescription()));
+    if(QApplication::activeModalWidget()) { psLog("event: hold ignored (a modal dialog owns input)"); return; }
+    if(!psPressActionable_) { psLog("event: hold ignored (not actionable)"); return; }
+    // With no tracked title the old rule still holds at the moment of the hold: the XMB must still be in
+    // front. A press that began in the XMB and lost the foreground before 1 s must not open a menu behind
+    // another application.
+    if(!running && !xmbOwnsForeground()) { psLog("event: hold ignored (XMB lost the foreground before the hold completed)"); return; }
+    // The console only opens its menu over the game; the XMB is brought forward first so the user can
+    // see and drive the menu. Quitting remains a separate, explicit selection.
+    if(running)bringXmbForward("PS hold while a tracked title is running");
+    if(shell_.psMenuOpen()){psLog("event: system menu already open");return;}
+    shell_.psHeld();
+    psLog(QString("event: system menu opened rows=%1 quitGameOffered=%2 foreground=%3")
+        .arg(shell_.psMenuItems().size()).arg(running?1:0).arg(foregroundDescription()));
+    update();
+}
+void View::psTappedEvent(qint64 durationMs) {
+    const bool running=titleRunning();
+    psLog(QString("event: tap %1 ms xmbActive=%2 xmbForeground=%3 titleRunning=%4 foreground=%5")
+        .arg(durationMs).arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(running?1:0).arg(foregroundDescription()));
+    if(!psPressActionable_) { psLog("event: tap ignored (not actionable)"); return; }
+    if(QApplication::activeModalWidget()) { psLog("event: tap ignored (a modal dialog owns input)"); return; }
+    if(!running && !xmbOwnsForeground()) { psLog("event: tap ignored (XMB lost the foreground before the tap completed)"); return; }
+    if(running)bringXmbForward("PS tap while a tracked title is running");
+    psHudUntil_=clock_.elapsed()+2500;
+    shell_.psTapped();   // closes the menu if open, otherwise clears status and flashes the indicator
+    psLog(QString("event: tap handled; no title was quit (titleRunning=%1) foreground=%2")
+        .arg(titleRunning()?1:0).arg(foregroundDescription()));
+    update();
+}
+void View::psReleasedEvent(qint64 durationMs) {
+    psLog(QString("event: release after %1 ms (hold, no tap)").arg(durationMs));
+}
+void View::bringXmbForward(const QString& reason) {
+    QWidget* top=window();
+    if(!top)return;
+    psLog(QString("focus: bring-to-front begin reason=\"%1\" xmbActive=%2 xmbForeground=%3 minimized=%4 foreground=%5")
+        .arg(reason).arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(top->isMinimized()?1:0).arg(foregroundDescription()));
+    if(top->isMinimized()) {
+        if(shell_.fullscreen())top->showFullScreen();
+        else top->showNormal();
+    }
+    if(shell_.fullscreen() && !top->isFullScreen())top->showFullScreen();
+    top->raise();
+    top->activateWindow();
+    if(auto* handle=top->windowHandle())handle->requestActivate();
+    setFocus(Qt::OtherFocusReason);
+#ifdef Q_OS_WIN
+    const HWND window=reinterpret_cast<HWND>(top->winId());
+    if(window) {
+        const HWND foreground=GetForegroundWindow();
+        if(foreground!=window) {
+            // A process that is not in front cannot normally call SetForegroundWindow; attaching to the
+            // current foreground thread's input queue for the call is the documented, non-invasive way
+            // through the foreground lock. Nothing is injected into the game process.
+            const DWORD foregroundThread=foreground?GetWindowThreadProcessId(foreground,nullptr):0;
+            const DWORD thisThread=GetCurrentThreadId();
+            const bool attached=foregroundThread && foregroundThread!=thisThread && AttachThreadInput(thisThread,foregroundThread,TRUE);
+            SetForegroundWindow(window);
+            BringWindowToTop(window);
+            SetActiveWindow(window);
+            if(attached)AttachThreadInput(thisThread,foregroundThread,FALSE);
+        }
+    }
+#endif
+    psLog(QString("focus: bring-to-front end xmbActive=%1 xmbForeground=%2 foreground=%3")
+        .arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(foregroundDescription()));
+}
+void View::reassertForeground(const QString& reason) {
+    if(xmbOwnsForeground())psLog(QString("focus: XMB already holds the foreground after %1 (%2)").arg(reason,foregroundDescription()));
+    else bringXmbForward(reason);
+    // The killed title's window is destroyed asynchronously; check once more after Windows has finished
+    // handing the foreground to its successor.
+    QTimer::singleShot(400,this,[this,reason]{
+        if(!xmbOwnsForeground())bringXmbForward(reason+" (retry after the title's window was destroyed)");
+        else psLog(QString("focus: XMB holds the foreground after %1 (%2)").arg(reason,foregroundDescription()));
+    });
+}
+void View::activatePsMenuSelection() {
+    const bool quitting=titleRunning() && !shell_.psMenuConfirmingOff() && shell_.psMenuSelection()==0;
+    psLog(QString("event: PS menu activate selection=%1 quitting=%2").arg(shell_.psMenuSelection()).arg(quitting?1:0));
+    shell_.psMenuActivate();
+    if(quitting) {
+        psLog(QString("event: Quit Game confirmed; tracked title terminated=%1").arg(titleRunning()?0:1));
+        reassertForeground("Quit Game terminated the tracked title");
+    }
+    update();
+}
 bool View::eventFilter(QObject* watched,QEvent* event) {
+    // Focus transitions of the XMB's own top-level window, for XMB_PS_LOG runs: together with the
+    // foreground window named on every PS event this shows whether a press arrived while the game owned
+    // the foreground.
+    if(event->type()==QEvent::WindowActivate || event->type()==QEvent::WindowDeactivate) {
+        QWidget* top=window();
+        if(top && (watched==top || (top->windowHandle() && watched==top->windowHandle())))
+            psLog(QString("focus: XMB %1 xmbActive=%2 foreground=%3")
+                .arg(event->type()==QEvent::WindowActivate?"activated":"deactivated")
+                .arg(isActiveWindow()?1:0).arg(foregroundDescription()));
+    }
     const auto* widget=qobject_cast<QWidget*>(watched);
     if(widget && (widget==this || widget->window()==window() || isAncestorOf(widget))) {
         if(event->type()==QEvent::KeyPress || event->type()==QEvent::MouseButtonPress || event->type()==QEvent::MouseMove || event->type()==QEvent::Wheel) {shell_.noteActivity();mediaControls_.activity(clock_.elapsed());}
@@ -1088,7 +1260,7 @@ void View::keyPressEvent(QKeyEvent* e) {
     if(shell_.psMenuOpen()) {
         if(e->key()==Qt::Key_Up)shell_.psMenuMove(-1);
         else if(e->key()==Qt::Key_Down)shell_.psMenuMove(1);
-        else if(e->key()==Qt::Key_Return || e->key()==Qt::Key_Enter)shell_.psMenuActivate();
+        else if(e->key()==Qt::Key_Return || e->key()==Qt::Key_Enter)activatePsMenuSelection();
         else if(e->key()==Qt::Key_Escape)shell_.psMenuClose();
         e->accept();return;
     }
@@ -1153,29 +1325,19 @@ void View::focusOutEvent(QFocusEvent* e) {
 }
 void View::pollController() {
 #ifdef Q_OS_WIN
-    if(!isActiveWindow() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;return;}
+    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;return;}
     // XInput pad 0 and any PlayStation controller over HID (pad.cpp), merged; the left stick doubles as the D-pad.
     XINPUT_STATE state{};const bool xinput=XInputGetState(0,&state)==ERROR_SUCCESS;
     pad::State hid;const bool playstation=pad::latest(hid);
     quint16 buttons=quint16((xinput?state.Gamepad.wButtons:0)|(playstation?hid.buttons:0)|keyHeld_);
-    // PS button: a tap returns to the XMB and flashes the controller indicator; holding it for a second opens
-    // the system menu, exactly as the console does (RPCS3 capture, audit/PS-BUTTON.md).
-    {
-        const bool psDown=(buttons&0x400)!=0;
-        const qint64 psNow=clock_.elapsed();
-        if(psDown && psDownAt_<0){psDownAt_=psNow;psHoldFired_=false;}
-        else if(psDown && !psHoldFired_ && psNow-psDownAt_>=1000){psHoldFired_=true;shell_.psHeld();}
-        else if(!psDown && psDownAt_>=0){
-            if(!psHoldFired_ && psNow-psDownAt_<1000){psHudUntil_=psNow+2500;shell_.psTapped();}
-            psDownAt_=-1;psHoldFired_=false;
-        }
-        buttons=quint16(buttons&~0x400);   // consumed here: the menu owns its own input
-    }
+    // PS is consumed by the global watcher (ps_watcher.cpp), which also covers a focused game; it must
+    // never reach the XMB navigation bits below.
+    buttons=quint16(buttons&~0x400);
     if(shell_.psMenuOpen()) {
         const auto edgePs=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;buttons_=buttons;
         if(edgePs&XINPUT_GAMEPAD_DPAD_UP)shell_.psMenuMove(-1);
         if(edgePs&XINPUT_GAMEPAD_DPAD_DOWN)shell_.psMenuMove(1);
-        if(edgePs&XINPUT_GAMEPAD_A)shell_.psMenuActivate();
+        if(edgePs&XINPUT_GAMEPAD_A)activatePsMenuSelection();
         if(edgePs&XINPUT_GAMEPAD_B)shell_.psMenuClose();
         return;
     }

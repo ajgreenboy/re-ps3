@@ -7,6 +7,7 @@
 #include "ribbon.h"
 #include "rsx_program.h"
 #include "shell.h"
+#include "ps_watcher.h"
 #include "photo_viewport.h"
 #include "media_controls.h"
 #include "text_renderer.h"
@@ -54,9 +55,10 @@ public:
     void setIntroEnabled(bool enabled) { introEnabled_=enabled; }
     // Verification taps dispatch synchronously, independent of foreground focus and the physical input poll.
     void replayKeyTap(int key);
-    // Verification taps for the PS button (no physical controller in scripted runs).
-    void replayPsTap() { shell_.psTapped(); }
-    void replayPsHold() { shell_.psHeld(); }
+    // Verification taps for the PS button (no physical controller in scripted runs). They drive the
+    // same global watcher state machine a physical press does, including the 1 s hold.
+    void replayPsTap();
+    void replayPsHold();
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -79,9 +81,20 @@ private:
     QVector<FrameSample> frameTrace_;
     void saveFrameTrace();
     qint64 previousFrameNs_=0,reportAt_=0;
-    // PS button: pressed-time and hold latch, plus the short controller-indicator window a tap opens.
-    qint64 psDownAt_=-1,psHudUntil_=0;
-    bool psHoldFired_=false;
+    // PS button: the global watcher (independent of window focus) and the short controller-indicator
+    // window a tap opens.
+    PsWatcher psWatcher_;
+    qint64 psHudUntil_=0;
+    bool psPressActionable_=false;
+    bool titleRunning() const;
+    bool xmbOwnsForeground() const;
+    void psPressed();
+    void psHeldEvent();
+    void psTappedEvent(qint64 durationMs);
+    void psReleasedEvent(qint64 durationMs);
+    void bringXmbForward(const QString& reason);
+    void reassertForeground(const QString& reason);
+    void activatePsMenuSelection();
     quint64 frames_=0;
     double categoryPosition_=6;
     int previousCategory_=6;
