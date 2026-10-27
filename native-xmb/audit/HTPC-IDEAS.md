@@ -1,11 +1,13 @@
 # HTPC ideas: making the native XMB a couch system without losing the XMB
 
-Date: 2026-10-26. A brainstorm, not a plan of record. No source file was edited for it,
+Date: 2026-10-26. A brainstorm, not a plan of record, plus the dispatcher-ready task queue
+in section 5. No source file was edited for it,
 no build or GUI run was performed, and no capture was taken. Everything below is read
 from source plus the existing audit records, which are cited by file and function rather
 than by line where the working tree is dirty. Note that `shell.cpp`, `shell.h`,
-`view.cpp` and `view.h` currently carry uncommitted changes (a PS-button menu, referenced
-in a comment as `audit/PS-BUTTON.md`, which does not exist yet), so this document assumes
+**Status update 2026-10-26:** the PS-button menu and its capture doc landed in commit `6ca36df`
+(`audit/PS-BUTTON.md` now exists and the tree is clean for shell/view), so the blocker below is
+cleared; `src/icons.cpp` is also committed. The document was written when
 that direction is already in flight and does not recommend it again.
 
 ## 1. What this is, HTPC-wise, and the one gap
@@ -302,3 +304,198 @@ Things that look appealing on a feature list and should stay out.
   Windows and the hardware. Say that in Accessory Settings; do not emulate it.
 - **Always-listening voice control.** Microphone permission, privacy and a driver surface,
   for a feature the console never had.
+
+## 5. Subagent task queue
+
+These briefs are written to be pasted whole into a subagent dispatch. Each is
+self-contained, names the files it owns, and asks for evidence the existing harness can
+actually produce. This section was written from a session running at delegation depth 0,
+so it could not spawn the tasks itself; the dispatch has to happen one level up.
+
+### Shared rules (restate these in every dispatch)
+
+- Repo root `C:\dev\xmb`. Build with
+  `& .\native-xmb\build.ps1 -OutputDirectory ..\out\native-<task>` so the user's running
+  `out/native-xmb/re-ps3-native.exe` is not locked; the build fails LNK1104 while that
+  executable is running. Work from `native-xmb` when passing a relative output directory.
+- Run with `--dev-flash <repo-parent>\rpcs3\bin\dev_flash --data-dir <scratch> --no-intro`,
+  with `XMB_LOG=<file>` set. A scripted run starts 2.5 s after launch and consumes one
+  token every 300 ms.
+- Verify with `--script "...grab=<file.png>..."` (writes the PNG and its JSON sidecar) and,
+  where a number is claimed, `bun work/ab-compare.ts` or `bun work/ab-scenarios.ts`. No new
+  test framework, no new test suite, no committed fixture media.
+- Never edit `src/icons.cpp` (an uncommitted change owned by another agent). Never edit a
+  file outside the task's own list. Captures, fixtures, logs and reports stay under `out/`;
+  firmware assets, credentials and accounts never enter Git.
+- No fabricated data, no new online service, no privileged or silent system change: a power
+  action is confirmed first. Commit only the task's own files, as
+  `Al <ajgreenboy@gmail.com>`, and only when asked.
+
+### G0 - Shared groundwork: panel, HUD, sidecar fields
+
+Depends on: nothing, but it refactors the in-flight PS-menu code, so the owner of the
+uncommitted `shell.cpp`/`shell.h`/`view.cpp`/`view.h` changes must land or park them first.
+Blocks: T2, T3, T4, T5 (T1 only for its sidecar fields).
+
+Read first: `src/shell.h` (the `psMenu*` block and `Page`), `src/view.cpp`
+`drawPsMenu`/`drawControllerHud`/`pollController`, `src/media_controls.*` (the 3 s / 250 ms
+model), `src/main.cpp` script runner (the `grab=` sidecar).
+
+Slice:
+
+- Generalise the PS menu into one `Panel` state (title, rows, selection) that the view draws
+  over the scene and the pad drives; make the PS menu its first caller. Suppress idle, media
+  keys and the OSK while it is open, as the PS menu already suppresses idle.
+- A timed HUD: text plus a value, shown on change and faded with the `MediaControls` timing,
+  drawn in the info-bar area. This is the volume bar and the controller indicator.
+- Extend the `grab=` sidecar with `pageKind`, `panelOpen`, `panelSelection`,
+  `displayState`, `awakeHeld`, `masterVolume`, `subtitleCue`, `audioTrack`, with stable
+  defaults when a feature is absent, and document the fields in a comment there.
+
+Evidence: the three existing named states still capture pixel-identically (the harness
+already produces PSNR Infinity / SSIM 1 for self-repeatability, so this is a real
+regression gate, not a claim); one scripted capture with a temporary panel row; the sidecar
+JSON parsed and every new key present; a HUD capture at 0 s and 4 s showing the fade.
+
+Never: change menu motion, sizes or colours; change what the PS menu does.
+
+### T1 - Native Jellyfin sign-in with a masked OSK
+
+Rows 1 and 2 of the table. Read first: `src/jellyfin_signin.cpp`, `src/jellyfin_shell.cpp`
+(`openJellyfin`), `Shell::openChoices` (the way an XMB page is pushed), `src/view.cpp`
+`openOsk`/`oskClose`/`oskInsert`/`drawOsk`, the `keys` and `type=` handling in
+`src/main.cpp`.
+
+Slice:
+
+- On opening a Jellyfin app while signed out, push a page with rows `Server` (read-only,
+  from the registration), `Username`, `Password`, `Sign In`, built with the existing `Page`
+  model so Back, the pad and the column fade work unchanged.
+- Reuse `View::openOsk` for both fields and add a masked mode for the password; the OSK's
+  cached UI signature must not carry the plaintext.
+- Keep values in memory only. Retire `JellyfinSignIn` and `requestJellyfinSignIn` in the
+  same change so there is exactly one sign-in surface.
+
+Evidence: captures of the page, of the username OSK, and of the masked password field with
+no plaintext in the PNG or the sidecar (`pageKind` from G0); a `XMB_LOG` line
+`jellyfin: sign-in request for <user>` plus the HTTP outcome; a deliberate wrong password
+producing 401 and the inline error, which proves the typed values reached
+`/Users/AuthenticateByName` without needing an account. State in the result that a live
+session is unproven without the operator's server.
+
+Never: persist the password (remembered sign-in is a separate, opt-in slice), relax the
+client's redirect/nonce rules, or log the password.
+
+### T2 - Session: stay awake while playing, go dark when idle
+
+Rows 5 and 4. Read first: the `Shell` idle lambda (`power/idleMinutes`), the media
+status/`gameRunning()` transitions, `src/host.cpp`, `src/view.cpp` composite dim path,
+`src/preferences.cpp` key validation.
+
+Slice:
+
+- `host::holdDisplayAwake(bool)` wrapping `SetThreadExecutionState(ES_CONTINUOUS |
+  ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)`; held while `mediaOpen_` or `gameRunning()`,
+  released on stop, return, error and shutdown. One log line per transition.
+- System Auto-Off becomes display-off: a black frame, audio stopped, idle suppressed, any
+  input restoring the same page and row. Quitting stays an explicit confirmed choice.
+
+Evidence: `idle=301000` gives a near-black frame (the existing dim measures a 0.450688
+mean-RGB ratio; this must be far below it) with `displayState` in the sidecar; the wake
+frame is pixel-identical to the pre-idle frame, reusing the screensaver replay's gate; the
+log shows the hold and the release and only in the right states; one manual 20-minute audio
+run with the Windows power plan set to sleep in 5 minutes, reported by the operator. Say
+plainly that `powercfg /requests` needs an elevated shell and that the log proves only that
+the app asked.
+
+Never: call any shutdown, restart or suspend API (that is a separate, confirmed task);
+change host brightness or power settings; quietly rename the existing Auto-Off behaviour.
+
+### T3 - Subtitles and audio tracks
+
+Row 7. Read first: the `QMediaPlayer` wiring in `src/shell.cpp`, the media overlay in
+`src/view.cpp`, `src/text_renderer.*`, `src/media_controls.*`, the player bindings in
+`pollController`, `CMakeLists.txt`.
+
+Slice:
+
+- A player panel (G0) on Triangle with `Subtitles: Off/<name>` and `Audio: <track>`, and move
+  Repeat/Shuffle into it so the face buttons are free.
+- New `src/subtitles.{h,cpp}`: parse a sidecar `.srt`/`.vtt` next to the media, index cues
+  against `player_->position()`, draw the active cue through the existing GL text renderer.
+- Populate `Audio` from `QMediaPlayer::audioTracks()` and apply `setActiveAudioTrack` when
+  more than one is reported.
+
+Evidence: a hand-written two-cue `.srt` beside the existing generated clip (both under
+`out/`); captures at cued and non-cued timestamps where a subtitle-band crop differs
+(SSIM below 1) and matches the Off run when subtitles are off; `subtitleCue` and
+`audioTrack` in the sidecar; the log printing cue index and start time; a panel capture
+showing both rows and the current choice.
+
+Never: add a test suite or fixture media to Git; claim embedded MKV tracks or Jellyfin
+subtitles, which are follow-ons; write anything next to the user's media.
+
+### T4 - Volume HUD on the pad
+
+Row 6. Read first: `src/pad.cpp` (`State::l2`/`r2` are parsed and unused), `pollController`
+in `src/view.cpp`, `src/host.cpp` endpoint volume, the `keys` table in `src/main.cpp`,
+`src/media_controls.*`.
+
+Slice:
+
+- Route L2/R2 and new `VOLUP`/`VOLDOWN`/`MUTE` script keys to `host::setMasterVolume` in 5 %
+  steps, ignored while the OSK, a panel or a dialog is open.
+- Show the G0 HUD bar in the info-bar area with the existing 3 s / 250 ms fade.
+
+Evidence: captures at 30/60/90 where the sidecar's `masterVolume`, read back through
+`host::masterVolume()`, matches the bar; a capture after 4 s with the bar gone at the same
+3000/3125/3250 ms boundary the video controls were tested at; a log line per change; the
+script restoring the original level, and the result saying so, because an isolated data
+directory does not isolate the Windows audio endpoint.
+
+Never: touch mute state, the app's own `audio/volume`, or per-app mixer entries; leave the
+host endpoint at a different level than it started.
+
+### T5 - Continue Watching
+
+Row 10. Read first: `Shell::resumePositionFor`/`storeResumePosition`, the `media/resume`
+format, the Video category build, `src/view.cpp` row rendering.
+
+Slice:
+
+- A `Continue` folder at the top of the Video column listing in-progress titles with
+  `Resuming at m:ss`, capped at ten, most recent first, dropping entries whose file has
+  vanished.
+- Move the map to `{id: {path, ms, title}}` with a migration that keeps old hash-only
+  entries working (or clears them with one log line), because the current key is a
+  truncated SHA-1 of the path and stores no path.
+
+Evidence: play, Back at about 8.8 s, and a capture of the folder with the row and its
+remaining time; Accept then a capture 1 s later with the overlay position at or beyond
+8.8 s and the log printing `media: resumed at <ms>`; playing to the end removing the row
+and emptying the map.
+
+Never: change the 64-entry cap silently, change resume thresholds, or store anything about
+a file outside the data directory.
+
+### Dispatch order and conflicts
+
+| Task | Depends on | Files owned | Conflicts with |
+|---|---|---|---|
+| G0 | PS-menu work landed or parked | `shell.*`, `view.*`, `main.cpp` | every task below |
+| T1 | G0 (sidecar only) | `jellyfin_signin.*` (delete), `shell.*`, `view.cpp`, `main.cpp` | T2, T3, T4 |
+| T2 | G0 | `host.*`, `shell.cpp`, `view.cpp`, `preferences.*` | T1, T3, T4 |
+| T3 | G0 | new `subtitles.*`, `CMakeLists.txt`, `shell.cpp`, `view.cpp`, `main.cpp` | T1, T2, T4 |
+| T4 | G0 | `pad.*`, `view.cpp`, `host.cpp`, `shell.cpp`, `main.cpp` | T1, T2, T3 |
+| T5 | G0 | `shell.cpp`, `preferences.*`, `view.cpp` | T1-T4 |
+
+Every task touches `shell.cpp` and `view.cpp`, and `src/icons.cpp` is already dirty, so these
+are **not** parallel-safe in one working tree: run them one at a time (G0, T1, T2, T4, T5,
+T3), each in its own output directory. If parallel dispatch is required anyway, give each
+agent its own worktree or branch, forbid it from touching another task's files, and expect
+to resolve `shell.cpp`/`view.cpp` conflicts by hand. T2 and T4 are the cheapest; if only two
+slots are available, take those plus T1.
+
+Not queued: the remaining table rows (3, 8, 9, 11-18) stay as candidates until these land.
+Row 3 in particular should follow T2, since it is the same evening-ending problem with a
+privileged call added.
