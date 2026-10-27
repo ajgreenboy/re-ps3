@@ -109,6 +109,9 @@ void main(){
     float bevel=pow(1.-max(normal.z,0.),2.)*.10;
     float light=(.58+.26*diffuse+bevel)*mix(.70,1.,clamp(brightness,0.,1.));
     // Tint the surface, not its opacity; only shape coverage and page transitions fade.
+    // Measured 2026-10-26: moving focus brightness to the alpha (the firmware's _Ambiant.w semantics) costs
+    // 0.85 dB on the category-icon layer while this opaque material has no glass refraction, so the RGB
+    // dimming stays until the icon is drawn through the refractive path (audit/ITEM-ICONS.md).
     colour=vec4(clamp(mix(vec3(1.),tint,tintStrength)*light,0.,1.),material.a*opacity);
 })";
     opaqueReady_=opaque_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) &&
