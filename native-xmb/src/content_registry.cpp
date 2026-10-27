@@ -95,6 +95,8 @@ bool validateAppForWrite(ContentApp& app, const QString& baseDirectory, QString&
     app.title = app.title.trimmed();
     app.kind = app.kind.trimmed();
     app.category = app.category.trimmed();
+    if (app.kind == QStringLiteral("jellyfin") && app.category.isEmpty())
+        app.category = QStringLiteral("tv");
     if (app.id.isEmpty())
         return fail(error, QStringLiteral("App id must not be empty"));
     for (const QChar ch : app.id) {
@@ -106,8 +108,9 @@ bool validateAppForWrite(ContentApp& app, const QString& baseDirectory, QString&
     }
     if (app.title.isEmpty())
         return fail(error, QStringLiteral("App title must not be empty"));
-    if (app.kind != QStringLiteral("game") && app.kind != QStringLiteral("web"))
-        return fail(error, QStringLiteral("App kind must be 'game' or 'web'"));
+    if (app.kind != QStringLiteral("game") && app.kind != QStringLiteral("web")
+        && app.kind != QStringLiteral("jellyfin"))
+        return fail(error, QStringLiteral("App kind must be 'game', 'web' or 'jellyfin'"));
     static const QStringList categories = {
         QStringLiteral("game"), QStringLiteral("tv"), QStringLiteral("music"),
         QStringLiteral("video"), QStringLiteral("network")
@@ -133,9 +136,13 @@ bool validateAppForWrite(ContentApp& app, const QString& baseDirectory, QString&
         if (app.url.isEmpty() || !parsed.isValid()
             || (parsed.scheme() != QStringLiteral("http") && parsed.scheme() != QStringLiteral("https"))
             || parsed.host().isEmpty() || !parsed.userInfo().isEmpty()
-            || parsed.authority().contains(QLatin1Char('@')))
-            return fail(error, QStringLiteral("Web URL must be http(s), include a host, and contain no credentials"));
+            || parsed.authority().contains(QLatin1Char('@'))
+            || (app.kind == QStringLiteral("jellyfin") && (parsed.hasQuery() || parsed.hasFragment())))
+            return fail(error, app.kind == QStringLiteral("jellyfin")
+                        ? QStringLiteral("Jellyfin Server URL must be http(s), include a host, and contain no credentials, query or fragment")
+                        : QStringLiteral("Web URL must be http(s), include a host, and contain no credentials"));
         app.executable.clear();
+        if (app.kind == QStringLiteral("jellyfin")) app.workingDirectory.clear();
         app.arguments.clear();
     }
     for (const QString& argument : app.arguments) {
@@ -179,8 +186,9 @@ bool parseApp(const QJsonValue& value, qsizetype index, const QString& baseDirec
     }
     if (app.title.trimmed().isEmpty())
         return fail(error, QStringLiteral("%1 title must not be empty").arg(where));
-    if (app.kind != QStringLiteral("game") && app.kind != QStringLiteral("web"))
-        return fail(error, QStringLiteral("%1 kind must be 'game' or 'web'").arg(where));
+    if (app.kind != QStringLiteral("game") && app.kind != QStringLiteral("web")
+        && app.kind != QStringLiteral("jellyfin"))
+        return fail(error, QStringLiteral("%1 kind must be 'game', 'web' or 'jellyfin'").arg(where));
 
     if (!object.contains(QStringLiteral("category")))
         app.category = app.kind == QStringLiteral("game") ? QStringLiteral("game") : QStringLiteral("tv");
@@ -223,8 +231,17 @@ bool parseApp(const QJsonValue& value, qsizetype index, const QString& baseDirec
         if (app.url.isEmpty() || !parsed.isValid()
             || (parsed.scheme() != QStringLiteral("http") && parsed.scheme() != QStringLiteral("https"))
             || parsed.host().isEmpty() || !parsed.userInfo().isEmpty()
-            || parsed.authority().contains(QLatin1Char('@')))
-            return fail(error, QStringLiteral("%1 web URL must be http(s), include a host, and contain no credentials").arg(where));
+            || parsed.authority().contains(QLatin1Char('@'))
+            || (app.kind == QStringLiteral("jellyfin") && (parsed.hasQuery() || parsed.hasFragment())))
+            return fail(error, app.kind == QStringLiteral("jellyfin")
+                        ? QStringLiteral("%1 Jellyfin Server URL must be http(s), include a host, and contain no credentials, query or fragment").arg(where)
+                        : QStringLiteral("%1 web URL must be http(s), include a host, and contain no credentials").arg(where));
+        if (app.kind == QStringLiteral("jellyfin")) {
+            app.executable.clear();
+            app.workingDirectory.clear();
+            if (!app.arguments.isEmpty())
+                return fail(error, QStringLiteral("%1 Jellyfin registrations cannot have executable arguments").arg(where));
+        }
     }
 
     normalizePath(app.workingDirectory, baseDirectory);

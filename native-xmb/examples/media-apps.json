@@ -4,7 +4,7 @@
     {
       "id": "jellyfin",
       "title": "Jellyfin",
-      "kind": "web",
+      "kind": "jellyfin",
       "category": "tv",
       "url": "http://localhost:8096"
     },

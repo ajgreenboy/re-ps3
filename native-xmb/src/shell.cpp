@@ -316,8 +316,8 @@ void Shell::refreshContent() {
             }
             for(const auto& app:contentApps_)if(app.category==category.id) {
                 auto e=item("custom:"+app.id,app.title,app.kind=="game"?"game_tex_default_ps3":"tex_video","explore_plugin_full",
-                    app.kind=="game"?Action::LaunchApp:Action::OpenUrl,app.kind=="game"?app.id:app.url);
-                e.detail=app.kind=="game"?QString{}:"Service app · Opens in your browser";
+                    app.kind=="game"?Action::LaunchApp:app.kind=="jellyfin"?Action::JellyfinApp:Action::OpenUrl,app.kind=="web"?app.url:app.id);
+                e.detail=app.kind=="game"?QString{}:app.kind=="jellyfin"?"Jellyfin":"Service app · Opens in your browser";
                 e.artwork=result.art.value("custom:"+app.id);e.gameTile=app.kind=="game";providers.push_back(std::move(e));
             }
             category.entries=providers+category.entries;
@@ -607,28 +607,16 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         emit changed();
     });
     connect(&slideshow_,&QTimer::timeout,this,[this]{stepPhoto(1);});
-    connect(player_.get(),&QMediaPlayer::mediaStatusChanged,this,[this](QMediaPlayer::MediaStatus status){
+    connect(player_.get(),&QMediaPlayer::mediaStatusChanged,this,[this](QMediaPlayer::MediaStatus state){
         if(mediaOpen_ && !photoOpen()) {
-            loading_=status==QMediaPlayer::LoadingMedia;
-            if(status==QMediaPlayer::EndOfMedia) {
-            // ISC-16 metadata: when a track loads, take its tags so the row stops showing a bare
-            // filename. Qt exposes them on the player only after the media is loaded.
-            if(status==QMediaPlayer::LoadedMedia) {
-                const auto tags=player_->metaData();
-                const auto title=tags.value(QMediaMetaData::Title).toString().trimmed();
+            loading_=state==QMediaPlayer::LoadingMedia || state==QMediaPlayer::StalledMedia;
+            if(state==QMediaPlayer::LoadedMedia && !jellyfinQueue_) {
+                const auto tags=player_->metaData();const auto title=tags.value(QMediaMetaData::Title).toString().trimmed();
                 const auto artist=tags.value(QMediaMetaData::ContributingArtist).toString().trimmed();
-                const auto album=tags.value(QMediaMetaData::AlbumTitle).toString().trimmed();
-                if(!title.isEmpty() || !artist.isEmpty()) {
-                    const QString label=title.isEmpty()?status_:title;
-                const auto tagged=mediaTags_.value(mediaQueue_.currentIndex());
-                if(!tagged.isEmpty() && mediaTitle_!=tagged)mediaTitle_=tagged;
-                    mediaTags_[mediaQueue_.currentIndex()]=artist.isEmpty()?label:label+" - "+artist;
-                    if(album.isEmpty())mediaAlbum_.clear(); else mediaAlbum_=album;
-                }
+                mediaAlbum_=tags.value(QMediaMetaData::AlbumTitle).toString().trimmed();
+                if(!title.isEmpty()){mediaTitle_=artist.isEmpty()?title:title+" - "+artist;mediaTags_[mediaQueue_.currentIndex()]=mediaTitle_;}
             }
-                const auto request=mediaRequest_;
-                QTimer::singleShot(0,this,[this,request]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(false);});
-            }
+            if(state==QMediaPlayer::EndOfMedia) {const auto request=mediaRequest_;QTimer::singleShot(0,this,[this,request]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(false);});}
         }
         emit changed();
     });
@@ -647,8 +635,9 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         const auto request=mediaRequest_;
         QTimer::singleShot(0,this,[this,request,error]{if(request==mediaRequest_ && mediaOpen_ && !photoOpen())advanceMedia(true,error);});
     });
+    initJellyfin();
 }
-Shell::~Shell(){disconnect(&steamFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
+Shell::~Shell(){jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();disconnect(&steamFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
 const QVector<Entry>& Shell::entries()const {return pages_.isEmpty()?categories_[category_].entries:pages_.last().entries;}
 const QVector<Entry>& Shell::entriesAt(int depth)const {return depth==0?categories_[category_].entries:pages_.at(depth-1).entries;}
 int Shell::selectionAt(int depth)const {return depth==0?selections_[category_]:pages_.at(depth-1).selection;}
@@ -768,6 +757,11 @@ void Shell::activate() {
     case Action::RefreshContent:refreshContent();break;
     case Action::RefreshFriends:refreshSteamFriends(true);break;
     case Action::ImportApps:emit requestImportApps();break;
+    case Action::JellyfinApp:openJellyfin(entry);break;
+    case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
+    case Action::JellyfinPlay:openJellyfinMedia(entry);break;
+    case Action::JellyfinMore:loadJellyfinPage(entry.value,entry.detail,entry.option.toInt());break;
+    case Action::JellyfinSignOut:signOutJellyfin();break;
     case Action::Unavailable:message_=entry.title+"\n\nThis feature is not available in the native recreation yet.";break;
     }
     emit changed();
@@ -776,8 +770,8 @@ void Shell::back() {
     touch();
     if(!message_.isEmpty() || mediaOpen_ || !pages_.isEmpty())interactionAudio_.play(InteractionAudio::Cue::Back);
     if(!message_.isEmpty())message_.clear();
-    else if(mediaOpen_){++photoRequest_;++mediaRequest_;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});}
-    else if(!pages_.isEmpty()){library_.cancel();scanRequest_=0;loading_=false;status_.clear();pages_.removeLast();}
+    else if(mediaOpen_){++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});}
+    else if(!pages_.isEmpty()){library_.cancel();scanRequest_=0;jellyfinRequest_=0;loading_=false;status_.clear();pages_.removeLast();}
     emit changed();
 }
 void Shell::chooseLibrary(const QString& folder) {
@@ -793,6 +787,7 @@ void Shell::openDirectory(const QString& path) {
     scanRequest_=library_.scan(path,kind=="photo"?MediaKind::Photo:kind=="music"?MediaKind::Music:MediaKind::Video);
 }
 void Shell::openFile(const Entry& entry) {
+    jellyfinQueue_=false;
     if(categories_[category_].id=="photo") {
         const auto request=++photoRequest_;loading_=true;photoRotation_=0;photo_={};emit mediaFrame({});
         auto* watcher=new QFutureWatcher<QImage>(this);
@@ -827,6 +822,7 @@ int Shell::mediaRepeatMode() const {
     return preferences_.value("media/repeatMode").toInt();
 }
 void Shell::startQueuedMedia() {
+    if(jellyfinQueue_){startJellyfinMedia();return;}
     const auto* selected=mediaQueue_.current();if(!selected)return;
     const auto item=*selected; // player callbacks must not invalidate the selected queue entry
     ++mediaRequest_;mediaOpen_=true;mediaTitle_=item.title;loading_=true;status_.clear();
@@ -839,6 +835,10 @@ void Shell::startQueuedMedia() {
     emit changed();
 }
 void Shell::advanceMedia(bool failed,const QString& error) {
+    if(jellyfinQueue_) {
+        finishJellyfinPlayback();
+        if(failed){++mediaRequest_;jellyfinRequest_=0;loading_=false;player_->stop();status_="Playback stopped";message_="Jellyfin\n\nThis media could not be played. Check the server and its transcoding support.";emit changed();return;}
+    }
     if(mediaQueue_.empty())return;
     if(failed) {
         if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: rejected"<<mediaTitle_<<error;
@@ -878,7 +878,7 @@ QString Shell::mediaQueueSummary() const {
     if(!status_.isEmpty())result+="  ·  "+status_;
     return result;
 }
-bool Shell::photoOpen()const{return mediaOpen_ && categories_[category_].id=="photo";}
+bool Shell::photoOpen()const{return mediaOpen_ && !jellyfinQueue_ && categories_[category_].id=="photo";}
 void Shell::showPhoto(){if(!photo_.isNull())emit mediaFrame(photo_.transformed(QTransform().rotate(photoRotation_)));}
 void Shell::stepPhoto(int delta) {
     if(loading_)return;
@@ -929,6 +929,9 @@ void Shell::loadTheme() {
 qint64 Shell::mediaPosition()const{return player_->position();}
 qint64 Shell::mediaDuration()const{return player_->duration();}
 void Shell::refreshDirectory(){
+    if(!mediaOpen_ && !pages_.isEmpty() && pages_.last().jellyfin) {
+        const auto page=pages_.last();loadJellyfinPage(page.jellyfinParent,page.title,page.jellyfinStart,page.jellyfinViews,true);return;
+    }
     if(pages_.isEmpty() && !mediaOpen_) {
         if(categories_[category_].id=="friends")refreshSteamFriends(true);else refreshContent();
         return;

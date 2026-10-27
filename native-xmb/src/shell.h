@@ -7,6 +7,8 @@
 #include "profiles.h"
 #include "steam_friends.h"
 #include "content_registry.h"
+#include "jellyfin_client.h"
+#include "jellyfin_stream.h"
 #include "steam_owned.h"
 #include "steam_collections.h"
 #include "steam_family.h"
@@ -27,7 +29,7 @@ class QVideoSink;
 namespace xmb {
 class Assets;
 class SteamArtwork;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, SteamStoreSection, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps };
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, SteamStoreSection, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps, JellyfinApp, JellyfinFolder, JellyfinPlay, JellyfinMore, JellyfinSignOut };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -89,6 +91,8 @@ public:
     bool idleDisplayAllowed() const;
     bool mediaOpen() const { return mediaOpen_; }
     QString mediaTitle() const { return mediaTitle_; }
+    QString mediaProvider() const { return jellyfinQueue_?QString("Jellyfin"):QString("Local"); }
+    QString mediaPlayMethod() const { return jellyfinQueue_?jellyfinPlayback_.playMethod:QString{}; }
     QString mediaQueueSummary() const;
     int mediaRepeatMode() const;
     void skipMedia(int direction);
@@ -107,6 +111,8 @@ public:
     void refreshDirectory();
     void refreshContent();
     void importApps(const QString& file);
+    void authenticateJellyfin(QUrl server,QString username,QString password);
+    void cancelJellyfinSignIn();
     void createUser(const QString& name);
 signals:
     void changed();
@@ -118,6 +124,8 @@ signals:
     void requestQuit();
     void requestNewUser();
     void requestImportApps();
+    void requestJellyfinSignIn(QUrl server);
+    void jellyfinSignInFinished(bool success,QString error);
 private:
     Assets& assets_;
     Preferences preferences_;
@@ -126,6 +134,22 @@ private:
     Profiles profiles_;
     QString dataDirectory_,steamRoot_,steamId_;
     QVector<ContentApp> contentApps_;
+    JellyfinClient jellyfin_;
+    JellyfinStream jellyfinStream_;
+    JellyfinPlayback jellyfinPlayback_;
+    QTimer jellyfinProgress_;
+    quint64 jellyfinRequest_=0;
+    int jellyfinRequestDepth_=0,jellyfinRootDepth_=0;
+    bool jellyfinSigningIn_=false,jellyfinQueue_=false,jellyfinStarted_=false;
+    QString jellyfinServiceTitle_,jellyfinRequestedTitle_;
+    QHash<QString,bool> jellyfinAudio_;
+    void initJellyfin();
+    void openJellyfin(const Entry& entry);
+    void loadJellyfinPage(const QString& parent,const QString& title,int start=0,bool views=false,bool replace=false);
+    void openJellyfinMedia(const Entry& entry);
+    void startJellyfinMedia();
+    void finishJellyfinPlayback();
+    void signOutJellyfin();
     SteamFriends steamFriends_;
     SteamOwned steamOwned_;
     OwnedGameList ownedGames_;      // purchased titles from the Steam Web API (may be empty without a key)
@@ -165,7 +189,7 @@ private:
     int photoRotation_=0;
     QVector<Category> categories_;
     QVector<int> selections_;
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false; QString jellyfinParent; int jellyfinStart=0; };
     QVector<Page> pages_;
     QString message_,mediaTitle_,renderer_;
     QDateTime clockOverride_;

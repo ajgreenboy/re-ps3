@@ -18,6 +18,10 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - Verify with `--script` (keys, `grab=`, `burst=<prefix>@KEY`), never by eye alone. Compare against frames of the
   reference video at the same state.
 
+## Native Jellyfin continuation (2026-10-26)
+
+[Native service/player and verification handoff](audit/JELLYFIN-NATIVE.md): local authentication, native library pages, direct and server-transcoded HLS playback, queue/seek/pause/return, session reporting and sign out. Real Jellyfin 12.4 verified with generated media. Posters, selectors, resume UI and remembered sign-in remain open.
+
 ## Latest broader continuation (2026-10-26)
 
 [Phase continuation and resume map](audit/PHASE-CONTINUATION.md): integrated app-registration editor, video controls that fade during playback, bounded seeking/hour labels, and Display Settings → Screensaver with verified native dim/wake. Exact firmware player panels, dim brightness and timings remain open.
@@ -38,7 +42,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Input | Keyboard, XInput, and DualShock 3/4 / DualSense over HID (`src/pad.cpp`; HID untested without a controller) |
 | Installed titles | Installed Steam games appear like installed PKGs directly in Game; dev_hdd0 and games.yml titles retain their RPCS3 launch path. See audit/STEAM-INTEGRATION.md |
 | Steam Friends | Signed-in local client helper reads 46 real friends/presence without changing profile privacy; Web API remains optional fallback. See audit/STEAM-CLIENT-FRIENDS.md |
-| Imported apps | Versioned JSON importer adds local executables or service URLs to XMB categories; Jellyfin browser-app example included. Embedded player/authentication remain open |
+| Imported apps | Native editor and versioned importer add executables, browser apps and authenticated Jellyfin services. Jellyfin direct/HLS playback verified; see audit/JELLYFIN-NATIVE.md |
 | Host settings | System Information, network list, video/audio output and master volume read and write the real PC |
 
 ## In flight (2026-10-25)
