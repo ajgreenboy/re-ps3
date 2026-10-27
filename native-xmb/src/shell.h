@@ -38,6 +38,11 @@ struct Entry {
     QVariant option;
     QString themeIcon; // the PS3 theme (.p3t icontable) id that replaces this icon, e.g. "icon_game_setting"
     QImage artwork; // provider images decoded off the render thread
+    // Where a generated row's title and icon came from: "xmbml" (the view's title_rsc/icon_rsc), "rco"
+    // (a label the firmware builds in a plugin, resolved through its own RCO strings), "builtin" (the
+    // last-resort literal this build shipped) or "fallback" (the whole column kept its built-in rows).
+    // Empty on hand-written rows, so the entry dump stays quiet about the rest of the XMB.
+    QString source;
     bool gameTile=false,friendRow=false;
     int presenceState=0;
 };
@@ -304,6 +309,9 @@ private:
     void showPhoto();
     void rebuildUsers();
     void addInstalledApps();
+    // Builds the Network column's rows from the firmware's own category_network.xml (audit/XMBML-NETWORK.md),
+    // keeping the built-in rows when the definition cannot be read.
+    void resolveNetworkColumn();
     // RPCS3 next to dev_hdd0 (the emulator whose dev_flash/dev_hdd0 we read), or empty.
     QString emulatorPath() const;
     void launch(const Entry& entry);
