@@ -230,7 +230,13 @@ private:
     // character and the UI signature carries the dot count instead of the text, so a secret cannot leak into
     // the frame, the signature cache or a capture. Every other caller leaves it false and the keyboard behaves
     // exactly as it did.
-    struct Osk { bool open=false,shift=false,symbols=false,masked=false; QString title,text; int row=0,column=0,cursor=0; std::function<void(QString)> done; };
+    struct Osk {
+        bool open=false,shift=false,symbols=false,masked=false;
+        bool preserveWhitespace=false,allowEmpty=false;
+        QString title,text;
+        int row=0,column=0,cursor=0,maxLength=32;
+        std::function<void(QString)> done;
+    };
     Osk osk_;
     void openOsk(const QString& title,const QString& initial,std::function<void(QString)> done,bool masked=false);
     void drawOsk(QPainter& p);
