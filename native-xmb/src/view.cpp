@@ -18,6 +18,7 @@
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLPaintDevice>
 #include <QTextStream>
+#include <QTextBoundaryFinder>
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
@@ -143,6 +144,9 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     // sign-in page itself is a normal XMB page, which is what keeps pollController live while it is open.
     connect(&shell_,&Shell::requestJellyfinFieldEdit,this,[this](QString field,QString title,QString initial,bool masked){
         openOsk(title,initial,[this,field](const QString& value){shell_.setJellyfinSignInField(field,value);},masked);
+        // Service values are not display names: preserve exact credentials and deliver an empty edit.
+        osk_.preserveWhitespace=true;osk_.allowEmpty=true;
+        osk_.maxLength=field=="server"?2048:field=="username"?256:4096;
     });
     loadWallpaper();
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
@@ -1342,7 +1346,14 @@ void View::drawScene(QPainter& p) {
                 const double breath=.35+.65*(.5-.5*std::cos(2*std::numbers::pi*double(resting)/3400.));
                 if(focus>.5)glow(labelRect,label,27,(focus-.5)*2*breath*(entry.disabled?.45:1.));
                 text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
-                if(!value.isEmpty() && panelAmount<.5)text({1300+offset,y-25,440,50},value,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
+                if(!value.isEmpty() && panelAmount<.5) {
+                    QString shown=value;
+                    if(entry.action==Action::JellyfinSignInField) {
+                        QFont valueFont(shell_.fontFamily());valueFont.setPixelSize(21);
+                        shown=QFontMetrics(valueFont).elidedText(value,Qt::ElideRight,440);
+                    }
+                    text({1300+offset,y-25,440,50},shown,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
+                }
                 const auto subtitle=shell_.subtitleText(entry);
                 if(!subtitle.isEmpty())text({labelX,y+20,1100,30},subtitle,17,QColor(230,230,230,int(235*alpha)),Qt::AlignLeft|Qt::AlignTop);
                 // The help line belongs to the selection, not the eased position: on the real XMB it moves to the new
@@ -1867,7 +1878,11 @@ void View::keyPressEvent(QKeyEvent* e) {
         case Qt::Key_Return:case Qt::Key_Enter:if(e->modifiers()&Qt::ControlModifier)oskClose(true);else oskPress();break;
         case Qt::Key_Escape:oskClose(false);break;
         case Qt::Key_Backspace:oskBackspace();break;
-        default:if(!e->text().isEmpty() && e->text().at(0).isPrint())oskInsert(e->text());break;
+        default: {
+            const auto scalars=e->text().toUcs4();
+            if(!scalars.isEmpty() && QChar::isPrint(scalars.first()))oskInsert(e->text());
+            break;
+        }
         }
         return;
     }
@@ -2028,6 +2043,12 @@ const OskKey* oskFunctionKey(int row,int column) {
     return nullptr;
 }
 constexpr double oskRowY[6]={434,488,542,596,650,704};
+int oskAdjacent(const QString& text,int cursor,bool forward) {
+    QTextBoundaryFinder boundaries(QTextBoundaryFinder::Grapheme,text);
+    boundaries.setPosition(cursor);
+    const int next=forward?boundaries.toNextBoundary():boundaries.toPreviousBoundary();
+    return next<0?(forward?int(text.size()):0):next;
+}
 }
 QString View::oskCharacter(int row,int column) const {
     static const char* lower[4]={"1234567890","qwertyuiop","asdfghjkl'","zxcvbnm,.?"};
@@ -2042,12 +2063,26 @@ void View::openOsk(const QString& title,const QString& initial,std::function<voi
     update();
 }
 void View::oskClose(bool accept) {
-    auto done=std::move(osk_.done);const auto value=osk_.text.trimmed();osk_=Osk{};
-    if(accept && done && !value.isEmpty())done(value);
+    auto done=std::move(osk_.done);
+    const auto value=osk_.preserveWhitespace?osk_.text:osk_.text.trimmed();
+    const bool allowEmpty=osk_.allowEmpty;
+    osk_=Osk{};
+    if(accept && done && (allowEmpty || !value.isEmpty()))done(value);
     update();
 }
-void View::oskInsert(const QString& value){osk_.text.insert(osk_.cursor,value);osk_.cursor+=int(value.size());if(osk_.text.size()>32){osk_.text.truncate(32);osk_.cursor=std::min(osk_.cursor,32);}update();}
-void View::oskBackspace(){if(osk_.cursor>0){osk_.text.remove(osk_.cursor-1,1);--osk_.cursor;}update();}
+void View::oskInsert(const QString& value) {
+    // Limit only the inserted text. Editing a full field must never discard its existing suffix.
+    int count=std::min(int(value.size()),std::max(0,osk_.maxLength-int(osk_.text.size())));
+    if(count>0 && count<value.size() && value[count-1].isHighSurrogate() && value[count].isLowSurrogate())--count;
+    osk_.text.insert(osk_.cursor,value.left(count));osk_.cursor+=count;update();
+}
+void View::oskBackspace() {
+    if(osk_.cursor>0) {
+        const int before=oskAdjacent(osk_.text,osk_.cursor,false);
+        osk_.text.remove(before,osk_.cursor-before);osk_.cursor=before;
+    }
+    update();
+}
 void View::oskMove(int dx,int dy) {
     osk_.row=(osk_.row+dy+6)%6;
     if(dx!=0) {
@@ -2068,8 +2103,8 @@ void View::oskPress() {
     case OskAction::Shift:osk_.shift=!osk_.shift;break;
     case OskAction::Backspace:oskBackspace();break;
     case OskAction::Space:oskInsert(" ");break;
-    case OskAction::Left:osk_.cursor=std::max(0,osk_.cursor-1);break;
-    case OskAction::Right:osk_.cursor=std::min(int(osk_.text.size()),osk_.cursor+1);break;
+    case OskAction::Left:osk_.cursor=oskAdjacent(osk_.text,osk_.cursor,false);break;
+    case OskAction::Right:osk_.cursor=oskAdjacent(osk_.text,osk_.cursor,true);break;
     case OskAction::Enter:oskClose(true);return;
     case OskAction::None:break;
     }
@@ -2098,9 +2133,13 @@ void View::drawOsk(QPainter& p) {
     // A masked field (the Jellyfin password) draws one bullet per character and measures the caret against those
     // bullets, so the position stays right without the characters being drawn anywhere.
     const QString composed=osk_.masked?QString(osk_.text.size(),QChar(0x2022)):osk_.text;
-    const double before=QFontMetricsF(fieldFont).horizontalAdvance(composed.left(osk_.cursor));
-    label({512,330,900,60},composed,26,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-    if((clock_.elapsed()/500)%2==0)p.fillRect(QRectF(512+before,342,2,36),QColor(140,220,120)); // blinking cursor
+    const QFontMetricsF fieldMetrics(fieldFont);
+    const double before=fieldMetrics.horizontalAdvance(composed.left(osk_.cursor));
+    const double scroll=std::max(0.,before-896.);
+    p.save();p.setClipRect(QRectF(512,330,900,60),Qt::IntersectClip);
+    label({512-scroll,330,std::max(900.,fieldMetrics.horizontalAdvance(composed)+4.),60},composed,26,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+    if((clock_.elapsed()/500)%2==0)p.fillRect(QRectF(512+before-scroll,342,2,36),QColor(140,220,120)); // blinking cursor
+    p.restore();
     for(int row=0;row<4;++row)for(int column=0;column<10;++column) {
         const QRectF r(500+column*72,oskRowY[row]-23,66,46);
         key(r,QColor(236,236,236),QColor(190,190,190),osk_.row==row && osk_.column==column);
