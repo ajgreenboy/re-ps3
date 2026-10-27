@@ -165,7 +165,54 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
     return true;
 }
 bool Shell::gameRunning() const {
-    return !game_.isNull() && game_->state()!=QProcess::NotRunning;
+    // Also true while a Steam handoff is being watched, so the idle auto-close cannot quit behind a game.
+    return (!game_.isNull() && game_->state()!=QProcess::NotRunning) || !steamGameId_.isEmpty();
+}
+// Steam launches itself, so the only honest lifecycle signal is Steam's own registry state. The
+// handoff records the app id, watches Apps\<id>\Running, and reports the return when it clears.
+bool Shell::startSteamTracked(const QString& appId,const QString& title) {
+    const QString exe=QDir(steamRoot_).filePath("steam.exe");
+    if(!QFileInfo(exe).isFile() || !QProcess::startDetached(exe,{"-applaunch",appId},steamRoot_)) {
+        message_=title+"\n\nSteam could not be started. Refresh the game library and check the Steam installation.";
+        return false;
+    }
+    steamGameId_=appId;gameTitle_=title;steamGameSeen_=false;steamGameClear_=0;
+    steamWatchAge_.start();steamWatch_.start();
+    activity_.start();
+    qInfo().noquote()<<"launch: steam -applaunch"<<appId<<"(watched through Steam's registry)";
+    emit changed();
+    return true;
+}
+void Shell::pollSteamGame() {
+    if(steamGameId_.isEmpty()) { steamWatch_.stop(); return; }
+    const auto state=steamAppState(steamGameId_);
+    constexpr qint64 startTimeoutMs=5*60*1000;   // Steam may download/update before the title runs
+    if(state.updating) { steamWatchAge_.restart(); return; }
+    if(state.running) {
+        if(!steamGameSeen_)qInfo().noquote()<<"steam:"<<gameTitle_<<"is running";
+        steamGameSeen_=true;steamGameClear_=0;return;
+    }
+    if(!steamGameSeen_) {
+        if(steamWatchAge_.elapsed()<startTimeoutMs)return;
+        steamWatch_.stop();const QString title=gameTitle_;steamGameId_.clear();gameTitle_.clear();
+        message_=title+"\n\nSteam did not report this title as running.";
+        qWarning().noquote()<<"steam:"<<title<<"never reported running";
+        emit changed();return;
+    }
+    // Steam clears the flag when the last process exits; require two polls so a launcher-to-game
+    // handover inside Steam is not mistaken for a return.
+    if(++steamGameClear_<2)return;
+    steamWatch_.stop();
+    const QString title=gameTitle_;
+    steamGameId_.clear();gameTitle_.clear();steamGameSeen_=false;steamGameClear_=0;
+    qInfo().noquote()<<"returned from"<<title<<"(Steam reported it stopped)";
+    restoreFocus();
+    emit changed();
+    refreshContent();
+}
+void Shell::restoreFocus() {
+    // Returning from a title starts a fresh idle interval, as the media and dialog paths do.
+    activity_.start();
 }
 void Shell::launch(const Entry& entry) {
     const QString emulator=emulatorPath();
@@ -576,6 +623,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         if(categories_[category_].id=="friends" && SteamFriends::available())refreshSteamFriends();
     });
     steamRefresh_.start(60000);
+    steamWatch_.setInterval(1000);
+    connect(&steamWatch_,&QTimer::timeout,this,&Shell::pollSteamGame);
     steamFriendsError_="Connect the signed-in Steam client, or open the Steam friends window.";
     rebuildFriends();
     for(auto& category:categories_)if(category.id=="game") {
@@ -706,12 +755,7 @@ void Shell::activate() {
     case Action::Folder:openDirectory(entry.value);break;
     case Action::File:openFile(entry);break;
     case Action::Launch:launch(entry);break;
-    case Action::LaunchSteam: {
-        const QString exe=QDir(steamRoot_).filePath("steam.exe");
-        if(!QFileInfo(exe).isFile() || !QProcess::startDetached(exe,{"-applaunch",entry.value},steamRoot_))
-            message_=entry.title+"\n\nSteam could not be started. Refresh the game library and check the Steam installation.";
-        break;
-    }
+    case Action::LaunchSteam:startSteamTracked(entry.value,entry.title);break;
     case Action::SteamFolder:openSteamFolder(entry.value);break;
     case Action::SteamStoreBrowse: {
         // Sections first: no request until a section is chosen, so opening the store is instant.
