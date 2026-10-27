@@ -523,3 +523,206 @@ slots are available, take those plus T1.
 Not queued: the remaining table rows (3, 8, 9, 11-18) stay as candidates until these land.
 Row 3 in particular should follow T2, since it is the same evening-ending problem with a
 privileged call added.
+
+## 6. T4 landed: the couch volume path, 2026-10-26
+
+Written after the last source edit. Every number below came from a run of the built binary
+(`out/native-volume/re-ps3-native.exe`, 22:43:49, later than every edited source file), not
+from reading source. `shell.cpp`/`shell.h` were being edited by another agent and were not
+touched: the whole path lives in `view.cpp`/`view.h`, and `main.cpp` only gained script
+tokens, as the task's fence required.
+
+### 6.1 Input mapping
+
+| input | where | what happens |
+|---|---|---|
+| L2 held (`pad::State::l2` or XInput `bLeftTrigger`) | `View::pollVolumeRamp`, called from `pollController` | one 5% step down on the press, then a step while held |
+| R2 held (`pad::State::r2` or XInput `bRightTrigger`) | same | the same upwards |
+| VOL UP / VOL DOWN / MUTE | `VolumeKeyFilter` (a `QAbstractNativeEventFilter` on the application) | `WM_APPCOMMAND` `APPCOMMAND_VOLUME_*` and `WM_KEYDOWN`/`WM_SYSKEYDOWN` `VK_VOLUME_*` are applied and swallowed |
+| the same keys, if Qt delivers them as key events | `View::keyPressEvent` | `Qt::Key_VolumeUp/Down/Mute` reach the same handler |
+| `VOLUP`,`VOLDOWN`,`MUTE` | `--script` | `replayKeyTap(Qt::Key_Volume*)`, i.e. the keyboard path |
+| `VOLSET=<0..100>` | `--script` | an exact level through the same apply function |
+| `VOLKEY=up|down|mute|vkup|vkdown|vkmute` | `--script` | posts the real `WM_APPCOMMAND` / `WM_KEYDOWN` to the window, so the native filter is exercised end to end |
+| `VOLRESTORE` | `--script` | puts back the level and mute state read at start-up |
+
+The triggers are analog axes, never D-pad bits: they are not merged into pollController's
+`buttons`, so a held trigger cannot move the XMB, press Cross or consume the D-pad repeat
+(`repeatAt_` is untouched). A press threshold of 0.35 keeps a resting trigger quiet; a squeeze
+past 0.75 shortens the repeat from 120 ms to 60 ms, which is the analog half of the feature.
+The step is taken from `host::masterVolume()` (not from a cache), so a change made outside the
+app cannot accumulate drift.
+
+### 6.2 What the HUD is, and where it sits
+
+The firmware's own volume display is one page holding a single horizontal level meter:
+`videoplayer_plugin.rco` `videoplayer_volume_page` / `videoplayer_volume_level_meter`
+(`out/native-reference/rco-behavior/resources.json`), with the same object pair in
+`audioplayer_plugin.rco` (`audioplayer_volume_page`/`audioplayer_volume_level_meter`) and
+`explore_plugin_full.rco` (`volume_page`/`volume_level_meter`). The page's projection is in the
+plugin's paf code and is **not** recovered, so the rect is fitted rather than traced - the same
+honesty the notification composite carries in `audit/NOTIFICATIONS.md`.
+
+- Rect: 222x58 at (1000, 75), i.e. the band immediately left of the information panel
+  (x 1329..1920, y 75..133), which no other composite uses. It is above the notification plaque
+  (y 145), left of the options panel (x 1330), clear of the OSK (y 290..788) and clear of the
+  media overlay (y 895+).
+- Material: the information bar's own recipe - a `QColor(0,0,0,20)` rounded plate, `tex_infobar`
+  at 0.12 and the 1 px white 90-alpha border - so it reads as part of the XMB.
+- Contents: the firmware string `msg_volume_control` ("Volume Control") at 15 px, the value at
+  19 px right-aligned ("45%", or "Mute" when the endpoint is muted), and one 196x6 level meter.
+  The meter keeps showing the level while muted, greyed; nothing here writes the mute state
+  except the mute key itself.
+- Timing: `MediaControls` (`src/media_controls.*`) is instantiated in the view and `opened()` is
+  called on every change, so the HUD lives on the exact model the video controls use - 3000 ms
+  visible, then a linear 250 ms fade - instead of a second timing scheme.
+- No input: nothing in the draw path reads a key or a button, and the composite is only drawn
+  when it is on screen. The UI layer's signature carries its quantised opacity, so the fade
+  updates without a shell change.
+
+Suppression, reusing the rules the other corner composites already follow:
+
+| surface | HUD | why |
+|---|---|---|
+| PS system menu | hidden | the menu blacks the frame and owns the screen; the HUD returns with its remaining lifetime when it closes (captured) |
+| information page / message dialog | hidden | those replace the frame |
+| item options panel | hidden | the panel owns the keys that could change the level |
+| on-screen keyboard | hidden | the OSK owns the keyboard |
+| a modal desktop dialog | behind the dialog (a separate window) | `pollController` already returns early while a modal is open, so the pad and key paths decline |
+| intro | hidden, and the pad/key paths decline | the cold boot owns the screen |
+
+Volume input is declined in exactly those states, so a media key that is not taken is left to
+Windows rather than swallowed. That fallback was observed: with the PS menu open, a posted
+`APPCOMMAND_VOLUME_MUTE` was declined (trace line), passed through, and Windows muted the
+endpoint itself - one mute, no HUD, no double step.
+
+### 6.3 Read-back (requested vs what Windows reports)
+
+Every change logs `host::masterVolume()` after the write, unconditionally; `XMB_VOLUME_LOG=1`
+adds the trace lines (HUD visibility/expiry, the fade curve, ramp start/release, declined
+keys, duplicate presses). The driven run (pinned clocks `--render-clock 20
+--background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-26T21:50:00 --focus-time 2000`,
+data directory a copy of `out/native-reference/store/ui3-data`):
+
+| step | source | requested | Windows reported | HUD crop reads |
+|---|---|---|---|---|
+| start | constructor read | - | **0%** (muted 0) | - |
+| `VOLSET=30` | script | 30% | 30% (muted 0) | `30%`, meter 30% |
+| `VOLSET=60` | script | 60% | 60% (muted 0) | `60%`, meter 60% |
+| `VOLSET=90` | script | 90% | 90% (muted 0) | `90%`, meter 90% |
+| `MUTE` | key path | mute 1 | muted 1, level 90% | `Mute`, meter grey at 90% |
+| `MUTE` | key path | mute 0 | muted 0, level 90% | - |
+| `VOLSET=0` | script | 0% | 0% (muted 0) | `0%`, empty meter |
+| `VOLRESTORE` | script | 0% | 0% (muted 0) | `0%` (bit-identical to the `VOLSET=0` frame) |
+
+Second run, for the key and message paths:
+
+| step | source | requested | Windows reported |
+|---|---|---|---|
+| `VOLSET=50` | script | 50% | 50% |
+| `VOLUP` | keyboard event | 55% | 55% |
+| `VOLUP` | keyboard event | 60% | 60% |
+| `VOLDOWN` | keyboard event | 55% | 55% |
+| `VOLKEY=up` | `WM_APPCOMMAND` | 60% | 60% |
+| `VOLKEY=vkdown` | `WM_KEYDOWN VK_VOLUME_DOWN` | 55% | 55% |
+| `VOLKEY=mute` | `WM_APPCOMMAND` | mute 1 | muted 1, level 55% |
+| `VOLKEY=vkmute` | `WM_KEYDOWN VK_VOLUME_MUTE` | mute 0 | muted 0, level 55% |
+
+Each requested value equals the reported one, so the HUD is drawing the endpoint's value and
+not the request. The meter fraction and the percentage in the crops agree with the read-back at
+30, 60 and 90.
+
+### 6.4 The fade, measured
+
+`XMB_VOLUME_LOG=1` traces the fade one line per frame. A single change at 45%, with the
+animation otherwise idle:
+
+```
+volume: trace HUD visible (level 45 muted 0, 3 ms after the change)
+volume: trace HUD fade opacity 0.988 at 3003 ms after the change
+volume: trace HUD fade opacity 0.952 at 3012 ms after the change
+volume: trace HUD fade opacity 0.504 at 3124 ms after the change
+volume: trace HUD fade opacity 0.020 at 3245 ms after the change
+volume: trace HUD expired (level 45 muted 0, 3254 ms after the change)
+```
+
+That is the `MediaControls` boundary exactly: full opacity through 3000 ms, a linear 250 ms
+fade, reported hidden on the first frame past 3250 ms. A capture cannot be landed inside a
+250 ms window with a 300 ms script step, so the curve is measured from the log rather than
+guessed from pixels; the pixels still prove the two ends (`hud-show.png` differs from a frame
+that never had a HUD at PSNR 15.84 dB / SSIM 0.4341; `hud-gone.png`, taken about 3.9 s after
+the change, is bit-identical to it at PSNR Infinity / SSIM 1.0000).
+
+### 6.5 Non-collision, measured
+
+```
+bun work/ab-compare.ts hud-show.png hud-none.png 1329,75,591,58    -> PSNR Infinity  SSIM 1.0000  (info bar)
+bun work/ab-compare.ts hud-show.png hud-none.png 1496,145,400,90   -> PSNR Infinity  SSIM 1.0000  (notification slot)
+bun work/ab-compare.ts hud-show.png hud-none.png 995,70,235,70     -> PSNR 15.84 dB     SSIM 0.4341  (the HUD's own slot)
+```
+
+A frame with the HUD up and a frame without it are bit-identical over the information panel and
+over the notification plaque, and differ only in the HUD's own band. The same pair of crops
+proves the options-panel rule: with the options panel open (`shell: options opened category=
+game depth= 0 entry= steam-store rows= 3`) the HUD slot is bit-identical to the rest frame
+(PSNR Infinity, SSIM 1.0000) while the panel's own area differs (19.98 dB / 0.9219), and the
+HUD returns, mid-fade, when the panel closes (22.01 dB / 0.5747). The PS menu frame at
+`psmenu-suppressed.png` is black with no HUD; `after-psmenu.png`, taken 0.6 s after Escape,
+shows the HUD at 70%.
+
+### 6.6 Gates
+
+- Build: `& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-volume` - passed.
+- `bun work\ab-layers.ts --capture --exe C:/dev/out/native-volume/re-ps3-native.exe` -
+  **PASS 6/6**. Every layer except the whole frame reproduces its baseline to the last digit
+  (info bar 14.78/.6117, clock 11.39/.4105, item labels 11.94/.3913, icon row 20.91/.8947, top
+  background 20.24/.9344); the frame layer reads 18.29 against 18.02 (+0.27 dB, i.e. slightly
+  *closer* to the stored RPCS3 frame). That frame delta cannot be the volume work: the HUD
+  cannot draw without a change, and the same binary's rest capture (`rest.png`, same pinned
+  clocks) has an empty HUD slot. It is the rest of the shared tree (other agents' `shell.cpp`,
+  `icons.cpp`, font and audio changes were already in the working tree when this build was
+  made), which is worth knowing when reading the number.
+- `bun work\ab-layers.ts --states --exe ...` - **4/4 pass**; no named state changed.
+- No harness, reference or threshold file was edited.
+
+### 6.7 The restore, and what it was
+
+The Windows endpoint is not isolated by `--data-dir`, so the run has to put it back. The start
+level read by the first run - and confirmed independently through Core Audio with a throwaway
+C# interop probe outside the repo - was **0% unmuted**, and that is what the runs left behind:
+`volume: restored the start-up state 0% muted 0 -> Windows reports 0% muted 0 (mute call ok 1)`,
+then a fresh process (and the independent probe) read **0% muted 0** again. One intermediate
+run (the declined-key experiment) left the endpoint at 5% and Windows-muted; it was put back
+with `MUTE` + `VOLSET=0` and re-verified.
+
+### 6.8 Not proven, and why
+
+- **The physical trigger.** No pad is attached to this machine and the harness has no
+  controller injection, so L2/R2 are structural: they are read at the top of `pollController`
+  and feed the same `volumeStep` the keys use. This is the same limitation
+  `audit/OPTIONS-MENU.md` records for its controller path.
+- **The duplicate guard.** One press can arrive as both `WM_APPCOMMAND` and `VK_VOLUME_*`; the
+  filter applies the first and swallows the second within 100 ms. The harness posts one form at
+  a time (300 ms apart), so the guard is coded and reasoned about but not exercised here.
+- **The HUD's on-screen rect** is fitted to the information bar, not traced from the firmware
+  page projection; closing that needs the paf page projection in `videoplayer_plugin`, which is
+  not recovered anywhere in this project.
+- **A capture inside the 250 ms fade.** The curve is measured from the log (6.4); a pixel
+  capture of a half-faded HUD would need a sub-100 ms script step the harness does not have.
+
+### 6.9 Files touched
+
+- `native-xmb/src/view.h`: the volume state (`volumeHud_`, level, mute, start-up snapshot, ramp
+  deadline, fade-trace fields), the native-filter handle, the public `setMasterVolumePercent` /
+  `restoreMasterVolume`, and the private helpers.
+- `native-xmb/src/view.cpp`: `VolumeKeyFilter` (the `QAbstractNativeEventFilter`),
+  `volumeInputBlocked`, `volumeApply`, `volumeStep`, `volumeToggleMute`, `volumeKeyAction`,
+  `setMasterVolumePercent`, `restoreMasterVolume`, `pollVolumeRamp`, `drawVolumeHud`; the
+  start-up read and the filter install/uninstall; the trigger read in `pollController`; the key
+  branch in `keyPressEvent`; the HUD draw and its suppression in `drawScene`; the signature term
+  and the fade trace in `paintGL`.
+- `native-xmb/src/main.cpp`: `VOLUP`, `VOLDOWN`, `MUTE`, `VOLSET=`, `VOLKEY=`, `VOLRESTORE`.
+- `native-xmb/audit/HTPC-IDEAS.md`: this section.
+
+Not touched: `shell.cpp`, `shell.h`, `xmbml_view.*`, `settings_menu.cpp`, `preferences.cpp`,
+`host.cpp`, `host.h`, `CMakeLists.txt`, the verification harness, or any reference/threshold.
+Captures, logs and crops are under `out/native-reference/volume/` and are not committed.
