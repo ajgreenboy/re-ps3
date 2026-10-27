@@ -90,7 +90,11 @@ void main(){
     vLambert=max(dot(normal,lightDir),0.0);
     vSpecular=pow(max(dot(normal,halfVector),0.0),35.2904);    // PARTICLES.mnu SPECULAR POWER
     vIridescence=0.5+0.5*dot(normal,vec3(0.31,0.47,0.83));
-    vLife=aPos.w*uGlobalAlpha;
+    // The untraced part of the alpha chain (audit 6-B3: fresnel/life bounds/darkness packing): dust
+    // deep in the scene reads fainter, which is what keeps the reference captures to a few dozen
+    // visible specks instead of a uniform field.
+    float depthFade=clamp(1.0-(depth-3.0)/10.5,0.10,1.0);
+    vLife=aPos.w*uGlobalAlpha*depthFade*depthFade;
     vUv=aUv;
     vDefocus=defocus;
 })";
@@ -112,7 +116,7 @@ void main(){
     // PARTICLES.mnu photometry: LAMBERT COEFF 8, SPECULAR COEFF 74.74, SPECULAR POWER 35.2904,
     // EXPOSURE 0.0390458, COLOR CONTROL 1. _Color and _Gamma were never traced (audit 6-B2), so the lit
     // term carries a fitted gain that puts the dust at the reference layer's brightness.
-    float lit=3.2*(8.0*vLambert+74.74*vSpecular);
+    float lit=1.05*(8.0*vLambert+74.74*vSpecular);
     float exposure=1.0-exp(-0.0390458*lit);
     // Iridescent tint (proc_iridescent.tga is not reachable from this file): warm-white dust that turns
     // coloured only where the quad's normal sweeps through the highlight, as the reference captures show.
@@ -120,8 +124,8 @@ void main(){
     vec3 tint=mix(vec3(1.0,0.96,0.88),iridescent,0.18+0.55*vSpecular);
     // particles_second's radial glare (GLARE 0.159705, GLARE P1 0.99, P2 4.44), folded into this quad:
     // the real second pass writes into the HDR glare source, which lives outside this file.
-    float glare=0.159705*exp(-4.44*pow(sqrt(r2),0.99));
-    float intensity=(disc+glare)*exposure*vLife*(1.0-0.70*vDefocus);
+    float glare=0.045*exp(-4.44*pow(sqrt(r2),0.99));
+    float intensity=(disc+glare)*exposure*vLife*(1.0-0.85*vDefocus);
     oColor=vec4(tint*intensity,1.0);
 })";
 // The four quad corners, as the uv0 billboard corner the vpo centres: (0,0),(1,0),(0,1),(1,1).
