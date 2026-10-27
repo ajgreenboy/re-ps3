@@ -12,6 +12,14 @@
 namespace xmb {
 namespace {
 struct Choice {QString title;QVariant value;};
+// The console's Date Format and Time Format options (sysconf_plugin msg_datetime_fmt_* and msg_time_fmt_*).
+// The short forms feed the information-panel clock, the full forms the Date and Time screen. Fields are
+// zero-padded like the firmware's own option labels and its reference frame (25/10); the hour is not padded,
+// which is the US clock convention ("1:05 PM", not "01:05 PM").
+QString clockDate(int format) {return QStringList{"dd/MM","MM/dd","yyyy/MM/dd"}.value(format,"MM/dd");}
+QString clockFullDate(int format) {return QStringList{"dd/MM/yyyy","MM/dd/yyyy","yyyy/MM/dd"}.value(format,"MM/dd/yyyy");}
+QString clockTime(int format) {return format?"h:mm AP":"HH:mm";}
+QString clockFullTime(int format) {return format?"h:mm:ss AP":"HH:mm:ss";}
 QVector<Choice> choices(const QString& key,Assets& assets) {
     const auto text=[&](const QString& id,const QString& fallback){return assets.text("sysconf_plugin",id,fallback);};
     if(key=="appearance/colour")return {{"Original",0},{"Blue",1},{"Purple",2},{"Red",3},{"Green",4},{"Silver",5}};
@@ -63,7 +71,8 @@ void Shell::openSettings(const QString& id) {
     } else if(id=="date") {
         page.title=tr("msg_datetime_setting","Date and Time Settings");
         page.entries={option("datetime",tr("msg_datetime","Date and Time"),tr("msg_datetime_explanation",{}),{},Action::Information,
-                "Date and Time\n\n"+QDateTime::currentDateTime().toString("dddd, d MMMM yyyy  HH:mm:ss t")+"\n\nThe clock follows the host system. Display format and time zone can be changed within XMB."),
+                "Date and Time\n\n"+clockDateTime().toString(clockFullDate(preferences_.value("clock/dateFormat").toInt())+" "+
+                    clockFullTime(preferences_.value("clock/hourFormat").toInt()))+"\n\nThe clock follows the host system. Display format and time zone can be changed within XMB."),
             setting("date_fmt","Date Format","clock/dateFormat"),setting("time_fmt","Time Format","clock/hourFormat"),
             setting("timezone","Time Zone","clock/timeZone")};
     } else if(id=="system") {
@@ -180,9 +189,11 @@ QDateTime Shell::clockDateTime()const {
 }
 QString Shell::clockText()const {
     const auto now=clockDateTime();
-    const QString date=QStringList{"d/M","M/d","yyyy/M/d"}.value(preferences_.value("clock/dateFormat").toInt(),"d/M");
-    const QString time=preferences_.value("clock/hourFormat").toInt()?"h:mm AP":"HH:mm";
-    return now.toString(date+"  "+time);
+    const int dateFormat=preferences_.value("clock/dateFormat").toInt();
+    const int hourFormat=preferences_.value("clock/hourFormat").toInt();
+    // One space between date and time: the reference frame's word gap is 14 px at this 27 px size, which is
+    // a single space, not two (audit/TEXT-RENDERER.md section 5, audit/INFO-BAR.md).
+    return now.toString(clockDate(dateFormat)+" "+clockTime(hourFormat));
 }
 void Shell::chooseWallpaper(const QString& file) {
     if(file.isEmpty())return;
