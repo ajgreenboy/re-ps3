@@ -27,7 +27,7 @@ qt_add_executable(re-ps3-native
     src/jellyfin_client.cpp src/jellyfin_client.h src/jellyfin_stream.cpp src/jellyfin_stream.h
     src/jellyfin_signin.cpp src/jellyfin_signin.h src/jellyfin_shell.cpp
     src/rsx_program.cpp src/rsx_program.h src/ribbon.cpp src/ribbon.h src/hdr.cpp src/hdr.h src/icons.cpp src/icons.h src/particles.cpp src/particles.h src/coldboot.cpp src/coldboot.h
-    src/shell.cpp src/shell.h src/host.cpp src/host.h src/pad.cpp src/pad.h src/view.cpp src/view.h)
+    src/shell.cpp src/shell.h src/host.cpp src/host.h src/pad.cpp src/pad.h src/ps_watcher.cpp src/ps_watcher.h src/view.cpp src/view.h)
 target_link_libraries(re-ps3-native PRIVATE Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::Network)
 if(Freetype_FOUND)
     target_link_libraries(re-ps3-native PRIVATE Freetype::Freetype)
