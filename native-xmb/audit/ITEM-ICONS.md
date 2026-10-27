@@ -214,3 +214,16 @@ the level-0 385 above-focus row; brightness 1.0 open column and 0.247/0.698 behi
 still use Qt; and the native material model (brightness tints RGB instead of scaling alpha, with invented diffuse
 and bevel terms). Untraceable/open: the 1.1022x second size class, level>0 sizes and the 95 above-focus offset,
 non-icontex item-icon sizes, the 110 vs 109.5 parent shift, and the page-move scale motion.
+## Experiment 2026-10-26: brightness on alpha vs on RGB
+
+The contradiction above (`_Ambiant.w` scales the program alpha in the firmware, while the native opaque
+material dims RGB) was tested rather than assumed. Moving focus brightness into the alpha
+(`material.a * opacity * brightness`) and running the canonical capture dropped the category-icon layer
+from **20.99 dB to 20.14 dB (-0.85 dB)**, with SSIM 0.8865 -> 0.8851, while every other layer stayed put.
+
+Conclusion: with the current **opaque** material the RGB dimming is measurably closer to the reference
+frame, because the firmware's alpha scaling acts on a glass surface that also refracts the background;
+letting the background through an opaque icon changes its appearance more than the reference does. The
+alpha change was reverted and the reason is recorded in `src/icons.cpp`. Switching to `_Ambiant.w` on
+alpha therefore waits on drawing item icons through the refractive glass path (the open gap), and the
+measurement above is the bar the change has to beat.
