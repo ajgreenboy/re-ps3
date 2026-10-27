@@ -3,6 +3,7 @@
 #include <QApplication>
 #include "assets.h"
 #include "catalog.h"
+#include "xmbml_view.h"
 #include "host.h"
 #include "p3t.h"
 #include "steam_library.h"
@@ -130,6 +131,121 @@ void Shell::addInstalledApps() {
         const QString content=QFileInfo(QDir(folder).filePath("PS3_GAME/PARAM.SFO")).isFile()?QDir(folder).filePath("PS3_GAME"):folder;
         add(folder,content,true);
     }
+}
+// --- Network column from the firmware's XMBML -------------------------------------------------------
+// audit/FIRMWARE-PARITY-GAPS.md row 8 (M1) and audit/XMBML-NETWORK.md: the 4.93 firmware describes this
+// column in vsh/resource/explore/xmb/category_network.xml - the root view lists the rows as <Query>
+// nodes in display order, and each query names a pixmap view whose <Table> carries title_rsc and
+// icon_rsc. Those keys are resolved through the RCO's English strings. Read once per process, read-only,
+// bounded by readXmbDocument and the row cap; the built-in list stays in place when the definition
+// cannot be read, and the reason is logged.
+void Shell::resolveNetworkColumn() {
+    const auto category=std::find_if(categories_.begin(),categories_.end(),[](const Category& c){return c.id==QStringLiteral("network");});
+    if(category==categories_.end())return;
+    const QString container=QStringLiteral("explore_category_network");
+    const bool verbose=qEnvironmentVariableIsSet("XMB_XMBML_LOG") && qEnvironmentVariable("XMB_XMBML_LOG")!=QStringLiteral("0");
+    QElapsedTimer timer;timer.start();
+    const auto column=readCategoryView(QDir(assets_.root()).filePath(QStringLiteral("vsh/resource/explore/xmb/category_network.xml")));
+    const QString parseMs=QString::number(timer.nsecsElapsed()/1e6,'f',2);
+    const auto builtin=[&](const QString& reason) {
+        qWarning().noquote()<<"xmbml: network column keeps its built-in rows:"<<reason<<column.path
+            <<("(definition parsed in "+parseMs+" ms)");
+        for(auto& entry:category->entries)entry.source=QStringLiteral("fallback");
+        if(verbose)for(const auto& entry:category->entries)
+            qInfo().noquote()<<"xmbml: network fallback row"<<entry.id<<"("<<entry.title<<") source=fallback";
+    };
+    if(!column.ok()){builtin(column.error);return;}
+    // Labels the firmware builds in a plugin rather than in XMBML: this file's seg_premo view is the bare
+    // <Item class="type:x-xmb/xmlpremo">, and the 4.93 shop variant of the same column
+    // (category_network_shop.xml, same dev_flash) carries the table this one omits (title_rsc
+    // msg_psp_connection, icon_rsc tex_premo); explore_category_network ships both strings plus
+    // msg_download_control/tex_dl_manage for the download query the ese plugin answers.
+    struct PluginLabel { QString msg,texture; };
+    static const QHash<QString,PluginLabel> pluginLabels{
+        {"seg_premo",{"msg_psp_connection","tex_premo"}},
+        {"seg_dlctrl",{"msg_download_control","tex_dl_manage"}}};
+    // Last resort only, for a dev_flash whose RCO text is unreadable: the labels this build shipped
+    // before the column came from XMBML.
+    static const QHash<QString,QPair<QString,QString>> lastResort{
+        {"seg_manual",{"Online Instruction Manuals","tex_onlinemanual"}},
+        {"seg_premo",{"Remote Play","tex_premo"}},
+        {"seg_browser",{"Internet Browser","tex_browser"}},
+        {"seg_kensaku",{"Internet Search","tex_kensaku"}},
+        {"seg_dlctrl",{"Download Management","tex_dl_manage"}}};
+    // The XMBML item class decides the native action. Every Network row in 4.93 is a browser handoff, a
+    // browser plugin action, Remote Play, an in-game row or a console-owned list; none of them has a PC
+    // equivalent this build can honestly perform, and the XMBML carries no URL, so an Action::OpenUrl
+    // target would have to be invented. The reason is logged per row and recorded in the audit.
+    const auto actionFor=[](RowKind kind,const XmbmlRow& row)->std::pair<Action,QString> {
+        switch(kind) {
+        case RowKind::WebBrowser:
+            return {Action::Unavailable,QStringLiteral("the firmware hands this node to the PS3 Internet Browser; "
+                "this build has no browser and the XMBML carries no URL to hand to the host one")};
+        case RowKind::ModuleAction:
+            return {Action::Unavailable,QStringLiteral("the plugin the firmware runs (")+(row.moduleName.isEmpty()?QStringLiteral("unknown"):row.moduleName)+
+                QLatin1Char(':')+(row.moduleAction.isEmpty()?QStringLiteral("unknown"):row.moduleAction)+
+                QStringLiteral(") is part of the PS3 browser, which this build does not have")};
+        case RowKind::RemotePlay:
+            return {Action::Unavailable,QStringLiteral("Remote Play needs a PS3 and a registered PSP/Vita; "
+                "the PC equivalent is a different, destructive remote-desktop path")};
+        case RowKind::DynamicProvider:
+            return {Action::Unavailable,QStringLiteral("the row is produced by the console's ")+row.provider+
+                QStringLiteral(":// provider at run time; this build has no such provider")};
+        case RowKind::InGameExit:
+        case RowKind::Unknown:
+            break;
+        }
+        return {Action::Unavailable,QStringLiteral("the item class is not mapped to a native action")};
+    };
+    QVector<Entry> rows;
+    int unresolved=0;
+    for(const auto& row:column.rows) {
+        // Firmware visibility that this build cannot reach: the in-game XMB, and the installed-content
+        // query (addInstalledApps() appends those rows at the gameDir position, after the page rows).
+        if(row.inGameOnly) {
+            if(verbose)qInfo().noquote()<<"xmbml: network skip"<<row.key<<"(in-game only: this build has no in-game XMB)";
+            continue;
+        }
+        if(row.key==QStringLiteral("gameDir")) {
+            if(verbose)qInfo().noquote()<<"xmbml: network skip gameDir (the installed-content scan owns these rows)";
+            continue;
+        }
+        QString title,source;
+        if(!row.titleRsc.isEmpty()) {
+            title=assets_.text(container,row.titleRsc);
+            if(!title.isEmpty())source=QStringLiteral("xmbml");
+        }
+        if(title.isEmpty() && pluginLabels.contains(row.key)) {
+            title=assets_.text(container,pluginLabels[row.key].msg);
+            if(!title.isEmpty())source=QStringLiteral("rco");
+        }
+        if(title.isEmpty()) {
+            title=lastResort.value(row.key).first;
+            if(!title.isEmpty())source=QStringLiteral("builtin");
+        }
+        if(title.isEmpty()){++unresolved;qWarning().noquote()<<"xmbml: network row"<<row.key<<"has no title (no title_rsc, no plugin label)";continue;}
+        QString texture=row.iconRsc;
+        if(texture.isEmpty())texture=pluginLabels.value(row.key).texture;
+        if(texture.isEmpty())texture=lastResort.value(row.key).second;
+        Entry entry=item(row.id,title,texture,container,Action::Unavailable);
+        entry.source=source;
+        if(!row.infoRsc.isEmpty())entry.detail=assets_.text(container,row.infoRsc);
+        const auto decision=actionFor(row.kind(),row);
+        entry.action=decision.first;
+        if(verbose)qInfo().noquote()<<"xmbml: network row"<<entry.id<<"key="+row.key
+            <<"class="+(row.itemClass.isEmpty()?QStringLiteral("-"):row.itemClass)
+            <<"title=\""+entry.title+"\""<<"titleSource="+(row.titleRsc.isEmpty()?source:row.titleRsc)
+            <<"texture="+entry.texture<<"action="+QString::number(int(entry.action))<<"source="+source
+            <<"reason=\""+decision.second+"\"";
+        rows.push_back(std::move(entry));
+    }
+    if(rows.isEmpty()){builtin(QStringLiteral("no row of the definition could be titled")+" ("+QString::number(unresolved)+QStringLiteral(" unresolved)"));return;}
+    category->entries=rows;
+    qInfo().noquote()<<QStringLiteral("xmbml: network column resolved %1 rows from category_network.xml "
+        "(queries %2, sha256 %3): parsed in %4 ms, resolved in %5 ms%6")
+        .arg(int(rows.size())).arg(column.queries).arg(column.sha256.left(12)).arg(parseMs)
+        .arg(QString::number(timer.nsecsElapsed()/1e6,'f',2))
+        .arg(unresolved?QStringLiteral(", %1 untitleable rows").arg(unresolved):QString());
 }
 // Launches a child and keeps it parented so the XMB knows when it returns. While it runs the
 // idle auto-close is suppressed; on exit the library is rescanned and the column restored,
@@ -487,9 +603,13 @@ void Shell::refreshContent() {
             QJsonArray categories;
             for(const auto& category:categories_) {
                 QJsonArray entries;
-                for(const auto& e:category.entries)
-                    entries.push_back(QJsonObject{{"id",e.id},{"title",e.title},{"detail",e.detail},
-                        {"action",int(e.action)},{"value",e.value},{"hasArtwork",!e.artwork.isNull()}});
+                for(const auto& e:category.entries) {
+                    QJsonObject row{{"id",e.id},{"title",e.title},{"detail",e.detail},
+                        {"action",int(e.action)},{"value",e.value},{"hasArtwork",!e.artwork.isNull()}};
+                    // Only generated rows carry an origin, so the dump stays quiet about the rest.
+                    if(!e.source.isEmpty())row.insert("source",e.source);
+                    entries.push_back(row);
+                }
                 categories.push_back(QJsonObject{{"id",category.id},{"entries",entries},{"count",entries.size()}});
             }
             QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES"));
@@ -610,6 +730,9 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("messages",friendText("msg_msg_box","Message Box"),"item_tex_Messages","explore_category_friend",Action::SettingsPage,"messages"),
             item("block",friendText("msg_ignore_list","Block List"),"item_tex_IgnoreList","explore_category_friend",Action::Information,friendText("msg_error_not_registered","No persons have been added."))}}
     };
+    // The Network column's rows come from the firmware's own category_network.xml (the proof of the
+    // XMBML-driven column mechanism); it keeps the list above when the definition cannot be read.
+    resolveNetworkColumn();
     // Bind the current native settings projection to original XMBML resource
     // keys. Selector/plugin visibility and unmapped operations remain separate.
     const auto document=readXmbDocument(QDir(assets.root()).filePath("vsh/resource/explore/xmb/category_sysconf.xml"));
@@ -648,8 +771,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         {"settings/sound","icon_sound_setting"},{"settings/security","icon_security_setting"},{"settings/remote","icon_remoteplay_setting"},
         {"settings/network","icon_network_setting"},{"music/options","icon_music_setting"},{"video/options","icon_bdvd_setting"},
         {"game/data","icon_gamedata"},{"game/memory","icon_vmc"},{"game/ps3","icon_savedata"},{"game/psp","icon_savedata_minis"},
-        {"network/manual","icon_onlinemanual"},{"network/remote","icon_remoteplay"},{"network/browser","icon_browser"},
-        {"network/search","icon_inet_search"},{"network/downloads","icon_download"},{"psn/trophy","icon_trophy"},
+        {"network/manual","icon_onlinemanual"},{"network/premo","icon_remoteplay"},{"network/browser","icon_browser"},
+        {"network/kensaku","icon_inet_search"},{"network/dlctrl","icon_download"},{"psn/trophy","icon_trophy"},
         {"friends/add","icon_addfriend"},{"friends/players","icon_playermet"},{"friends/chatroom","icon_chatroom_text"},
         {"friends/chat","icon_chat"},{"friends/messages","icon_mbox"},{"friends/block","icon_blocklist"}};
     for(auto& category:categories_) {
