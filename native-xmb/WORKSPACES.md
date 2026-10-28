@@ -6,8 +6,6 @@ nobody else owned, unexplained named-state failures caused by a concurrent mater
 user's running exe, and one agent's `Stop-Process` killing another's long-running capture. The fix is not fewer
 agents; it is separate trees with one owner per boundary.
 
-**Per-workspace handoff docs: [workspaces/00-INDEX.md](workspaces/00-INDEX.md)** - one document per workspace
-(mission, ownership, boundaries, build/verify commands, current state, evidence index, gotchas, first tasks).
 
 ## 1. The rule that makes split work possible
 
