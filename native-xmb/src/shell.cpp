@@ -1286,6 +1286,9 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     // track-switch lines (audit/SUBTITLES.md). A sidecar this build cannot read is always named, because
     // a file the user put next to the film and that silently does nothing is the report this answers.
     subtitleLog_=qEnvironmentVariableIsSet("XMB_SUBTITLE_LOG");
+    // The box's answer row is quiet by default; XMB_DIALOG_LOG=1 names each event (raised, moved, answered,
+    // cancelled) so a scripted run can prove which choice it made without reading pixels (audit section 11).
+    dialogLog_=qEnvironmentVariableIsSet("XMB_DIALOG_LOG");
     initJellyfin();
     // The sign-in surface is this shell's own page, not a modal dialog: openJellyfin() emits
     // requestJellyfinSignIn, which used to reach a QDialog in the view. Connecting it here keeps one sign-in
@@ -1374,13 +1377,20 @@ int Shell::selectionAt(int depth)const {return depth==0?selections_[category_]:p
 // English text is only the fallback for a dev_flash that cannot be read.
 void Shell::showMessage(const QString& text,MessageKind kind) {
     message_=text;messageKind_=kind;messageActions_.clear();messageAccept_=nullptr;
+    // A message never inherits an answer row: only showConfirm raises the two-choice box, so every other
+    // surface (and an information-only Box) has no answer to move or confirm.
+    messageBoxChoices_=false;messageBoxChoice_=BoxChoice::No;
 }
 void Shell::showMessage(const QString& title,const QString& body,MessageKind kind) {
     showMessage(body.isEmpty()?title:title+"\n\n"+body,kind);
 }
 void Shell::showConfirm(const QString& title,const QString& body,std::function<void()> accepted) {
     showMessage(title,body,MessageKind::Box);
+    // The frame's box starts on No (the non-destructive answer), and the pair is live from here: Left/Right
+    // move it, Cross confirms it, Circle cancels (audit/DIALOGS-FIRMWARE.md section 11).
+    messageBoxChoices_=true;messageBoxChoice_=BoxChoice::No;
     messageAccept_=std::move(accepted);
+    if(dialogLog_)qInfo().noquote()<<"dialog: box show choices=yes choice=no";
 }
 void Shell::showErrorPage(const QString& title,const QString& cause,const QStringList& actions) {
     showMessage(title,cause,MessageKind::ErrorCode);
@@ -1388,10 +1398,34 @@ void Shell::showErrorPage(const QString& title,const QString& cause,const QStrin
 }
 void Shell::clearMessage() {
     message_.clear();messageKind_=MessageKind::None;messageActions_.clear();messageAccept_=nullptr;
+    messageBoxChoices_=false;messageBoxChoice_=BoxChoice::No;
+}
+int Shell::boxChoice() const {
+    return messageKind_==MessageKind::Box && messageBoxChoices_?int(messageBoxChoice_):-1;
+}
+int Shell::boxChoiceSlot() const {
+    return messageKind_==MessageKind::Box && messageBoxChoices_?
+        (messageBoxChoice_==BoxChoice::Yes?0:1):-1;
 }
 void Shell::horizontal(int delta) {
     touch();if(!delta)return;
-    if(!message_.isEmpty())return;
+    if(!message_.isEmpty()) {
+        // A confirm box is the one message with a horizontal choice row: Left/Right (the keyboard's and the
+        // pad's, both already routed through here) move the answer with the XMB's own snd_cursor. Every other
+        // surface ignores a horizontal press exactly as before, and a Box with no answers has nothing to move.
+        // The frame draws Yes on the left and No on the right, and there are exactly two answers, so one step
+        // lands on the other one from either side; the model's 0 = No / 1 = Yes order is what the getters expose
+        // and what Cross commits, not a screen position. Whether the console clamps at an end instead of
+        // wrapping is unproven (no local burst shows this box's D-pad), so the wrap is a stated native choice.
+        if(messageKind_==MessageKind::Box && messageBoxChoices_) {
+            messageBoxChoice_=messageBoxChoice_==BoxChoice::No?BoxChoice::Yes:BoxChoice::No;
+            if(dialogLog_)qInfo().noquote()<<"dialog: box move choice="
+                <<(messageBoxChoice_==BoxChoice::Yes?"yes":"no");
+            interactionAudio_.play(InteractionAudio::Cue::Move);
+            emit changed();
+        }
+        return;
+    }
     if(mediaOpen_) {
         if(categories_[category_].id=="photo") {
             stepPhoto(delta);
@@ -1420,9 +1454,18 @@ void Shell::activate() {
     // snd_system_ok acknowledgement (Cue::Accept).
     if(messageKind_==MessageKind::Box) {
         auto accepted=std::move(messageAccept_);
+        // Cross/Enter confirms the focused answer. Yes runs the box's action and closes; No closes without it.
+        // A Box raised with no answers (showMessage(..., MessageKind::Box)) has nothing to confirm, so it keeps
+        // the single-action path every Box had before the choice model: cross dismisses and runs whatever the
+        // message carries, if anything. The cue is snd_decide either way - the frame's footer names Enter as the
+        // box's confirm button, whichever answer it commits.
+        const bool commit=!messageBoxChoices_ || messageBoxChoice_==BoxChoice::Yes;
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        if(dialogLog_)qInfo().noquote()<<"dialog: box enter choice="
+            <<(messageBoxChoices_?(messageBoxChoice_==BoxChoice::Yes?"yes":"no"):"none")
+            <<"commit="<<(commit?1:0);
         clearMessage();
-        if(accepted)accepted();
+        if(commit && accepted)accepted();
         emit changed();
         return;
     }
@@ -2418,7 +2461,14 @@ void Shell::back() {
     // Circle dismisses any surface; on a box it is the cancel button, so the accepted action is dropped
     // with the message (clearMessage forgets it). snd_cancel (Cue::Back) is the obvious cancel cue but is
     // UNPROVEN for a dialog - nothing local ties it to one.
-    if(!message_.isEmpty())clearMessage();
+    if(!message_.isEmpty()) {
+        // The cancel path never consults the answer: No, Yes or no answer row, Circle closes without the
+        // action and snd_cancel plays above. The log names the focus the box had when it was cancelled.
+        if(dialogLog_ && messageKind_==MessageKind::Box)
+            qInfo().noquote()<<"dialog: box cancel choice="
+                <<(messageBoxChoices_?(messageBoxChoice_==BoxChoice::Yes?"yes":"no"):"none");
+        clearMessage();
+    }
     else if(mediaOpen_){
         // Leaving playback remembers where it was, so reopening resumes there. Ten seconds in and
         // fifteen from the end are not worth remembering on long media; short clips use a tenth.
