@@ -59,7 +59,7 @@
       }
     ],
     "backgrounds": [
-      { "id": "day", "clock": "2026-10-25T10:00:00", "note": "the traced daylight pin the stored RPCS3 baseline was captured at: 10:00 is 3/4 of the way from the 07:00 yoake key to the 11:00 day key (icons.cpp:64-65), so this cell is daylight as the reference frame saw it, not the exact preset key" },
+      { "id": "day", "clock": "2026-10-28T10:00:00", "note": "the traced daylight pin, at the DATE the matched day references were captured (2026-10-28): the month phase is (day-1)/daysInMonth*30, so 10-28 gives 26.129 while 10-25 gives 23.2258, and the canonical gate removed that 3.7/255 depression by matching the date. 10:00 is 3/4 of the way from the 07:00 yoake key to the 11:00 day key (icons.cpp:64-65), so this cell is daylight as the reference frame saw it, not the exact preset key" },
       { "id": "night", "clock": "2026-10-25T00:00:00", "note": "night is held from 23:00 to 01:00, so midnight is the preset's own value" },
       { "id": "yoake", "clock": "2026-10-25T05:00:00", "note": "yoake is reached at 05:00 and held to 07:00" },
       { "id": "higure", "clock": "2026-10-25T17:00:00", "note": "higure is reached at 17:00 and held to 19:00" }

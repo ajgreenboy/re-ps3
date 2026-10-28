@@ -2065,3 +2065,21 @@ states were re-saved against it.
 The remaining gating failures are real rendering differences with named regions; the largest is still the
 background's flat achromatic residue (+0.0594 linear scene, past the draw), whose closing artifact is the
 console's 64x32 surface dump (`work/fp-grid-day.npy` is the expected value). No budget was changed to move a cell.
+## 19. Day pin corrected in the reference contract (2026-10-28, later)
+
+The docs pass spotted the last pin inconsistency: `work/parity-reference.json` still pinned the `day` preset to
+**2026-10-25T10:00** while every matched day reference was captured on **10-28**. The month phase is
+`(day-1)/daysInMonth*30`, so that 3-day gap put the native render at 23.2258 where the reference sits at 26.129 -
+the same 3.7/255 depression the canonical gate removed in `70a7711`. The day pin now carries the reference date and
+the reason.
+
+Re-scored (scorecard `scorecard-20261028-161558`, run `run-20261028-160444`, executable `native-box2` sha256
+`13f59bc6...6c15bc`): **Tier A 35/35**, Tier B **0 pass / 2 informative**, Tier C **9**, 23 gating failures, 10
+captured cells without a reference, corpus **25/30** states. Frame scores improved on every state that has a day
+reference - `root` 17.86 -> **18.23/0.8263**, `page-settings-system` 18.50 -> **19.07/0.8627** - and the two
+informative states remain the ones whose only failing region is an annotated `contentDiffers` one.
+
+Floor to clear for the next state that passes: the gating regions, not the frames. The remaining failures are the
+documented rendering differences (background residue, item columns/rows where content is annotated as informative
+but the *frame* still misses), so the next wins have to come from the two open implementation items, not from
+scoring.
