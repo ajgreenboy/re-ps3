@@ -815,7 +815,7 @@
       "trace": [{ "pattern": "continue watching: page opened with 1 row.*" }],
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "box plate", "crop": [482, 452, 319, 40], "required": true },
+        { "name": "box plate", "crop": [482, 452, 319, 40], "required": true, "contentDiffers": true, "contentDiffersReason": "the console frame opens the box over the Game column wallpaper (region luma 111) while this route opens it over the darker Continue Watching page (native 163), so the wash sits on a different underlying scene by construction; the answers and footer rows stay gating because they are drawn on the same plate" },
         { "name": "box answers", "crop": [1150, 560, 420, 60], "required": true },
         { "name": "box footer", "crop": [600, 872, 760, 55], "required": true }
       ]
