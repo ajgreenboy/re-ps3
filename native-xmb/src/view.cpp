@@ -199,7 +199,7 @@ void View::saveFrameTrace() {
         else out<<"frame paint: "<<sample.at<<' '<<sample.cpu<<' '<<int(sample.rebuilt)<<' '<<int(sample.moving)<<'\n';
     }
 }
-void View::PafEase::retarget(double target,double milliseconds,int mode) {
+void View::PafEase::retarget(double target,double milliseconds,int mode,double delayMilliseconds) {
     if(!started_){value=from_=to_=target;started_=true;return;}
     if(target==to_ && (running_ || value==target))return;
     // FUN_003981ec: the duration snaps to whole 60 Hz frames; k by frame count (DAT_0068eb04.. and the 1/(2.2+(n-5)/3) tail).
@@ -212,6 +212,10 @@ void View::PafEase::retarget(double target,double milliseconds,int mode) {
         k_=frames<=4?shortK[frames-1]:1./((frames-5)*.333333+2.2);growth_=1.000001;
     }
     duration_=frames/60.*.999999;
+    // paf has no start delay; the options panel's entrance is measured with one (UI-ELEMENT O6), so the ease
+    // holds its start value for delayMilliseconds and then runs the same 60 Hz curve. 0 everywhere else.
+    // duration_ and elapsed_ are in seconds, so the delay is converted here once.
+    delay_=std::max(0.,delayMilliseconds)*.001;
     from_=value;to_=target;progress_=0;elapsed_=0;running_=true;
 }
 void View::PafEase::advance(double seconds) {
@@ -222,9 +226,11 @@ void View::PafEase::advance(double seconds) {
     // changes the curve at 120/240 Hz. Interpolation preserves its integer-frame values while allowing smooth
     // host refresh rates; the firmware's duration-end landing and retarget-from-current-value are retained.
     elapsed_+=std::max(0.,seconds);
-    if(elapsed_>=duration_){progress_=1;running_=false;}
+    const double active=elapsed_-delay_;   // negative while the measured start offset is still running
+    if(active<=0.){value=from_;return;}
+    if(active>=duration_){progress_=1;running_=false;}
     else {
-        const double frames=elapsed_*60;const int whole=int(frames);const double fraction=frames-whole;
+        const double frames=active*60;const int whole=int(frames);const double fraction=frames-whole;
         progress_=0;
         for(int i=0;i<whole;++i)progress_=step(progress_);
         progress_+=(step(progress_)-progress_)*fraction;
@@ -689,27 +695,39 @@ void View::paintGL() {
     const qint64 nowNs=clock_.nsecsElapsed(),now=nowNs/1000000;
     const double dt=std::clamp(double(nowNs-previousFrameNs_)/1.e9,0.,.1);previousFrameNs_=nowNs;
     const double renderSeconds=secondsOverride_>=0.?secondsOverride_:double(nowNs)/1.e9; // fixed for A/B captures
-    // Every move is a firmware paf animation (PafEase): 200 ms in accel mode 5 for the category and item moves and the
-    // column cross-fade; the page (depth) move is slower, fitted to 300 ms in mode 4 (audit/PIPELINE.md "Menu motion").
+    // Every move is a firmware paf animation (PafEase): 200 ms in accel mode 5 for the category and item moves and
+    // the column cross-fade. The page (depth) move runs on two eases because two evidence sets disagree on it and
+    // each drives a different channel (audit/PAGE-MOVE.md 14.1 traced the bar re-layout at 200 ms mode 5; the 4c
+    // burst's frame count is 18 frames = 300 ms mode 4 for the page content). See view.h and section 15 of the audit.
     categoryEase_.retarget(shell_.category(),moveMilliseconds);categoryEase_.advance(dt);categoryPosition_=categoryEase_.value;
     if(!outgoing_.isEmpty()){fadeEase_.advance(dt);categoryFade_=fadeEase_.value;if(!fadeEase_.running()){categoryFade_=0;outgoing_.clear();}}
     depthEase_.retarget(shell_.depth(),pageMilliseconds,4);depthEase_.advance(dt);depthPosition_=depthEase_.value;
+    barEase_.retarget(shell_.depth(),barMilliseconds,5);barEase_.advance(dt);barDepthPosition_=barEase_.value;
     // Capture-only switch: XMB_DEPTH_PIN=<0..2> holds the depth progress at that value, so a deterministic
     // --render-clock grab can measure one intermediate frame of the page move (the easing itself runs on the
-    // real frame clock, which --render-clock does not pin). Unset in every normal run, where it changes nothing.
+    // real frame clock, which --render-clock does not pin). Both channels are pinned to the same value so a
+    // pinned frame stays the one geometry model section 13.4 tabulates. Unset in every normal run, where it
+    // changes nothing.
     if(const QString pin=qEnvironmentVariable("XMB_DEPTH_PIN");!pin.isEmpty()) {
         bool ok=false;const double pinned=std::clamp(pin.toDouble(&ok),0.,double(shell_.depth()));
-        if(ok)depthPosition_=pinned;
+        if(ok){depthPosition_=pinned;barDepthPosition_=pinned;}
     }
     for(auto& column:columns_){column.ease.retarget(column.selection,moveMilliseconds);column.ease.advance(dt);column.position=column.ease.value;}
-    // The item-level Triangle options panel: its list slides in from the right over 200 ms (mode 5) and moves
-    // between rows on the same curve. A fresh open lands on the current selection without sliding the list.
+    // The item-level Triangle options panel: its list slides in from the right and moves between rows on the
+    // 200 ms mode-5 curve. A fresh open lands on the current selection without sliding the list. The entrance is
+    // NOT the 200 ms key-to-rest the rest of the XMB uses: the console starts it 115..150 ms after the key and
+    // ramps 245..255 ms (UI-ELEMENT-GAP-AUDIT O6 [M]), i.e. at rest 360..410 ms; the close starts 9 ms after the
+    // key and ramps 200 ms. paf has no delay parameter, so the delay is carried by PafEase itself (a local
+    // addition, view.h) rather than by starting the ease late: a late start cannot express the measured 9 ms
+    // close offset and would desynchronise the panel's slide from its own opacity.
     if(shell_.optionsOpen()) {
         if(!optionsWasOpen_){optionsOpenEase_=PafEase();optionsOpenEase_.retarget(0);optionsPanelEase_=PafEase();}
-        optionsOpenEase_.retarget(1,moveMilliseconds);
+        optionsOpenEase_.retarget(1,optionsOpenMs,5,optionsOpenDelayMs);
         optionsPanelEase_.retarget(shell_.optionsSelection(),moveMilliseconds);
-    } else optionsOpenEase_.retarget(0,moveMilliseconds);
+    } else optionsOpenEase_.retarget(0,moveMilliseconds,5,optionsCloseDelayMs);
     optionsOpenEase_.advance(dt);optionsPanelEase_.advance(dt);
+    if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && optionsOpenEase_.running())
+        qInfo().noquote()<<"options:"<<now<<"ms open amount"<<QString::number(optionsOpenEase_.value,'f',4);
     optionsWasOpen_=shell_.optionsOpen();
     // Surface B2, the music control panel (audit/MEDIA-PANELS-FIRMWARE.md 4.3): the traced presentation is
     // a 150-unit fade with 0 delay (explore_plugin.prx 0x270a00 / 0x270a04) and a 150/100 move/size
@@ -749,12 +767,14 @@ void View::paintGL() {
     // Local diagnosis: XMB_MOTION_LOG=1 logs the focused column's and the depth's eased positions each frame while they move.
     if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && !columns_.isEmpty() && columns_.back().ease.running())
         qInfo().noquote()<<"motion:"<<now<<"ms position"<<QString::number(columns_.back().position,'f',4)<<"target"<<columns_.back().selection;
-    if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && depthEase_.running())
-        qInfo().noquote()<<"depth:"<<now<<"ms position"<<QString::number(depthPosition_,'f',4)<<"target"<<shell_.depth();
+    if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && (depthEase_.running() || barEase_.running()))
+        qInfo().noquote()<<"depth:"<<now<<"ms position"<<QString::number(depthPosition_,'f',4)
+            <<"bar"<<QString::number(barDepthPosition_,'f',4)<<"target"<<shell_.depth();
     if(std::abs(depthPosition_-shell_.depth())<.001) {
         depthPosition_=shell_.depth();
         if(columns_.size()>shell_.depth()+1)columns_.resize(shell_.depth()+1);
     }
+    if(std::abs(barDepthPosition_-shell_.depth())<.001)barDepthPosition_=shell_.depth();
     glClearColor(.04f,.04f,.05f,1.f);glClear(GL_COLOR_BUFFER_BIT);
     // Cold boot: the intro starts once its sound is decoded (or after 1.5 s without it); its clock drives the boot
     // presets of every background layer (BootBG2 / NormalBG2, Ribbon::bootWeights) and hides the UI until ShowGUI.
@@ -787,6 +807,10 @@ void View::paintGL() {
     const qint64 blinkMs=secondsOverride_>=0?qint64(secondsOverride_*1000.):clock_.elapsed();
     if(osk_.open)osk_.caretLit=((blinkMs/qMax(1,oskLayout_.caret.blinkMilliseconds))%2)==0;
     QString signature=QString::asprintf("%.4f %.4f %.4f %d %d %d ",categoryPosition_,depthPosition_,categoryFade_,shell_.category(),shell_.depth(),uiRevision_);
+    // The bar layer runs its own (traced) depth ease; it is part of the signature only while the two disagree,
+    // so the canonical rest frame's signature string is byte-identical to before the split.
+    if(std::abs(barDepthPosition_-depthPosition_)>.0005)
+        signature+=QString::asprintf(" bar %.4f ",barDepthPosition_);
     for(const auto& column:columns_)signature+=QString::number(column.position,'f',4)+' ';
     signature+=shell_.clockText()+shell_.message()+shell_.status();
     // The message surface's own fades run between shell changes (the box in and out, the hint row, the
@@ -797,6 +821,15 @@ void View::paintGL() {
     // The options panel animates (slide-in, row focus) without a shell change on every frame.
     if(shell_.optionsOpen() || optionsOpenEase_.value>0.)
         signature+=QString::asprintf(" options %d %.4f %.4f %d",shell_.optionsOpen()?1:0,optionsOpenEase_.value,optionsPanelEase_.value,shell_.optionsSelection());
+    // The PS surfaces' own envelopes advance with the clock, not with a shell change, so their state belongs
+    // in the signature or the cached UI layer would freeze on the frame the menu opened: the hold menu's
+    // black/text/bloom staging and the tap indicator's fade. Quantised by 1/256, and absent at rest (so the
+    // canonical frame's signature string is unchanged).
+    if(shell_.psMenuOpen())
+        signature+=QString::asprintf(" pshold %d %d %d",int(psHoldTextAlpha(now)*256.),int(psHoldBloomAmount(now)*256.),
+            (psPressAt_>0 && now-psPressAt_>=qint64(psHoldBlackMs))?1:0);
+    else if(psHudAt_>0)
+        signature+=QString::asprintf(" pshud %d",int(psHudOpacity(now)*256.));
     if(focusClock_.isValid()) { // the focused label's breathing glow and the idle label fade, in coarse steps
         const double resting=double(focusTime());
         signature+=QString::asprintf(" glow %d idle %d",int((.5-.5*std::cos(2*std::numbers::pi*resting/3400.))*24),int(std::clamp((resting-4000)/800.,0.,1.)*16));
@@ -1652,18 +1685,20 @@ void View::drawScene(QPainter& p) {
     } else {
         previousMediaOpen_=false;
         const auto& categories=shell_.categories();
+        // Two depth channels (audit/PAGE-MOVE.md section 15). `childAmount` is the page content's progress
+        // (the icon's 262 px travel, the item columns, the label's fade): 18 rendered frames = 300 ms mode 4,
+        // the fit the 4c burst's frame count supports. `barAmount` is the bar layer's: the firmware's bar
+        // re-layout on a page change is 200 ms mode 5, traced at the instruction level (PAGE-MOVE 14.1).
         const double childAmount=std::clamp(depthPosition_,0.,1.);
+        const double barAmount=std::clamp(barDepthPosition_,0.,1.);
         // Category-band transition (GEOMETRY-ROOT 5.2/5.3, decoded fpdump7 2026-10-28). The bar keeps its
         // world grid (200 wu pitch + 10 focus padding, worldY 250/260) while the camera distance falls
         // 2700 -> 2483.53, so the projection 2700/d turns those into screen pitch 200 -> 217.43, unfocused
         // y 290 -> 268.21 and the bar's focused row 280 -> 257.34. The interpolation is linear in the
         // animated distance (the decoded d series is the eased property), so screen positions follow 1/d,
         // not a screen-space lerp. [TRACED: endpoints and the 210 wu pitch from the decoded vertex
-        // constants. FIT: the ease driving them is the existing depth PafEase (300 ms mode 4) fitted to the
-        // 18-frame burst; PAGE-MOVE 14.1 traces the firmware bar driver at 200 ms mode 5 instead, and the
-        // 0.902-per-frame distance/brightness channel is slower than the 18-frame x channel (PAGE-MOVE 1.3,
-        // 7 reading 1). One ease is used because the parent move owns the geometry, not the timing.]
-        const double recedeDistance=2700.-(2700.-2483.53)*childAmount;   // 2700 -> 2483.53
+        // constants. The recede is the bar layer's own channel and runs on the traced 200 ms mode 5.]
+        const double recedeDistance=2700.-(2700.-2483.53)*barAmount;      // 2700 -> 2483.53
         const double recede=2700./recedeDistance;                        // projection factor 1 -> 1.08716
         // The bar layer's focused category stays on its root world x and only projects: 565 -> 530.57 (the
         // decoded transition draws put it at 530.85 including that frame's 0.27 px offset).
@@ -1678,8 +1713,8 @@ void View::drawScene(QPainter& p) {
         // layout opacity, so folding both into one would square the root state. [FIT: the captured open
         // frame is already post-recede (its ~700 ms page load outlasts the recede), so only the
         // 0.698/0.067 endpoints bound this curve; the linear presence term is this build's.]
-        const double barBrightness=.698+(.067-.698)*childAmount;
-        const double barPresence=childAmount>=.999?0.:1.-childAmount;
+        const double barBrightness=.698+(.067-.698)*barAmount;
+        const double barPresence=barAmount>=.999?0.:1.-barAmount;
         for(int i=0;i<categories.size() && !messageScreen;++i) {
             // Firmware geometry (RPCS3 capture at 1920x1080, audit/PIPELINE.md): focus column at x 565, icons
             // 200 px apart with 10 px more either side of the focused one; quads 117 px, focused 167 px;
@@ -1687,8 +1722,13 @@ void View::drawScene(QPainter& p) {
             // reproduces them and childAmount 1 draws the page's one icon at 303 with no neighbours.
             const auto& cat=categories[i];const double distance=i-categoryPosition_;            const bool open=i==shell_.category();
             const double focus=std::max(0.,1.-std::abs(distance));
-            // Projected root grid: the bar anchor plus (200 n + 10 sign n) * 2700/d.
-            const double x=open?pageX:barFocusX+(200.*distance+10.*std::clamp(distance,-1.,1.))*recede;
+            // Projected root grid: the bar anchor plus (200 n + 10 sign n) * 2700/d. The *focused* icon takes
+            // the same grid but without the focus padding and with the page's 262 px depth travel: on a
+            // category move it arrives from one whole bar step, measured on the console at 632 -> 561 px
+            // (PAGE-MOVE 14.2) - i.e. +200 px at p = 0 sliding to 0 at p = 1, and the bar's label under it
+            // travels with it (+159 px one frame after the key on the same frames). [TRACED: the 200 px step
+            // and the measured positions; the ease it rides is the 200 ms mode-5 category move.]
+            const double x=open?pageX+200.*distance*recede:barFocusX+(200.*distance+10.*std::clamp(distance,-1.,1.))*recede;
             const double y=open?290.-10.*focus:540.-250.*recede;
             const double iconScale=open?1.:recede;
             // No dim behind a message: both measured reference frames keep the XMB at full brightness
@@ -1728,7 +1768,18 @@ void View::drawScene(QPainter& p) {
                 const double ramp=open?1.:barBrightness/.698;
                 p.setOpacity(opacity*(.67+.33*focus)*ramp);drawCategory(p,drawn,{x-size/2,(open?290.:y)-size/2,size,size});
             }
-            if(i==shell_.category()){p.setOpacity((1.-childAmount));text({x-140,330,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
+            // The bar's own label, drawn under its own icon - not at a fixed focus slot. The console draws
+            // exactly one category label at rest (the focused one) and, during a move, BOTH: the departing
+            // category's label slides out under its own icon while it fades, and the entering one brightens
+            // in place as it arrives (PAGE-MOVE 14.2 section 3.1; the per-frame ink alpha is in section 15).
+            // Measured on `navmove/right1` (Network -> PlayStation Network, key at 540.4 ms), label ink peak
+            // luma against a 62 background with a 255 settled peak: outgoing .76/.58/.44/.33/.25/.19/.14 at
+            // +26/+42/+54/+65/+89/+102/+113 ms, entering .31/.72/.83/.89 - i.e. the two cross-fade 1-categoryFade_
+            // / categoryFade_ and their sum stays within .08 of 1. [TRACED: the fade values and the fact that
+            // both labels ride their own icons; FIT: none - the ease is the category move's own 200 ms mode 5.]
+            if(i==shell_.category()){p.setOpacity((1.-childAmount)*(1.-categoryFade_));text({x-140,330,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
+            else if(i==outgoingCategory_ && categoryFade_>.001 && !outgoing_.isEmpty())
+                {p.setOpacity((1.-childAmount)*categoryFade_);text({x-140,330,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
         }
         const auto isChoiceColumn=[](const Column& column) {
@@ -2167,52 +2218,71 @@ void View::drawScene(QPainter& p) {
     // left-aligned on a 40 px pitch with the selected one one size larger inside a ~5 px Gaussian bloom,
     // the controller/charge panel at y 803-865 and the Enter/Back legend with its own rule at the bottom.
     // A hold opens it; "Turn Off the System" asks once before quitting.
+    // The entrance is measured, not a frame: on the console's hold burst (PARITY-SCORECARD 16.3, 206.6 fps,
+    // 300,470,1320,240) the XMB is untouched until the frame goes FULLY black 1052 ms after the press; the
+    // entries' first ink is 1279 ms and their text is at full opacity 1326 ms; the selected row's bloom then
+    // keeps growing until 1840 ms - the measured "staged" appearance. Before 1052 this draws nothing, so the
+    // XMB stays up for the 52 ms between the watcher's 1000 ms rule and the console's envelope.
     if(shell_.psMenuOpen()) {
-        p.save();
-        p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0));   // the console blacks the whole frame
-        // The menu's own clock: ink x 1613..1802, y 166..185, with a 1 px luma-175 rule under it at y 199.
-        text({1383,153,420,45},shell_.clockText(),23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
-        p.fillRect(QRectF(0,199,1920,1),QColor(255,255,255,175));
-        const auto psItems=shell_.psMenuItems();
-        // Both entries start at the same left edge (measured ink x 831/832) and the selected one is ~7%
-        // larger: the shared prefix "Turn Off the " measures 156 px on the focused row and 146 px on the
-        // other, and the caps are 18 px and 17 px. The 43 px "pitch" in SCORECARD 16.5 is band tops:
-        // the bloom adds 2 rows above the focused cap, the baselines themselves are 40 px apart.
-        const double psTop=506.5;
-        for(int i=0;i<psItems.size();++i) {
-            const bool focused=!shell_.psMenuConfirmingOff() && i==shell_.psMenuSelection();
-            const int size=focused?24:23;
-            const QString label=shell_.psMenuConfirmingOff() && i==0?QObject::tr("Turn Off the System?"):psItems[i];
-            const QRectF row(831,psTop+i*40.,1000,34);
-            if(focused) {
-                QFont bloomFont(shell_.fontFamily());bloomFont.setPixelSize(size);
-                drawTextBloom(p,bloomFont,row,label,3.6);
+        const qint64 held=psPressAt_>0?clock_.elapsed()-psPressAt_:-1;
+        const bool black=held<0 || held>=qint64(psHoldBlackMs);
+        if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog)
+            qInfo().noquote()<<"pshold:"<<held<<"ms pressAt"<<psPressAt_<<"black"<<(black?1:0)
+                <<"text"<<QString::number(psHoldTextAlpha(clock_.elapsed()),'f',3)
+                <<"bloom"<<QString::number(psHoldBloomAmount(clock_.elapsed()),'f',3);
+        if(black) {
+            const double content=psHoldTextAlpha(clock_.elapsed());
+            const double bloom=psHoldBloomAmount(clock_.elapsed());
+            p.save();
+            p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0));   // the console blacks the whole frame
+            // Everything after the plate takes the envelope's staged alpha: the clock and both rules are
+            // outside the burst's crop, so they ride the entries' text (1279..1326) rather than a curve of
+            // their own.
+            p.setOpacity(content);
+            // The menu's own clock: ink x 1613..1802, y 166..185, with a 1 px luma-175 rule under it at y 199.
+            text({1383,153,420,45},shell_.clockText(),23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+            p.fillRect(QRectF(0,199,1920,1),QColor(255,255,255,175));
+            const auto psItems=shell_.psMenuItems();
+            // Both entries start at the same left edge (measured ink x 831/832) and the selected one is ~7%
+            // larger: the shared prefix "Turn Off the " measures 156 px on the focused row and 146 px on the
+            // other, and the caps are 18 px and 17 px. The 43 px "pitch" in SCORECARD 16.5 is band tops:
+            // the bloom adds 2 rows above the focused cap, the baselines themselves are 40 px apart.
+            const double psTop=506.5;
+            for(int i=0;i<psItems.size();++i) {
+                const bool focused=!shell_.psMenuConfirmingOff() && i==shell_.psMenuSelection();
+                const int size=focused?24:23;
+                const QString label=shell_.psMenuConfirmingOff() && i==0?QObject::tr("Turn Off the System?"):psItems[i];
+                const QRectF row(831,psTop+i*40.,1000,34);
+                if(focused && bloom>.01) {
+                    QFont bloomFont(shell_.fontFamily());bloomFont.setPixelSize(size);
+                    drawTextBloom(p,bloomFont,row,label,3.6*bloom);
+                }
+                text(row,label,size,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
             }
-            text(row,label,size,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+            if(shell_.psMenuConfirmingOff())
+                text({830,psTop+80,1000,34},QObject::tr("X turns the XMB off; the PC stays on   O cancels"),20,QColor(170,170,170),Qt::AlignLeft|Qt::AlignVCenter);
+            // Controller/charge panel: numbers above 17 px slots (x 132 + 44.33*i 1..4), labels at x 311, the
+            // pad glyph between "Controller" and "1", the charge dash centred on x 488.
+            p.setPen(Qt::NoPen);
+            for(int i=0;i<4;++i) {
+                const double x=132.+i*44.333;
+                p.setBrush(i==0?QColor(160,13,13):QColor(30,30,30));
+                p.drawRect(QRectF(x,828,17,17));
+                text({x-2,801,21,22},QString::number(i+1),19,QColor(215,215,215),Qt::AlignCenter);
+            }
+            text({311,795,220,34},QObject::tr("Controller"),24,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+            drawImage(p,"system_plugin","tex_controller",{448,799,31,31});
+            text({494,795,60,34},"1",23,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+            text({311,835,220,34},QObject::tr("Charge Level"),24,QColor(215,215,215),Qt::AlignLeft|Qt::AlignVCenter);
+            text({468,835,40,34},"-",24,QColor(215,215,215),Qt::AlignHCenter|Qt::AlignVCenter);
+            // Footer legend (console ink x 726/762 and 1155/1192, y 897-916) with the console's 1 px rule at y 880.
+            p.fillRect(QRectF(0,880,1920,1),QColor(255,255,255,175));
+            drawImage(p,"system_plugin","tex_cross",{726,898,18,18});
+            text({760,890,140,34},QObject::tr("Enter"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+            drawImage(p,"system_plugin","tex_circle",{1155,897,20,20});
+            text({1190,890,140,34},QObject::tr("Back"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+            p.restore();
         }
-        if(shell_.psMenuConfirmingOff())
-            text({830,psTop+80,1000,34},QObject::tr("X turns the XMB off; the PC stays on   O cancels"),20,QColor(170,170,170),Qt::AlignLeft|Qt::AlignVCenter);
-        // Controller/charge panel: numbers above 17 px slots (x 132 + 44.33*i 1..4), labels at x 311, the
-        // pad glyph between "Controller" and "1", the charge dash centred on x 488.
-        p.setPen(Qt::NoPen);
-        for(int i=0;i<4;++i) {
-            const double x=132.+i*44.333;
-            p.setBrush(i==0?QColor(160,13,13):QColor(30,30,30));
-            p.drawRect(QRectF(x,828,17,17));
-            text({x-2,801,21,22},QString::number(i+1),19,QColor(215,215,215),Qt::AlignCenter);
-        }
-        text({311,795,220,34},QObject::tr("Controller"),24,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-        drawImage(p,"system_plugin","tex_controller",{448,799,31,31});
-        text({494,795,60,34},"1",23,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-        text({311,835,220,34},QObject::tr("Charge Level"),24,QColor(215,215,215),Qt::AlignLeft|Qt::AlignVCenter);
-        text({468,835,40,34},"-",24,QColor(215,215,215),Qt::AlignHCenter|Qt::AlignVCenter);
-        // Footer legend (console ink x 726/762 and 1155/1192, y 897-916) with the console's 1 px rule at y 880.
-        p.fillRect(QRectF(0,880,1920,1),QColor(255,255,255,175));
-        drawImage(p,"system_plugin","tex_cross",{726,898,18,18});
-        text({760,890,140,34},QObject::tr("Enter"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-        drawImage(p,"system_plugin","tex_circle",{1155,897,20,20});
-        text({1190,890,140,34},QObject::tr("Back"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-        p.restore();
     }
     else if(psHudAt_>0) {
         // A PS tap raises the controller indicator beside the clock. Measured on the console's tap burst
@@ -2241,6 +2311,27 @@ double View::psHudOpacity(qint64 now) const {
     if(t<221)return double(t-155)/66.;
     if(t<2222)return 1.;
     return 1.-double(t-2222)/66.;
+}
+// The PS-hold menu's staged entrance, from the console's hold burst (PARITY-SCORECARD 16.3, 206.6 fps,
+// C:\dev\out\rpcs3-gaps-2026-10-28\burst\ps-menu-entries, PS pressed 150 ms into the burst). Frame means
+// over the 1320x240 entries crop: 65.85 at 1190 ms (XMB), 0.00 from 1202 (= press + 1052) to 1411, first
+// ink 1429 (peak 63), peak 148/207/255 at 1436/1452/1476, and the focused row's bright-pixel count still
+// growing 3903 -> 6236 from 1476 to 1986. So the text ramps 1279..1326 and the bloom 1326..1840.
+// [TRACED: black at 1052, first ink 1279, text full 1326, bloom settled ~1840. FIT: the two ramps are
+// linear - the burst separates their endpoints but not their shape between them (BEHAVIOUR C7).]
+double View::psHoldTextAlpha(qint64 now) const {
+    if(psPressAt_<=0)return 1.;                       // no press seen: the menu is a steady state
+    const double t=double(now-psPressAt_);
+    if(t<=psHoldTextStartMs)return 0.;
+    if(t>=psHoldTextMs)return 1.;
+    return (t-psHoldTextStartMs)/(psHoldTextMs-psHoldTextStartMs);
+}
+double View::psHoldBloomAmount(qint64 now) const {
+    if(psPressAt_<=0)return 1.;
+    const double t=double(now-psPressAt_);
+    if(t<=psHoldTextMs)return 0.;
+    if(t>=psHoldBloomMs)return 1.;
+    return (t-psHoldTextMs)/(psHoldBloomMs-psHoldTextMs);
 }
 // ---- Couch volume ----------------------------------------------------------------------------------------
 // The PC's master volume, driven by the pad's analog triggers and by the Windows media keys, with one
@@ -2770,6 +2861,9 @@ bool View::xmbOwnsForeground() const {
 void View::psPressed() {
     const bool modal=QApplication::activeModalWidget()!=nullptr;
     psPressActionable_=!modal && (xmbOwnsForeground() || titleRunning());
+    // The hold menu's envelope is measured from this instant (PARITY-SCORECARD 16.3: black 1052 ms after the
+    // press). The watcher's own 1000 ms rule is unchanged; the envelope is what the console spends after it.
+    if(psPressActionable_)psPressAt_=clock_.elapsed();
     psLog(QString("event: press xmbActive=%1 xmbForeground=%2 titleRunning=%3 menuOpen=%4 modal=%5 foreground=%6")
         .arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(titleRunning()?1:0)
         .arg(shell_.psMenuOpen()?1:0).arg(modal?1:0).arg(foregroundDescription()));

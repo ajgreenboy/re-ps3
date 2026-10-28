@@ -35,18 +35,38 @@ public:
     // FUN_003ad728; paf animation setup FUN_003981ec and evaluator FUN_00398748). Mode 5 closes a fixed fraction
     // k of the remaining distance every 60 Hz frame, k from a table by the duration in frames, and lands on the
     // target when the frame-snapped duration ends. A new target restarts the curve from the current value.
-    // Mode 4 is the same per-frame form with its own k table; the page (depth) move uses it (RPCS3 capture).
+    // Mode 4 is the same per-frame form with its own k table (the page content channel, PAGE-MOVE 4c).
+    // `delayMilliseconds` holds the value at `from_` for that long before the curve starts: paf has no delay
+    // parameter, so this is the options panel's measured start offset expressed locally (UI-ELEMENT O6).
     struct PafEase {
         double value=0;
-        void retarget(double target,double milliseconds=200,int mode=5);
+        void retarget(double target,double milliseconds=200,int mode=5,double delayMilliseconds=0);
         void advance(double seconds);
         bool running() const { return running_; }
     private:
-        double from_=0,to_=0,progress_=1,elapsed_=0,duration_=0,k_=0,growth_=1.000001;
+        double from_=0,to_=0,progress_=1,elapsed_=0,duration_=0,delay_=0,k_=0,growth_=1.000001;
         bool started_=false,running_=false;
     };
     static constexpr double moveMilliseconds=200;
+    // The page (depth) move, split because two evidence sets disagree on its timing and each drives a
+    // different channel (audit/PAGE-MOVE.md 14.1 vs 4c; the measurements are in section 15 of that file):
+    //   pageMilliseconds, mode 4 - FIT: the console's visible page content (the icon's 262 px travel and the
+    //     item column's entry) is 18 rendered frames = 300 ms at 0.7741/frame. The burst does not snap at
+    //     200 ms, so this channel keeps the frame-count fit.
+    //   barMilliseconds, mode 5 - TRACED: the firmware's own bar re-layout on a page change is 200 ms, mode 5
+    //     (xmb_plugin state+0x520 = 200.0, every bar animator passes 5; PAGE-MOVE 14.1). It drives the bar
+    //     layer: the recede distance/projection, the bar's own focus row and the neighbours' brightness.
     static constexpr double pageMilliseconds=300;
+    static constexpr double barMilliseconds=200;
+    // The item-level Triangle options panel's entrance (UI-ELEMENT-GAP-AUDIT O6, measured [M]): the open
+    // starts 115..150 ms after the key and ramps 245..255 ms (at rest 360..410 ms); the close starts 9 ms
+    // after the key and ramps 200 ms. The mid-points of the measured ranges are used. The CLOSE still draws
+    // no fade: the panel's draw is gated on Shell::optionsOpen(), so the exit is a hard cut (measured: every
+    // frame from +21 ms is the plain page). The 9 ms is measured and applied to the ease so a latched close
+    // needs no further change here; PAGE-MOVE section 15.4 records the gap.
+    static constexpr double optionsOpenDelayMs=130;
+    static constexpr double optionsOpenMs=250;
+    static constexpr double optionsCloseDelayMs=9;
     // Renders the background offscreen at reference times and writes the same statistics measured from the
     // reference videos (band colours by clock time, ribbon crest over 40 s). Returns false on GL failure.
     bool measureReference(const QString& path);
@@ -97,6 +117,18 @@ private:
     // (2288 ms after the press). psHudAt_ is the press instant, psHudUntil_ the hard end.
     qint64 psHudAt_=0,psHudUntil_=0;
     double psHudOpacity(qint64 now) const;
+    // The PS-hold menu's own envelope, measured on the console's hold burst (PARITY-SCORECARD 16.3,
+    // C:\dev\out\rpcs3-gaps-2026-10-28\burst\ps-menu-entries, 206.6 fps, PS pressed 150 ms into the
+    // burst): the frame is untouched while the XMB is up, goes FULLY black 1052 ms after the press, both
+    // entries' text reaches full opacity at 1326 ms, and the selected row's bloom keeps growing until
+    // 1840 ms. psPressAt_ is the press instant the watcher reported; 0 means "no press seen".
+    qint64 psPressAt_=0;
+    static constexpr double psHoldBlackMs=1052;    // the whole frame is black from here after the press
+    static constexpr double psHoldTextStartMs=1279;// the entries' first ink
+    static constexpr double psHoldTextMs=1326;     // both entries' text at full opacity
+    static constexpr double psHoldBloomMs=1840;    // the selected row's bloom at its resting strength
+    double psHoldTextAlpha(qint64 now) const;
+    double psHoldBloomAmount(qint64 now) const;
     bool psPressActionable_=false;
     bool titleRunning() const;
     bool xmbOwnsForeground() const;
@@ -111,7 +143,7 @@ private:
     double categoryPosition_=6;
     int previousCategory_=6;
     struct Column { QVector<Entry> entries; int selection=0; double position=0; PafEase ease; };
-    PafEase categoryEase_,depthEase_,fadeEase_;
+    PafEase categoryEase_,depthEase_,fadeEase_,barEase_;
     // Item-level Triangle options panel: its own open amount (slide-in) and focus position, animated with the
     // same paf curve as the settings panel. Drawn only while Shell::optionsOpen().
     PafEase optionsPanelEase_,optionsOpenEase_;
@@ -141,6 +173,10 @@ private:
     qint64 focusTime() const { return focusTimeOverride_>=0?focusTimeOverride_:(focusClock_.isValid()?focusClock_.elapsed():0); }
     qint64 focusKey_=-1;
     double depthPosition_=0;
+    // The bar layer's own depth progress (barMilliseconds/mode 5, traced) next to the page content's
+    // (pageMilliseconds/mode 4, fitted). At rest both equal shell_.depth(), so nothing at the canonical
+    // rest frame moves; mid-transition the bar recede lands ~100 ms before the page content does.
+    double barDepthPosition_=0;
     int previousDepth_=0;
     void syncColumns();
     // ---- Phase 11.3: the settings choice band -------------------------------------------------------
@@ -318,14 +354,16 @@ private:
     // D5 page keeps every other Information message unchanged. Measured: rules 199/879, rows on the
     // 40 px pitch from ink 291, labels right at 939, values left at 979, Back hint ink 897, no clock.
     void drawMessageTablePage(QPainter& painter);    // depth-2 read-only table page
-    // The D4 chrome: icon + left title above rule 1 at the measured ink y 154..188, the two flat rules
-    // (alpha ~0.22 at y 197, ~0.15 at y 877, uniform across x - not tex_msgdialog_bar, which is
-    // centre-bright), and the analog clock face these pages keep while the info bar's plate is hidden.
-    void drawPageChrome(QPainter& painter,const QString& title);
+    // The D4 chrome: icon + left title above rule 1 at the measured ink box (icon 109..149 x 154..189,
+    // title ink 165 / 167), the page class's two flat rules - y and alpha are the caller's, because the
+    // modal message page and the box measure 199/879 at 177/255 while the D5 information page keeps the
+    // D4 fit of 198/872 at 56/51 - and the analog clock face these pages keep.
+    void drawPageChrome(QPainter& painter,const QString& title,double ruleTop,int ruleTopAlpha,double ruleBottom,int ruleBottomAlpha);
     void drawPageClock(QPainter& painter);
     // One button hint: a page_btnnavi glyph (30x30 texture, alpha-bounds fitted) and a system_plugin
-    // label, laid out from the measured x 1155. The page kinds put its ink at y 889..909 (measured); a
-    // modal box has no measured hint baseline and passes its own, just below the plate.
+    // label, laid out from the measured anchors: the glyph's ink box is 20 px at x 1155 with its top at
+    // 897, the label's ink starts at x 1192 with its cap rows at 898 (a 21 px face: 2 px left bearing,
+    // VCenter rect 4 px above the glyph's ink top). The box passes its own ink tops.
     struct Hint { QString glyph,label; };
     void drawHintRow(QPainter& painter,const QVector<Hint>& hints,double inkTop,double opacity);
     void drawMessageText(QPainter& painter,const QRectF& rect,const QString& value,int size,const QColor& colour,int flags=Qt::AlignLeft|Qt::AlignVCenter);

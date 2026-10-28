@@ -110,7 +110,7 @@ the stick. L2/R2 are read as analog axes and never merged into the navigation bi
 
 | surface | input/trigger | firmware behaviour (evidence) | native status (code reference) | priority |
 |---|---|---|---|---|
-| B1 column -> page | open/close transition | 18 rendered frames (~300 ms) open and close on the console (PAGE-MOVE 4c, section 5), but the bar driver is disassembled at **200 ms, mode 5** with no mode-4 animate call anywhere (PAGE-MOVE 14.1). TRACED (200/5) vs FIT (300/4) | **differs** - `pageMilliseconds=300` and mode 4 (view.h:49, view.cpp:696), labelled a fit at view.cpp:1633 | P0 |
+| B1 column -> page | open/close transition | 18 rendered frames (~300 ms) open and close on the console (PAGE-MOVE 4c, section 5), but the bar driver is disassembled at **200 ms, mode 5** with no mode-4 animate call anywhere (PAGE-MOVE 14.1). TRACED (200/5) vs FIT (300/4) | **closed as a split (PAGE-MOVE 15.1)** - the traced 200 ms mode 5 now drives the bar layer (recede, neighbours; `barMilliseconds`, view.h:60) and the page content channel keeps the 18-frame fit (`pageMilliseconds=300`, mode 4, view.h:59). The burst does not snap at either candidate, which is why both survive on different channels | P0 |
 | B2 category move | Left-Right | 200 ms paf accel mode 5; the incoming set approaches with tau 72-75 ms (PAGE-MOVE 14.2) | **matches** - `moveMilliseconds=200`, mode 5 (view.h:48, view.cpp:694) | P2 |
 | B3 item row move | Up-Down | Same 200 ms mode-5 curve as the category move | **matches** - view.cpp:704 | P2 |
 | B4 page open | focus geometry | The focused row steps to x 303 and the column recedes (PAGE-MOVE 2, GEOMETRY-ROOT); the receding bar and the incoming column are still open (PHASES 13, PARITY-GAPS 1.4) | **differs** in part - the label/pen and parent icon are measured, the receding bar is not applied (view.cpp:1628-1662) | P1 |
@@ -137,7 +137,7 @@ the stick. L2/R2 are read as analog axes and never merged into the navigation bi
 | C4 notification | appear/leave | Slides 48 px from the right while opacity goes 0->1 on the traced paf curve (NOTIFICATIONS 4.2) | **matches** - 200 ms mode 5, `notificationEase_` (view.cpp:727) | P3 |
 | C5 notification | dwell | 4000 ms is this build's fit; the firmware's `DAT_00047fcc = 2100.0` argument has no traced meaning (NOTIFICATIONS 3) | **unprovable** - native 4000 ms per entry, FIFO, 4-deep queue | P2 |
 | C6 PS tap plate | envelope | Starts 155 ms after the press, full 66 ms later, holds 2001 ms, gone 66 ms later (PS-BUTTON 3) | **matches** - view.cpp:2162-2169 with the plate at 1191,81 (2151-2155) | P2 |
-| C7 PS hold menu | envelope | Fully black at 1052 ms; the entries fade in between 1202 ms and ~1970 ms (SCORECARD 16.3) | **absent** - no black hold and no fade-in; the full menu is drawn on the first frame after the 1000 ms rule (ps_watcher.cpp:95) | P1 |
+| C7 PS hold menu | envelope | Fully black at 1052 ms; the entries fade in between 1202 ms and ~1970 ms (SCORECARD 16.3). Re-measured in PAGE-MOVE 15.5: 1202 is the black onset, the entries' text runs 1279..1326, and the selected row's bloom grows to ~1840 | **matches (fixed, PAGE-MOVE 15.5)** - black at press+1052, content at 1279..1326, bloom 1326..1840 (`psHoldTextAlpha`/`psHoldBloomAmount`, view.cpp); the 1000 ms watcher rule is unchanged, so the menu now appears 52 ms after it | P1 |
 | C8 OSK caret | blink | ~936 ms period, lit ~470 / dark ~440, duty ~53% (OSK 13.1) | **matches** - `OskCaret::blinkMilliseconds = 468` half-phase, `blinkTraced = true` (osk_layout.h:116-120); three audits still say 500 ms (section 7.1) | P2 |
 | C9 OSK panel | open/close | Alpha ramp 66-96 ms open (at rest ~550 ms after Cross, because the dialog dims first), visible fade ~104 ms close with a bright flash (OSK 13.2) | **absent** - the panel appears and disappears in one frame (OSK 15.8 last item) | P2 |
 | C10 dialogs | motion | 200 units on the label group (TRACED 0x00341BFC), 1000 on the plate child (0x00344094), 100 per hint group (`anim_*_show`), 150 for the error body (0x00340964) | **matches** - view.h:340-348 | P2 |
@@ -253,12 +253,13 @@ Each item states which is newer; `git log -1 --format=%ci` on the commit that ch
    still carries the older comment ("500 ms is the audit's FIT ... never traced"), authored in `6ead87c`
    (2026-10-27 22:58). **The code is newer than both audits and than its own comment.** Row C8 records the
    behaviour as matching; the audits need the correction.
-2. **Page-move duration and mode.** PAGE-MOVE 14.1 (`3c0c87b`, 2026-10-27 21:56) disassembles the bar driver
-   at **200 ms, mode 5** and calls "300 ms mode 4" contradicted as a firmware value. `view.h:49` and
-   `view.cpp:696` still ship `pageMilliseconds=300` with mode 4, authored in `dbee2de` (2026-10-25), and the
-   call site is labelled a fit (view.cpp:1633). **The audit is newer; the code is knowingly stale**, and the
-   phase status (PHASES 14.1) says the re-time is held pending one hop of the call chain. Row B1 is the
-   highest-priority timing gap in this document.
+2. **Page-move duration and mode. (Resolved 2026-10-28, PAGE-MOVE 15.1.)** PAGE-MOVE 14.1 (`3c0c87b`,
+   2026-10-27 21:56) disassembles the bar driver at **200 ms, mode 5** and calls "300 ms mode 4" contradicted
+   as a firmware value. `view.h:49` and `view.cpp:696` shipped `pageMilliseconds=300` with mode 4, authored in
+   `dbee2de` (2026-10-25). PAGE-MOVE 15.1 then measured the burst's frame count against both candidates: the
+   visible channel does not snap at either 200 or 300 ms, so the pass split the constants - the traced
+   200 ms mode 5 drives the bar layer (`barMilliseconds`, `barEase_`) and the 18-frame fit keeps the page
+   content channel. Row B1 above records the outcome; this item is no longer stale.
 3. **Settings commit cue.** SETTINGS-FIRMWARE D29 says the value write plays `snd_decide`. INTERACTION-AUDIO
    10.2/10.3 (H1, `27f1569`, 2026-10-27 22:36) traces a module-action completion to `snd_system_ok`, and
    `shell.cpp:1502` plays `Cue::Accept`. **Code is newer**; D29 is stale (row C14).
@@ -297,9 +298,12 @@ Each item states which is newer; `git log -1 --format=%ci` on the commit that ch
 
 Ranked; each line is what the console does and what this build does instead.
 
-1. **B1 page open/close** - 200 ms mode 5 (traced) against 300 ms mode 4 (fit) in the shipped easing.
-2. **C7 PS hold envelope** - black at 1052 ms with a 1202-1970 ms entry fade against a full menu at 1000 ms.
-3. **A43 PS hold threshold** - the console's hold fires later and holds the black frame; the watcher fires at 1000 ms.
+1. **B1 page open/close** - was 200 ms mode 5 (traced) against 300 ms mode 4 (fit) in one easing. **Fixed**
+   as a two-channel split (PAGE-MOVE 15.1); no longer a gap.
+2. **C7 PS hold envelope** - black at 1052 ms with a 1202-1970 ms entry window against a full menu at 1000 ms.
+   **Fixed** (PAGE-MOVE 15.5): black 1052, text 1279..1326, bloom to 1840.
+3. **A43 PS hold threshold** - the watcher's 1000 ms rule is unchanged by decision, and the envelope above
+   now supplies the console's 52 ms.
 4. **D3 Delete** - `expage_fdelete_dialog` with select-all/decide; native plays the error cue.
 5. **D4 Copy** - a source picker with the name-exists dialog; native lists Copy disabled.
 6. **C12 settings confirm chains** - `page_*_top` -> ask -> proceed; native commits immediately.
