@@ -668,3 +668,143 @@ exposure first, which is what the fitted gain suggested.
 
 Nothing in this pass edited `src/`; `hdr.cpp`, `hdr.h`, `ribbon.cpp` and `ribbon.h` are unchanged, no budget,
 reference or harness file was touched, and the scratch scripts and dumps under `out/bgprobe/` are local only.
+
+## The pedestal, tested against the console's own constant block, 2026-10-28 (second pass)
+
+This pass was asked to test the cheapest source hypotheses for the pre-tone-map residual: a uniform the plugin
+sets that the native never sets, a constant-slot error in the ucode translation, a texture term, and a missing
+blend/clear term. It closed all four with local artifacts and found that the residual is **not a constant
+pedestal**: it is present at the day state (+0.065 linear scene) and absent at the night state (+0.002), so a
+constant subtraction would be a one-state fit that over-corrects the other state by more than 20x. No source file
+was changed by this pass; the build under test is `C:\dev\out\native-pedestal` from `view.cpp` 07:13:01 (another
+pass's text/label work included), `hdr.cpp` unchanged.
+
+### 1. Hypothesis 1, a uniform we never set: false, from the console's own ucode
+
+`out/native-reference/fp-dump2` and `fpdump7` hold RPCS3 fragment-program captures of `moyou/back_colours0.fpo`
+(97 and 468 ucodes of the program's 8608-byte microcode). `--decode-fp lines:lib/moyou/back_colours0.fpo@<dir>`
+patches each capture back into the shipped program and reads every named parameter's slot value. The decoded
+block, at the pinned 10-25 10:00 clock, against what `renderOriginalBackground` passes:
+
+| parameter | console (decoded capture) | native (`view.cpp`) |
+|---|---|---|
+| `_DayTime` | 1168.77 | 1168.8 (cosine fit through the same point) |
+| `_NightTime` | 2200 | 2200 |
+| `_MonthTime` | 23.2258 | 23.629 (see 6) |
+| `_NightBrightness` | 0.486059 (settled) / 0.513834 (coldboot1 boot) | 0.486059 at settle |
+| `_NightDayBlend` | 1 | 1 |
+| `_Alpha` | 0, 1.48e-05, ... smoothstep of the boot fade | 1 at settle |
+| `PI` | 3.14159 | 3.14159 (the ucode's own literal) |
+
+The program's parameter table has exactly these seven constants plus the four month samplers, `uv` and `col`; there
+is no eighth additive slot. The captured microcode differs from the shipped `.fpo`'s in **17 bytes of 8608, in 5
+instruction words**, and those five words are the patched literals (`_NightTime` at slot 0 = 2200 is the first) -
+i.e. the console runs the same 395-instruction program this build translates, with the six values above patched in.
+There is no uniform for the native to be missing.
+
+### 2. Hypothesis 2, a constant-slot assignment error: the mapping is right
+
+Because the console's patched literals land in exactly the slots our decoder names (the `--decode-fp` values above
+are read through `CgProgram::parameters[name].constantSlots`), the parameter-to-slot map is confirmed against the
+console, not just against our own dump. `renderOriginalBackground` starts from `backColours_.constants`, i.e. the
+ucode's own 143 literal slots, so unused slots hold the firmware's defaults rather than stale values; there is no
+"zero the unused slots" case here, and all six runtime values are written to every slot their parameter names.
+
+### 3. Hypothesis 3, a texture term: the month palettes decode byte-exactly
+
+`--month-sheet` (the app's own decode of `textures/month_bg/rgb/10.dds`) was compared with an independent decode of
+the same file out of `lines.qrc` (A8R8G8B8, 64x32, five mips, masks 0x00FF0000/0x0000FF00/0x000000FF): mean delta
+0.05/0.19/0.57 of 255 over the tile (the 0.57 in B is the contact sheet's "10 day" label drawn over one texel), and
+the sampled texels match exactly (0,0 = 226/177/15; 0,32 = 225/162/14; 31,0 = 216/197/0). The shader's sample
+coordinate is the firmware's own quantisation - `r[0].xy = floor(uv*64+0.5, uv*32+0.5) * (1/64, 1/32)` - so both
+engines read the same texels with the same 50/50 texel-boundary filtering. No SRGB or mip bias is involved: the
+textures are uncompressed, the native binds them with a Linear filter at LOD 0, and the derivative of the quantised
+coordinate is 0 between steps.
+
+### 4. Hypothesis 4, a clear colour or a double draw: false
+
+`hdr.cpp` `begin()` clears the scene target to (0,0,0,1) every frame; `renderOriginalBackground` disables blending
+and draws one fullscreen triangle, so the background *replaces* the clear and a clear colour cannot survive under it.
+The only other contributor to the scene before the `XMB_BG_SCENE` dump is the procedural `background_` pass, which
+with `overlay = original` sets `c = vec3(0.)` and adds only `grain/650` (+-0.2/255, mean 0). The ribbon is excluded
+by the earlier pass's skip test; the particles are drawn after the dump.
+
+### 5. What the residue actually is: a day-state term, not a pedestal
+
+Splitting the residual through the shipped `ToneMap` curve (`glutils/ToneMap.fpo`, day preset from
+`override/day/HDR.mnu`: EXPOSURE 1.05, WHITE LEVEL 0.899181), with the native's pre-tone-map scene from
+`XMB_BG_SCENE` and the console's scene recovered by inverting the reference's displayed background (day: model check
+toneMap(scene) vs native display rms 1.8-2.6/255):
+
+| state | window | native - console, linear scene (R/G/B) | display delta (R/G/B) |
+|---|---|---|---|
+| day, 10-25 10:00 | y<70, x<1400 | +0.065 / +0.067 / +0.061 | +20.6 / +21.3 / +19.4 |
+| night, 10-27 21:53 | y<70, x<1400 | +0.0023 / +0.0019 / +0.0003 | +1.50 / +1.38 / +0.82 |
+
+The scene column is the reference's display run backwards through the shipped tone map, so it does not by itself say
+whether the term enters before or after the tone map: a post-tone-map term of the same size lands in that column too.
+What it does establish is magnitude and state dependence, and it rules out a tone-map *parameter* difference (below).
+
+At the day state the difference is a tight plateau: 97% of the top band's pixels fall in +0.05..+0.08, and the
+display profile across 160 px columns is +19.6..+21.3 (mean +20.3). At night the same measurement is 1/30 of that.
+A constant added anywhere in the background chain cannot do that - the console's night background is 0.0194 in scene
+units, so a +0.065 pedestal would make the native four times brighter than the console there, and it is not.
+
+It is not a tone-map parameter change either. Solving the shipped tone-map form for the per-pixel
+`k = 1/white^2` that maps the native's scene onto the console's display, for every EXPOSURE in 0.50..1.60, leaves no
+interior solution: the spread of `k` falls monotonically to the grid edge (E 0.51, relative sd 4.6%), and the shipped
+day preset leaves an rms of 20.76/255. A single (EXPOSURE, WHITE) pair cannot explain the pair of frames.
+
+The shape that fits the day state is a term of roughly +0.06 plus about 8% of the level. It cannot be unconditional
+arithmetic in the day path either: that path is still mixed at 0.5 weight at night (the decoded `_NightDayBlend` is
+0.5 there, and the output really is a 50/50 palette mix), so a day-path term would still show at half strength, about
+15x the +0.002 measured. The term therefore follows the *state* - the day preset or the day-side inputs - and every
+input that reaches the background is now excluded (values, slots, program bytes, textures), which is why this pass
+did not spend a fifth guess on it.
+
+### 6. Two side findings worth their own line
+
+- **`_MonthTime` has no time-of-day term in the console.** The decoded value at 10-25 10:00 is 23.2258, which is
+  `(day-1)/daysInMonth*30` exactly; `view.cpp`'s `(date.day()-1+t)/date.daysInMonth()*30` adds +0.403 at 10:00. The
+  shader uses the month as a phase (`fc[95] = -15`, then 0.25 per unit), so the effect is about 1.3% of the phase
+  and well under 1/255 of the frame. This is a conformance hunk for `backgroundTime()`, not applied here because
+  `view.cpp` is another pass's file.
+- **The firmware's final composite in the captured frames is `ToneApplyDisplay`, not `ApplyGlare`.** The RSX call
+  list (`out/native-reference/fp-dump2/calls.txt`, 306 draws, every draw's microcode length) draws the 96-byte
+  `ToneApplyDisplay` five times, once per captured frame, and never draws the 128-byte `ApplyGlare` this build uses
+  in `Hdr::finish`. That pass subtracts `texture(tex13, gl_FragCoord)/8`, but the console's own frame carries no such
+  term: projected through the tone curve the scene delta accounts for the display delta to within 1-2/255, i.e. the
+  post-tone-map part of the difference is an order of magnitude below the 1/16 = 16/255 that dither would subtract.
+  So swapping the pass is not a pedestal fix. Recorded as a follow-up for whoever owns the HDR chain, because the
+  program choice is a real divergence from the firmware.
+
+### 7. What artifact closes this
+
+The one measurement that decides between "our translation computes a different value" and "the console's chain
+post-processes the background" is the console's **pre-tone-map scene for the settled day frame**: the contents of
+the 64x32 colour surface the `back_colours0` draw renders into (`ucode_length 8608 draw N surface 64x32` in the
+capture records - note the draw is at 64x32, not 1920x1080), at the pinned clock. The existing capture patch dumps
+the program, its runtime constants, the bound textures and the final frame, but not intermediate surfaces, so the
+console's own scene value at a pixel cannot be read today. One RPCS3 run at `--render-clock 30`,
+`--background-clock 2026-10-25T10:00`, with the surface dumped after that draw, compared with the native's
+`XMB_BG_SCENE` at the same pixel, decides it in a single comparison. Absent that, the next local step is a
+CPU evaluation of the translated fragment program over the console's decoded constants and the two month palettes:
+it would reproduce either the native's plateau or the console's value and localise the instruction.
+
+### 8. Verification numbers for this build (no change kept)
+
+- `work/ab-layers.ts --capture --exe C:\dev\out\native-pedestal\re-ps3-native.exe`: **PASS 6/6**, text presence
+  1677 bright pixels (minimum 900) PASS; frame 18.48 (base 18.29), top background 20.25, category icon row 21.20,
+  item label row 11.92, clock text 11.39, info bar 14.98.
+- `work/parity.ts --capture --score --state root`: Tier A PASS (category game, depth 0, 11 rows), Tier B fail on the
+  baseline budget: frame 17.97 / 0.8225, top background 22.24 / 0.9710 PASS, category icon row 20.52 / 0.9087 PASS,
+  item label row 11.08 / 0.4003 (content), clock text 11.57 / 0.5376, info bar 14.54 / 0.7669.
+- Per-band native - console luma, 12 bands of 90 px, canonical pins: +21.4, +20.2, +19.6, +20.0, +30.8, +35.8,
+  +27.3, -6.0, -4.3, +10.5, +17.4, +16.6. Bands 0-3 (y 0-360) are ribbon-free and read +21.4..+19.6 in display
+  units; the ribbon-free top window (y<70) reads +0.065..+0.067 in linear scene units; bands 10-11 (ribbon-free,
+  y 900-1080) read +17.4 / +16.6 in display units.
+- Determinism: two captures at `--render-clock 20` with the other pins equal are SHA256-identical
+  (`72F01CEB1A07B320...EDD513A8`).
+- No change was kept, so there is no before/after delta: the numbers above are the current tree's numbers, and the
+  pedestal did not shrink. Scratch scripts and dumps live under `out/bgprobe/` and are local only; no budget,
+  reference or harness file was touched.
