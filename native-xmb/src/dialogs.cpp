@@ -218,7 +218,7 @@ void View::drawPageChrome(QPainter& p,const QString& title,double ruleTop,int ru
     p.setBrush(QColor(255,255,255,ruleTopAlpha));p.drawRect(QRectF(0,ruleTop,1920,1));
     p.setBrush(QColor(255,255,255,ruleBottomAlpha));p.drawRect(QRectF(0,ruleBottom,1920,1));
     p.restore();
-    drawPageClock(p);
+    if(!modalMessagePage())drawPageClock(p);
 }
 void View::drawPageClock(QPainter& p) {
     // The measured pages keep only the clock face: no plate, no date text. The hands and their drop

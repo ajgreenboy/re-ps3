@@ -1420,6 +1420,19 @@ int View::choiceBandFocus(const ChoiceBand& band,const QVector<Entry>& model,int
     (void)picked;
     return -1;
 }
+// The modal message-page class (view.h): the D4 titled page and the D2 error-code page. This is the one
+// class the 2026-10-28 firmware frames measure for both page treatments, so the dim and the info-bar gate
+// below read the same predicate. The confirm box and the depth-2 table page are the class's negative
+// controls: no dim and no bar on either frame.
+bool View::modalMessagePage() const {
+    if(shell_.message().isEmpty())return false;
+    const MessageKind kind=shell_.messageKind();
+    return kind==MessageKind::Page || kind==MessageKind::ErrorCode;
+}
+// The measured page gain under a modal message page: 0.735, i.e. a black wash at 0.265 = 68/255 (1 - 68/255
+// = 0.7333, within 0.002 of the fitted gain). DIALOGS-FIRMWARE 13.7 item 1; the offline reference-gain test
+// (work/msgview: the frame with this gain applied) takes the back-hint crop 16.71 -> 19.40 dB.
+constexpr int kMessagePageDimAlpha=68;
 void View::drawScene(QPainter& p) {
     iconQueue_.clear();
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
@@ -1430,7 +1443,8 @@ void View::drawScene(QPainter& p) {
     const bool messageUp=messageKind!=MessageKind::None;
     const bool inlineMessage=messageKind==MessageKind::Inline;
     // A Page/Box/ErrorCode/Info surface replaces the item list and the category band (the firmware's page is
-    // the whole screen: the reference frame's band is off-frame, and neither measured frame dims anything).
+    // the whole screen: the reference frame's band is off-frame). The modal message pages dim the page they
+    // replace - the wash below is the measurement - while the box and the table page dim nothing (14.1).
     const bool messageScreen=messageUp && !inlineMessage;
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
         if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);textRenderer_.draw(*this,p,r,value,f,colour,flags);return;}
@@ -2084,11 +2098,26 @@ void View::drawScene(QPainter& p) {
             }
         }
         if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
+        // The modal message page's dim (DIALOGS-FIRMWARE 13.7 item 1). The console does not replace the page
+        // when a message page opens, it dims it: page-network-test-error and page-network-connection-settings
+        // read 47.0-51.0 where the same patch on a message-free frame reads 73-88, a whole-page least-squares
+        // gain of 0.735. The confirm box's top band reads 73.6 against the root's 73.8 and the depth-2 table
+        // page 73.5, so the wash is per class - View::modalMessagePage() is the class and nothing else on the
+        // frame takes it. The stack order is page -> dim -> chrome: the wash draws here, after the
+        // page/background composite and before the info bar and the message surface, so the bar's measured
+        // ramp alphas and the chrome's own alphas land over the dimmed page (the message page's y75 plate ramp
+        // measures the same 0.35 alpha over its 50.6 background that the root's measures over 71.0).
+        const bool modalPage=modalMessagePage();
+        if(modalPage)p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,kMessagePageDimAlpha));
         // Info bar: the information panel's own material, xmb_plugin_normal:tex_indi_bg, a 24x24 nine-slice
         // tile with an 8 px white alpha ramp on every side around a black interior at alpha 13/255 (5.1%).
         // It frames the clock in the top-right corner; the clock's centre sits at y~104 as in the reference
-        // video. A message page keeps only the analog clock face (measured on D4: plate and date text
-        // absent, clock kept), which drawPageChrome draws with the page.
+        // video. A modal message page keeps the WHOLE bar, not only the face (DIALOGS-FIRMWARE 13.7 item 2):
+        // both network message frames keep the plate's ramps (y75 122.4 over the dimmed 50.6 background = the
+        // same 0.35 alpha as the root's, y132 121.9, left edge x1329), the clock text (574 ink pixels in
+        // x1690..1770) and the filled clock face. The bar is chrome, so it draws after the wash above and
+        // keeps its own alphas; the D5 information page has no 1080p frame of its fit and keeps drawPageChrome's
+        // clock with no bar, and the box/table pages keep neither.
         // A firmware band owns the screen: the captured frames have neither the plate nor the analog clock
         // (SETTINGS 11.6 measured luma 0 at x1750..1918, y100 on screensaver-list-rest.png; options-open-01
         // shows the same), and the band does not reach the plate's area, so the absence is a state and not
@@ -2104,7 +2133,7 @@ void View::drawScene(QPainter& p) {
                     && (choice->source==QLatin1String("rco")||choice->source==QLatin1String("capture"));
             }();
         const bool optionsBandUp=shell_.optionsOpen() && !shell_.optionsArePlayer() && optionsOpenEase_.value>.001;
-        if(!messageScreen && !choiceBandUp && !optionsBandUp) {
+        if((!messageScreen || modalPage) && !choiceBandUp && !optionsBandUp) {
             // Measured from the saved 1920x1080 firmware frames (audit/ITEM-MENU-INFO-FIRMWARE.md B3/E4):
             // the visible plate is 591x58 at (1329,75), flush to the right screen edge. The tile's own 1 px
             // transparent margin lies just outside that core (x1328/y74) and its right border falls past
@@ -2125,12 +2154,35 @@ void View::drawScene(QPainter& p) {
                 p.setOpacity(1);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));p.drawRoundedRect(infoBar.adjusted(.5,.5,-.5,-.5),4,4);p.restore();
             }
             text({1240,82,525,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
-            const auto time=shell_.clockDateTime().time();const QPointF center(1791,104);
+            // The analog clock face. Two fits, chosen by the same page class as the wash above:
+            //   - the canonical root frame keeps the fit this build has always drawn (2.7 px ring at
+            //     1791/104, no disc, 10/7 px hands). Its gate layers are recorded and the rest frame is
+            //     frozen this pass, so the measured fit is not lifted to it here; that lift is the
+            //     follow-up DIALOGS-FIRMWARE 13.7 records (it would move the clock text and info bar layers).
+            //   - a modal message page draws the face its own frames measure: a 32x32 face centred on
+            //     1789.5/103.5 (ring ink x 1774..1776 and 1803..1805, rows 88..119), a 3 px ring on a
+            //     14.6 px centre line, a near-black disc (the frame's interior reads 0-22 over a 45..70
+            //     plate interior, i.e. black at ~0.8) and hands that reach the ring: the 10:05 minute hand
+            //     merges with it along the 30 degree ray (255 out to r 15.5) and the hour hand ends at
+            //     r 10.5 on the 300 degree ray. drawPageChrome draws its own page clock only when the bar is
+            //     absent (it asks View::modalMessagePage(); the one-line dialogs.cpp hunk is returned with this
+            //     pass), so on a message page this face is the only clock on the frame.
+            const bool measuredFace=modalPage;
+            const QPointF centre=measuredFace?QPointF(1789.5,103.5):QPointF(1791,104);
+            const double ringRadius=measuredFace?14.6:14.;
+            const double ringStroke=measuredFace?3.:2.7;
+            const double minuteLength=measuredFace?13.:10.;
+            const double hourLength=measuredFace?9.5:7.;
+            const auto time=shell_.clockDateTime().time();
             const auto hand=[&](double angle,double length){const double a=angle*std::numbers::pi/180.;return QPointF(std::sin(a)*length,-std::cos(a)*length);};
-            p.save();p.setBrush(Qt::NoBrush);
+            p.save();
+            if(measuredFace) {
+                p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,204));
+                p.drawEllipse(centre,13.,13.);p.setBrush(Qt::NoBrush);
+            }
             for(int shadow=1;shadow>=0;--shadow) {
-                const auto c=center+QPointF(shadow*1.5,shadow*1.5);p.setPen(QPen(shadow?QColor(0,0,0,150):QColor(255,255,255),2.7,Qt::SolidLine,Qt::RoundCap));
-                p.drawEllipse(c,14,14);p.drawLine(c,c+hand(time.minute()*6,10));p.drawLine(c,c+hand((time.hour()%12)*30+time.minute()*.5,7));
+                const auto c=centre+QPointF(shadow*1.5,shadow*1.5);p.setPen(QPen(shadow?QColor(0,0,0,150):QColor(255,255,255),ringStroke,Qt::SolidLine,Qt::RoundCap));
+                p.drawEllipse(c,ringRadius,ringRadius);p.drawLine(c,c+hand(time.minute()*6,minuteLength));p.drawLine(c,c+hand((time.hour()%12)*30+time.minute()*.5,hourLength));
             }
             p.restore();
             // The firmware's indicator row (page_xmb_indicator in xmb_plugin_normal.rco, B1): five 32x32
@@ -2419,30 +2471,24 @@ void View::restoreMasterVolume() {
     qInfo().noquote()<<QString("volume: restored the start-up state %1% muted %2 -> Windows reports %3% muted %4 (mute call ok %5)")
         .arg(volumeStart_).arg(volumeStartMuted_?1:0).arg(volumeLevel_).arg(volumeMuted_?1:0).arg(muteSet?1:0);
 }
-void View::pollVolumeRamp(float down,float up,qint64 now) {
-    // The pad's triggers are analog axes, not D-pad bits: nothing here touches `buttons`, `repeatAt_` or the
-    // navigation paths, so a held trigger cannot move the XMB or consume a D-pad repeat.
+void View::pollTriggerSeek(float down,float up) {
+    // L2/R2 are the video container's own seek pair: the hint art carries tex_cp_help_l2_left / _r2_right
+    // with msg_fast_r_with_icon / msg_fast_f_with_icon ("Fast Reverse" / "Fast Forward",
+    // audit/MEDIA-PANELS-FIRMWARE.md 3.4, 3.6). The console binds no volume to them (BEHAVIOUR-GAP-AUDIT
+    // A11), so in the video player this is the only thing they do. One 10 s step per press - the same step
+    // Left/Right uses through Shell::seekMedia - because no local artifact times a held trigger and an
+    // acceleration curve must not be invented.
+    // The triggers are analog axes, not D-pad bits: nothing here touches `buttons`, `repeatAt_` or the
+    // navigation paths, so a trigger cannot move the XMB or consume a D-pad repeat.
     constexpr float kPress=.35f;      // a resting DualShock 3/4 trigger reads 0.0; this is the press threshold
-    if(volumeInputBlocked()){volumeRamp_=0;return;}
-    const float pressure=std::max(down,up);
-    if(pressure<kPress) {
-        if(volumeRamp_ && volumeTrace())qInfo()<<"volume: trace ramp released";
-        volumeRamp_=0;
-        return;
-    }
+    const bool pressed=std::max(down,up)>=kPress;
+    if(pressed==triggerHeld_)return;  // only the threshold crossing is a press: no repeat while held
+    triggerHeld_=pressed;
+    if(!pressed || volumeInputBlocked() || !shell_.videoOpen())return;
     const int direction=up>down?1:-1;
-    const qint64 interval=pressure>=.75f?60:120; // full squeeze ramps twice as fast
-    if(direction!=volumeRamp_) {                  // the press: one step now, then the held repeat
-        volumeRamp_=direction;volumeRampAt_=now+interval;
-        if(volumeTrace())qInfo().noquote()<<QString("volume: trace ramp start %1 pressure %2 interval %3 ms")
-            .arg(direction>0?"R2":"L2").arg(pressure,0,'f',2).arg(interval);
-        volumeStep(direction,direction>0?QStringLiteral("R2"):QStringLiteral("L2"));
-        return;
-    }
-    if(now<volumeRampAt_)return;
-    // Counted from the last deadline, not from this poll, so the 16 ms poll cannot stretch the interval.
-    volumeRampAt_=std::max(volumeRampAt_,now-interval)+interval;
-    volumeStep(direction,direction>0?QStringLiteral("R2"):QStringLiteral("L2"));
+    shell_.seekMedia(qint64(direction)*10000);
+    if(volumeTrace())qInfo().noquote()<<QString("volume: trace trigger seek %1 -> %2 ms")
+        .arg(direction>0?"R2":"L2").arg(shell_.mediaPosition());
 }
 // The firmware's volume display (audit/MEDIA-PANELS-FIRMWARE.md section 5): one page holding a single paf
 // PhLevelMeter and nothing else that draws. The segment art is the console's default level-meter set in
@@ -3055,8 +3101,8 @@ void View::keyPressEvent(QKeyEvent* e) {
         case Qt::Key_Plus:case Qt::Key_Equal:zoomPhoto(1);e->accept();return;
         case Qt::Key_Minus:zoomPhoto(-1);e->accept();return;
         case Qt::Key_0:resetPhotoView();e->accept();return;
-        case Qt::Key_Q:shell_.vertical(-1);e->accept();return;
-        case Qt::Key_E:shell_.vertical(1);e->accept();return;
+        case Qt::Key_Q:shell_.rotatePhoto(-1);e->accept();return;
+        case Qt::Key_E:shell_.rotatePhoto(1);e->accept();return;
         case Qt::Key_Left:if(photoViewport_.canPan()){panPhoto(-1,0);e->accept();return;}break;
         case Qt::Key_Right:if(photoViewport_.canPan()){panPhoto(1,0);e->accept();return;}break;
         case Qt::Key_Up:if(photoViewport_.canPan()){panPhoto(0,-1);e->accept();return;}break;
@@ -3095,7 +3141,7 @@ void View::focusOutEvent(QFocusEvent* e) {
 }
 void View::pollController() {
 #ifdef Q_OS_WIN
-    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;volumeRamp_=0;return;}
+    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;triggerHeld_=false;return;}
     // A --script run is the script's own input: every scripted key goes through replayKeyTap, which dispatches the
     // same handlers the pad drives. A physical controller is therefore not read at all, so a capture cannot depend
     // on a pad lying on its d-pad (which used to walk the keyboard focus off the default key between two grabs).
@@ -3113,7 +3159,7 @@ void View::pollController() {
     // wins when both controllers are attached.
     const float triggerDown=std::max(xinput?state.Gamepad.bLeftTrigger/255.f:0.f,playstation?hid.l2:0.f);
     const float triggerUp=std::max(xinput?state.Gamepad.bRightTrigger/255.f:0.f,playstation?hid.r2:0.f);
-    pollVolumeRamp(triggerDown,triggerUp,clock_.elapsed());
+    pollTriggerSeek(triggerDown,triggerUp);
     if(shell_.psMenuOpen()) {
         const auto edgePs=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;buttons_=buttons;
         if(edgePs&XINPUT_GAMEPAD_DPAD_UP)shell_.psMenuMove(-1);
@@ -3177,7 +3223,7 @@ void View::pollController() {
             if(movement&XINPUT_GAMEPAD_DPAD_UP)shell_.vertical(-1);if(movement&XINPUT_GAMEPAD_DPAD_DOWN)shell_.vertical(1);
         }
         if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)zoomPhoto(-1);if(edge&XINPUT_GAMEPAD_RIGHT_SHOULDER)zoomPhoto(1);
-        if(edge&XINPUT_GAMEPAD_X)resetPhotoView();if(edge&XINPUT_GAMEPAD_Y)shell_.vertical(1);
+        if(edge&XINPUT_GAMEPAD_X)resetPhotoView();if(edge&XINPUT_GAMEPAD_Y)shell_.rotatePhoto(1);
         if(edge&XINPUT_GAMEPAD_A)shell_.activate();if(edge&XINPUT_GAMEPAD_B)shell_.back();
         if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
         buttons_=buttons;return;

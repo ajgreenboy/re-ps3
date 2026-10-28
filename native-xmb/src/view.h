@@ -233,8 +233,7 @@ private:
     bool volumeMuted_=false;         // Windows' endpoint mute state as last read
     int volumeStart_=-1;             // start-up level and mute state, put back by restoreMasterVolume()
     bool volumeStartMuted_=false;
-    int volumeRamp_=0;               // the held trigger: -1 L2, +1 R2, 0 released
-    qint64 volumeRampAt_=0;          // next held-trigger step deadline
+    bool triggerHeld_=false;         // an L2/R2 press is down, for the one-step-per-press seek edge
     qint64 volumeHudAt_=0;           // when the HUD's 3 s interval started, for the opt-in fade trace
     bool volumeHudVisible_=false;    // for the opt-in trace of the HUD's own expiry
     bool volumeWarned_=false;        // one line only when the endpoint cannot be read
@@ -244,7 +243,7 @@ private:
     void volumeStep(int direction,const QString& source);  // one 5% step through the host endpoint
     void volumeToggleMute(const QString& source);
     void volumeApply(int percent,const QString& source);   // set, read back, log, show the HUD
-    void pollVolumeRamp(float down,float up,qint64 now);   // held L2/R2 repeat, called from pollController
+    void pollTriggerSeek(float down,float up);             // L2/R2 seek in the video player, called from pollController
     void drawVolumeHud(QPainter& painter,double opacity);
     // ---- Media panels, surfaces A and B (audit/MEDIA-PANELS-FIRMWARE.md) ------------------------------
     // The firmware's player chrome, drawn from the containers' own objects. Every screen rect below is a
@@ -354,6 +353,17 @@ private:
     // D5 page keeps every other Information message unchanged. Measured: rules 199/879, rows on the
     // 40 px pitch from ink 291, labels right at 939, values left at 979, Back hint ink 897, no clock.
     void drawMessageTablePage(QPainter& painter);    // depth-2 read-only table page
+    // The two modal message-page classes the 2026-10-28 frames measure (DIALOGS-FIRMWARE 13.7): the D4
+    // titled page (MessageKind::Page) and the D2 error-code page (ErrorCode). They are the only surfaces
+    // that sit on the console's dimmed page - page-network-test-error and page-network-connection-settings
+    // read 47.0-51.0 where the same patch on a message-free frame reads 73-88, a whole-page least-squares
+    // gain of 0.735 - and they are the only message surfaces that keep the whole info bar (the plate's
+    // nine-slice ramps at y75/y132, the clock text and the filled clock face). The confirm box and the
+    // depth-2 table page measure neither (the box's top band reads 73.6 against the root's 73.8 and its
+    // top-right is flat at 76.9; the table page's is 77.0), so they return false and keep what they had.
+    // drawPageChrome asks this before drawing the page's own clock: when the bar is present, the bar's
+    // clock is the only clock on the frame.
+    bool modalMessagePage() const;
     // The D4 chrome: icon + left title above rule 1 at the measured ink box (icon 109..149 x 154..189,
     // title ink 165 / 167), the page class's two flat rules - y and alpha are the caller's, because the
     // modal message page and the box measure 199/879 at 177/255 while the D5 information page keeps the

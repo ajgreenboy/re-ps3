@@ -1764,3 +1764,241 @@ parity  bun work\parity.ts --capture --score --state page-network-status-list,pa
 
 The measuring scripts for 13.1-13.4 (row profiles, ink boxes, the dim gain) are in
 `C:\dev\out\msgchrome\` (`measure_refs.py`, `measure_frame.py`, `scan_notify3.py`), outside the repo.
+
+---
+
+## 14. View-level message-page treatments, 2026-10-28: the per-class page dim and the info bar a message page keeps
+
+Scope of this pass: the two deltas section 13.7 returned as hunks, both of which live in `view.cpp`. Code
+touched: `native-xmb/src/view.cpp` and one declaration in `native-xmb/src/view.h`; `dialogs.cpp` is not
+touched, and 14.2 returns the one-line hunk that removes the page's own clock once the bar is present.
+
+"before" is the HEAD build `out/native-msgchrome/re-ps3-native.exe` (sha256 `AE576594849AF17A9BACCF4913BA2EB9C0F9C7AB81AAE755C5BDEDA71E9593C9`,
+the build 13.5 measured - its crops reproduce 13.5's numbers to the last digit). "after" is
+`out/native-msgview/re-ps3-native.exe` (sha256 `203E431DD736F1C97922016B495CA7F39866156522AED4B99623F2BCBE8359AC`).
+Both captured with `bun work/parity.ts --capture` at the harness pins (render clock 30, UI clock
+2026-10-25T12:32:00, day 2026-10-28T10:00:00, focus age 2000 ms) - the pins 13.5 used. "hunk" is a scratch
+copy of the tree carrying the 14.2 one-liner (`out/msgview/hunk-build`, sha256 `0510D59495968CE546D0D988E4AEF401A77044695A8F94361AB170BCA1C1A597`),
+built only to measure the state that lands with the hunk; it is not a deliverable.
+
+### 14.1 The dim is per class, and it is one neutral wash over the composited page
+
+Reference, 1920x1080, Rec.709 luma, patch means. The two network message pages are from the same console
+session as `page-settings-network` (the page behind them) and `root`:
+
+| patch | page-network-test-error | page-network-connection-settings | page-settings-network (undimmed) | root (undimmed) | page / undimmed |
+|---|---|---|---|---|---|
+| x20..300, y30..90 | 51.9 | 51.9 | 73.5 | 73.8 | 0.706 |
+| x1600..1900, y900..1050 | 40.9 | 40.9 | 53.4 | 53.4 | 0.766 |
+| x1600..1900, y300..377 | 47.9 | 47.9 | 58.8 | 58.7 | 0.815 |
+
+The spread is the ribbon's phase: the message pages were captured at 10:05 and the message-free frames at
+10:00, so the wave sits in a different place. The wash is applied at 13.7's 0.735 - **68/255 = 0.265, gain
+0.733** - which sits inside the 0.70-0.77 the patches measure; a whole-frame least-squares fit of the message
+page against a message-free frame comes out lower (0.66) because it also averages the page's ghost content
+(0.28, 14.5) and the chrome (1.0), so it is not the wash's own factor. Measured on the after frame against
+the before frame, the wash is neutral to a thousandth:
+
+| channel | before (x20..300, y30..90) | after | after / before |
+|---|---|---|---|
+| R | 110.0 | 80.7 | 0.733 |
+| G | 88.7 | 65.0 | 0.733 |
+| B | 48.9 | 35.8 | 0.732 |
+
+The class is the measurement. The two negatives:
+
+| frame | top band x20..300, y30..90 | plate row y75 at x1400..1700 |
+|---|---|---|
+| dialog (confirm box) | 73.6 against the root's 73.8 (no dim) | flat: 76.9 at x1340..1400 (no bar) |
+| page-network-status-list (table page) | 73.5 (no dim) | flat: 76.9 (no bar) |
+
+So the wash and the bar are keyed on the same class - `View::modalMessagePage()`, which is `Page` or
+`ErrorCode` and nothing else. Inline messages, the confirm box, the depth-2 table page and the D5
+information page all return false and keep exactly what they drew.
+
+Stack order, page -> dim -> chrome, is what the frames show, and the after frame reproduces it. The wash
+draws where the page is composited: after the category/column/page pass, before the info bar and before
+`drawMessageSurface`. Evidence from the same crop:
+
+| element | reference | after |
+|---|---|---|
+| rule y199, alpha over its own background | 192.6 over 51.8 = 0.693 | 197.3 over 66.5 = 0.694 |
+| rule y879, alpha over its own background | 189.4 over 41.4 = 0.693 | 192.9 over 52.3 = 0.694 |
+| info-bar plate y75, alpha over its own background | 122.4 over 50.6 = 0.351 | 120.7 over 65.2 = 0.293 |
+
+The rules keep alpha 0.693 over the *dimmed* page in both, and the plate ramp is drawn over the dimmed page
+at its own alpha, not at 0.693 x 0.733: the chrome is above the wash, the page is below it. The plate's
+0.293 against the frame's 0.351 is the pre-existing nine-slice ramp fit (UI-ELEMENT-GAP-AUDIT R12 measured
+the same 17-21% shortfall on the root frame); it is not this pass's, and 14.5 records it.
+
+### 14.2 A modal message page keeps the whole info bar
+
+The reference keeps everything inside the bar, over the dimmed page. Measured on the two message pages:
+
+| element | frame |
+|---|---|
+| plate top ramp, y75 | 126.7 over the dimmed 53.9 at x1340..1400; 122.4 over 50.6 at x1400..1700 |
+| plate bottom ramp, y132 | 126.0 / 121.9 |
+| plate left ramp, column x1329 | 125.0 over 54.1 = 0.353 (one antialiased column) |
+| clock text | 521 pixels above 140 luma in x1690..1770 (13.7 counted 574 with its own threshold), ink box x1690..1760, rows 95..115 |
+| clock face | 32x32: ink x1774..1805, rows 88..119; ring 3 px bright on a 14.6 px centre line, centred 1789.5/103.5 |
+| face interior | median 14.8 in the lower half at r 4..10.5, against a 44.4 plate interior (a near-black disc) |
+| hands | the 10:05 minute hand merges with the ring (255 along the 30 degree ray to r 15.5); the hour hand ends at r 10.5 on the 300 degree ray |
+
+`view.cpp`'s gate was `if(!messageScreen && !choiceBandUp && !optionsBandUp)`, so a message screen skipped
+the plate, the text and the face, and `dialogs.cpp` added only its own ring at the old fit (1776/93) - the
+double clock 13.7 warned about. The gate is now `if((!messageScreen || modalPage) && ...)`: the measured
+message-page class draws the bar over the wash, everything else is byte-identical.
+
+The face is drawn with the measured geometry only where the bar is measured - on `modalPage`. The canonical
+root frame keeps the fit this build has always drawn (2.7 px ring at 1791/104, no disc, 10/7 px hands),
+because the rest frame is frozen this pass and its two clock layers are recorded gate baselines; 14.5
+records lifting the measured fit to the root as a separate delta. Parameters selected by the predicate:
+
+| parameter | root (frozen) | modal message page (measured) |
+|---|---|---|
+| centre | 1791 / 104 | 1789.5 / 103.5 |
+| ring centre line / stroke | 14 px / 2.7 px | 14.6 px / 3.0 px |
+| disc | none | black at 204/255 inside r 13 |
+| hands, minute / hour | 10 px / 7 px | 13 px / 9.5 px |
+
+`drawPageChrome` still calls `drawPageClock`, so until the hunk lands a message page draws the new face and
+the old ring together. The hunk (one line, `dialogs.cpp:221`, the last statement of `drawPageChrome`):
+
+```
+-    drawPageClock(p);
++    if(!modalMessagePage())drawPageClock(p);
+```
+
+With it, the modal message page and the error-code page draw the bar's face only, and the D5 information
+page - which has no 1080p reference and keeps the old fit - still gets its page clock, so nothing becomes
+unused.
+
+### 14.3 Crop numbers (matched comparisons, `work/ab-compare.ts`)
+
+Same crop definitions as 13.5; the bracket rows are diagnostics this pass added, not catalogue regions.
+
+| state | crop | before | after | +hunk | verdict |
+|---|---|---|---|---|---|
+| page-network-test-error | frame 0,0,1920,1080 | 15.85 / 0.8051 | **21.09 / 0.9067** | 21.13 / 0.9070 | +5.24 dB, +0.102 SSIM; now PASS (18.00 / 0.850) |
+| page-network-test-error | back hint 1140,880,120,56 | 16.71 / 0.8358 | **21.36 / 0.9288** | 21.36 / 0.9288 | +4.65 dB; PASS (the offline wash-only test predicted 19.41) |
+| page-network-test-error | message body 700,470,520,100 | 9.26 / 0.2586 | 11.57 / 0.3275 | 11.57 / 0.3275 | contentDiffers (native text), +2.31 dB |
+| page-network-test-error | [info bar 1329,75,591,58] | 13.37 / 0.4370 | 13.89 / 0.7602 | 14.36 / 0.7782 | +0.52 / +0.32 as built, +0.99 / +0.34 with the hunk |
+| page-network-test-error | [clock text 1570,80,260,50] | 10.79 / 0.3152 | 10.66 / 0.5209 | 11.20 / 0.5547 | the old ring sits in this crop until the hunk |
+| page-network-test-error | [face 1760,80,70,60] | 10.30 / 0.2529 | 11.64 / 0.6216 | 14.26 / 0.7387 | +4.0 dB with the hunk; at the reference clock pin 16.67 / 0.7846 |
+| page-network-test-error | [plate left 1329,75,420,58] | 13.73 / 0.4368 | 13.65 / 0.7444 | 13.65 / 0.7444 | PSNR flat, +0.31 SSIM; the crop holds the clock string, which differs by pin |
+| page-network-connection-settings | frame | 15.93 / 0.8046 | **20.95 / 0.9049** | 20.99 / 0.9051 | +5.02 dB, +0.100 SSIM; PASS |
+| page-network-connection-settings | back hint | 16.72 / 0.8359 | **21.36 / 0.9288** | 21.36 / 0.9288 | +4.64 dB; PASS |
+| page-network-connection-settings | message body 500,460,900,110 | 9.73 / 0.3190 | 12.02 / 0.3910 | 12.02 / 0.3910 | contentDiffers, +2.29 dB |
+| page-network-connection-settings | [info bar] | 13.43 / 0.4401 | 13.87 / 0.7590 | 14.33 / 0.7764 | +0.44 / +0.32 as built |
+| page-network-connection-settings | [clock text] | 10.88 / 0.3213 | 10.64 / 0.5138 | 11.16 / 0.5462 | |
+| page-network-connection-settings | [face] | 10.34 / 0.2535 | 11.60 / 0.6238 | 14.06 / 0.7373 | |
+| page-network-status-list | frame | 17.49 / 0.8648 | 17.49 / 0.8648 | - | unchanged, byte-identical frame |
+| page-network-status-list | status rows | 12.52 / 0.6277 | 12.52 / 0.6277 | - | unchanged (contentDiffers) |
+| page-network-status-list | title rule | 22.16 / 0.9538 | 22.16 / 0.9538 | - | unchanged |
+| dialog-box | frame | 19.88 / 0.9013 | 19.88 / 0.9013 | - | unchanged to the score |
+| dialog-box | box plate / answers / footer | 12.10 / 0.3815, 21.64 / 0.9012, 22.25 / 0.9512 | identical | - | unchanged |
+
+The box frame's 72 differing pixels against the before capture are a 1-luma GPU jitter inside the box icon
+(x612..667, y523..558; 34 of them on an earlier pair of the same build), not this change: the box path
+draws no bar and no wash, and its three scored regions are identical to four decimals.
+
+The clock face at the reference's own pin. `parity.ts --capture --ui-clock 2026-10-28T10:05:00` against the
+hunk build puts the face at the console's time as well as its geometry:
+
+| crop | before | after (as built) | +hunk | +hunk and reference clock |
+|---|---|---|---|---|
+| info bar 1329,75,591,58 | 13.37 / 0.4370 | 13.89 / 0.7602 | 14.36 / 0.7782 | 15.11 / 0.8014 |
+| clock text 1570,80,260,50 | 10.79 / 0.3152 | 10.66 / 0.5209 | 11.20 / 0.5547 | 12.17 / 0.6250 |
+| face 1760,80,70,60 | 10.30 / 0.2529 | 11.64 / 0.6216 | 14.26 / 0.7387 | 16.67 / 0.7846 |
+
+The face's disc and ring, measured on that capture: ink x1774..1804, rows 88..118 (the frame's x1774..1805,
+rows 88..119), peak 255, ring 3 px on a 14.6 px line, disc median 11.3 against our 57.1 plate interior
+(the frame 14.8 against 44.4). Ours is 3.5 luma darker inside because the 0.8 black is composited over a
+plate interior 12.7 luma brighter than the console's; the disc is present and near-black in both.
+
+### 14.4 Verification
+
+| check | result |
+|---|---|
+| canonical gate `work/ab-layers.ts --capture --exe C:/dev/out/native-msgview/re-ps3-native.exe` | **PASS 6/6**, every layer delta +0.00 dB / +0.0000 SSIM (frame 18.76/0.8360, top background 21.06/0.9434, category icon row 21.62/0.9062, item label row 11.99/0.3895, clock text 11.41/0.4528, info bar 15.05/0.7667), text presence 1668 bright pixels (minimum 900) PASS |
+| rest frame, before vs after build | byte-identical: both SHA-256 `3823A9D4406567AF3E5A70614EBB180973F90E0B39C6563AE6DEB077261076AF`; the build's root frame did not move at all |
+| determinism, two `--render-clock 20` captures | both SHA-256 `37E2B590C42EF0E3F3601CA492221147C9874D2E3B1785E6237B616F2C0BBC14`, PSNR Infinity / SSIM 1.0000 - the same hash 13.6 recorded |
+| `work/parity.ts --capture --score --state page-network-test-error,page-network-connection-settings,page-network-status-list,dialog-box` | scorecard `out/parity/scorecards/scorecard-20261028-183459.md` (exe sha256 `203e431d...`); Tier A 4 pass, 3 cells B informative, 1 gating cell failure - the status-list frame, unchanged from before |
+
+| state | region | PSNR / SSIM | verdict |
+|---|---|---|---|
+| page-network-test-error | frame | 21.09 / 0.9067 | **PASS** (was FAIL 15.85 / 0.8051) |
+| | message body | 11.57 / 0.3275 | informative (contentDiffers) |
+| | back hint | 21.36 / 0.9288 | **PASS** (was FAIL 16.71 / 0.8358) |
+| page-network-connection-settings | frame | 20.95 / 0.9049 | **PASS** (was FAIL 15.93 / 0.8046) |
+| | message body | 12.02 / 0.3910 | informative |
+| | back hint | 21.36 / 0.9288 | **PASS** (was FAIL 16.72 / 0.8359) |
+| page-network-status-list | frame | 17.49 / 0.8648 | FAIL (18.00 / 0.850) - unchanged, the host-report row content |
+| | status rows | 12.52 / 0.6277 | informative (unchanged) |
+| | title rule | 22.16 / 0.9538 | PASS |
+| dialog-box | frame | 19.88 / 0.9013 | PASS (unchanged) |
+| | box plate | 12.10 / 0.3815 | informative (unchanged) |
+| | box answers | 21.64 / 0.9012 | PASS |
+| | box footer | 22.25 / 0.9512 | PASS |
+
+The parity run exits 1 on its one gating cell - the pre-existing status-list frame failure (observed again on the
+score pass over the same run, scorecard `scorecard-20261028-184737.md`); both message pages moved from a
+gating failure to a pass, and the table and box states did not move at all.
+
+All four checks were run on two builds: the deliverable one (above) and a rebuild after unrelated concurrent edits
+landed elsewhere in the tree (`view.cpp`/`view.h` unchanged between them; that rebuild is sha256
+`C88CFC827CC20144DEB114768D394B75222451FD02436C9F74CE2D6D40474C57`). Both produced the same gate layers, the same
+rest-frame hash, the same determinism hash and the same parity numbers, so none of these results is sensitive
+to the other files.
+
+### 14.5 Deltas this pass measured but did not land
+
+1. **A message page keeps the page behind it; this build draws no page at all.** Both message pages show
+   the Network Settings page still composited and heavily subdued - the focused category icon's toolbox at
+   x303/290, the wrench and globe at x250/470 and x310/520, the left triangle at 460/510, the raising row's
+   label at the focus slot, all at the same positions `page-settings-network` draws them. Measured peak
+   ratios against that page: **0.282** (toolbox), 0.326 (wrench/globe) and 0.228 (triangle) - i.e. a 0.4
+   content opacity under the 0.733 wash (0.4 x 0.733 = 0.293), the same 0.40 the settings band uses for the
+   page behind it. `view.cpp` gates the category loop and the columns block on `!messageScreen`, so this
+   build replaces the page instead of dimming it. The un-restored region (x180..920, y200..570, 13.2% of the
+   frame) measures MSE 987 against the frame's 504 in the after capture; matching it at the measured content
+   opacity is worth roughly +0.9 dB on the frame crop (the back-hint and body crops are outside it). It is a
+   structural change to what a message screen shows and needs its own verification on every route that can
+   raise a message page, so it is recorded rather than landed.
+2. **The old page clock draws beside the new face until the 14.2 hunk lands.** On the after build the two
+   faces are 16 px apart and the info-bar crop pays for it: 13.89 / 0.7602 as built against 14.36 / 0.7782
+   with the hunk (the face crop 11.64 -> 14.26). The crop numbers in 14.3 name both states.
+3. **The measured face is not lifted to the canonical root frame** (14.2): the root keeps its 2.7 px
+   ring and no disc, so the info-bar and clock-text gate layers stay at their recorded 15.05 / 11.41. Lifting
+   it means re-baselining those two layers and moving the rest frame, which this pass is not allowed to do.
+4. **The plate's nine-slice ramps are 17% weak** (0.293 against 0.351 on the message page; R12 measured the
+   same on the root). The bar's crop therefore scores 14.36 with the hunk rather than higher; a stronger
+   ramp is the next term in the info-bar layer, not this pass's.
+5. **The clock string is a capture pin, not a render.** The references show 10/28 10:00 AM (root) and
+   10/28 10:05 AM (message pages); the harness pins 10/25 12:32 PM. Scoring the hunk build at the
+   reference's own pin lifts the info bar 14.36 -> 15.11, the clock text 11.20 -> 12.17 and the face
+   14.26 -> 16.67 (14.3). The bar's remaining residual is the string and the hands' time, not its geometry.
+6. **A message page raised over a playing video keeps its old treatment.** The wash and the bar live in the
+   XMB branch of `drawScene` (media closed), because every measured message page is over the XMB; a message
+   over a video still draws the surface with no wash and no bar. No reference exists for that state, so
+   nothing was invented for it.
+
+### 14.6 Reproduction
+
+```
+build   & C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-msgview
+before  bun work\parity.ts --capture --state page-network-test-error,page-network-connection-settings,page-network-status-list,dialog-box --exe C:/dev/out/native-msgchrome/re-ps3-native.exe --out C:/dev/out/msgview/parity-before
+after   bun work\parity.ts --capture --state page-network-test-error,page-network-connection-settings,page-network-status-list,dialog-box --exe C:/dev/out/native-msgview/re-ps3-native.exe --out C:/dev/out/msgview/parity-after
+score   bun work\parity.ts --capture --score --state page-network-test-error,page-network-connection-settings,page-network-status-list,dialog-box --exe C:/dev/out/native-msgview/re-ps3-native.exe
+crop    bun work\ab-compare.ts out\parity-references\page-network-test-error__original__day__1080p.png <frame.png> 1140,880,120,56
+        bun work\ab-compare.ts out\parity-references\page-network-test-error__original__day__1080p.png <frame.png> 1329,75,591,58
+gate    bun work\ab-layers.ts --capture --exe C:/dev/out/native-msgview/re-ps3-native.exe
+det     bun work\ab-layers.ts --capture --render-clock 20 --exe C:/dev/out/native-msgview/re-ps3-native.exe   (twice)
+```
+
+The measuring scripts for 14.1-14.3 (patch means, the channel ratios, the dim fit, the face's radial
+profiles and polar disc sample, the ghost-page ratios) are in `C:\dev\out\msgview\` (`dimcheck.py`,
+`gain2.py`, `face_ref2.py`, `faceverify.py`, `disc.py`, `ghost.py`), outside the repo. The after frames are
+in `C:\dev\out\msgview\parity-after\run-20261028-182902\`, the hunk's in
+`C:\dev\out\msgview\parity-hunk\run-20261028-183634\` and `parity-hunk-clock\run-20261028-183827\`.
