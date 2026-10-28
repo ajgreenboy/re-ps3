@@ -48,7 +48,6 @@ struct FontRaster::Impl {
         QString path;
         QByteArray head;
         QByteArray cmap;
-        QString family;
         FT_F26Dot6 size64 = 0;
         QPoint delta26_6; // transform currently installed on the face, in 1/64 pixel
     };
@@ -170,7 +169,6 @@ bool FontRaster::configure(const QString& fontDirectory)
         entry.bytes = std::move(bytes);
         entry.face = face;
         entry.path = info.absoluteFilePath();
-        if(face->family_name)entry.family = QString::fromUtf8(face->family_name);
         entry.head = sfntTable(face, FT_MAKE_TAG('h', 'e', 'a', 'd'));
         entry.cmap = sfntTable(face, FT_MAKE_TAG('c', 'm', 'a', 'p'));
         if (entry.head.isEmpty() || entry.cmap.isEmpty()) {
@@ -187,18 +185,6 @@ bool FontRaster::configure(const QString& fontDirectory)
 QString FontRaster::version() const
 {
     return impl_ ? impl_->freetypeVersion : QString();
-}
-
-QStringList FontRaster::families() const
-{
-    // Family names as FreeType reads them, i.e. the same name table Qt's addApplicationFont registered.
-    QStringList result;
-    if (!impl_)
-        return result;
-    for (const Impl::Face& face : impl_->faces)
-        if (!face.family.isEmpty() && !result.contains(face.family))
-            result.append(face.family);
-    return result;
 }
 
 QString FontRaster::sourceFor(const QRawFont& font) const

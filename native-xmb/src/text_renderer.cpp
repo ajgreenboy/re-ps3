@@ -5,7 +5,6 @@
 #include <QTextOption>
 #include <QVector2D>
 #include <QDebug>
-#include <QElapsedTimer>
 #include <QFontMetricsF>
 #include <QVector4D>
 #include <algorithm>
@@ -199,46 +198,8 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
     drawImpl(gl,painter,rect,text,requested,colour,flags,*found,labelClass,glow,shadow,ink);
 }
 
-TextRenderer::~TextRenderer() { joinWarm(); }
-
-void TextRenderer::joinWarm() {
-    if(warmThread_.joinable())warmThread_.join();
-}
-
-// Shapes one short string per firmware family with the same QFont path the draws use. The result is
-// discarded: this only resolves Qt's application-font engines and shaper startup, a fixed one-time cost
-// of the first real layout (measured ~150 ms with any firmware face; a system face costs under 1 ms and
-// a second firmware family is under 1 ms, so the cost is process-global). No renderer state is touched,
-// so the draws that follow are unchanged; only when the cost is paid moves, off the first paint.
-static void warmFontStackStatic(const QStringList& families) {
-    const auto shape=[&](const QString& family) {
-        QFont font(family);font.setStyleName(QStringLiteral("Regular"));font.setPixelSize(42);
-        font.setStyleStrategy(QFont::PreferAntialias);font.setHintingPreference(QFont::PreferNoHinting);
-        QTextLayout lay(QStringLiteral("Game"),font);
-        QTextOption option;option.setWrapMode(QTextOption::NoWrap);lay.setTextOption(option);
-        lay.beginLayout();
-        auto line=lay.createLine();
-        if(line.isValid()){line.setLineWidth(1e9);line.setPosition({0,0});}
-        lay.endLayout();
-    };
-    for(const auto& family:families)if(!family.isEmpty())shape(family);
-}
-
-
 bool TextRenderer::init(QOpenGLFunctions_3_3_Core& gl,const QString& fontDirectory) {
-    joinWarm(); // a re-created context must not reuse a joinable std::thread
-    profile_=qEnvironmentVariableIntValue("XMB_TEXT_PROFILE")!=0;
-    // The startup budget's own split (XMB_TEXT_PROFILE=1): when init starts, how much of it is the font
-    // configure, and how much the three shader programs. Diagnostic only; no timer runs on the shipped path.
-    QElapsedTimer profileClock,profileTotal;
-    if(profile_){profileClock.start();profileTotal.start();qInfo().noquote()<<"text profile: init start";}
     useFreeType_=raster_.configure(fontDirectory) && !qEnvironmentVariableIntValue("XMB_TEXT_QT");
-    const qint64 profileFontNs=profile_?profileClock.nsecsElapsed():0;
-    // Start the font-stack warm-up before the shader programs, so its one-time cost overlaps the rest of
-    // GL init and the scene work before the first text draw. XMB_TEXT_WARM=0 restores the synchronous
-    // first-draw cost for the A/B.
-    if(useFreeType_ && qEnvironmentVariable("XMB_TEXT_WARM")!=QStringLiteral("0"))
-        warmThread_=std::thread([families=raster_.families()]{ warmFontStackStatic(families); });
     // Per-phase coverage tiles are on by default: two phases per layer pixel on each axis, i.e. four
     // positions per output pixel. XMB_TEXT_PHASE=0 restores whole-output-pixel snapping.
     const bool phasesEnabled=qEnvironmentVariableIsSet("XMB_TEXT_PHASE")
@@ -336,7 +297,6 @@ void main(){
     result=vec4(tint.rgb*fill+rgb*(1.-fill),fill+halo*(1.-fill));
 }
 )";
-    if(profile_)profileClock.restart();
     if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) ||
        !program_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment) || !program_.link()) {
         qWarning().noquote()<<"text atlas:"<<program_.log();return false;
@@ -363,8 +323,6 @@ void main(){
     result=vec4(tint.rgb*fill,fill);
 }
 )";
-    const qint64 profileShaderNs=profile_?profileClock.nsecsElapsed():0;
-    if(profile_)profileClock.restart();
     maskAvailable_=maskProgram_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) &&
         maskProgram_.addShaderFromSourceCode(QOpenGLShader::Fragment,maskFragment) && maskProgram_.link() &&
         compositeProgram_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) &&
@@ -373,9 +331,7 @@ void main(){
     if(!maskAvailable_)
         qWarning().noquote()<<"text mask:"<<maskProgram_.log()<<compositeProgram_.log()
             <<"- coverage union disabled, per-glyph alpha-over stays";
-    const qint64 profileMaskShaderNs=profile_?profileClock.nsecsElapsed():0;
-    if(profile_)profileClock.restart();
-    gl.glGenVertexArrays(1,&vao_);gl.glGenBuffers(1,&vbo_);
+    gl.glGenVertexArrays(1,&vao_);gl.glGenBuffers(1,&vbo_);gl.glBindVertexArray(vao_);
     gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);
     gl.glEnableVertexAttribArray(0);gl.glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(Vertex),nullptr);
     gl.glEnableVertexAttribArray(1);gl.glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(2*sizeof(float)));
@@ -389,19 +345,9 @@ void main(){
                :QString("unavailable"))
            <<"shadow:"<<(shadowAttenuate_?QString("attenuate, fitted (default)")
                                           :QString("premultiplied colour/alpha (XMB_TEXT_SHADOW=premultiplied)"));
-    if(profile_) {
-        const auto ms=[](qint64 ns){return QString::number(double(ns)/1e6,'f',3);};
-        const qint64 totalNs=profileTotal.nsecsElapsed();
-        qInfo().noquote()<<QString("text profile: init total %1 ms (font configure %2 ms, atlas shader %3 ms, "
-            "mask shaders %4 ms, vao %5 ms)")
-            .arg(ms(totalNs)).arg(ms(profileFontNs)).arg(ms(profileShaderNs)).arg(ms(profileMaskShaderNs))
-            .arg(ms(totalNs-profileFontNs-profileShaderNs-profileMaskShaderNs));
-    }
     return true;
 }
 void TextRenderer::release(QOpenGLFunctions_3_3_Core& gl) {
-    joinWarm();
-    if(profile_)profileFlush("release");
     for(const auto& page:pages_)gl.glDeleteTextures(1,&page.texture);
     pages_.clear();faces_.clear();layouts_.clear();
     // A new context re-reads the material objects through the caller's Materials, so the cached copies
@@ -415,7 +361,6 @@ void TextRenderer::release(QOpenGLFunctions_3_3_Core& gl) {
     compositeProgram_.removeAllShaders();ready_=false;maskLogged_=false;
 }
 void TextRenderer::beginFrame(QOpenGLFunctions_3_3_Core& gl,const QSize& target,qreal rasterScale,int pixelGrid) {
-    if(profile_ && profileGlyphs_)profileFlush("frame");
     target_=target;pixelGrid_=std::max(1,pixelGrid);
     rasterScale=std::max(.1,rasterScale);
     // Clear on resize/scale or a full atlas, at a frame boundary rather than
@@ -442,8 +387,6 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
     const auto found=f.glyphs.constFind(key);
     if(found!=f.glyphs.cend())return *found;
     Glyph value;value.phaseX=phaseX;value.phaseY=phaseY;
-    QElapsedTimer profileClock;
-    if(profile_)profileClock.start();
     // libfontFT.prx cellFontFT_65E27CB3 @ 0x6aa4 loads outlines with flags 10, then uses
     // FT_Outline_Get_Bitmap. FT_RENDER_MODE_NORMAL uses FreeType's same grayscale outline rasterizer.
     // The delta is the masked 26.6 pen phase that the same function feeds FT_Set_Transform.
@@ -458,7 +401,6 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
     for(int y=0;y<raw.height();++y)for(int x=0;x<raw.width();++x)
         coverage.scanLine(y)[x]=raw.format()==QImage::Format_Alpha8 || raw.format()==QImage::Format_Grayscale8
             ?raw.constScanLine(y)[x]:uchar(raw.hasAlphaChannel()?raw.pixelColor(x,y).alpha():raw.pixelColor(x,y).red());
-    if(profile_){profileRasterNs_+=profileClock.nsecsElapsed();profileClock.restart();}
     const auto tile=tileFor(coverage,pad,std::max(.5,haloSigma*rasterScale_));
     // Tight ink bounds (nonzero red coverage only) in tile pixels. The halo padding is excluded so the
     // overlap test asks whether two glyphs can actually share a covered layer pixel, not whether their
@@ -470,7 +412,6 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
             if(row[x]){inkBounds=inkBounds.united(QRect(x,y,1,1));}
     }
     if(!inkBounds.isEmpty())value.ink=inkBounds.adjusted(pad,pad,pad,pad);
-    if(profile_){profileHaloNs_+=profileClock.nsecsElapsed();profileClock.restart();}
     if(tile.width()>atlasSize || tile.height()>atlasSize)return f.glyphs.insert(key,value).value();
     // QPainter's image engine may leave sub-rectangle unpack state behind. Reset
     // it before allocation as well as subimage uploads; otherwise glyph spans vanish.
@@ -494,7 +435,6 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
             }
             return f.glyphs.insert(key,value).value();
         }
-        if(profile_)profileClock.restart();
         Page p;gl.glGenTextures(1,&p.texture);gl.glBindTexture(GL_TEXTURE_2D,p.texture);
         // Empty areas and gutters must be zero for bilinear sampling at tile edges.
         QImage empty(atlasSize,atlasSize,QImage::Format_RGBA8888);empty.fill(Qt::transparent);
@@ -502,7 +442,6 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
         gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
         gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
         pages_.push_back(p);
-        if(profile_){profilePageNs_+=profileClock.nsecsElapsed();++profilePages_;profileClock.restart();}
     }
     auto& p=pages_.back();value.page=int(pages_.size())-1;value.atlas={p.x,p.y,tile.width(),tile.height()};
     const auto bounds=f.font.boundingRect(index);
@@ -512,16 +451,13 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
     gl.glPixelStorei(GL_UNPACK_ROW_LENGTH,0);
     gl.glPixelStorei(GL_UNPACK_SKIP_PIXELS,0);gl.glPixelStorei(GL_UNPACK_SKIP_ROWS,0);
     gl.glTexSubImage2D(GL_TEXTURE_2D,0,p.x,p.y,tile.width(),tile.height(),GL_RGBA,GL_UNSIGNED_BYTE,tile.constBits());
-    if(profile_){profileUploadNs_+=profileClock.nsecsElapsed();++profileGlyphs_;}
     p.x+=tile.width()+1;p.rowHeight=std::max(p.rowHeight,tile.height());
     return f.glyphs.insert(key,value).value();
 }
 TextRenderer::Layout& TextRenderer::layout(const QString& text,const QFont& font,qreal width,int flags) {
     const QString display=FontRaster::mapSymbols(text);
     const QString key=font.key()+QChar(0x1f)+QString::number(width,'f',3)+':'+QString::number(flags)+QChar(0x1f)+display;
-    joinWarm(); // the one-time Qt font-stack cost, if the worker has not finished it yet
     auto found=layouts_.find(key);if(found!=layouts_.end()){found->used=++serial_;return *found;}
-    QElapsedTimer shapeClock;if(profile_)shapeClock.start();
     if(layouts_.size()>=maxLayouts) {
         auto oldest=layouts_.begin();for(auto it=layouts_.begin();it!=layouts_.end();++it)if(it->used<oldest->used)oldest=it;
         layouts_.erase(oldest);
@@ -540,21 +476,11 @@ TextRenderer::Layout& TextRenderer::layout(const QString& text,const QFont& font
             line.setLineWidth(std::max(1.,width));line.setPosition({0,value.height});value.height+=line.height();any=true;
         }
         shaped.endLayout();
-        if(profile_)profileShapeLineNs_+=shapeClock.nsecsElapsed();
         if(!any)value.height+=QFontMetricsF(font).height();
         for(const auto& run:shaped.glyphRuns()) {
             const int f=face(run.rawFont());const auto indices=run.glyphIndexes();const auto positions=run.positions();
             for(int i=0;i<indices.size();++i)value.glyphs.push_back({f,indices[i],positions[i]});
         }
-    }
-    if(profile_) {
-        const qint64 shapeNs=shapeClock.nsecsElapsed();
-        if(shapeNs>=2000000)qInfo().noquote()<<QString("text profile: layout %1 ms for %2 px \"%3\" "
-            "(lines+layout %4 ms, glyph runs %5 ms)")
-            .arg(double(shapeNs)/1e6,0,'f',2).arg(font.pixelSize()).arg(display.left(28))
-            .arg(double(profileShapeLineNs_)/1e6,0,'f',2)
-            .arg(double(shapeNs-profileShapeLineNs_)/1e6,0,'f',2);
-        profileShapeLineNs_=0;
     }
     return layouts_.insert(key,std::move(value)).value();
 }
@@ -563,8 +489,6 @@ void TextRenderer::drawImpl(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,cons
                             const Materials::TextMaterial& material,const char* labelClass,
                             qreal glow,bool shadow,bool ink) {
     if(!ready_ || text.isEmpty() || colour.alpha()==0 || painter.opacity()<=0)return;
-    QElapsedTimer profileDrawClock;
-    if(profile_){profileDrawClock.start();++profileDraws_;}
     // The material this string actually draws with, and the shadow it reduces to. The material is
     // traced once per surface before any GL state changes, so the log's first line is a complete
     // description of the shadow the following draw applies.
@@ -581,7 +505,6 @@ void TextRenderer::drawImpl(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,cons
     // rasteriser paths must stay unhinted or stems snap differently from the reference.
     font.setHintingPreference(QFont::PreferNoHinting);
     auto& shaped=layout(text,font,rect.width()*rasterScale_,flags);
-    if(profile_)profileShapeNs_+=profileDrawClock.nsecsElapsed();
     qreal offset=0;if(flags&Qt::AlignVCenter)offset=(rect.height()*rasterScale_-shaped.height)/2;
     else if(flags&Qt::AlignBottom)offset=rect.height()*rasterScale_-shaped.height;
     const auto transform=painter.combinedTransform();
@@ -615,7 +538,6 @@ void TextRenderer::drawImpl(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,cons
         const qreal penY=transform.map(QPointF(0,rect.top()+(placed.position.y()+offset)/rasterScale_)).y();
         const auto& g=glyph(gl,placed.face,placed.index,
                             phases_?penPhase(penX):0,phases_?penPhase(penY):0);if(g.page<0)continue;
-        if(profile_)++profileQuads_;
         // The unphased origin is the same layer-pixel tile origin this renderer used before per-phase
         // tiles existed: the whole tile is snapped to the output-pixel grid, which is what the
         // firmware's ((phase+pen)+0x3f)>>6 blit origin does. A phase-shifted tile instead sits on the
@@ -659,9 +581,7 @@ void TextRenderer::drawImpl(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,cons
     if(unionNeeded) {
         QRect content;
         for(const auto& box:boxBuffer_)content=content.united(box.toAlignedRect());
-        QElapsedTimer profileMaskClock;bool haveMask=false;
-        if(!content.isEmpty()){if(profile_)profileMaskClock.start();haveMask=ensureMask(gl);if(profile_)profileMaskNs_+=profileMaskClock.nsecsElapsed();}
-        if(haveMask) {
+        if(!content.isEmpty() && ensureMask(gl)) {
             // The shadow samples the same mask displaced by (shadowDx, shadowDy) layer px, so the
             // cleared region is the ink box grown by that displacement on every side (a cleared edge
             // texel is still zero) and the composite quad is the ink box plus the displaced copy.
@@ -796,29 +716,8 @@ void TextRenderer::drawImpl(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,cons
         program_.release();
     }
     gl.glBindVertexArray(0);gl.glBindBuffer(GL_ARRAY_BUFFER,0);gl.glBindTexture(GL_TEXTURE_2D,0);
-    if(profile_){const qint64 drawNs=profileDrawClock.nsecsElapsed();profileDrawNs_+=drawNs;
-        profileSlowestDrawNs_=std::max(profileSlowestDrawNs_,drawNs);}
     if(!checked_ && qEnvironmentVariableIntValue("XMB_TEXT_CHECK")){checked_=true;selfCheck(gl);}
     painter.endNativePainting();
-}
-
-void TextRenderer::profileFlush(const char* where) {
-    // One line per frame that rasterised tiles: where the glyph cost actually goes. shape/state are
-    // the parts of the same draw calls that are not glyph work (QTextLayout shaping, GL state,
-    // painter begin/endNativePainting, glBufferData, the driver's first use of each program).
-    if(!profile_ && !profileGlyphs_)return;
-    const auto ms=[](qint64 ns){return QString::number(double(ns)/1e6,'f',2);};
-    const qint64 glyphNs=profileRasterNs_+profileHaloNs_+profilePageNs_+profileUploadNs_+profileMaskNs_;
-    qInfo().noquote()<<QString("text profile: %1 %2 tile(s) in %3 draw(s), %4 glyph quads: raster %5 ms, "
-        "halo %6 ms, page init %7 ms (%8 page(s)), upload %9 ms, mask target %10 ms | shaping %11 ms, "
-        "draw total %12 ms (slowest draw %13 ms, non-glyph %14 ms)")
-        .arg(where).arg(profileGlyphs_).arg(profileDraws_).arg(profileQuads_).arg(ms(profileRasterNs_))
-        .arg(ms(profileHaloNs_)).arg(ms(profilePageNs_)).arg(profilePages_).arg(ms(profileUploadNs_))
-        .arg(ms(profileMaskNs_)).arg(ms(profileShapeNs_)).arg(ms(profileDrawNs_))
-        .arg(ms(profileSlowestDrawNs_)).arg(ms(profileDrawNs_-glyphNs-profileShapeNs_));
-    profileRasterNs_=profileHaloNs_=profileUploadNs_=profilePageNs_=profileMaskNs_=0;
-    profileGlyphs_=profilePages_=profileDraws_=profileQuads_=0;
-    profileShapeNs_=profileDrawNs_=profileSlowestDrawNs_=0;
 }
 
 bool TextRenderer::ensureMask(QOpenGLFunctions_3_3_Core& gl) {
@@ -1134,8 +1033,6 @@ void TextRenderer::selfCheck(QOpenGLFunctions_3_3_Core& gl) {
                         if(gpu!=cpu)++mismatch;
                         if(cpu!=over.constScanLine(y)[x])++differ;
                     }
-
-
                     report("union-mask",mismatch==0 && differ>0,
                            QString("GPU GL_MAX mask == keep-larger helper on %1 px; alpha-over differs at %2 px")
                                .arg(probeBox.width()*probeBox.height()).arg(differ));

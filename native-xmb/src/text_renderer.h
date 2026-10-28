@@ -9,7 +9,6 @@
 #include <QRawFont>
 #include <QVector>
 #include <memory>
-#include <thread>
 #include <vector>
 #include "font_raster.h"
 #include "rco_objects.h"   // Materials::TextMaterial: the firmware Text object's own material
@@ -32,7 +31,6 @@ public:
         qreal ellipsisX = 0; // pen x, relative to the string origin, where U+2026 is drawn
         bool elided = false;
     };
-    ~TextRenderer();
     bool init(QOpenGLFunctions_3_3_Core& gl,const QString& fontDirectory);
     void release(QOpenGLFunctions_3_3_Core& gl);
     // target: the layer's pixel size; rasterScale: layer pixels per 1920x1080 unit; pixelGrid: layer pixels per
@@ -174,20 +172,5 @@ private:
     // worst case is 4x the glyph tiles; the firmware's 26.6 pen has a 1/64 phase and this is the
     // quantisation the 2x2 resolve can actually express.
     static constexpr int phaseSteps=2;
-    // XMB_TEXT_PROFILE=1 startup budget instrumentation (audit/VERIFICATION-HARNESS.md 5.4a).
-    // Counters only; every timer call sits behind the flag, so the shipped path pays nothing and the
-    // rendered output is unchanged. One line per frame that rasterised a tile, plus the init split.
-    void profileFlush(const char* where);
-    bool profile_=false;
-    qint64 profileRasterNs_=0,profileHaloNs_=0,profileUploadNs_=0,profilePageNs_=0,profileMaskNs_=0;
-    qint64 profileDrawNs_=0,profileShapeNs_=0,profileSlowestDrawNs_=0;
-    qint64 profileShapeLineNs_=0;
-    int profileGlyphs_=0,profilePages_=0,profileDraws_=0,profileQuads_=0;
-    // The Qt font stack pays a one-time ~150 ms cost on the first QTextLayout that uses an application
-    // (firmware) font - measured, audit/VERIFICATION-HARNESS.md 5.4a. That cost is process-global, not
-    // per family, so it is warmed on a worker thread while the rest of GL init runs, and the first real
-    // shaping joins it. XMB_TEXT_WARM=0 restores the synchronous first-draw cost for the A/B.
-    void joinWarm();
-    std::thread warmThread_;
 };
 }

@@ -30,7 +30,7 @@
       "description": "Whole 1920x1080 frame (aggregate; not a layer by itself)",
       "crop": [0, 0, 1920, 1080],
       "baseline": { "psnr": 18.2027, "ssim": 0.8388 },
-      "captureBaseline": { "psnr": 18.92, "ssim": 0.8553 }
+      "captureBaseline": { "psnr": 18.29, "ssim": 0.8342 }
     },
     {
       "name": "top background",
@@ -44,28 +44,28 @@
       "description": "Full-width band across the category icons and their spacing",
       "crop": [0, 240, 1920, 120],
       "baseline": { "psnr": 20.1304, "ssim": 0.9022 },
-      "captureBaseline": { "psnr": 20.90, "ssim": 0.8982 }
+      "captureBaseline": { "psnr": 20.93, "ssim": 0.8990 }
     },
     {
       "name": "item label row",
       "description": "Focused item row: icon plus glowing label. Content still differs from the reference, so this is a regression gate, not a fidelity pass",
       "crop": [400, 425, 800, 100],
       "baseline": { "psnr": 11.8619, "ssim": 0.3791 },
-      "captureBaseline": { "psnr": 12.04, "ssim": 0.3860 }
+      "captureBaseline": { "psnr": 11.95, "ssim": 0.3925 }
     },
     {
       "name": "clock text",
       "description": "Digits of the top-right date/time only",
       "crop": [1570, 80, 260, 50],
       "baseline": { "psnr": 10.3272, "ssim": 0.3504 },
-      "captureBaseline": { "psnr": 13.64, "ssim": 0.5128 }
+      "captureBaseline": { "psnr": 11.39, "ssim": 0.4500 }
     },
     {
       "name": "info bar",
       "description": "Top-right info bar: translucent band, border and analog clock icon, including its text",
       "crop": [1329, 75, 591, 58],
       "baseline": { "psnr": 13.3995, "ssim": 0.4973 },
-      "captureBaseline": { "psnr": 17.61, "ssim": 0.8244 }
+      "captureBaseline": { "psnr": 14.98, "ssim": 0.7639 }
     }
   ],
   "stateSelfBaseline": {
