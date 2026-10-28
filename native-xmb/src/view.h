@@ -16,6 +16,7 @@
 #include <array>
 #include <functional>
 #include <QDateTime>
+#include <QSet>
 #include <QOpenGLWidget>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
@@ -138,6 +139,31 @@ private:
     double depthPosition_=0;
     int previousDepth_=0;
     void syncColumns();
+    // ---- Phase 11.3: the settings choice band -------------------------------------------------------
+    // The committed choice model (settings_menu.h) owns the lists; the draw pass needs only the
+    // firmware's own labels in their authored order, and each item's value so the row the model has
+    // selected can be found again when the RCO's authored order differs from choices()'s (Date Format
+    // and Time Format are authored in another order - SETTINGS 11.3/11.6). Resolved once per process,
+    // on the first settings choice that draws, and cached by the Preferences key the row writes.
+    // `source` says where the labels came from: "rco" (the firmware's own page), "capture" (Theme, whose
+    // RCO page is empty and whose labels are the 2026-10-28 capture's), "native" (this build's list for
+    // a row with no firmware page) or "none" (no page at all). Only rco/capture draw the band; the rest
+    // keep this build's options panel, with a logged line, so no function is lost.
+    struct ChoiceBand {
+        QString setting,pageId,rowId,rcoPage,source,note;
+        QStringList labels;
+        QVector<QVariant> values;
+        QVector<bool> writable;   // false: a firmware item this build cannot commit yet
+        bool scrollable=false;
+    };
+    QHash<QString,ChoiceBand> choiceBands_;
+    QSet<QString> choiceBandsLogged_;
+    bool choiceBandsBuilt_=false;
+    const ChoiceBand* choiceBandFor(const QString& setting);
+    // The drawn row that owns the model's selection: the item whose value the model would commit (so the
+    // focused label and the committed value cannot disagree), else the item the row's own displayed value
+    // names (the time zone), else the model's position.
+    int choiceBandFocus(const ChoiceBand& band,const QVector<Entry>& model,int selection,const QString& currentText) const;
     QImage mediaFrame_;
     PhotoViewport photoViewport_;
     MediaControls mediaControls_;

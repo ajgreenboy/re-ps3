@@ -2,6 +2,7 @@
 #include "app_editor.h"
 #include "host.h"
 #include "pad.h"
+#include "settings_menu.h"
 #include <QPainter>
 #include <QKeyEvent>
 #include <QAbstractNativeEventFilter>
@@ -1109,6 +1110,122 @@ void View::drawSubtitle(QPainter& p,const QString& cue) {
         p.drawText(band.translated(offset),flags,cue);
     p.setPen(fill);p.drawText(band,flags,cue);
 }
+namespace {
+// --- The firmware band (Phase 11.3) -----------------------------------------------------------------
+// One drawing, two parameter sets. On the console a settings choice list and the item options menu are
+// the same full-height right-hand band over the page (SETTINGS 9.3a: the band is the firmware's, not
+// this build's); they differ in their edge, their row pitch and where their rows sit. Every number
+// below is measured on the captured frame named under each set, and the fill stops are the band's own
+// white alpha sampled on a row where the page behind is black, so the luma is the alpha
+// (audit/SETTINGS-FIRMWARE.md 13.3 records the profiles and the two frame references).
+struct BandStop { double at; int alpha; };   // `at` is a fraction of x0..fadeEnd
+struct PanelBand {
+    bool firmware=false;      // false: this build's earlier options panel, unchanged
+    double x0=1330.;          // settled left edge of the fill
+    double fadeEnd=1920.;     // geometric zero of the fill
+    double pitch=40.;         // row pitch
+    bool fixedRows=false;     // rows are anchored at rowCentre and do not travel with focus
+    double rowCentre=505.;    // fixed rows: row 0's text centre; scrolling list: the focus row's centre
+    double labelInset=16.;    // row text left = x0 + labelInset
+    double contentDim=1.;     // brightness of the page the band covers, at rest (measured)
+    const BandStop* stops=nullptr;
+    int stopCount=0;
+};
+// settings/screensaver-list-rest.png, y=100 (the page behind is black there, so the luma is the fill's
+// alpha), sampled column by column: 0 at <=1259, 15 at 1260 (the plane's antialiased edge), 32 at 1261
+// and 34 at 1262 (its 2 px bright step), 23 at 1263, 27 at 1265, 37 at 1270, 45 at 1275, 50 at 1280,
+// 57 at 1290, 60 at 1300, 61 across 1303-1330, 60 at 1340, 53 at 1400, 45 at 1450, 37 at 1500, 25 at
+// 1550, 9 at 1600, 2 at 1650, 0 at 1690. The committed hunk's 0/.005 = 0/60 stops would put 60 at x1262
+// and over-brighten 1263-1299 by up to 35 luma; the measured profile is used instead and the
+// correction is dated in SETTINGS 13.3.
+const BandStop kChoiceBandStops[]={
+    {0.,15},{.00233,32},{.00465,34},{.00698,23},{.01163,27},{.02326,37},{.03488,45},{.04651,50},
+    {.06977,57},{.09302,60},{.1,61},{.13953,61},{.16279,61},{.18605,60},{.32558,53},{.44186,45},
+    {.55814,37},{.67442,25},{.7907,9},{.90698,2},{1.,0}};
+// dialogs/options-open-01.png, y=100, the same column-by-column read: 15 at 1320, 34 at 1322 (the step),
+// 25 at 1324, 30 at 1326, 38 at 1330, 47 at 1336, 51 at 1340, 56 at 1346, 59 at 1352, 61 at 1360,
+// 62 across 1366-1388, 61 to 1396, 60 at 1400, 58 at 1420, 55 at 1450, 48 at 1500, 39 at 1550, 28 at
+// 1600, 12 at 1650, 4 at 1690, 2 at 1700, 0 at 1742.
+const BandStop kOptionsBandStops[]={
+    {0.,15},{.00474,34},{.00948,25},{.01422,30},{.0237,38},{.03791,47},{.04739,51},{.06161,56},
+    {.07583,59},{.09479,61},{.109,62},{.16588,61},{.18957,60},{.23697,58},{.30806,55},{.42654,48},
+    {.54502,39},{.66351,28},{.78199,12},{.87678,4},{.90047,2},{1.,0}};
+// The settings choice list: SETTINGS 9.1/U2 (left edge 1260, 40 px pitch, the focused item centred on
+// the 505 focus row, item text at 1276, no check and no dot) and 11.6 (the fill's zero at 1690). The page
+// behind renders at 0.52 of its own brightness while the band is up: the parent's white text reads 255
+// with no band and 136 on batch 1 (0.533) and 131 on the batch-2 Theme band (0.513), while 12.3's
+// Screensaver still reads 104 (0.408) - a measured bracket, so 0.52 is a fit inside it. The category band
+// and the background are bit-identical with and without the band (the briefcase icon reads 123.2 vs
+// 123.1 luma), so the dim belongs to the page and not to a plate over the frame (SETTINGS 13.2).
+const PanelBand kChoiceBand{.firmware=true,.x0=1260.,.fadeEnd=1690.,.pitch=40.,.fixedRows=false,
+    .rowCentre=505.,.labelInset=16.,.contentDim=.52,.stops=kChoiceBandStops,
+    .stopCount=int(std::size(kChoiceBandStops))};
+// The item options menu: ITEM-MENU-INFO-FIRMWARE E1 measures baselines 560/598/636 at a 38 px pitch and
+// row text at 1334. E1's band numbers were approximate ("edge ~1330, fading to nothing by ~1690"); the
+// frame's own columns are exact - the first lit column is 1320 (a 2 px step, 15 at 1320 and 34 at 1322),
+// the fill peaks at 62 and the last lit column is 1741 - so the measured edge and end are used, and the
+// text column stays at E1's 1334 (inset 14 from the measured edge, not the 4 the approximate 1330 would
+// give). The rows do not scroll (the firmware's menu carries no scroll object) and are anchored on the
+// first baseline; drawing centres the em box 8 px above that baseline, which is the offset measured
+// between the rect centre and the ink bottom on this build's capture (SETTINGS 13.5).
+const PanelBand kOptionsBand{.firmware=true,.x0=1320.,.fadeEnd=1742.,.pitch=38.,.fixedRows=true,
+    .rowCentre=552.,.labelInset=14.,.contentDim=.545,.stops=kOptionsBandStops,
+    .stopCount=int(std::size(kOptionsBandStops))};
+}
+const View::ChoiceBand* View::choiceBandFor(const QString& setting) {
+    if(setting.isEmpty())return nullptr;
+    if(!choiceBandsBuilt_) {
+        // One read of the committed choice model per process (settings_menu.h): every settings page's
+        // choice rows with the firmware's own labels, order and values. The model reads
+        // sysconf_plugin.rco once and only on a run that draws a choice list, which is why this is lazy
+        // rather than part of start-up.
+        choiceBandsBuilt_=true;
+        int lists=0,items=0;
+        const auto catalogue=settingsChoiceCatalogue(assets_);
+        for(const auto& list:catalogue) {
+            if(list.setting.isEmpty()||list.items.isEmpty()||choiceBands_.contains(list.setting))continue;
+            ChoiceBand band;
+            band.setting=list.setting;band.pageId=list.pageId;band.rowId=list.rowId;
+            band.rcoPage=list.rcoPage;band.source=list.source;band.note=list.note;
+            band.scrollable=list.scrollable;
+            for(const auto& item:list.items) {
+                band.labels<<item.label;band.values<<item.value;band.writable<<item.writes;
+            }
+            choiceBands_.insert(list.setting,band);++lists;items+=int(band.labels.size());
+        }
+        qInfo().noquote()<<QStringLiteral("view: settings choice model -> %1 lists, %2 items (labels from the firmware's own pages)")
+            .arg(lists).arg(items);
+    }
+    const auto found=choiceBands_.constFind(setting);
+    return found==choiceBands_.cend()?nullptr:&*found;
+}
+int View::choiceBandFocus(const ChoiceBand& band,const QVector<Entry>& model,int selection,
+                          const QString& currentText) const {
+    const int count=int(band.labels.size());
+    if(count<=0)return 0;
+    if(model.isEmpty())return 0;
+    const int picked=std::clamp(selection,0,int(model.size())-1);
+    // (1) The model's selected item, by the value it commits. This is what keeps the focused label and
+    // the committed value paired when the RCO's authored order differs from choices()'s (Date Format and
+    // Time Format: SETTINGS 11.3/11.6), and it is also the resting focus, because openChoices() starts
+    // the page's selection on the current value.
+    for(int i=0;i<count;++i)
+        if(band.writable.value(i) && choiceValueMatches(model[picked].option,band.values.value(i)))return i;
+    // (2) A row whose stored value is not one of the model's own values - the time zone, whose firmware
+    // items are GMT-offset tokens while the store holds a host IANA id or "System". The row's own
+    // displayed value names the current item; the model's moves then move the drawn focus from there.
+    int rest=-1;
+    if(!currentText.isEmpty())
+        for(int i=0;i<count;++i)if(band.labels.value(i)==currentText){rest=i;break;}
+    if(rest>=0) {
+        int dot=-1;
+        for(int i=0;i<int(model.size());++i)
+            if(shell_.valueText(model[i])==QString(QChar(0x25CF))){dot=i;break;}
+        return std::clamp(rest+picked-(dot>=0?dot:0),0,count-1);
+    }
+    // (3) Nothing in the drawn list is current: keep the model's own position.
+    return std::clamp(picked,0,count-1);
+}
 void View::drawScene(QPainter& p) {
     iconQueue_.clear();
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
@@ -1141,53 +1258,80 @@ void View::drawScene(QPainter& p) {
     // one visual language. `rows` switches it to the player panel's form: a marker column on the left for the current
     // choice, dimmed rows for the ones this build cannot honour, and the focused row's note under the list.
     const auto drawOptionsPanel=[&](const QStringList& items,double position,double alpha,double ahead,const QString& heading,
-                                    const QVector<MenuOption>* rows=nullptr) {
-        const double x0=1330+ahead*600;
+                                    const QVector<MenuOption>* rows=nullptr,const PanelBand* band=nullptr,
+                                    const QVector<bool>* writable=nullptr) {
+        // Phase 11.3: `band` selects the firmware's own form - a settings choice list (SETTINGS 9.1/U2,
+        // 11.6, 11.8) or the item options menu (ITEM-MENU-INFO-FIRMWARE E1/F6). Without it this is the
+        // panel the surfaces shared before, unchanged.
+        const bool firmwareBand=band && band->firmware;
+        const double x0=(firmwareBand?band->x0:1330.)+ahead*600;
+        const double fadeEnd=firmwareBand?band->fadeEnd:1920.;
+        const double pitch=firmwareBand?band->pitch:40.;
         const double rowCount=rows?double(rows->size()):double(items.size());
-        const double first=505-(rowCount-1.)*20.;
+        const double first=firmwareBand?band->rowCentre:505-(rowCount-1.)*20.;
         p.save();p.setOpacity(alpha);
         // Over the XMB's own background the light strip is enough. Over video it is not: white 23 px text
         // on a bright frame is unreadable, so the in-player panel lays the strip on a dark plate (the
-        // console's control panel dims the picture behind it for the same reason).
-        if(rows) {
+        // console's control panel dims the picture behind it for the same reason). The firmware band is
+        // never over video and the frame shows no plate, so the plate stays with the in-player panel.
+        if(rows && !firmwareBand) {
             QLinearGradient shade(x0,0,1920,0);
             shade.setColorAt(0,QColor(0,0,0,158));shade.setColorAt(1,QColor(0,0,0,120));
             p.fillRect(QRectF(x0,0,1920-x0,1080),shade);
         }
-        QLinearGradient fill(x0,0,1920,0);fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
-        p.fillRect(QRectF(x0,0,1920-x0,1080),fill);
-        QLinearGradient edge(x0-10,0,x0+4,0);edge.setColorAt(0,QColor(255,255,255,0));edge.setColorAt(.75,QColor(255,255,255,70));edge.setColorAt(1,QColor(255,255,255,0));
-        p.fillRect(QRectF(x0-10,0,14,1080),edge);
-        // The list scrolls with the focused row, so the heading and the note follow the row they belong
-        // to rather than the list's resting box: `first` is only where row 0 sits when focus is at 0.
-        const double rowZero=505-position*40;
-        if(!heading.isEmpty()) { // a submenu (Sort By) or the player panel names itself above its list
-            const double headingY=rows?std::max(56.,rowZero-68.):first-64;
-            text({x0+(rows?34:16),headingY,1920-x0-40,40},heading,19,QColor(255,255,255,190));
+        if(firmwareBand) {
+            // The band's own measured profile (SETTINGS 13.3). It carries the left step as well: the
+            // frame's 1260-1262 columns are the plane's antialiased edge and a 2 px bright step, which
+            // the earlier panel's separate 14 px edge stroke would overdraw to ~110 luma.
+            QLinearGradient fill(x0,0,fadeEnd,0);
+            for(int stop=0;stop<band->stopCount;++stop)
+                fill.setColorAt(band->stops[stop].at,QColor(255,255,255,band->stops[stop].alpha));
+            p.fillRect(QRectF(x0,0,fadeEnd-x0,1080),fill);
+        } else {
+            QLinearGradient fill(x0,0,1920,0);fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
+            p.fillRect(QRectF(x0,0,1920-x0,1080),fill);
+            QLinearGradient edge(x0-10,0,x0+4,0);edge.setColorAt(0,QColor(255,255,255,0));edge.setColorAt(.75,QColor(255,255,255,70));edge.setColorAt(1,QColor(255,255,255,0));
+            p.fillRect(QRectF(x0-10,0,14,1080),edge);
         }
-        const double labelX=x0+(rows?34:16),labelWidth=1920-labelX-24;
+        // The list scrolls with the focused row, so the heading and the note follow the row they belong
+        // to rather than the list's resting box: `first` is only where row 0 sits when focus is at 0. The
+        // item menu's band does not move at all (no scroll object in the firmware), so its row 0 is fixed.
+        const double focusRow=firmwareBand?band->rowCentre:505.;
+        const double rowZero=firmwareBand&&band->fixedRows?band->rowCentre:focusRow-position*pitch;
+        if(!heading.isEmpty()) { // a submenu (Sort By) or the player panel names itself above its list
+            const double headingY=rows?std::max(56.,rowZero-68.):(firmwareBand?rowZero-48.:first-64);
+            text({firmwareBand?x0+band->labelInset:x0+(rows?34:16),headingY,
+                  firmwareBand?fadeEnd-x0-band->labelInset-24:1920-x0-40,40},heading,19,QColor(255,255,255,190));
+        }
+        const double labelX=firmwareBand?x0+band->labelInset:x0+(rows?34:16);
+        const double labelWidth=(firmwareBand?fadeEnd:1920.)-labelX-24;
         for(int i=0;i<int(rowCount);++i) {
-            const double distance=i-position,y=505+distance*40;
+            const double distance=i-position;
+            // Firmware rows are anchored on the measured baselines and do not travel with focus; the
+            // settings list keeps its 40 px pitch and its centred-with-focus motion.
+            const double y=(firmwareBand&&band->fixedRows)?focusRow+double(i)*pitch:focusRow+distance*pitch;
             if(y<-40 || y>1120)continue;
             const double focus=std::max(0.,1.-std::abs(distance));
             const QRectF rect(labelX,y-20,labelWidth,40);
-            const bool enabled=rows?(*rows)[i].enabled:true;
-            const QString title=rows?(*rows)[i].title:items[i];
+            const bool enabled=rows?(*rows)[i].enabled:(writable?writable->value(i,true):true);
+            const QString title=rows?(*rows)[i].title:items.value(i);
             // A row this build cannot honour still takes the focus halo (weaker), so it is visibly the
             // selected row; its title is dimmed and its note says why.
             if(focus>.5)glow(rect,title,23,(focus-.5)*2*(enabled?1.:.45));
-            if(rows && (*rows)[i].active) { // the current choice, where the console's own list shows a check
+            // The firmware marks the current item by focus only - no check and no dot (SETTINGS U4) - so
+            // the dot stays inside the rows path the player panel owns and never draws on a band.
+            if(rows && !firmwareBand && (*rows)[i].active) {
                 p.save();p.setBrush(QColor(255,255,255,235));p.setPen(Qt::NoPen);
                 p.drawEllipse(QPointF(x0+18,y),4.5,4.5);p.restore();
             }
-            const int level=rows&&!enabled?115:int(255*(.78+.22*focus));
+            const int level=!enabled?115:int(255*(.78+.22*focus));
             text(rect,title,23,QColor(255,255,255,level));
             if(rows && focus>.5) {
                 // One line under the list while a row has focus: the file behind a subtitle row, or the
                 // reason a row cannot be chosen. Never a claim the shell has not measured.
                 const QString note=(*rows)[i].note;
                 if(!note.isEmpty())
-                    text({labelX,std::min(1010.,rowZero+rowCount*40.+8),labelWidth,90},note,16,QColor(225,225,225,235),
+                    text({labelX,std::min(1010.,rowZero+rowCount*pitch+8),labelWidth,90},note,16,QColor(225,225,225,235),
                         Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
             }
         }
@@ -1277,23 +1421,89 @@ void View::drawScene(QPainter& p) {
             for(const auto& entry:column.entries)if(entry.action!=Action::SetSetting)return false;
             return true;
         };
-        const auto drawColumns=[&](const QVector<Column>& columns,double opacity,double offset,bool active) {
+        // The value the row that opened a choice list displays. That text is the shell's own current-value
+        // authority, so the band can rest on the current item without reading the store from here; the
+        // time zone needs it because its stored value is a host id the firmware's 110 GMT items cannot
+        // match by value (SETTINGS 11.3/11.7a).
+        const auto rowValueText=[&](const QVector<Column>& cols,int level,const QString& setting) {
+            if(level<1 || level>int(cols.size()))return QString{};
+            const auto& parent=cols[level-1];
+            if(parent.entries.isEmpty())return QString{};
+            const auto& row=parent.entries.value(std::clamp(parent.selection,0,int(parent.entries.size())-1));
+            return row.setting==setting?shell_.valueText(row):QString{};
+        };
+        const auto drawColumns=[&](const QVector<Column>& columns,double opacity,double offset,bool active,
+                                   double cover=1.) {
         // An open options panel is not a level of its own: the columns keep the layout of the page under it.
         const double panelOpen=columns.size()>=2 && isChoiceColumn(columns.back())?std::clamp(depthPosition_-(columns.size()-2),0.,1.):0.;
         const double layoutDepth=depthPosition_-panelOpen;
         const int lastLevel=int(columns.size())-1-(panelOpen>0?1:0);
+        // The firmware's own list for the column that is open, or null when this build's panel draws it. The
+        // lookup is cached by the row's Preferences key, so this is a hash lookup per frame, not an RCO read.
+        const ChoiceBand* bandColumn=nullptr;
+        if(columns.size()>=2 && isChoiceColumn(columns.back())) {
+            bandColumn=choiceBandFor(columns.back().entries.value(0).setting);
+            if(bandColumn && (bandColumn->labels.isEmpty()
+                || (bandColumn->source!=QLatin1String("rco") && bandColumn->source!=QLatin1String("capture"))))
+                bandColumn=nullptr;
+        }
+        // Phase 11.3: a firmware band covers the page, and the frames show the page's own content at
+        // 0.52 (settings list) / 0.545 (item menu) of its brightness while the category band, the clock
+        // area and the background are untouched - so the dim belongs to the page, not to a plate over the
+        // frame (SETTINGS 13.2). `cover` carries the item menu's dim; the settings band's is per level.
+        // A native list drawn by this build's earlier panel is not a firmware band and keeps the page lit.
+        const double bandDim=bandColumn?1.-(1.-kChoiceBand.contentDim)*panelOpen:1.;
         for(int level=0;level<columns.size();++level) {
             const auto& column=columns[level];
             const bool panelColumn=isChoiceColumn(column);
             double behind=std::clamp((panelColumn?depthPosition_:layoutDepth)-level,0.,1.);
             const double ahead=std::clamp(level-(panelColumn?depthPosition_:layoutDepth),0.,1.);
-            const double columnAlpha=(1.-ahead)*opacity;
-            // A setting's choices open as the PS3 options panel on the right instead of a new column.
+            const double pageDim=(panelOpen>0. && !panelColumn)?bandDim:1.;
+            const double columnAlpha=(1.-ahead)*opacity*pageDim*cover;
+            // A setting's choices open as the PS3 options band on the right instead of a new column.
             if(panelColumn) {
                 if(columnAlpha>0) {
                     QStringList titles;titles.reserve(column.entries.size());
                     for(const auto& entry:column.entries)titles<<entry.title;
-                    drawOptionsPanel(titles,column.position,columnAlpha,ahead,QString());
+                    // Phase 11.3: the firmware's own list is drawn as its own band, labels and order from
+                    // the committed choice model; a row the model has no firmware list for keeps this
+                    // build's options panel and says so once, so no function is lost.
+                    const QString setting=column.entries.value(0).setting;
+                    if(bandColumn) {
+                        titles=bandColumn->labels;
+                        const QString current=rowValueText(columns,level,setting);
+                        // The drawn rows are the firmware's; the focus is the drawn row that owns the
+                        // model's selection, so the focused label and the committed value stay paired.
+                        const double whole=std::floor(column.position);
+                        const double fraction=column.position-whole;
+                        const int from=choiceBandFocus(*bandColumn,column.entries,int(whole),current);
+                        double drawn=from;
+                        if(fraction>0.) {
+                            const int to=choiceBandFocus(*bandColumn,column.entries,int(whole)+1,current);
+                            drawn=from+(to-from)*fraction;
+                        }
+                        if(!choiceBandsLogged_.contains(setting)) {
+                            choiceBandsLogged_.insert(setting);
+                            qInfo().noquote()<<QStringLiteral("view: settings choice band %1 -> %2 items from %3 (%4), current row %5, %6")
+                                .arg(setting).arg(int(bandColumn->labels.size())).arg(bandColumn->source,
+                                    bandColumn->rcoPage.isEmpty()?QStringLiteral("no page object"):bandColumn->rcoPage)
+                                .arg(from).arg(bandColumn->scrollable?QStringLiteral("scrolls"):QStringLiteral("fits the band"));
+                        }
+                        drawOptionsPanel(titles,drawn,columnAlpha,ahead,QString(),nullptr,&kChoiceBand,&bandColumn->writable);
+                    } else {
+                        if(!choiceBandsLogged_.contains(setting)) {
+                            choiceBandsLogged_.insert(setting);
+                            const ChoiceBand* choice=choiceBandFor(setting);
+                            const QString why=!choice?QStringLiteral("the choice model has no list for this row")
+                                :choice->source==QLatin1String("native")||choice->source==QLatin1String("rco-page-empty")
+                                    ?QStringLiteral("the firmware has no list of its own for this row (%1)").arg(choice->note)
+                                    :choice->labels.isEmpty()?QStringLiteral("the firmware list is empty (%1)").arg(choice->note)
+                                    :QStringLiteral("this build's list is the only one for this row (%1)").arg(choice->note);
+                            qInfo().noquote()<<QStringLiteral("view: settings choice panel %1 keeps this build's options panel: %2")
+                                .arg(setting,why);
+                        }
+                        drawOptionsPanel(titles,column.position,columnAlpha,ahead,QString());
+                    }
                 }
                 continue;
             }
@@ -1447,14 +1657,22 @@ void View::drawScene(QPainter& p) {
         if(!messageScreen) {
             // On a category move the item columns do not travel a whole icon step (202 px): the reference slides the old
             // list ~150 px away while it fades and brings the new one in from ~150 px, crossing over each other.
-            if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*150,false);
-            drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*150,true);
-            // Item-level Triangle options: the same right-hand panel over the page it belongs to. Only drawn while
+            // The item menu's band covers the page too (measured 0.545, ITEM-MENU-INFO-FIRMWARE E1); the
+            // in-player panel's frame is unmeasured, so it keeps the page at full brightness.
+            const double optionsCover=(shell_.optionsOpen() && !shell_.optionsArePlayer())?
+                1.-(1.-kOptionsBand.contentDim)*optionsOpenEase_.value:1.;
+            if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*150,false,optionsCover);
+            drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*150,true,optionsCover);
+            // Item-level Triangle options: the same right-hand band over the page it belongs to. Only drawn while
             // the shell reports it open; the panel never becomes a level of the column stack.
             if(shell_.optionsOpen() && optionsOpenEase_.value>0.) {
                 QStringList titles;titles.reserve(shell_.options().size());
                 for(const auto& option:shell_.options())titles<<option.title;
-                drawOptionsPanel(titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,shell_.optionsTitle());
+                // Phase 11.3: the item menu is the firmware's own band (ITEM-MENU-INFO-FIRMWARE E1/F6): its
+                // measured edge, 38 px pitch, fixed rows and 1334 text column, and its MenuOption rows so a
+                // row this build cannot honour is dimmed with its reason. No dot: the band marks by focus.
+                drawOptionsPanel(titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,
+                                 shell_.optionsTitle(),&shell_.options(),&kOptionsBand);
             }
         }
         if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
@@ -1463,7 +1681,19 @@ void View::drawScene(QPainter& p) {
         // It frames the clock in the top-right corner; the clock's centre sits at y~104 as in the reference
         // video. A message page keeps only the analog clock face (measured on D4: plate and date text
         // absent, clock kept), which drawPageChrome draws with the page.
-        if(!messageScreen) {
+        // A firmware band owns the screen: the captured frames have neither the plate nor the analog clock
+        // (SETTINGS 11.6 measured luma 0 at x1750..1918, y100 on screensaver-list-rest.png; options-open-01
+        // shows the same), and the band does not reach the plate's area, so the absence is a state and not
+        // an occlusion. A native list drawn by the earlier panel keeps the bar, which is what it shipped.
+        const bool choiceBandUp=columns_.size()>=2 && isChoiceColumn(columns_.back())
+            && depthPosition_>double(columns_.size()-2)+0.001
+            && [&] {
+                const ChoiceBand* choice=choiceBandFor(columns_.back().entries.value(0).setting);
+                return choice && !choice->labels.isEmpty()
+                    && (choice->source==QLatin1String("rco")||choice->source==QLatin1String("capture"));
+            }();
+        const bool optionsBandUp=shell_.optionsOpen() && !shell_.optionsArePlayer() && optionsOpenEase_.value>.001;
+        if(!messageScreen && !choiceBandUp && !optionsBandUp) {
             // Measured from the saved 1920x1080 firmware frames (audit/ITEM-MENU-INFO-FIRMWARE.md B3/E4):
             // the visible plate is 591x58 at (1329,75), flush to the right screen edge. The tile's own 1 px
             // transparent margin lies just outside that core (x1328/y74) and its right border falls past
