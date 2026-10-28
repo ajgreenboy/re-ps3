@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "settings_menu.h"
 #include "media_controls.h"
 #include <QApplication>
 #include "assets.h"
@@ -1059,23 +1060,19 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     // The Network column's rows come from the firmware's own category_network.xml (the proof of the
     // XMBML-driven column mechanism); it keeps the list above when the definition cannot be read.
     resolveNetworkColumn();
-    // Bind the current native settings projection to original XMBML resource
-    // keys. Selector/plugin visibility and unmapped operations remain separate.
-    const auto document=readXmbDocument(QDir(assets.root()).filePath("vsh/resource/explore/xmb/category_sysconf.xml"));
-    if(document.error.isEmpty() && document.views.contains("seg_fixed_items")) {
-        const auto& view=document.views["seg_fixed_items"];
-        const QMap<QString,QString> aliases{{"system","console"},{"video","bd_dvd"},{"date","date_time"}};
-        int resolved=0;
-        for(auto& entry:categories_[1].entries) {
-            const auto key=aliases.value(entry.id,entry.id);
-            const auto table=view.tables.constFind(key);
-            if(table==view.tables.cend())continue;
-            entry.title=assets.text(sys,table->value("title_rsc"),entry.title);
-            entry.detail=assets.text(sys,table->value("info_rsc"));
-            entry.texture=table->value("icon_rsc",entry.texture);++resolved;
-        }
-        qInfo()<<"catalog: settings projection resolved"<<resolved<<"entries from original XMBML and English RCO text";
-    } else qWarning().noquote()<<"catalog: settings resource unavailable"<<document.error;
+    // The Settings column is the firmware's own definition (Phase 11.1, audit/SETTINGS-FIRMWARE.md
+    // 1.1-1.2): category_sysconf.xml's root view names #seg_fixed_items, whose 18 tables give the
+    // column's rows in document order. The 16 rows a retail console shows keep that order, with the
+    // RCO's own title, info line and tex_* icon; edy and console_qa are omitted with a logged reason,
+    // and the three child=segment rows lose their second label line (fo_lbl2_alpha=0). The resolver
+    // keeps each id's native action, value and setting, so every page and theme icon still applies.
+    if(const auto rows=settingsColumnEntries(categories_[1].entries,assets_);!rows.isEmpty())
+        categories_[1].entries=rows;
+    else qWarning().noquote()<<"xmbml: settings column keeps its built-in rows";
+    // The resolved tex_* name is in Entry::texture and in the entry dump, but this renderer draws the
+    // named RCO icon through drawItemGlyph's white item-glyph material, while the frame's brass settings
+    // icon is the qgl icon program addressed by numeric id. Until the icon program takes a named RCO
+    // texture (Phase 11.4/13), these ids keep the frame's material instead of a white outline.
     // QGL normal maps carry the original embossed silhouettes. IDs were checked
     // against a contact sheet and the user's reference recording; unknown shapes
     // keep their named RCO artwork rather than guessing a numeric ID.
@@ -1345,6 +1342,10 @@ void Shell::promoteNotification() {
     auto& front=notifications_.first();
     front.expiresAt=notificationClock_.elapsed()+notificationLifetimeMs;
     if(!notificationTimer_.isActive())notificationTimer_.start();
+    // Firmware: the trophy notification carries sound "snd_trophy" (np_trophy_util.prx builds the
+    // descriptor with plugin=system_plugin, sound=snd_trophy; audit/INTERACTION-AUDIO.md section 10).
+    if(front.icon.startsWith("tex_notification_trophy_"))
+        interactionAudio_.play(InteractionAudio::Cue::Trophy);
     if(notificationLog_)qInfo().noquote()<<"notify: show"<<front.title<<front.icon<<notificationLifetimeMs<<"ms";
 }
 void Shell::expireNotifications() {
@@ -1429,8 +1430,12 @@ void Shell::activate() {
     if(mediaOpen_){togglePlayback();return;}
     if(entries().isEmpty() || loading_)return;
     const auto entry=entries()[selection()];
-    interactionAudio_.play(entry.action==Action::Unavailable?InteractionAudio::Cue::Error:
-        entry.action==Action::SettingChoices?InteractionAudio::Cue::Options:InteractionAudio::Cue::Confirm);
+    // Committing a value is the firmware's module-action path: snd_system_ok when the action completes
+    // (explore_plugin.prx FUN_00030954 / FUN_00062e6c). SetSetting is silent here and plays Cue::Accept
+    // after its write below (audit/INTERACTION-AUDIO.md section 10).
+    if(entry.action!=Action::SetSetting)
+        interactionAudio_.play(entry.action==Action::Unavailable?InteractionAudio::Cue::Error:
+            entry.action==Action::SettingChoices?InteractionAudio::Cue::Options:InteractionAudio::Cue::Confirm);
     switch(entry.action) {
     case Action::SettingsPage:openSettings(entry.value);break;
     case Action::SettingChoices:openChoices(entry.setting,entry.title);break;
@@ -1438,15 +1443,23 @@ void Shell::activate() {
         if(entry.setting=="appearance/background" && entry.option.toInt()==2 && wallpaper().isEmpty() && theme_.background.isNull()){emit requestWallpaper();break;}
         if(entry.setting=="appearance/theme" && entry.option.toString().isEmpty() && backgroundMode()==2 && wallpaper().isEmpty()) {
             // Back to the system's theme with no wallpaper of the user's own: the original background returns.
-            if(preferences_.setValues({{"appearance/theme",QString{}},{"appearance/background",0}}) && !pages_.isEmpty())pages_.removeLast();
+            if(preferences_.setValues({{"appearance/theme",QString{}},{"appearance/background",0}})) {
+                interactionAudio_.play(InteractionAudio::Cue::Accept);
+                if(!pages_.isEmpty())pages_.removeLast();
+            } else interactionAudio_.play(InteractionAudio::Cue::Error);
             break;
         }
         if(entry.setting.startsWith("host/")) { // the computer's own settings, written straight to the host
             const bool ok=entry.setting=="host/volume"?host::setMasterVolume(entry.option.toInt()):host::setMasterMuted(entry.option.toBool());
-            if(!ok)showMessage("The system volume could not be changed.",MessageKind::Page);else if(!pages_.isEmpty())pages_.removeLast();
+            if(!ok){interactionAudio_.play(InteractionAudio::Cue::Error);showMessage("The system volume could not be changed.",MessageKind::Page);}
+            else {interactionAudio_.play(InteractionAudio::Cue::Accept);if(!pages_.isEmpty())pages_.removeLast();}
             break;
         }
-        if(preferences_.setValue(entry.setting,entry.option) && !pages_.isEmpty())pages_.removeLast();break;
+        if(preferences_.setValue(entry.setting,entry.option)) {
+            interactionAudio_.play(InteractionAudio::Cue::Accept);
+            if(!pages_.isEmpty())pages_.removeLast();
+        } else interactionAudio_.play(InteractionAudio::Cue::Error); // rejected write: guess
+        break;
     case Action::EditName:emit requestSystemName(preferences_.value("system/name").toString());break;
     case Action::CreateUser:emit requestNewUser();break;
     case Action::SelectUser:profiles_.select(entry.value);break;
