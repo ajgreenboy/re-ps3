@@ -966,6 +966,17 @@
         "imported": "2026-10-28T12:48:36.537Z"
       },
       "skipped": null
+    },
+    {
+      "state": "dialog-box",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/dialog__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-gaps-2026-10-28/MANIFEST.md",
+      "clock": "not readable on the frame: the modal page replaces the info bar; the console plate read 10/28 10:03 AM on the frames immediately before and after (a31, a32)",
+      "note": "Same firmware frame as the dialog cell (the console delete-confirmation box), now scored against the state that actually raises the native box (Continue Watching -> Triangle -> Down x2 -> Enter) instead of the inline empty-state line. The body strings and item icon still differ by construction (console deletes a corrupted title, native removes a resume entry); the plate, answer row and footer are the compared surfaces.",
+      "skipped": null
     }
   ],
   "summary": {
