@@ -5,18 +5,21 @@ RPCS3 VSH recording. Project goal: a complete native C++ recreation.
 
 ## Read this set
 
-Current handoff (2026-10-28): [HANDOFF-2026-10-28.md](../HANDOFF-2026-10-28.md) - the tree at `9545047`,
+Current handoff (2026-10-28): [HANDOFF-2026-10-28.md](../HANDOFF-2026-10-28.md) - the tree at `e818e25`,
 what ships after the firmware-recovery week, the four gate instruments with their last recorded numbers,
-and where the work goes next. The plan of record is [PHASES-2026-10-28.md](../PHASES-2026-10-28.md)
-(phases 8-16, with the 88-item completion ledger: 15 done / 44 partly / 28 not started / 1 obsolete);
-ownership and write fences are in [WORKSPACES.md](../WORKSPACES.md). The previous handoff,
+the 2026-10-28 baselines correction, and where the work goes next. The plan of record is
+[PHASES-2026-10-28.md](../PHASES-2026-10-28.md) (phases 8-16, with the 88-item completion ledger:
+16 done / 48 partly / 23 not started / 1 obsolete); ownership and write fences are in
+[WORKSPACES.md](../WORKSPACES.md). The previous handoff,
 [HANDOFF-2026-10-27.md](../HANDOFF-2026-10-27.md), is a dated snapshot of `0c8faee` and still carries the
 operational reference (build/run, config migration, crash reporting, release checklist, ground rules).
 
-Fidelity instrument and register (2026-10-27): [PARITY-SCORECARD.md](PARITY-SCORECARD.md) - the
-three-tier method, the 25-state / 600-cell corpus and the first scorecard (0/25 states at A+B+C; Tier A
-22, Tier B 0, Tier C 9) - and [FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md), re-scored in its
-section 1.1 with section 2.6 listing every surface that moved from free-hand to firmware-derived.
+Fidelity instrument and register (2026-10-28): [PARITY-SCORECARD.md](PARITY-SCORECARD.md) - the
+three-tier method, the catalogue and its 720-cell matrix, and the text-bearing scorecard (`e818e25`:
+0 of 35 capturable states at A+B+C; Tier A 35, Tier B 0 with 22 measured at 17.6-19.0 dB / 0.83-0.87
+SSIM, Tier C 9, 22 of 30 firmware states referenced) - and
+[FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md), re-scored in sections 1.1-1.3 with section 2.6
+listing every surface that moved from free-hand to firmware-derived.
 
 Firmware recoveries (2026-10-27, all with measured specs):
 [dialogs and message boxes](DIALOGS-FIRMWARE.md) (`e4e3c23`, implemented in `e171263`),
@@ -48,6 +51,13 @@ numeric error code could not be produced on this console. It is the evidence beh
 sections added to [DIALOGS](DIALOGS-FIRMWARE.md) (section 9), [SETTINGS](SETTINGS-FIRMWARE.md) (section 12),
 [ITEM-MENU/INFO](ITEM-MENU-INFO-FIRMWARE.md) (part G), [GEOMETRY-ROOT](GEOMETRY-ROOT.md) (section 10) and
 [PAGE-MOVE](PAGE-MOVE.md) (dated note 2).
+
+Decoder and coverage documents (2026-10-28): [GIM-FORMATS.md](GIM-FORMATS.md) - the container's pixel
+formats, the palette-less format-0x5 mask case, the sibling palette block and the decode fixtures
+(`e90b196`) - and [TEXTURE-COVERAGE.md](TEXTURE-COVERAGE.md) - the 3,174-image sweep across 89
+containers, what the build actually consumes, the five draw-side substitutions and the decoder policy
+fixes (`4c4b25e`, `1781dd3`). The wave's other new documents - CAPTURE-BATCH-2-2026-10-28.md,
+RCO-OBJECT-MODEL.md and SESSION-POWER.md - are already indexed above.
 
 Latest Friends continuation (2026-10-26): [signed-in Steam client connection](STEAM-CLIENT-FRIENDS.md), including the verified live list and external SDK build input.
 
