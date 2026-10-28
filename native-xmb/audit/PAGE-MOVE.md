@@ -585,3 +585,360 @@ trace of the animate call. The call-site trace in vsh.elf paf `PhXmBar` remains 
 ```
 
 Firmware-derived numbers stay in these audit notes; no dump, module or capture is committed.
+
+---
+
+# PAGE-MOVE phase 14.1 - 2026-10-27 (late): the bar animate call, read at the instruction level
+
+Third pass on the same question, and the first one that reads the machine code instead of the
+decompiler. Fence: this file plus two new helpers under `work/` (`page-move-scan.ts`,
+`page-move-listing.ps1`). No `src/` edit, no git command, no RPCS3. Modules are the same local,
+gitignored 4.93 files as before: `vsh.elf` sha256 `54f6216dd498da24...a525fa`,
+`xmb_plugin.prx` sha256 `553b3e212cb4b343...0462c9`, both re-hashed this pass and both identical to
+the hashes recorded in this file.
+
+Headline: **the only 0.3 s constant in the paf bar code is not a duration.** `DAT_0068f020` is loaded
+into `f1` of `_opd_FUN_003b0620` and that function uses `f1` as the *target value* of the animated
+property, not as the duration. The duration is the *second* float argument, and the plugin's own bar
+driver feeds **200 ms**, not 300 ms. The mode literal in every bar animate call is **5**; there is no
+mode-4 animate call anywhere in paf. `pageMilliseconds=300, mode 4` is therefore **contradicted as a
+firmware value** and remains a *fit to the capture* only - and the capture's 18-frame count now
+disagrees with the traced 200 ms, which is a new, specific open question rather than the old
+mode-4-versus-mode-5 one.
+
+## 0. Method, and what Ghidra did to the project
+
+Two evidence classes, both local and read-only:
+
+| Tool | What it produced |
+|---|---|
+| Ghidra 12.1.4 headless, project `ghidra_work/vsh493w`, program `vsh.elf`, `-process -noanalysis -readOnly`, scripts `ghidra_scripts/ListRange.java` and `ghidra_scripts/DecompileAt.java` | instruction listings of 0x3981EC, 0x3ABC9C, 0x3AC980-0x3ACD00, 0x3ACCf4, 0x3AD3xx, 0x3AF1E4-0x3AF320, 0x3B0600-0x3B06A0; decompile of 0x147E28 |
+| `work/page-move-scan.ts` (new), `work/elf-const.ts` | OPD descriptor lookup, word cross-reference scans, constant reads from `vsh.elf` and `xmb_plugin.prx` |
+| `rea/vsh_exports.csv`, `rea/plugins/xmb_plugin.prx_imports.csv` | NID -> export VA, and which paf exports `xmb_plugin` actually imports |
+| `out/native-reference/rco-behavior/resources.json` | animation-entry counts per RCO |
+
+**The Ghidra project was not saved and not modified.** The project was opened with `-readOnly`, the
+headless logs contain no `Saving`/`save program` line, and the newest file under
+`ghidra_work/vsh493w.rep/user/` still carries its 2026-10-21 timestamp. `-noanalysis` means the
+existing analysis was used as-is; every range listed is inside a function the project already
+defined, and `DecompileAt` found `FUN_00147e28` already a function, so no function was created. The
+only non-instruction bytes encountered were the mode-4 jump table at 0x398390-0x3983A0, which
+`ListRange` printed as `?? 38`/`?? 44`/... rather than decoding; even if a script had touched the
+program, `-readOnly` means no change could be persisted. No firmware-derived file was written into
+the repo - all listings went to `%TEMP%\p14-1` / `%TEMP%\page-move-14.1`.
+
+## 1. Two identical trampolines: how a paf animation actually starts
+
+`FUN_003abc9c` (0x3ABC9C) and `FUN_003af114` (0x3AF114) are byte-for-byte the same idea; both are paf
+internal entry points that all the exported wrappers funnel through. The listing of 0x3ABC9C is
+short enough to quote whole:
+
+```
+003abc9c: or r11,r3,r3        ; r11 = object
+003abca0: mfspr r0,LR
+003abca4: stdu r1,-0x70(r1)
+003abca8: std r0,0x80(r1)
+003abcac: or r5,r7,r7         ; forwarded arg3 = incoming r7
+003abcb0: or r7,r9,r9         ; forwarded arg5 = incoming r9
+003abcb4: lwz r9,0x0(r11)     ; r9 = object->vtable
+003abcb8: or r6,r8,r8         ; forwarded arg4 = incoming r8
+003abcbc: lwz r9,0x13c(r9)    ; r9 = vtable[0x13c]  (an OPD descriptor)
+003abcc0: lwz r0,0x0(r9)      ; r0 = descriptor->code
+003abcc4: std r2,0x28(r1)
+003abcc8: mtspr CTR,r0
+003abccc: lwz r2,0x4(r9)      ; r2 = descriptor->toc
+003abcd0: bctrl
+```
+
+So the animate call is `object->vtable[0x13c](object, arg2, arg3, arg4, arg5, f1..f8)` where this
+trampoline **forwards r3, r4, r7, r8, r9 and drops r5, r6**, and passes every float register through
+untouched. `FUN_00147e28` (decompiled this pass) is a fourth instance of the same shape:
+
+```c
+uVar1 = (*(code *)**(undefined4 **)(*param_1 + 0x13c))(param_1,param_2,param_5,local_10,in_stack_0000007c);
+```
+
+That is what page 4's open item asked for ("resolve the mode argument by disassembly"): the argument
+*positions* are now known exactly, and they are the ones the decompiler was guessing at. The five
+integer arguments by position are `(state, propertyId, mode, targetValue4f, flag)`; the floats are
+`(duration, delay)` plus up to four more.
+
+## 2. The animation setup's own ABI (0x3981EC), from the machine code
+
+`_opd_FUN_003981ec`, the paf animation setup, was listed and it fixes the register model that this
+file's section 3 had only inferred from the decompile:
+
+```
+003981f8: lfs  f0,-0x1508(r9)  ; [0x68eaf8] = 0.001
+003981fc: fmuls f2,f2,f0       ; f2 = delayMs  * 0.001
+00398204: fmuls f1,f1,f0       ; f1 = durationMs * 0.001
+00398210: stfs f2,0x18(r3)     ; state->+0x18 = delay (seconds)
+00398214: stfs f1,0x4(r3)      ; state->+0x04 = duration (seconds)
+0039822c: stw  r4,0x20(r3)     ; state->+0x20 = MODE  <- r4
+00398230: lfs  f12,[0x6fb1e8]  ; 1/60
+00398238: lfs  f13,[0x6fb1ec]  ; 60.0
+00398240: fmuls f0,f0,f13      ; frames = duration_s * 60
+00398244: fctiwz f0,f0         ; int()
+...
+00398290: lwz  r0,0x20(r3)     ; switch on the mode
+00398294: blelr (r0 <= 3)      ; modes 0-3: no curve set
+003982a4: cmpi r0,5 -> formula k = 1/(2.2+(n-5)/3) for n>4
+00398354: cmpi r0,4 -> table of 14 k values for n=1..14
+```
+
+So `setup(f1 = durationMs, f2 = delayMs, r3 = state, r4 = mode)`, frames = `int(ms*0.001*60)`, and
+the ease constants are exactly the ones this file derived in section 3. **The duration is `f1` and the
+mode is the fourth integer argument.** That is the one piece page 4b called "possibly a decompiler
+artifact of the float/int register split"; it is not an artifact, and the 5 in the wrappers is a real
+immediate (`li r7,0x5`), not a mis-placed argument.
+
+## 3. Candidate call sites
+
+Every site below is a paf wrapper that starts or retargets a `PhXmBar` item animation. "Duration arg"
+is the float position that reaches `setup`'s `f1`; "mode" is the integer position that reaches its
+`r4`. Addresses are `vsh.elf` VAs; "plugin line" is `out/native-reference/xmb_plugin_all.c`.
+
+| # | Call site (VA, symbol) | paf export NID | Reached from | Object | Property id | Mode | Duration arg | Delay arg |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `_opd_FUN_003b0620` @ 0x3B0620 | 0xF35FE0BC | `xmb_plugin` `FUN_00002838` (decompile line 2141); `_opd_FUN_003accf4` | one bar entry (vector at `bar+0x294`) | 0x1000016 | **5** (`li r7,0x5` @0x3b0670) | **2nd float** | 3rd float |
+| 2 | `_opd_FUN_003accf4` @ 0x3ACCF4 | 0xC94E8621 | no importer, no in-module `bl` | every bar entry | 0x1000016 (non-focused) | 5 | caller's `f1`; focused entry instead goes to `FUN_003b4310` | 0.0 |
+| 3 | `_opd_FUN_003acae4` @ 0x3ACAE4 | 0x7BAAD6D1 | `xmb_plugin` lines 1929, 1988, 2000, 3183 | every bar entry | 0x1000003 | 5 | 2nd float | 3rd float |
+| 4 | `_opd_FUN_003acafc` @ 0x3ACAFC | 0x62ED555B | `xmb_plugin` lines 1828, 1857, 1881, 1956 | every bar entry (focused gets 1.0, others 0.0 in the flag slot) | 0x1000003 | 5 | 2nd float | 3rd float |
+| 5 | `_opd_FUN_003ac79c` @ 0x3AC79C | 0x5837B7E2 | `xmb_plugin` lines 1823, 1950, 2046, 2050, 2103 | every bar entry | 0x1000015 | 5 | 2nd float | 3rd float |
+| 6 | `FUN_003ac6dc` @ 0x3AC6DC | - (internal) | `paf` | every bar entry | 0x1000018 | 5 (`li r7,0x5` @0x3af1f0) | 2nd float | 3rd float |
+| 7 | `_opd_FUN_003ac524` @ 0x3AC524 | 0xDDE862B5 | `xmb_plugin` `FUN_00002804` -> `paf_paf_DDE862B5(DAT_00017f4c = 0.0, ...)` | focused bar entry only | 0x52 (a different dispatch inside `FUN_003b069c`) | 5 | 2nd float | 3rd float |
+| 8 | `_opd_FUN_003ac5c0` / `_opd_FUN_003ac668` @ 0x3AC5C0 / 0x3AC668 | 0xEC7C4469 / 0x8846BC65 | `xmb_plugin` lines 2047, 2097 (0xEC7C4469) | one bar entry (index argument) | - (`FUN_003b07a8`) | 5 | 2nd float | 3rd float |
+| 9 | `_opd_FUN_003ad3bc` / `_opd_FUN_003ad728` @ 0x3AD3BC / 0x3AD728 | 0xF744FE00 / 0xBC8DD07D | `paf` key handler `FUN_003af01c` (paf-range.c:27662, :27668) | bar focus index | - | - | `DAT_0068f054` = **200.0 ms** (constant) | - |
+
+Reading of row 1, which is the important one, from the listing at 0x3B0620:
+
+```
+003b062c: fmr f30,f3          ; save delay
+003b0634: fmr f31,f2          ; save duration
+003b0654: bl  0x0042cbe0      ; fills a 4-float block with f1 (f1 untouched)
+003b0658: lis r4,0x100
+003b0660: fmr f1,f31          ; f1 = saved 2nd float  -> duration
+003b0664: or  r3,r28,r28      ; r3 = the bar object
+003b066c: ori r4,r4,0x16      ; r4 = 0x1000016 (property id)
+003b0670: li  r7,0x5          ; r7 = 5  -> forwarded as r5 -> the mode
+003b0674: li  r9,0x0
+003b0678: bl  0x003abc9c
+```
+
+`_opd_FUN_0042cbe0(double value, float *out)` writes `value` into `out[0..3]` (see
+`phase3-infobar-common.c:101`), so the incoming `f1` becomes a **four-component target value**
+`{f1,f1,f1,f1}`, not a duration. That is the fact that invalidates the 0.3 s reading.
+
+## 4. Correction to section 2 of this file: `DAT_0068f020` is not a 300 ms duration
+
+Section 2 of this file says `DAT_0068f020` (0.3 s) is "a genuine 300 ms bar duration" whose "only use
+is `_opd_FUN_003accf4`, which calls `_opd_FUN_003b0620(0.3, item)`". The call is real; the
+interpretation is not. At 0x3ACD50-0x3ACD6C the non-focused branch is:
+
+```
+003acd50: bl   0x003abd20          ; r3 = &bar->items[i]
+003acd54: lis  r9,0x69
+003acd58: fmr  f2,f31             ; f2 = the export's own f1
+003acd5c: lwz  r3,0x0(r3)         ; r3 = the bar object
+003acd60: lfs  f3,-0xfdc(r9)      ; f3 = [0x68f024] = 0.0
+003acd68: lfs  f1,-0xfe0(r9)      ; f1 = [0x68f020] = 0.3
+003acd6c: bl   0x003b0620
+```
+
+and in `_opd_FUN_003b0620` that `f1` is only ever consumed by `bl 0x0042cbe0` - the 4-float target
+block - while the duration slot is filled from `f2`. So in this call:
+
+* **0.3 is the target value** of property 0x1000016 for every non-focused bar entry (a plausible
+  dim/scale target: the same call family passes 1.0 for the focused entry);
+* **the duration is the caller's `f1`**, i.e. supplied by whoever calls export 0xC94E8621.
+
+And nobody does: `0xC94E8621` is not imported by any plugin in `rea/plugins/*_imports.csv`
+(`xmb_plugin`, `explore_plugin`, `explore_category_*`, `system_plugin` set included), and a `bl`
+scan of `vsh.elf` finds no in-module caller of 0x3ACCF4. So row 2 of the table is
+**export-only and uncalled** in the artifacts at hand, and it cannot be the page move. The 300 ms
+"corroboration" that section 3 of this file recorded has to be withdrawn:
+
+> Retracted: "there is now a firmware 300 ms bar-duration constant (0x68f020) consistent with it."
+> 0x68f020 is a target value inside an uncalled export, not a duration.
+
+## 5. What the plugin actually feeds the bar: 200 ms
+
+`xmb_plugin.prx` imports exactly the wrappers in rows 1, 3, 4, 5, 7 and 8, plus the bar accessors
+(`0xC1A00166` -> 0x3ABD58 item lookup, `0x796A32FE` -> 0x3B456C focused index, `0x703117AD` ->
+0x3ABCF8 `PhXmBar` class). Its bar driver is `FUN_00002838` @ 0x2838 (`xmb_plugin_all.c:1674-2223`):
+
+```c
+1786:  dVar23 = (double)*(float *)(DAT_0001beac + 0x520);   // the bar animation duration
+1823:  paf_paf_5837B7E2((double)DAT_00017f50 /*1.0*/, dVar23, 0.0, piVar2);
+1828:  paf_paf_62ED555B((float)(dVar23 * DAT_00017f78 /*1.2*/), 0.0, piVar2);
+1929:  paf_paf_7BAAD6D1(dVar23, piVar2);
+2141:  paf_paf_F35FE0BC(dVar18, dVar23, (double)DAT_00017fb8 /*0.0*/, iVar10);   // per item
+```
+
+`state+0x520` has exactly two writers in the whole plugin, both in `FUN_00003ab0` @ 0x3AB0:
+
+| Site | Value | When |
+|---|---|---|
+| `xmb_plugin_all.c:2249` and `:2253` | `DAT_00017fbc` = **200.0** | the transition-refcount at `state+0x534` falls to 0 -> the bar is re-laid-out |
+| `xmb_plugin_all.c:2262` | `0.0` | the refcount rises from 0 -> the re-layout is a snap |
+
+`xmb_plugin.prx`'s float block at VA 0x17F40-0x17FDC (file offset = VA + 0xF0) holds
+`1.0, 0.5, 1.1, 10.0, 1.5, 3.0, 380, 500, 240, 1.2, 1.25, 1.8, 24, 0.2, -5, 0.3, 0.7, 0.4, 0.64,
+0.6, 0.1, 0.05, 0.25, 0.9, -0.5, 0.0, **200.0**, 1400, 0.0, 3000, 0.0, 2000, 100, 200, 200`. There is
+**no 300.0 anywhere in xmb_plugin**, and 200.0 appears three times (0x17FBC, 0x17FD8, 0x17FDC).
+
+The refcount pair is the page-change hook:
+
+* `FUN_00003bd0(state, 1)` (bar becomes inactive) is called from `FUN_0000805c` @ 0x805C, which is
+  called from the page/view switch driver `FUN_00008e38` @ 0x8E38 (`xmb_plugin_all.c:4532`) when a
+  newly activated page object has level 0 or 3. That path sets the duration to 0 first (snap) and
+  then, when the refcount returns to 0, arms **200 ms** and re-runs the whole bar layout.
+* `FUN_00003bd0(state, 0)` is called from `FUN_00007dec` @ 0x7DEC - the counter-release path.
+
+So the firmware's own bar re-layout that runs on an XMB page change is **200 ms**, using wrappers
+whose mode literal is **5**. There is no 300 ms figure and no mode-4 call in the entire bar path.
+
+Supporting detail, not proof: in `PhXmBar`'s default-attribute block (the class name at 0x68F080,
+defaults 0x68F090-0x68F1E8, which is the block `audit/GEOMETRY-ROOT.md:587` identifies as the one the
+widget code actually reads) the only pair that looks like duration + value is `200.0` at 0x68F1A8
+followed by `0.3` at 0x68F1AC - the same two numbers the plugin uses. Neither word is read by any of
+the functions listed above, so this is a coincidence of the defaults table, not evidence.
+
+## 6. RCO animations: checked, and empty for every XMB surface
+
+Re-read from `out/native-reference/rco-behavior/resources.json` this pass (13 resources, animation
+entry counts):
+
+`explore_category_friend/game/music/network/photo/psn/sysconf/tv/user/video.rco`,
+`explore_plugin_full.rco`, `xmb_ingame.rco`, `xmb_plugin_normal.rco` - **0 animation entries each**
+(24-87 objects each). So the depth transition is not an RCO-authored animation on any page surface,
+which confirms and extends page 4b section 1.1 (that pass had only checked the two `xmb_*` RCOs).
+Combined with section 5 above, the page transition is a code-driven `PhXmBar` animation, and every
+code-driven bar animation carries mode 5.
+
+## 7. Conclusion
+
+**Duration: traced, and it is 200 ms, not 300 ms.** The value reaches the setup from
+`state+0x520` (200.0, `xmb_plugin` VA 0x17FBC) through the second float argument of the bar
+animators; the only 0.3 s constant in paf is a target value in an export that nothing calls.
+
+**Mode: literal 5, everywhere; no mode-4 call exists.** Every one of the nine sites above is either
+`li r7,0x5` in the wrapper or passes `DAT_0068f054` with a 200 ms duration. Mode 4 is implemented in
+the setup's curve table but no caller in paf or in either XMB plugin selects it. What is *not* fully
+proven is that the 5 is the ease mode rather than a flag, because of one remaining hop:
+
+> **The one open hop.** The only word in `vsh.elf` that points at the animation handler's OPD
+> (`0x6DF3A0` -> `0x3981EC`) is at `0x63D40C`. If the handler called by the trampolines is entered
+> directly, its `r4` is `0x1000016` (the property id) and the property id would land in
+> `state+0x20`, the field the ease switch reads - which cannot be what shipping code does. Either
+> (a) `0x63D2D0` is not the vtable base and that word is a table entry for a different class, or
+> (b) one intermediate function sits between the trampoline and 0x3981EC and moves `r5` into `r4`.
+> The artifacts at hand do not decide between them. What they do decide is that the literal is **5**
+> and that no **4** appears.
+
+**Is `view.cpp` `pageMilliseconds=300, mode 4` confirmed, contradicted, or still a fit?**
+
+| Claim | Status after this pass |
+|---|---|
+| 300 ms duration | **CONTRADICTED as a firmware value.** The firmware bar duration is 200 ms; the 0.3 s constant is not a duration. 300 ms survives only as a fit to the phase 4c capture |
+| mode 4 | **CONTRADICTED as a firmware value** for the bar path: no mode-4 animate call exists, and every bar call carries 5. (The one-hop caveat above means "5 is the mode" is not proven, but "4" is not present at all) |
+| the pair as a description of the console | **STILL A FIT**, and now a fit that disagrees with the firmware on both numbers |
+
+**The new conflict, stated precisely.** Phase 4c counted **18 distinct motion steps** at 139.7 fps on
+a 60 Hz animation and matched them to `int(300*0.001*60) = 18` frames. A 200 ms animation is
+`n = int(200*0.001*60) = 12` frames, and at 139.7 fps a 12-frame move would present about 12 distinct
+steps, not 17-18. Two readings remain, and this pass cannot separate them:
+
+1. the captured channel is a composite - the 12-frame item move plus the slower bar recede recorded
+   in page 4b 1.3 (retention 0.902, ~29 frames) - and the extra 5-6 steps are the second channel;
+2. the console's page transition is not the `FUN_00002838` bar re-layout that this pass traced, and
+   some other path (uncalled export 0xC94E8621, or a module not analysed) drives it at 300 ms.
+
+Reading 2 has no supporting call site left - export 0xC94E8621 has no caller and no importer - so
+reading 1 is the better hypothesis, but "one frame-indexed burst that decodes `_Eye` as well as
+screen x" is what would close it. That is a capture, not a code read, and it is out of this pass's
+scope (another agent owns the rig).
+
+## 8. What the native code should change
+
+Nothing is edited by this pass. If the parent decides to land the change, it is two constants and one
+easing mode in `src/` (both currently owned by other passes):
+
+1. `native-xmb/src/view.h:46` - `pageMilliseconds` 300 -> **200**.
+2. `native-xmb/src/view.cpp:684` - `depthEase_.retarget(shell_.depth(),pageMilliseconds,4)` -> mode
+   **5** (the `PafEase` default, already used by `moveMilliseconds`).
+
+The mode-5 curve the native already implements is the one the firmware setup uses for every bar
+animation: `n = int(ms*0.001*60)` = 12 at 200 ms; `k = 0.9615, 0.78125, 0.6369, 0.5291` for frames
+1-4 and `k = 1/(2.2+(n-5)/3)` after that; per-frame growth 1.000001; per-frame retention
+`(1-k)*growth` = **0.7794**, settling on frame 12. The mode-4 curve currently in use
+(`k = 1/(3.775+0.217*(n-15))` at 300 ms, retention 0.7741) is 0.7% away in shape and 6 frames away in
+length, which is exactly the distinction the phase 4c frame count was supposed to settle.
+
+**Recommendation:** land the *documentation* change now (this section) and hold the two constants
+until either (a) the one open hop above is closed - the exact command is section 9 - or (b) the
+composite-channel reading of 4c is confirmed by a burst that decodes `_Eye.x` and `_Eye.z` per
+frame. Landing 200 ms mode 5 on the firmware evidence alone would make the app 100 ms shorter than a
+capture that was measured three times; landing nothing keeps a number this pass has now shown to be
+unsupported on both of its halves.
+
+If the intent is instead "match the capture, document the firmware", then the honest form is to keep
+300 ms / mode 4 and relabel it `fit` (the phase 14 exit criterion allows a fit with a frame count),
+deleting the 0x68f020 citation, which no longer supports it.
+
+## 9. The precise gap, and the command that closes it
+
+**Missing artifact:** the prototype of the vtable handler that the trampolines call, i.e. of
+`_opd_FUN_003981ec` as *called through* `0x63D40C`, and the identity of the vtable base that owns that
+slot. Everything else on the chain is read.
+
+**Exact local commands** (read-only, nothing saved; the project is `ghidra_work/vsh493w`):
+
+```
+# 1. the handler slot and the words around it (OPD word at 0x63D40C -> 0x6DF3A0 -> fn 0x3981EC)
+bun work/page-move-scan.ts fw493/vsh_module/vsh.elf word 0x6df3a0
+bun work/page-move-scan.ts fw493/vsh_module/vsh.elf dump 0x63d2c0 80
+# 2. the handler itself, as instructions (already done; repeatable)
+powershell -File work/page-move-listing.ps1 list 3981ec 3983a0
+# 3. the trampolines and one wrapper
+powershell -File work/page-move-listing.ps1 list 3abc9c 3abcec
+powershell -File work/page-move-listing.ps1 list 3b0600 3b06a0
+# 4. the animate entry that the other family uses (not in any local decompile)
+powershell -File work/page-move-listing.ps1 decomp 147e28
+```
+
+What to look for in (1): a class descriptor whose first word is a vtable base `B` with
+`[B+0x13C] == 0x006DF3A0`, and a constructor that stores `B` into a new object's first word. That
+constructor is the object the trampolines receive; its animate method then either is 0x3981EC (and
+the mode question is settled as "mode = 0x1000016 is impossible, so 5 is a flag, not a mode") or is a
+function that forwards `r5` into setup's `r4` (and the mode is 5). Either outcome changes what the
+native should do, which is why the constants above are held.
+
+Secondary gaps, named so the next pass does not re-derive them: `paf_ext.prx`, `paf_psjs.prx`,
+`paf_web.prx`, `vshmain_ext.prx` and `silk*.prx` are not in any local decompile and are the only
+remaining places a page-transition animation could be started from; `xmb_ingame.prx` was not
+analysed at all.
+
+## 10. Reproduction for this pass
+
+```
+# constants (read-only, ELF only)
+bun work/elf-const.ts --elf fw493/vsh_module/vsh.elf --at 0x68eff0 --count 72 --type float
+bun work/elf-const.ts --elf fw493/vsh_module/xmb_plugin.prx --at 0x17f40 --count 40 --type float
+# class-name pointer table (PhXmBar is entry 13: 0x6fb22c -> 0x68f080)
+bun work/page-move-scan.ts fw493/vsh_module/vsh.elf dump 0x6fb1f0 40
+# OPD descriptor of the animation handler
+bun work/page-move-scan.ts fw493/vsh_module/vsh.elf opd 0x3981ec
+# instruction listings / decompile (Ghidra headless, -noanalysis -readOnly, nothing saved)
+powershell -File work/page-move-listing.ps1 list   3ac980 3acd00
+powershell -File work/page-move-listing.ps1 list   3accf4 3ace00
+powershell -File work/page-move-listing.ps1 list   3af1e4 3af320
+powershell -File work/page-move-listing.ps1 list   3b0600 3b06a0
+powershell -File work/page-move-listing.ps1 decomp 147e28
+# RCO animation counts (no firmware read; the existing decode)
+node -e "const j=require('./out/native-reference/rco-behavior/resources.json');..."
+```
+
+No `.cpp`/`.h` file was modified; no git command was run; no capture was taken; the RPCS3 rig was
+not touched. Firmware-derived numbers stay in these audit notes; no dump, module or capture is
+committed.
