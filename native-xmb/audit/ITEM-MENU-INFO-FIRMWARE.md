@@ -1300,3 +1300,290 @@ No hunk is written here for it; it is recorded because it is now measured rather
 - The harness reference/log refresh that F7 owes (unchanged; no source was edited by this part).
 
 No source, threshold or reference was touched for this section.
+
+---
+
+# H. Dated pass - 2026-10-28: the two row groups, the label audit, the nested level
+
+Status: the **grouping and wording half is implemented** in `src/shell.cpp` / `src/shell.h`; the **drawing
+half** is the hunk in H6 and was not applied to the repository's `view.cpp` (write fence). Part F is not
+deleted; where H contradicts F, H says so. Evidence classes are A's three (RCO, CODE, FRAME) plus **DUMP**
+(the build's own `.options.json` / log lines) and the captures named below. Nothing in H is copied from a
+firmware artifact.
+
+## H1. The group break is data on the row
+
+The settled 4.93 frame carries two row groups, not one list (G2): `Sort By` / `Group Content` at ink
+301-323 / 341-362, then `Start` / `Delete` / `Information` at 539-560 / 581-598 / 621-638, with a gap between
+the last utility ink and the first action ink. The firmware's own builder appends the item actions in order and
+`Information` last (A4); the list-level commands are a second section above them.
+
+`MenuOption` now carries one field, `dividerBefore` (`src/shell.h`): true only on the first row of a group that
+starts after the gap. `Shell::buildOptions()` builds group 0 first and group 1 second:
+
+| group | rows | condition |
+|---|---|---|
+| 0 - list-level / utility | `Sort By` (`msg_sort`). `Group Content` and `Display All` remain absent, as F3 records (nothing is grouped/filtered on this build) | `page-sortable` |
+| 1 - item actions | the item's own command (`Resume` / `Open` / `View` / `Start` / `Play`), `Play from Beginning`, `Copy`, `Delete`, the Continue Watching `Remove`, and `Information` last | the F3 conditions, unchanged |
+
+No row set and no condition changed. `dividerBefore` is set on the first group-1 row only when group 0 is
+non-empty; with no utility rows the list is a single group and the flag is false. The menu opens with focus on
+that first action row (the settled frame's bright row is `Start`, E1), not on row 0; Up reaches the utility
+group and Down clamps on `Information` as before.
+
+The panel log and the options dump both expose the break, so it is checkable without pixels:
+
+```
+shell: options groups entry= ... groups= 2 break= Sort By -> Open
+```
+
+Every `.options.json` row now carries `dividerBefore`, and the file has a top-level `groups` array:
+
+```json
+"groups": [
+  {"group": 0, "dividerBefore": false, "rows": ["Sort By"]},
+  {"group": 1, "dividerBefore": true,  "rows": ["Open", "Copy", "Delete", "Information"]}
+]
+```
+
+## H2. Row sets and groups, per context (DUMP)
+
+Same five contexts as F3, same seeds, pinned clocks (`--render-clock 30 --background-clock
+2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00 --focus-time 2000`), measured from
+`<ctx>/entries.json.options.json` and the log. `entry` is the row Triangle was pressed on.
+
+| context | entry | group 0 (utility) | group 1 (actions) | dividerBefore |
+|---|---|---|---|---|
+| installed Steam title | `steam:2807960` Battlefield 6, depth 2 | (none) | `Start`, `Information` | none (1 group) |
+| local video folder | `.../video-library/Movies` | `Sort By` | `Open`, `Copy` (disabled), `Delete` (disabled), `Information` | on `Open` (2 groups) |
+| video file with resume | `.../video-library/Top Level Clip.mp4` | `Sort By` | `Resume`, `Play from Beginning`, `Copy` (disabled), `Delete` (disabled), `Information` | on `Resume` (2 groups) |
+| photo | `.../photo-lib/Alpha.png` | `Sort By` | `View`, `Copy` (disabled), `Delete` (disabled), `Information` | on `View` (2 groups) |
+| Continue Watching | `continue:59e69a3e0a2a2c78651d8ab2` | (none - the page is not a directory, so `page-sortable` is false) | `Resume`, `Play from Beginning`, `Remove`, `Information` | none (1 group) |
+
+Exact `options opened` lines (order is the firmware's group order, not F1's flat order):
+
+```
+steam:          rows= 2 Start|Information
+video folder:   rows= 5 Sort By|Open|Copy|Delete|Information
+video resume:   rows= 6 Sort By|Resume|Play from Beginning|Copy|Delete|Information
+photo:          rows= 5 Sort By|View|Copy|Delete|Information
+continue row:   rows= 4 Resume|Play from Beginning|Remove|Information
+```
+
+Conditions (all preserved from F3): `actionable`, `resume-record`, `local-content`, `page-sortable`,
+`continue-row`, `always-last`. The two disabled rows keep their reason notes verbatim
+(`This native build does not copy files yet.` / `... does not delete files yet.`).
+
+## H3. Wording audit against the RCO table
+
+Reproduction: `bun work/rco-table-dump.ts <dev_flash>/vsh/resource/explore_plugin_full.rco --text`
+(861 English entries, the reader `src/assets.cpp` uses). Every row label the shell can emit in these five
+contexts and in the Sort By submenu now resolves from that table:
+
+| emitted label | key | context |
+|---|---|---|
+| `Start` | `msg_game_start` | Steam title |
+| `Information` | `msg_info` | all five |
+| `Sort By` | `msg_sort` | the three local directory pages |
+| `Open` | `msg_open` | video folder |
+| `View` | `msg_display` | photo |
+| `Resume` | `msg_resume` | video resume, Continue Watching |
+| `Play from Beginning` | `msg_play_begin` | video resume, Continue Watching |
+| `Copy` / `Delete` | `msg_copy` / `msg_del` | local content, disabled (F3) |
+| `Remove` | `msg_eject` | Continue Watching row |
+| `Creation Date ^` / `Creation Date v` | `msg_created_date_time_f` / `_r` | Sort By submenu |
+| `Update Date ^` / `Update Date v` | `msg_updated_date_f` / `_r` | Sort By submenu |
+
+**The one label that was not a firmware key is fixed.** F3's Continue Watching row used
+`tr("Remove from Continue Watching")` with no key. It is now `msg_eject` = `Remove`, with the row note
+`Removes this title from Continue Watching; the file stays on disk.` and the existing confirm body
+`Do you want to remove this title from Continue Watching?`. `Remove` is the firmware's own generic remove
+word and the row performs exactly that on this build's record; it cannot be read as deleting the file
+(the note and the confirm box both say so). The confirm body remains native wording because no firmware
+string covers forgetting a resume point; that is a dialog body, not a row label. Older prose still names the
+old wording and is outside this pass's write fence: `audit/MEDIA-CONTROLS.md:188-222`, `audit/DIALOGS-FIRMWARE.md:623`
+and `:721`, `audit/VISUAL-BEHAVIOR.md` VIS-46, and F3's `continue-row` bullet below.
+
+Checks that did not change:
+
+- **No `Close` key and no `Close` row** in the 861-entry table; Circle/Escape still close (F1).
+- **No `Cancel` row.** `msg_cancel`/`msg_cancel2` are the confirm box's buttons, already read in
+  `dialogs.cpp`.
+- **`Remove Disc` (`msg_disc_eject`) has no row** because this build has no optical drive; both eject
+  labels still resolve and are printed by the panel log (F2).
+- **No row claims a capability the build lacks.** `Display All`, `Group Content`, `Add to Playlist`,
+  multi-select, update/purchase/search/Move rows stay absent; `Copy`/`Delete` are listed disabled with
+  their reasons; `Start` is only used for a launchable title, `View` only on the photo context.
+- The player panel's `Subtitles`/`Audio`/`Repeat`/`Shuffle` rows are the in-player surface, not
+  `expage_menu`; they were not relabelled.
+
+## H4. The Sort By submenu and the nested level
+
+**Heading position is a fit, not a measurement.** No frame shows an open level 1 (G4; G2's `Sort By` /
+`Group Content` are level-0 rows). The heading therefore stays where the view already puts it for a `rows`
+menu, one row pitch above the first baseline (`rowZero - 68` = 484 at the current anchor). This is a fit
+inside the unmeasured region, marked in the `SortMenu` case in `src/shell.cpp` and in this section; no new
+number was invented.
+
+**The two groups stay distinct across nesting.** Opening `Sort By` replaces the row vector, so the nested
+level is one group of four date rows and carries no `dividerBefore`; the parent vector (with its flag) is
+kept in `optionsParent_` and restored on Circle. DUMP evidence from one run:
+
+```
+shell: options groups entry= ... groups= 2 break= Sort By -> Open
+shell: options selection 0 Sort By
+shell: options sort menu opened rows= 4 labels=creation/update date pairs groups=1 parentGroups= 2 heading=fit(unmeasured)
+shell: options back to item list groups= 2
+```
+
+The parent's action rows are not drawn while the nested level is up; the nested list is not merged into
+either parent group.
+
+**The nested plate is a mismatch, recorded and not rebuilt.** The RCO authors levels 1-2 as *separate*
+`plane_menu1` / `plane_menu2` boxes, each 128x272 (A2, A6), with their own `BG0`/`BG1` and MLists. This build
+does not create a second plate: it draws the nested list in the **same** full-height band (x 1320..1742),
+heading above the rows (rows at the action anchor 552/590/628/666), and hides the parent rows. Verdict:
+
+| aspect | firmware | this build | fit or mismatch |
+|---|---|---|---|
+| level container | separate 128x272 plane at its own position | the level-0 band | **mismatch** (shape and position) |
+| heading | no level-1 frame exists; not measurable | one row pitch above the first row (484) | **fit** (inside an unmeasured region) |
+| row metrics | level-0 measurements only | same 38 px pitch / 1334 column as level 0 | fit by reuse, unproven for level 1 |
+| parent visibility | separate plate at its own position, the level-0 plate still exists in the tree | parent rows replaced, band unchanged | **mismatch** (no second plate/dim/offset) |
+
+No second plate was rebuilt in this slice: there is no frame of an open level 1, and inventing a 128x272
+rect would be a fit presented as a measurement. The gap is recorded in G4 / H8, not hidden. The capture
+`sortmenu-visible/sort-panel.png` shows today's single-band form (heading `Sort By`, four rows, no parent
+rows, no second plate).
+
+## H5. Verification
+
+Build (source: this repository; no `view.cpp` edit):
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-menugroups
+```
+
+Five context runs as H2, each with `XMB_DUMP_ENTRIES` set, so the group structure above is the build's own
+data. `ab-layers.ts --capture --exe C:/dev/out/native-menugroups/re-ps3-native.exe`:
+
+| layer | PSNR | baseline | SSIM | baseline | gate |
+|---|---:|---:|---:|---:|---|
+| frame | 18.92 | 18.92 | 0.8553 | 0.8553 | PASS |
+| top background | 20.25 | 20.25 | 0.9363 | 0.9363 | PASS |
+| category icon row | 20.90 | 20.90 | 0.8982 | 0.8982 | PASS |
+| item label row | 12.04 | 12.04 | 0.3860 | 0.3860 | PASS |
+| clock text | 13.64 | 13.64 | 0.5128 | 0.5128 | PASS |
+| info bar | 17.61 | 17.61 | 0.8244 | 0.8244 | PASS |
+
+**PASS 6/6.** Important caveat measured this pass: the candidate frame behind those numbers contains **no
+glyphs** (the shared tree's text compositor currently draws none; see H6's status note), and the six scores
+equal the stored `captureBaseline` exactly. The gate is therefore passing on a glyphless candidate: the
+`clock text` layer's 13.64 is not evidence that text renders. The six-layer gate is unchanged by this pass,
+but it is no longer a text guard until the shared-tree text regression is repaired and the captureBaseline
+is re-measured on a text-bearing frame.
+
+**Named state.** `work/ab-layers.thresholds.json`'s `video-options-panel` asserts the old flat order. The
+exact new expectation is:
+
+```json
+"log": [{ "pattern": "shell: options opened category= video depth= 1 .*rows= 5 Sort By\\|Open\\|Copy\\|Delete\\|Information" }]
+```
+
+(and the description's row list should read `Sort By / Open / Copy / Delete / Information`). Running the
+state against this build fails exactly there, before any pixel comparison:
+
+```
+ASSERT FAIL: the dump says a different state
+- log "shell: options opened ... rows= 5 Open\|Copy\|Delete\|Sort By\|Information": no matching line
+```
+
+The harness was not edited (fence). `work/parity-catalogue.json:403-405` carries the same old order and
+needs the same one-line update.
+
+## H6. The view hunk (not applied)
+
+`MenuOption::dividerBefore` is inert until the view consumes it. The hunk below adds the measured group
+separation to the item menu's band and uses the flag only as the break marker; no per-context y offset and no
+new panel geometry enter the view. `237` is G2's two origins: the action rows' rect centre 552 (E1's
+baseline 560 minus the 8 px em offset) minus the utility rows' rect centre 315 (ink 301-323 minus the same
+8 px). With pitch 38 the utility rows land at 315/353 (ink ~302-323 / 340-361) and the action rows keep
+552/590/628/666.
+
+```diff
+diff --git a/native-xmb/src/view.cpp b/native-xmb/src/view.cpp
+--- a/native-xmb/src/view.cpp
++++ b/native-xmb/src/view.cpp
+@@ -1137,5 +1137,6 @@ struct PanelBand {
+     double rowCentre=505.;    // fixed rows: row 0's text centre; scrolling list: the focus row's centre
+     double labelInset=16.;    // row text left = x0 + labelInset
++    double groupGap=0.;       // fixed rows: distance from the action origin up to a divider's group origin
+     double contentDim=1.;     // brightness of the page the band covers, at rest (measured)
+     const BandStop* stops=nullptr;
+     int stopCount=0;
+@@ -1180,3 +1181,3 @@
+ const PanelBand kOptionsBand{.firmware=true,.x0=1320.,.fadeEnd=1742.,.pitch=38.,.fixedRows=true,
+-    .rowCentre=552.,.labelInset=14.,.contentDim=.545,.stops=kOptionsBandStops,
++    .rowCentre=552.,.labelInset=14.,.groupGap=237.,.contentDim=.545,.stops=kOptionsBandStops,
+     .stopCount=int(std::size(kOptionsBandStops))};
+@@ -1315,7 +1316,15 @@
+         const double labelX=firmwareBand?x0+band->labelInset:x0+(rows?34:16);
+         const double labelWidth=(firmwareBand?fadeEnd:1920.)-labelX-24;
++        // The shell's dividerBefore is the firmware's group break (G2): the rows before it are the utility
++        // group, which starts groupGap px above the action group's own origin. Both origins are this band's
++        // measured numbers, so no menu-specific y offset enters the view.
++        int groupBreak=0;   // no break: 0 keeps i as i below
++        if(rows)for(int i=0;i<int(rows->size());++i)if((*rows)[i].dividerBefore){groupBreak=i;break;}
+         for(int i=0;i<int(rowCount);++i) {
+             const double distance=i-position;
+             // Firmware rows are anchored on the measured baselines and do not travel with focus; the
+             // settings list keeps its 40 px pitch and its centred-with-focus motion.
+-            const double y=(firmwareBand&&band->fixedRows)?focusRow+double(i)*pitch:focusRow+distance*pitch;
++            const bool aboveBreak=firmwareBand&&band->fixedRows&&groupBreak>0&&i<groupBreak;
++            const double y=(firmwareBand&&band->fixedRows)
++                ?focusRow+double(aboveBreak?i:i-groupBreak)*pitch-(aboveBreak?band->groupGap:0.)
++                :focusRow+distance*pitch;
+```
+
+The hunk was applied to a scratch copy of the last text-capable tree (not this repository), together with
+this pass's `shell.cpp`/`shell.h`, and captured. The measured ink bands in
+`out/menugroups-verify/video-folder-grouped/panel.png` are:
+
+| row | measured ink y | model |
+|---|---|---|
+| `Sort By` (utility) | 306-328 | 315 rect centre, ink ~302-328 |
+| `Open` (action, focused) | 543-564 | 552 rect centre, ink 539-560 |
+| `Copy` | 582-603 | 590 rect centre, ink 581-598 |
+| `Delete` | 620-637 | 628 rect centre, ink 619-636 |
+| `Information` | 657-675 | 666 rect centre, ink 657-674 |
+
+That is the settled frame's two groups: utility above, a 215 px gap for this one-utility-row list (the frame's
+two-row utility group leaves 177 px), then the action block. The capture is a
+layout proof only: the shared tree's glyph compositor was bypassed to the view's QPainter fallback in the
+scratch build because every build produced after 11:58 renders no glyphs (`text_renderer.cpp` /
+`font_raster.cpp` mtime 11:58:42; `native-textrevert`, 11:58:35, is the last text-bearing build). This is
+outside the write fence and is recorded so the next pass re-captures on a repaired tree. The repository's
+`view.cpp` was not edited.
+
+**Status of H.** Grouping and wording are done and measured from the build's own dumps in five contexts; the
+drawing hunk is recorded, not applied. The nested level remains one band, explicitly a mismatch against the
+firmware's separate 128x272 plate. The named state's log assertion needs the one-line order update above.
+Still open: the `BG1` rectangle, cap height/paddings (unchanged from E1/E6), the text-compositor regression in
+the shared tree, and the re-measure of the gate's captureBaseline once text renders again.
+
+## H7. Corrections to F
+
+- **F1's "the item's own command first" is true of the row builder, not of the screen order.** The firmware's
+  list-level rows sit above the item actions (G2); the item's command is the first row of group 1 and is the
+  row that gets initial focus. F1's wording is corrected by H1/H2; its conditions and the `Information`-last
+  invariant still hold.
+- **F3's table order is superseded** by H2's group order for the four contexts where `Sort By` exists. The
+  row sets, keys and conditions are unchanged; only `Sort By` moves to group 0.
+- **F2's "`msg_eject` ... never built"** is superseded: `msg_eject` is now the Continue Watching row's label
+  (H3); `msg_disc_eject` still has no row. F3's `continue-row` bullet ("keeps a native wording and the dump
+  gives it no key") is superseded with it.
+- **F7's assertion** is superseded by H5's exact new pattern; the harness and `parity-catalogue.json` were
+  not edited.
+- F6's nested-band note ("drawing the same band is the honest unmeasured choice") stands, now with the
+  explicit mismatch verdict in H4.
+

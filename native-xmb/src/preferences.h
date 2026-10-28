@@ -20,6 +20,22 @@ namespace xmb {
 // against the active profile and fall back to the shared set when the key is shared or when no
 // profile has been selected yet. absoluteKey() exposes the resolution for tests and the audit.
 //
+// clock/timeZone's three accepted forms
+// -------------------------------------
+// The value is shared (one time zone for the console) and has three accepted forms, all bounded:
+//   "System"          the default: the clock follows the host;
+//   an IANA id        "America/Los_Angeles", the form this build's host list produces and every older file
+//                     holds - still accepted, still resolved through QTimeZone, so no stored value is
+//                     orphaned by the firmware list;
+//   ""                the empty value, which behaves like "System";
+//   a firmware token  "date_time_config_timezone_pacific_us_canada": the RCO MItem name without its
+//                     "item_" namespace, which is exactly what the choice model's Zone values are
+//                     (settings_menu.cpp, SETTINGS-FIRMWARE.md 11.3). The store validates the *form*
+//                     (this one namespace, a 1..48 character lower-case name) because it holds no
+//                     firmware tree; the choice model resolves the token to the item's own label and
+//                     GMT offset, and a well-formed token this firmware does not ship resolves to
+//                     nothing (host time, no row label) rather than to a guessed zone.
+//
 // File format
 //   version 1 (before profiles): {"version":1,"values":{"audio/volume":60,...}}
 //   version 2 (this build):      {"version":2,"active":"<id>","values":{"profile/<id>/audio/volume":60,
@@ -71,6 +87,10 @@ public:
     static bool validProfileId(const QString& id);
     static bool isSharedKey(const QString& key);
     static QStringList sharedKeys();
+    // The namespace the firmware's 110 time zones are stored in, and the bounded test for a value in it
+    // (see the header note above). Exposed so the choice model produces and the store accepts one rule.
+    static QString firmwareZoneTokenPrefix();
+    static bool isFirmwareZoneToken(const QString& token);
 signals:
     void changed(const QString& key);
     void failed(const QString& message);

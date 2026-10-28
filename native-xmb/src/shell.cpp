@@ -1740,9 +1740,20 @@ void Shell::buildOptions() {
     if(entries().isEmpty())return;
     const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
     const qint64 resumeAt=entry.action==Action::Unavailable?0:optionResumePoint(entry);
-    // Row 0 is the item's own command, the first row every firmware builder appends (A4). Its label comes
-    // from the row's kind (A3: Open for a folder/store row, Play for a playable file, View for an image or an
-    // information row, Start for a game title) and becomes Resume while a resume record exists.
+    // Two groups, in the order the settled firmware frame shows them (ITEM-MENU-INFO-FIRMWARE G2: Sort By
+    // and Group Content at ink 301-323 / 341-362, then Start, Delete, Information at 539-560 / 581-598 /
+    // 621-638, with a gap between). Group 0 is the list-level/utility section and is built first, so
+    // `actionGroup` below marks the first primary row; only that row carries `dividerBefore`, which is the
+    // whole of the group data the view gets. No Display All row: nothing on these pages is grouped or
+    // hidden. Group Content has no native store, so it stays out rather than being drawn inert (F3).
+    if(optionPageSortable())
+        addOption({"msg_sort","Sort By"},OptionCommand::SortMenu,"page-sortable");
+    // Group 1 - the item's own actions. Its first row is the item's command (A4); the menu opens with focus
+    // on it (the settled frame's bright row is Start), not on the utility row above.
+    const int actionGroup=options_.size();
+    // Its label comes from the row's kind (A3: Open for a folder/store row, Play for a playable file, View
+    // for an image or an information row, Start for a game title) and becomes Resume while a resume record
+    // exists.
     if(entry.action!=Action::Unavailable)
         addOption(resumeAt>0?OptionLabel{"msg_resume","Resume"}:activateLabel(entry),OptionCommand::Activate,
                   resumeAt>0?"resume-record":"actionable");
@@ -1759,16 +1770,18 @@ void Shell::buildOptions() {
         addOption({"msg_del","Delete"},OptionCommand::Delete,"local-content",false,
                   tr("This native build does not delete files yet."));
     }
-    // msg_sort. A local folder page that has more than one row is what the command can act on; Steam and
-    // Jellyfin pages are not directory listings, so they do not offer it.
-    if(optionPageSortable())
-        addOption({"msg_sort","Sort By"},OptionCommand::SortMenu,"page-sortable");
-    // A Continue Watching row is this build's own record, not a firmware item: the firmware has no row for
-    // forgetting a resume point, so this one keeps a native wording and the dump marks it with no key.
+    // The Continue Watching row is this build's own record, not a firmware item: the firmware has no row
+    // for forgetting a resume point. Its label is the firmware's own generic remove word (`msg_eject` =
+    // "Remove") rather than an English literal, and the note plus the confirm box say what is removed, so
+    // the row cannot be read as deleting the file.
     if(entry.id.startsWith("continue:"))
-        addOption({nullptr,tr("Remove from Continue Watching")},OptionCommand::RemoveResume,"continue-row");
+        addOption({"msg_eject","Remove"},OptionCommand::RemoveResume,"continue-row",true,
+                  tr("Removes this title from Continue Watching; the file stays on disk."));
     // Information is always the last row (A4's invariant; msg_info, the builder's own key at :60986).
     addOption({"msg_info","Information"},OptionCommand::Information,"always-last");
+    // Mark the break only when there is a utility group to break from. With none, the list is one group and
+    // the flag stays false, so the view draws the measured action rows unchanged.
+    if(actionGroup>0 && actionGroup<int(options_.size()))options_[actionGroup].dividerBefore=true;
 }
 void Shell::logOptions(const Entry& entry) {
     QStringList titles,keys,conditions;
@@ -1783,8 +1796,16 @@ void Shell::logOptions(const Entry& entry) {
         <<"entry="<<entry.id<<"rows="<<options_.size()<<titles.join('|');
     qInfo().noquote()<<"shell: options rows entry="<<entry.id<<"keys="<<keys.join('|')
         <<"conditions="<<conditions.join('|');
-    // The two eject labels the audit corrected from "Eject Disc". No row uses them in this build (there is no
-    // optical drive), so the check is that the table resolves them to the firmware's own words.
+    // The group break the view draws from, as data: one line per group with the rows it holds. `break`
+    // names the pair the gap sits between; `(none)` means the list is a single group.
+    int groups=options_.isEmpty()?0:1,breakAt=-1;
+    for(int i=0;i<options_.size();++i)if(options_[i].dividerBefore){++groups;breakAt=i;}
+    qInfo().noquote()<<"shell: options groups entry="<<entry.id<<"groups="<<groups
+        <<"break="<<(breakAt>0?options_[breakAt-1].title+QStringLiteral(" -> ")+options_[breakAt].title
+                             :QStringLiteral("(none)"));
+    // The two eject labels the audit corrected from "Eject Disc": msg_eject is now the Continue Watching
+    // row's own label (the firmware's generic remove word), while msg_disc_eject still has no row because
+    // this build has no optical drive. The check is that the table resolves the firmware's own words.
     qInfo().noquote()<<"shell: options eject labels msg_eject="<<optionLabel({"msg_eject","Remove"})
         <<"msg_disc_eject="<<optionLabel({"msg_disc_eject","Remove Disc"});
     if(!qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES"))return;
@@ -1802,13 +1823,30 @@ void Shell::logOptions(const Entry& entry) {
         {"msg_psmove_notice","PlayStation(R) Move Safety Notice"},
         {"msg_health_warning_psn","Health Warnings"},
         {"msg_intellectual_property_notices","Intellectual Property Notices"}};
-    QJsonArray rows,labels;
+    QJsonArray rows,labels,groupsJson;
     for(const auto& option:options_) {
         QJsonObject row{{"title",option.title},{"command",int(option.command)},{"enabled",option.enabled},
-                        {"condition",option.condition}};
+                        {"condition",option.condition},{"dividerBefore",option.dividerBefore}};
         if(!option.labelKey.isEmpty())row.insert("key",option.labelKey);
         if(!option.note.isEmpty())row.insert("note",option.note);
         rows.push_back(row);
+    }
+    // The same groups the log line prints, with every row's title in build order: group 0 is the
+    // list-level/utility section, group 1 the item actions, and any later group would carry dividerBefore.
+    {
+        QJsonArray current;
+        int groupIndex=0;
+        for(const auto& option:options_) {
+            if(option.dividerBefore && !current.isEmpty()) {
+                groupsJson.push_back(QJsonObject{{"group",groupIndex},{"dividerBefore",groupIndex>0},
+                                                 {"rows",current}});
+                current=QJsonArray();++groupIndex;
+            }
+            current.push_back(option.title);
+        }
+        if(!current.isEmpty())
+            groupsJson.push_back(QJsonObject{{"group",groupIndex},{"dividerBefore",groupIndex>0},
+                                             {"rows",current}});
     }
     for(const auto& probe:probes) {
         const QString text=optionLabel(probe);
@@ -1819,8 +1857,8 @@ void Shell::logOptions(const Entry& entry) {
     QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".options.json");
     if(file.open(QIODevice::WriteOnly))
         file.write(QJsonDocument(QJsonObject{{"category",categories_[category_].id},{"depth",pages_.size()},
-            {"entryId",entry.id},{"entryTitle",entry.title},{"rows",rows},{"count",rows.size()},
-            {"labels",labels}}).toJson());
+            {"entryId",entry.id},{"entryTitle",entry.title},{"rows",rows},{"groups",groupsJson},
+            {"count",rows.size()},{"labels",labels}}).toJson());
 }
 void Shell::toggleOptions() {
     touch();
@@ -1855,6 +1893,11 @@ void Shell::toggleOptions() {
     if(choiceColumn)return;
     buildOptions();
     if(options_.isEmpty())return;
+    // The firmware opens the list with the item's own command focused (the settled frame's bright row is
+    // Start), while the list-level rows sit above it. Start on the first action row when a utility group
+    // exists, otherwise on row 0; Up from there reaches the utility group.
+    optionsSelection_=0;
+    for(int i=0;i<options_.size();++i)if(options_[i].dividerBefore){optionsSelection_=i;break;}
     optionsOpen_=true;
     interactionAudio_.play(InteractionAudio::Cue::Options);
     const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
@@ -1901,12 +1944,20 @@ void Shell::optionsActivate() {
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
         emit changed();
         break;
-    case OptionCommand::SortMenu:
+    case OptionCommand::SortMenu: {
         // The firmware's sort rows are date pairs with the direction glyph in the string itself (A3:
         // msg_created_date_time_f/_r, msg_updated_date_f/_r). Only the two pairs whose dates this build can
         // read (a file's or folder's creation and modification times) are offered; Import Date, Release Year,
         // Film Date and Earned Date have no source in this build, so they are not invented. There is no Close
         // row: Circle steps back to the item list.
+        //
+        // Nested level: the firmware's plane_menu1/2 are separate 128x272 plates (A2), while this build draws
+        // the nested list in the same full-height band with the parent rows hidden; that is a recorded
+        // mismatch (audit H4), not a plate rebuilt in this slice. The submenu's heading position is also
+        // unmeasured - no frame shows an open level 1 (G4) - so it stays at the view's existing one-row-pitch
+        // placement above the first baseline and is marked a fit in the audit (H3).
+        int parentGroups=options_.isEmpty()?0:1;
+        for(const auto& row:options_)if(row.dividerBefore)++parentGroups;
         optionsParent_=options_;optionsNested_=true;optionsTitle_=optionLabel({"msg_sort","Sort By"});
         options_.clear();
         addOption({"msg_created_date_time_f",QStringLiteral("Creation Date ")+QChar(0x25B2)},
@@ -1919,9 +1970,12 @@ void Shell::optionsActivate() {
                   OptionCommand::SortUpdatedDescending,"sort-row");
         optionsSelection_=0;
         interactionAudio_.play(InteractionAudio::Cue::Options);
-        qInfo().noquote()<<"shell: options sort menu opened rows="<<options_.size()<<"labels=creation/update date pairs";
+        qInfo().noquote()<<"shell: options sort menu opened rows="<<options_.size()
+            <<"labels=creation/update date pairs groups=1 parentGroups="<<parentGroups
+            <<"heading=fit(unmeasured)";
         emit changed();
         break;
+    }
     case OptionCommand::SortCreatedAscending:
     case OptionCommand::SortCreatedDescending:
     case OptionCommand::SortUpdatedAscending:
@@ -1991,9 +2045,13 @@ void Shell::optionsActivate() {
 void Shell::optionsClose() {
     if(!optionsOpen_)return;
     if(optionsNested_) { // Circle steps back to the item list; the menu stays open
+        // optionsParent_ is the same row vector that was on screen, so its `dividerBefore` flag survives the
+        // nesting round-trip; the nested level itself is one group and carries no divider (H3).
         options_=optionsParent_;optionsParent_.clear();optionsNested_=false;optionsTitle_.clear();optionsSelection_=0;
+        int groups=options_.isEmpty()?0:1;
+        for(const auto& row:options_)if(row.dividerBefore)++groups;
         interactionAudio_.play(InteractionAudio::Cue::Back);
-        qInfo().noquote()<<"shell: options back to item list";
+        qInfo().noquote()<<"shell: options back to item list groups="<<groups;
         emit changed();
         return;
     }

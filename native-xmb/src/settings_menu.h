@@ -59,6 +59,10 @@ struct ChoiceList {
     bool scrollable=false;
     QString scrollObject;   // the page's Scroll object when the RCO declares one
     QVector<ChoiceItem> items;
+    // The item the persisted value selects: its rcoIndex (the row the band focuses), or -1 when nothing
+    // in the list is current. A time zone stored as an IANA id has no firmware item, so this is -1 and the
+    // band is told not to guess a row (SETTINGS 13.6a/14); a firmware zone token reports its item.
+    int currentRow=-1;
     bool fromRco() const { return source==QLatin1String("rco"); }
     int count() const { return int(items.size()); }
 };

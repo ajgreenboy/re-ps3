@@ -104,6 +104,12 @@ struct MenuOption {
     QString note;          // one line under the list while this row has focus (a reason, a file name)
     QString labelKey;      // the explore_plugin_full key the title was read from; empty when none exists
     QString condition;     // why the row is in this particular list (the panel log and the options dump)
+    // True on the first row of a visual group that starts below the firmware's gap. The builder sets it on
+    // the first item action when the list-level/utility rows above it exist; it is the only group data the
+    // view gets, so the view owns the measured y anchors and no per-context offset lives in the shell
+    // (audit/ITEM-MENU-INFO-FIRMWARE.md G2: Sort By/Group Content ink 301-362, Start/Delete/Information
+    // 539-638, with the gap between).
+    bool dividerBefore=false;
 };
 // One audio track QMediaPlayer reports for the loaded media. `switchable` turns false the moment this
 // build asked for it and the player's own activeAudioTrack() did not follow, and then `reason` says so.
