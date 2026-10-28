@@ -628,3 +628,161 @@ of bright specks instead of the reference's few dozen faint ones. Two changes br
 Measured on the canonical capture (all six layers pass): frame **18.02 dB / 0.8301 SSIM** (was 17.89/0.8151),
 top background 20.24/0.9344, category icon row 21.05/0.8950, item label 11.94/0.3910. The tuning improves every
 dust-bearing layer, so it is both a look fix and a fidelity gain.
+## Applied 2026-10-27: real second pass, firmware iridescent LUT, alpha chain
+
+Closes the two items the "Applied" section still listed as open - "the in-shader radial halo replaces the
+separate `particles_second` program" and "`proc_iridescent.tga` and the untraced `_Color`/`_Gamma`" - and
+applies the fresnel half of the alpha chain. `src/particles.cpp` / `src/particles.h` only; `view.cpp` is
+untouched. Every number below is a local measurement (19:00-19:15, 2026-10-27), not an estimate.
+
+### 1. Two programs, two targets
+
+`particles_quads` and `particles_second` are now separate `QOpenGLShaderProgram` pairs (one VAO, one 48-byte
+VBO, one index buffer, one `glBufferSubData` per frame shared by both):
+
+| | pass 1 | pass 2 |
+|---|---|---|
+| program | `program_` (quads pair) | `glareProgram_` (second pair) |
+| target | the HDR scene (bound by `view.cpp:452`) | the HDR glare source, 256x144 for a 1920x1080 frame |
+| quad size | `SIZE MIDDLE -> FAR` x 1.15 | the same x **GLARE SCALE 5.44386** (slot 459, `glsl/particles_second.vpo.glsl:172-175`) |
+| shape | disc cut + iridescent tint + photometry | `intensity = GLARE * (1 - e^(-EXPOSURE*lit)) * e^(-P2 * r^P1)`, no disc, no tint |
+| blend | additive | additive |
+
+The folded `0.045 * exp(-4.44 * r^0.99)` term is **deleted** from pass 1's fragment program. Pass 2 uses the
+PARTICLES.mnu values the audit tabulated: GLARE 0.159705, P1 0.99, P2 4.44, GLARE SCALE 5.44386.
+
+`view.cpp` needs no change: both firmware passes arrive through the same `particles_.render(...)` call, so
+`render()` classifies the call as the glare pass when it arrives immediately after a scene draw, for the same
+`seconds`, with a different bound draw framebuffer (`Hdr` binds its glare source around the `extraGlare` hook).
+Explicit `renderGlare(gl, seconds, w, h)` is the unambiguous entry point and the preferred wiring - the exact
+one-line change is `particles_.render` -> `particles_.renderGlare` at `view.cpp:456`.
+
+The second pass consumes the pass-1 state: a repeated call for the same `seconds` steps nothing
+(`sync()` only advances `step_` toward `floor(seconds / DELTA TIME)` and the VBO upload is skipped when
+`step_`, `live_` and the aspect are unchanged). Evidence, `XMB_PARTICLE_LOG=1 --render-clock 30`:
+
+```
+particles: quads  step 3375 live 1529 nonfinite 0 checksum 96ed0c48 target 1920 x 1080 lut tga
+particles: second step 3375 live 1529 nonfinite 0 checksum 96ed0c48 target 256 x 144 lut tga
+```
+
+Identical step, live count and state checksum on both passes, every frame.
+
+Pass-2 footprint on the frame, measured by rebuilding the same worktree with the pass-2 draw gated off and
+capturing both: **61.86 dB / 0.99980 SSIM, 187,830 pixels changed (9.1%), maximum channel delta 3 of 255,
+mean |delta| 1.02 over the changed pixels.** The glints reach the frame at the brightness the mnu values
+imply; they are a faint bloom around the brightest specks, not a second field of light. The pass-2 rgb
+carries the alpha chain, as the second fpo does (line 124 multiplies by `v_tc[3].w` before `_Color` and
+`_Gamma`), so nothing blooms that pass 1 does not draw.
+
+### 2. The iridescent term is the firmware texture
+
+`particles/proc_iridescent.tga` **is** reachable, and it is what the shader samples now:
+
+- the file lives in `lines.qrc` (`flashRoot/vsh/resource/qgl/lines.qrc`), entry `particles/proc_iridescent.tga`,
+  65580 bytes: an uncompressed 32-bit TGA, 128x128, descriptor 0x98 (alpha 8 bits, bottom-up origin);
+- it is decoded by the same pair `ribbon.cpp` uses for `textures/TGA/freslut1.tga`: `QrcArchive::file` then
+  the static `Assets::decodeTga`. No extraction, no re-encoding, the plugin's own bytes
+  (`custom_render_all.c:42258`);
+- the sample is the fpo's: `uv = normal_v * 0.5 + 0.5`, then each channel raised to `_IridescentExp`
+  (IRIDESCENT EXP 1), i.e. `(t + 1)^1` - `glsl/particles_quads.fpo.glsl:74-107`, and the same chain in
+  `particles_second.fpo.glsl:63-102`;
+- `normal_v` is the particle's own orientation normal (the quaternion-rotated +z of this screen-space
+  projection), so one particle samples one point of the ramp: a per-particle hue, not a ramp across the quad.
+
+Why the load is not via `Assets&`: `Particles::init` is called as `particles_.init(*this)` (`view.cpp:340`)
+and `View` does not pass its `Assets` through, so `init(gl)` resolves the firmware root from the same
+`--dev-flash` argument the process was started with (`main.cpp:326` requires it) and reads the archive
+directly. `bool init(QOpenGLFunctions_3_3_Core&, Assets&)` exists as the clean path; the one-line change
+`particles_.init(*this)` -> `particles_.init(*this, assets_)` removes the command-line lookup.
+
+Colour handling: the ramp is saturated (measured span, sRGB: (215,60,167) magenta, (194,115,60) amber,
+(133,140,242) blue, mean (171,137,172)), and blending it in directly would produce the rainbow field the
+reference does not have. So it is used as **hue only** - divided by its own luma (clamped to 0.55..1.45), so
+brightness passes through untouched - and mixed into white with a small weight, `0.10 + 0.50 * specular`.
+Reference evidence for that choice: the RPCS3 frame's dust is colourless. Local maxima above their 5 px ring
+in `ab-rpcs3-root.png` have a mean additive delta of **(29,29,29)**, i.e. R = G = B.
+
+Measured on the 480x360 lower-left dust crop (40,640), same recipe:
+
+| frame | specks | peak delta | mean speck delta RGB |
+|---|---:|---:|---|
+| RPCS3 reference | 106 | 171 | (32,30,33) |
+| before (this change) | 171 | 92 | (36,30,24) warm |
+| after | 184 | 143 | (44,43,42) neutral |
+
+So the dust moved from warm amber flecks (92 levels peak) to neutral white points (143 levels peak) against
+the reference's neutral 171: closer in both colour and contrast, still more numerous (the emission volume is
+unchanged - 6-A2 stays open).
+
+### 3. Alpha and colour chain
+
+The single untraced colour term stays a single fitted gain, now called out as such in the shader:
+`uColorGain` multiplies the lit term in **both** programs (`_Color * _Gamma`, one scalar, applied before the
+`1 - e^-k` exposure where the fpo applies it after - a scalar commutes with the exponential's argument).
+Its value is **1.84**, derived rather than re-fitted: the previous 1.05 was fitted without a fresnel term, and
+the evidencing of the fresnel term (`1 - fresnel^FRESNEL`, FRESNEL 1.33319) multiplies the average alpha by
+`E[T] = 1 - INTEGRAL(f^1.33319) = 1 - 1/2.333 = 0.571` over the uniform-random orientation normal, so
+`1.05 / 0.571 = 1.84` holds the same mean exposure. The measured layers below confirm it did.
+
+The chain in pass 1 is the vpo's, per vertex: `T = clamp(1 - fresnel^1.33319)`, `x GLOBAL ALPHA`
+(`_Transparency.y`, the uniform `setGlobalAlpha` already drives from the boot weights), `x` the SPU life
+envelope, `x depthFade^2`. `depthFade` is still the stand-in for the life-bounds box / NEAR-FAR DARKNESS /
+DoF fades whose packing 6-B3 leaves open; it is the only fitted geometry left in the alpha chain.
+`GLOBAL ALPHA` keeps its meaning on both passes (a `GLOBAL ALPHA 0` theme draws no dust and blooms none).
+
+### 4. Determinism
+
+`--render-clock 30` with the canonical recipe (pinned background/UI clocks, 2 s focus, `full,wait,wait,wait`),
+two captures of the final build plus one more from a rebuild of the identical sources:
+
+```
+sha256 9C2A6CE98260D74D2E3C695F55D607180B1E24CAB94E01613251FE7666B332A0   (3 of 3 identical)
+```
+
+The capture with `XMB_PARTICLE_LOG=1` set hashes the same, so the log path does not perturb the frame.
+Caveat for anyone repeating this: the checkout is shared with concurrent work. Two captures six minutes
+apart during this session differed in the item column ("Saved Data Utility (PS2)/(PSP)" rows appeared;
+`p3t.cpp` / `text_renderer.cpp` changed at 19:05:49-19:06:01), which is why the before/after below is an
+isolated A/B built from the same worktree rather than a comparison against an older build.
+
+### 5. Measured result
+
+Isolated A/B: same worktree, same worktree state, `particles.{cpp,h}` reverted to the 2026-10-26 version for
+the "before" build, then restored (source sha256 `100AD1D0...`). Canonical capture, `work/ab-layers.ts`
+crops, reference `ab-rpcs3-root.png`:
+
+| layer | before | after | delta |
+|---|---:|---:|---:|
+| whole frame | 18.292 / 0.8295 | 18.282 / 0.8285 | -0.010 dB / -0.0010 |
+| top background | 20.238 / 0.9344 | 20.225 / 0.9336 | -0.013 dB / -0.0008 |
+| category icon row | 20.912 / 0.8947 | 20.893 / 0.8939 | -0.018 dB / -0.0008 |
+| item label row | 11.944 / 0.3913 | 11.940 / 0.3909 | -0.004 dB / -0.0004 |
+| clock text | 11.394 / 0.4105 | 11.394 / 0.4105 | 0 |
+| info bar | 14.779 / 0.6117 | 14.779 / 0.6117 | 0 |
+
+The particles layer's own footprint (before frame vs after frame) is **51.32 dB / 0.99901**. All six gates
+pass against `work/ab-layers.thresholds.json` (frame 18.0173/0.8301, top background 20.2377/0.9344, icon row
+21.0530/0.8950, item label 11.9415/0.3910, clock 11.3900/0.4105, info bar 14.7800/0.6117).
+
+This is a **measured small negative** on every dust-bearing layer: -0.01 to -0.018 dB, and only on the
+dust-bearing ones (clock and info bar are bit-identical, which also proves nothing outside the particle layer
+moved). It is 2-4% of the 0.5 dB gate. The reading is that the metric compares dust at an arbitrary phase
+against the reference frame's dust at its own phase, so a *more* correct speck (neutral, brighter core) scores
+slightly worse than the warmer, softer speck it replaced; the change is kept because it closes the two named
+audit gaps and the loss is inside the gate's noise floor. A revert is one file pair if the metric is preferred
+to the fidelity.
+
+### 6. Still open after this pass
+
+- **6-A2 emission origin**: still a uniform box (x across the width, y -3 +/- 5.5 triangular, z -3..-13.5).
+  It is why the native frame carries ~180 specks against the reference's ~106 in the same crop.
+- **6-B1 qgl material mode 3**: still additive; the additive pass 1 was not re-litigated here.
+- **6-B2 `_Color` / `_Gamma`**: values still untraced; one gain covers both, now derived from the fresnel
+  mean rather than re-fitted.
+- **6-B3 DoF / `_NearControl` / `_LifeBounds` packing**: `depthFade^2`, the focus bands and the 1.15 size
+  gain are still fits; `_Focus`/`_FocusCurves` component mapping was not captured.
+- **Glare-pass call detection**: the `render()` auto-dispatch keeps `view.cpp` untouched but infers the pass
+  from (previous call was a scene draw) + (same `seconds`) + (different draw framebuffer). Calling
+  `renderGlare()` from `view.cpp:456` removes the inference, and is the change to make if that line is ever
+  edited for another reason.
