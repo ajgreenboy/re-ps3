@@ -260,6 +260,9 @@ public:
     bool psMenuConfirmingOff() const { return psConfirmOff_; }
     // Triangle options panel for the selected entry (a right-hand panel; the XMB behind it keeps its layout).
     bool optionsOpen() const { return optionsOpen_; }
+    // Let a view-owned surface play a system cue through the shell's one audio player (the music
+    // control panel opens with the firmware's message cue; audit MEDIA-PANELS-FIRMWARE 7.2/11.7).
+    void playCue(InteractionAudio::Cue cue) { interactionAudio_.play(cue); }
     int optionsSelection() const { return optionsSelection_; }
     const QVector<MenuOption>& options() const { return options_; }
     QString optionsTitle() const { return optionsTitle_; }
