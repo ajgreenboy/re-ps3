@@ -2035,3 +2035,33 @@ Files touched by this pass: `work/parity.ts` (the phase sweep, the informative g
 `contentDiffers` / `contentDiffersReason` fields); `native-xmb/audit/PARITY-SCORECARD.md` (this section).
 No reference frame, no budget, no capture pin, no app source, no CMake and no `work/ab-layers.*` file was
 touched. Scratch captures and comparison images live under `out/phase-probe/` and are not tracked.
+## 18. Consolidated scorecard after the composite and pin waves (2026-10-28)
+
+Scorecard `scorecard-20261028-085426` (run `run-20261028-084205`, executable `native-head2` sha256
+`c88b1404983ad0430ead289682c42c286a58d0aa21fa19b29000b5be0eb04381`), the first full run after the
+composite renders and the canonical pin correction.
+
+**Tier A 34/35, then 35/35 after one catalogue fix.** The only miss was `background-list`'s `entryId`, which is
+`appearance/background/1` now that the measured `Brightness` submenu row sits first; `f4f5920` corrects the
+assertion rather than the app.
+
+**Tier B: 0 pass, 2 informative, 23 gating cell failures, 10 captured cells without a reference.** The two
+informative states are `page-settings-system` and `page-settings-video`, whose frames pass and whose only failing
+region is the annotated `contentDiffers` one - the category the annotation system exists for.
+
+**Tier C: 9 pass**, the rest `n/a` because their routes have no scripted transition.
+
+Composite results that are now passing their own budgets: `ps-menu` frame **28.82/0.9918**, entries
+**30.89/0.9857** (budget 26/0.95), legend **23.93/0.9423**; `info-indicator`'s indicator region
+**22.37/0.9277** (its frame fails on the background, not the indicator). `dialog` is at 18.12/0.8420 on its
+region - over the PSNR budget, short on SSIM - with the box now measured from the console frame.
+
+**The canonical pin moved from 2026-10-25 to 2026-10-28** (the date the reference was captured) after the fourth
+background pass measured that the reference's `_MonthTime` is 26.129, not the 23.2258 of the 10-25 session. Every
+gated layer improved: frame **18.29 -> 18.76**, top background **20.25 -> 21.06**, category icon row
+**20.93 -> 21.62**, clock 11.39 -> 11.41, info bar 14.98 -> 15.05, all SSIM up, gate **6/6**, and the twelve named
+states were re-saved against it.
+
+The remaining gating failures are real rendering differences with named regions; the largest is still the
+background's flat achromatic residue (+0.0594 linear scene, past the draw), whose closing artifact is the
+console's 64x32 surface dump (`work/fp-grid-day.npy` is the expected value). No budget was changed to move a cell.
