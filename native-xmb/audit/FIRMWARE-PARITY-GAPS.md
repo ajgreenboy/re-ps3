@@ -4,27 +4,31 @@ Assessment only. No source file was modified for this document. Written 2026-10-
 Scope: what the 4.93 firmware does in rendering, layout, motion, menus, text, behaviour and
 audio, and what this C++/Qt recreation still lacks.
 
-> **Status 2026-10-27/28 - read section 1.3 for the current score; section 1 below is the 2026-10-26
+> **Status 2026-10-27/28 - read section 1.4 for the current score; section 1 below is the 2026-10-26
 > assessment and is kept as history.** The firmware recoveries and the consumption passes landed after
 > this register was written: the runtime RCO object model (`6096dbf`), the dialogs recovery (`e4e3c23`)
 > and its implementation (`e171263`, verified in `6cf54a4`), the item-menu and information panel
 > recovery (`969c9ac`), the OSK layout module and its firmware recovery (`68134a6`), the settings pages
 > analysis and the root/page geometry (`4bbff6e`), the media panels analysis (`79f377d`), the scene
 > runtime-read adoption (`9545047`), the Settings row-set application (`937babe`, `4c4b25e`), the GIM
-> decode completion (`e90b196`), the P0 scorecard (`09ae471`) and the 2026-10-28 second wave: the
+> decode completion (`e90b196`), the P0 scorecard (`09ae471`) and the 2026-10-28 waves: the
 > settings/item bands (`3f3a445`), the media panels and volume meter (`320a69e`), the item-menu groups
 > (`b760278`, `8f02123`), the info-bar plate (`6ead87c`), the OSK draw (`78ccde9`), the texture and
-> theme decoder fixes (`1781dd3`) and the first text-bearing Tier B scorecard (`e818e25`). Section 2.6
-> lists every surface that moved from free-hand to firmware-derived, with the commit that moved it.
+> theme decoder fixes (`1781dd3`), the first text-bearing Tier B scorecard (`e818e25`), and the third
+> wave now rated in 1.4: the layout/text corrections (`2ecc49c`, `80f4ae4`), the Theme lists
+> (`7eafa75`, `8ef9ecd`, `abfc80b`), the two-button box (`9723cb4`), the PS menu and tap plate
+> (`af30d9e`), the composite references (`cb94045`), the scoring-validity layer (`471e781`) and the
+> canonical pin correction (`70a7711`). Section 2.6 lists every surface that moved from free-hand to
+> firmware-derived, with the commit that moved it.
 > Where a row's "current native state" changed, the row says "(updated 2026-10-27)" or "(updated
 > 2026-10-28)" - a row without that marker still describes the 2026-10-26 code.
 >
 > Two numbers a reader needs before quoting anything in this file: the scorecard is
-> [PARITY-SCORECARD.md](PARITY-SCORECARD.md) (`e818e25`: Tier A 35 of 35 capturable states, Tier B 0 of
-> 35 with 22 measured, Tier C 9, 22 of 30 firmware states referenced, **0 states 1:1**), and the
-> completion ledger is [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1 (16 done / 48 partly /
-> 23 not started / 1 obsolete). A percentage in sections 1.1-1.3 is a judgement with stated components;
-> the tier counts are the measurement.
+> [PARITY-SCORECARD.md](PARITY-SCORECARD.md) (`49acac6`, section 18: Tier A 35 of 35 capturable states,
+> Tier B 0 pass / 2 informative / 23 gating, Tier C 9, 25 of 30 firmware states referenced, **0 states
+> 1:1**), and the completion ledger is [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1 (16
+> done / 49 partly / 22 not started / 1 obsolete). A percentage in sections 1.1-1.4 is a judgement with
+> stated components; the tier counts are the measurement.
 
 > **Status 2026-10-27 - this register predates the 2026-10-26/27 feature run.** Since it was written,
 > the notification composite (B4, audit/NOTIFICATIONS.md), the item-level Triangle options menu
@@ -156,6 +160,78 @@ The thing that did **not** move is the thing the scorecard measures: rows and li
 one honest sentence should take the tier counts, not the percentage.
 
 
+### 1.4 Rating changes, 2026-10-28 third wave (through `49acac6`)
+
+Section 1.3 is the second 2026-10-28 pass; this is the third, and it supersedes 1.3's totals. Same
+weights, same rule: a surface counts only where the firmware's own data drives it **and** a matched
+comparison exists or is specified. Only surfaces that changed tonight are re-rated. **Media panels are
+not one of them**: `320a69e` is an ancestor of the last sync (`88b54ba`), so the media-panel rating in
+1.3 stands unchanged - a re-rating here would be a change with no commit behind it.
+
+**The overall score is a judgement, not a measurement, and the measurement beside it still says zero
+states are 1:1.** At `49acac6`, scorecard 18 reports **Tier A 35 of 35 capturable states**, **Tier B 0
+pass / 2 informative / 23 gating** (the 25 measured cells; 10 captured cells still have no reference),
+**Tier C 9**, and **25 of the 30** firmware-referenced states covered. The percentages answer "how much
+of the target is driven by the firmware's own data"; the tier counts answer "how much of it matches".
+They are different questions, and only the second is measured.
+
+| Surface (weight) | 2026-10-28 second wave | now | What moved, and what did not |
+|---|---:|---:|---|
+| Rendering (35%) | 61% | **62%** | The canonical background pin moved to the reference's own date and every gated layer improved (`70a7711`: frame 18.76/0.8360, top background 21.06/0.9434, icon row 21.62/0.9062); the same pass proves the console's own microcode reproduces this build's scene value, so the residual is a named constant past the draw rather than a translation defect. Text metrics were corrected from the matched pair (`80f4ae4`: em 27->32, ink .72->.455+.545, matched-string crop 14.85->22.81). Not moved: the refraction input, glyph-metric authority, glow, RSX quantisation, no icon-interior/edge layer, and the Settings row icons still draw `qgl` ids. |
+| Layout and motion (20%) | 71% | **74%** | The level-0 label pen (113 / 678), category title (-5), parent unfocused icon (455.54), faint-neighbour alpha (.067), depth-1 pen (60), the Theme band family (x0 1324 / zero 1744 / inset 17) and the measured 0.40 band dim are applied (`2ecc49c`, `abfc80b`, `80f4ae4`), and 17 of 22 Tier B states improved. Not moved: the receding-bar model and the incoming 210 / 1.10223 scale are still not in `src/`, so Phase 13's core constants are unchanged. |
+| Menus and screens (20%) | 55% | **60%** | The PS system menu is measured and fixed against its first console frame (`af30d9e`: entries 30.89/0.9857, frame 28.82/0.9918, legend 23.93); the two-button confirm box is measured and drawn from a console frame (`9723cb4`: region 18.12/0.8420, frame 19.77); the four Theme lists are the console's contents (`7eafa75`, `8ef9ecd`: 63 lists / 442 items, Color 13 rows with 12 month chips, Background 4 with the Brightness row, Font 3, refusals enforced). Not moved: the settings list page's expanding row, `tex_sett` icons, the confirm/apply/result family, the nested Sort By planes, and the root/page geometry. |
+| Behaviours (15%) | 40% | **41%** | The PS-tap plate now appears with the measured 155/66/2001/66 ms envelope, because the `ps` token finally reaches the tap handler (`af30d9e`). Not moved: the dialog box's drawn focus is still presentational (`Shell::activate` has no choice index), Delete/Copy/Move/Display All, BGM, a visible profile switch, the in-game overlay. |
+| Audio (10%) | 43% | **43%** | Nothing in this wave touched a cue, a level or a mix. |
+| **Weighted total** | **57%** (50-64) | **59%** (52-66) | 62x.35 + 74x.20 + 60x.20 + 41x.15 + 43x.10 = 58.95. The band is stated because the components are judgements; a single number invites quoting it as a score. |
+
+The Tier A/B evidence behind each re-rated surface, printed beside the judgement so the two cannot be
+confused:
+
+- **PS menu and control indicator.** Tier A: `ps-menu` and `info-indicator` pass. Tier B: `ps-menu`
+  frame **28.82/0.9918 PASS**, `ps menu entries` **30.89/0.9857 PASS** against the hand-set 26.0/0.95
+  budget, `ps menu legend` **23.93/0.9423**; `info-indicator`'s indicator region **22.37/0.9277 PASS**
+  (budget 18.0/0.88), while its whole frame remains 18.02/0.8257 FAIL because the background behind the
+  plate is this build's day wave, not the console's (`af30d9e`, scorecard 18).
+- **Dialog box.** Tier A: `dialog` passes, but **its route captures the inline line, not the box**, so
+  its Tier B cell stays 16.42/0.7576 FAIL. The box itself is measured by a direct crop against the
+  dialog reference: frame **19.77/0.8937**, `dialog` region **18.12/0.8420** - over the 18.0 PSNR budget,
+  short of 0.88 SSIM. The drawn `Yes`/`No` focus is presentational (10.5 in DIALOGS-FIRMWARE).
+- **Theme lists.** Tier A: the three list states were the 07:37 run's only Tier A misses (row counts and
+  the panel log line); `32dd3f0` aligns the catalogue and `f4f5920` fixes the last Background assertion,
+  and scorecard 18 reports Tier A 35/35. Tier B, last printed per state before the draw landed:
+  `color-list` 19.23/0.8639 frame and 19.77/0.8766 band column, `background-list` 18.82/0.8617 and
+  19.93/0.8797, `font-list` 18.38/0.8544; none passes. The draw's own crops against the console's list
+  frames are Color band 19.67/0.7430, chip column 17.71/0.7637 (annotated `contentDiffers` at
+  19.93/0.8404 because the console draws unlabelled chips and this build labels six values), Background
+  band 19.34/0.7463 and Font band 20.39/0.7756.
+- **Text metrics.** Tier A passes everywhere. Tier B: the only row both frames spell the same
+  ("System Name") goes **14.85/0.4813 -> 22.81/0.9457**; `page-settings-system` page rows 16.26->16.60
+  and `page-settings-theme` 15.27->15.53; the canonical gate is 6/6 and `root`'s item-label row is
+  11.08/0.4003 - inside its gate, but its label is a different string, so it is annotated
+  `contentDiffers`, not a pass. The multiply shadow is inert.
+- **Background pin.** Tier A is unaffected (a capture pin is not an assertion). The canonical family is
+  6/6 at 18.76/0.8360 frame, 21.06/0.9434 top background, 21.62/0.9062 icon row, 11.99/0.3895 item
+  label, 11.41/0.4528 clock and 15.05/0.7667 info bar. The **parity** cells keep the corpus pin, so no
+  Tier B number moved because of the correction; `root`'s last printed frame is 17.97/0.8225. **And that
+  pin is still the old date**: `work/parity-reference.json` line 62 fixes the `day` cell at
+  `2026-10-25T10:00:00` while the reference frame is a 10/28 capture, so the parity corpus still carries
+  the same `_MonthTime` phase confound (26.129 against the app's 23.63 at the 10-25 pin, worth about
+  3.7/255) that the canonical gate just removed. No Tier B cell has been re-captured at the corrected
+  date, which means today's Tier B frame and band numbers are **depressed by a known amount**, not
+  ceilings. Re-pinning the corpus is a corpus change (it invalidates the stored cells) and is not done
+  here.
+
+What the wave is worth, stated plainly: three composite surfaces moved from "never measured" (or from a
+6.6 dB region deficit) to passing their own region budgets - PS menu entries and frame, the control
+indicator, and the Theme lists' Tier A assertions; the two-button box moved from an invented native fit
+to a measured frame; the one text row whose string matches the console moved 8 dB; and the background's
+canonical numbers moved for a measured reason rather than a fit. What did **not** move is what Phase 13
+still owns: the receding bar, the incoming column, the 189 px pitch and the `kColumnX-40` anchor. The
+background residue (+0.0594 linear scene, past the draw) is named and its closing artifact is specified,
+but it is not closed. A reader who wants one honest sentence should take the tier counts, not the
+percentage: **0 states are 1:1.**
+
+
 ## 2. Gap register
 
 Size: S = bounded slice, days, evidence already local. M = needs one new capture or trace plus
@@ -205,11 +281,11 @@ code, one to two weeks. L = missing subsystem or unresolved firmware mechanism, 
 | M1 | Category columns and items | 28 local `category_*.xml` XMBML files plus explore_plugin resource tables and selector/visibility rules | Ten columns and their items are hardcoded (`src/shell.cpp:569-605`); only Settings titles/details/icon names are projected from `category_sysconf.xml` (`:608-622`) | Every other column's items, ordering, selector visibility and resource text are hand-written. Closes with: one column generated from its XMBML view plus its RCO strings, compared row-by-row against a firmware capture | L |
 | M2 | Submenu pages | explore_plugin page templates and XMBML views | Pages are built in code: settings pages, folder pages, Jellyfin and Steam folders (`src/shell.cpp`, `src/settings_menu.cpp:49-144`); depth capped at 32 (`src/settings_menu.cpp:50`) | A generic XMBML page renderer (columns, keys, icons, values) and the firmware's page-entry timing. Closes with: a non-settings firmware page (e.g. Trophy Collection or Game Data) reproduced from its XML and compared | L |
 | M3 | Options panel (Triangle) | `explore_plugin` `expage_menu` - BG0/BG1 plates plus MLists, rows installed at run time as strings, no scroll object (`audit/ITEM-MENU-INFO-FIRMWARE.md` A, `969c9ac`) | **Updated 2026-10-28 (second wave)**: the panel is the firmware's **full-height right-hand band over the dimmed page** - the shape `110f89d` measured, correcting the earlier "floating plate" reading - at the measured x1320 origin (zero at 1742), 38 px pitch and fixed baselines 560/598/636, built in the firmware's two groups with `dividerBefore` as data and a 237 px group gap, every label resolved from `explore_plugin_full`'s text table with its firmware condition, no Close row, no scroll, and `snd_cancel` on close (`828518e`, `b760278`, `3f3a445`, `8f02123`) | The nested Sort By level is still one band against the firmware's separate 128x272 planes (`b760278`); the open is the native 200 ms against the measured 245-255 ms (`3f5b0bd`); the per-category row set is asserted by the harness, not yet gated by a firmware crop. The plates' own dimensions remain partly measured. Closes with a firmware crop of the band and a per-category row comparison | M |
-| M4 | Information bar and panel | `xmb_plugin_normal.rco` `page_xmb_indicator`: `tex_indi_bg` 9-slice plane 560x82 at `posY -74`, a drawn 32 px analog clock, five 32x32 icon slots at -410/-376/-342/-274/-244, `page_busy` (`audit/ITEM-MENU-INFO-FIRMWARE.md` B, `969c9ac`; geometry in `GEOMETRY-ROOT.md` 2.1, rect in `110f89d`) | **Updated 2026-10-28 (second wave)**: **the bar is the firmware plate.** `xmb_plugin_normal:tex_indi_bg` is drawn as its own 8 px nine-slice at the measured visible rect 1329,75 591x58, with the tile's rounded corner, interior black at alpha 13/255, top/bottom/left ramps and no right edge, verified 7 of 8 border pixels within 1 luma of `alpha*RGB + (1-alpha)*bg`, replacing the invented rounded rect and the 1x125 `tex_infobar` gradient; the control-indicator row draws `tex_indi_online` and only from real Steam presence (`6ead87c`) | The other four slots (message, chat, avatar, plus) have no real state in this build and stay undrawn - an empty slot is honest, a made-up count is not. Still open: the busy icon from `page_busy`, the periodic paf setter that drives the clock (L5), and the bar's paf projection/typography. Closes with a plate measurement within 2 px and a minute-boundary clock capture. Gate: info bar 14.98 / 0.7639 | M |
-| M5 | Messages and dialogs | **No dialog RCO exists**: `msgdialog_plugin.rco` holds two objects and no `mbox_*`; the box, flat 12x12 plate, two bars, hint row and fades (100/200/1000 units) are assembled by `vsh.elf` (`audit/DIALOGS-FIRMWARE.md`, `e4e3c23`) | **Implemented 2026-10-27** (`e171263`, verified `6cf54a4`): five `MessageKind` surfaces (inline line, titled page, box, error-code page, information page) in `src/dialogs.cpp`, plate/bars/hint row from RCO colours and values, PAF fades 200/1000/100/150, no full-screen dim, both flat rules, two-button boxes and the confirm cue from the box's own path. Measured inline empty state 628..985 x 494..516 against firmware 630..982 x 494..514; titled page rule 1 at y 198 alpha .227 against .218, rule 2 at y 872, hint at 1155. The dialogs audit's status table has items 1-14 done | The modal box has **no firmware reference**, so its rect, title position and hint baseline stay native fits; the box draws no `tex_notification_*` glyph because which one it uses is unproven; and **no numeric 800xxxxx error code is producible on this console** (`3f5b0bd`), so the error-code page is measured-but-partial while the measured network-test error page is a catalogue state (`2d9cd30`). A pixel gate still waits for Phase 9: the firmware frames are 1262x800, so today's evidence is measured-value assertions | M |
+| M4 | Information bar and panel | `xmb_plugin_normal.rco` `page_xmb_indicator`: `tex_indi_bg` 9-slice plane 560x82 at `posY -74`, a drawn 32 px analog clock, five 32x32 icon slots at -410/-376/-342/-274/-244, `page_busy` (`audit/ITEM-MENU-INFO-FIRMWARE.md` B, `969c9ac`; geometry in `GEOMETRY-ROOT.md` 2.1, rect in `110f89d`) | **Updated 2026-10-28 (third wave)**: the bar is the firmware plate - `xmb_plugin_normal:tex_indi_bg` drawn as its own 8 px nine-slice at the measured visible rect 1329,75 591x58, with the tile's rounded corner, interior black at alpha 13/255, top/bottom/left ramps and no right edge, verified 7 of 8 border pixels within 1 luma of `alpha*RGB + (1-alpha)*bg`, replacing the invented rounded rect and the 1x125 `tex_infobar` gradient; the control-indicator row draws `tex_indi_online` and only from real Steam presence (`6ead87c`). Since `af30d9e` the PS-tap control-indicator **plate** is the measured 134x46 at (1191,81), flat RGB (53,49,41), with the pad glyph/`1`/`-` contents and the 155/66/2001/66 ms envelope; the token had never reached the tap handler because the pad gate freezes the watcher | The other four slots (message, chat, avatar, plus) have no real state in this build and stay undrawn - an empty slot is honest, a made-up count is not. Still open: the busy icon from `page_busy`, the periodic paf setter that drives the clock (L5), and the bar's paf projection/typography. The indicator region passes at 22.37/0.9277; the whole frame fails on the background. Closes with a minute-boundary clock capture. Gate: info bar 15.05 / 0.7667 | M |
+| M5 | Messages and dialogs | **No dialog RCO exists**: `msgdialog_plugin.rco` holds two objects and no `mbox_*`; the box, flat 12x12 plate, two bars, hint row and fades (100/200/1000 units) are assembled by `vsh.elf` (`audit/DIALOGS-FIRMWARE.md`, `e4e3c23`) | **Implemented 2026-10-27** (`e171263`, verified `6cf54a4`): five `MessageKind` surfaces (inline line, titled page, box, error-code page, information page) in `src/dialogs.cpp`, plate/bars/hint row from RCO colours and values, PAF fades 200/1000/100/150, no full-screen dim, both flat rules, two-button boxes and the confirm cue from the box's own path. Measured inline empty state 628..985 x 494..516 against firmware 630..982 x 494..514; titled page rule 1 at y 198 alpha .227 against .218, rule 2 at y 872, hint at 1155. **Updated 2026-10-28 (third wave)**: the two-button box now has its own firmware frame and is measured and drawn from it (`9723cb4`) - plate 319x176 at (482,452) with a white 43/255 wash (not `tex_msgdialog_bg`'s grey), no bar rows, no heading, the item's own 56x56 icon centred, the body left at x1074 on a 34 px pitch, `Yes`/`No` as text 120 px apart with `No` haloed, and the footer rule at y879 with X/O hints | No **numeric** 800xxxxx error code is producible on this console (`3f5b0bd`), so the error-code page is measured-but-partial while the measured network-test error page is a catalogue state (`2d9cd30`). The box's **behavioural** residual is stated: `Shell::activate` still accepts a Box unconditionally, so the drawn `Yes`/`No` focus is presentational, and its open/close fades remain TRACED only (no 200+ fps burst). The catalogue's `dialog` state still captures the inline line, so its Tier B cell (16.42/0.7576) does not measure the box; the box's direct crop is 18.12/0.8420 (over the PSNR budget, short of 0.88 SSIM). A pixel gate still waits for Phase 9: the firmware frames are 1262x800. | M |
 | M6 | OSK | `oskfullkeypanel_plugin.rco` plus the module: panel 493,290 934x500, 6x10 grid at 72x54 cells (55 key objects), 7x7 palette with 32 symbols, 52 named textures, measured caret and 0.70 dim (`audit/OSK-FIRMWARE.md`, `68134a6`) | **Updated 2026-10-28 (second wave)**: **the draw landed** (`6ead87c`, verified `78ccde9`): RCO nine-slice panel, 10x6 grid at the measured face stops, LABEL_* badge pills, SBTN/LBTN focus rings, prediction column with tinted KEYTOP masks, 7x5 palette with scroll, green I-beam caret, black at the measured 0.70 dim, starting at the measured default focus `g`, span- and palette-aware, with the caret phase pinned so captures are byte-identical. `src/osk_layout.*` reads the RCO and module (33/33 self-checks, committed-table fallback) and 52/52 textures decode (`e90b196`) | The remaining differences are listed in OSK-FIRMWARE 15: faces from geometry, caption x, an empty prediction column, the palette frame x, an opaque panel, no open/close fade, and the blink still at 500 ms with `blinkTraced = false` against the measured ~936 ms. The four layer gates are recorded as region scores, not wired as a gate. Closes with the 936 ms period wired and the four layers gated | M |
-| M7 | Settings pages | `sysconf_plugin.rco` page schemas and strings. Specified 2026-10-27 (`4bbff6e`, `audit/SETTINGS-FIRMWARE.md`): 16 retail rows from `seg_fixed_items`, a list page class with label x 625 / value x 1301, choice lists with their own measured bands, 29 numbered diffs | **Updated 2026-10-28 (second wave)**: the column, the three segment pages and every one-level page's row set are the firmware's (`937babe`, `4c4b25e`); every choice surface enumerates the page's own MItem children through the RCO English table in document order - 63 lists / 434 items, 45 of them sysconf's 373 (`416d13c`) - and is drawn as the measured **full-height right-hand band** (x1260, zero at 1690, 40 px pitch, scrolled rows under the focus row, the committed value focused, no dot and no check) with a 0.52 dim on the page content (`3f3a445`). The firmware's 110 GMT-offset zone tokens are storable, migrate, and round-trip (`5094833`) | The list page class with its expanding focused row, `tex_sett` row icons at 18/28 px, the confirm/apply/result family and per-page cue evidence (11.2/11.4/11.5/11.6). The band has **two** origins (1260-1261 for Display/Screensaver, 1324-1325 for Theme), so a per-page constant is still owed. Closes with a dump assertion per page plus a frame probe on the two page classes | L |
-| M8 | PS system menu | Measured RPCS3 capture of a PS hold (`audit/PS-BUTTON.md`) | **Done**: black frame, clock, centred entries, controller slots, Enter/Back legend, Quit Game while a title runs (`src/view.cpp:1040-1067`, `src/shell.cpp` psMenu*) | Remaining: real controller slot/charge data, and Quit Game covers only titles this app launched (Steam handoff is watched through the registry) | S |
+| M7 | Settings pages | `sysconf_plugin.rco` page schemas and strings. Specified 2026-10-27 (`4bbff6e`, `audit/SETTINGS-FIRMWARE.md`): 16 retail rows from `seg_fixed_items`, a list page class with label x 625 / value x 1301, choice lists with their own measured bands, 29 numbered diffs | **Updated 2026-10-28 (third wave)**: the column, the three segment pages and every one-level page's row set are the firmware's (`937babe`, `4c4b25e`); every choice surface enumerates the page's own MItem children through the RCO English table in document order - 63 lists / **442 items**, 45 of them sysconf's 373 (`416d13c`, corrected by `7eafa75`) - and is drawn as the measured **full-height right-hand band** (x1260 / x1324 per page family, 40 px pitch, scrolled rows under the focus row, the committed value focused, no dot and no check) with a **0.40** dim on the page content (`3f3a445`, `abfc80b`, `2ecc49c`). The four Theme lists are the console's contents: Color 13 rows (a text `Original` row plus twelve unlabelled month chips on a 12-row window, 6 writable, 7 drawn-but-disabled with a logged reason), Background four rows including the disabled `Brightness` submenu row, Font Original/Rounded/Pop with all three applied (`7eafa75`, `8ef9ecd`); a disabled item's sentinel is rejected by `Preferences`, and the measured commit path is January -> colour 5, February -> nothing (`955cfc1`). The firmware's 110 GMT-offset zone tokens are storable, migrate, and round-trip (`5094833`) | The list page class with its expanding focused row, `tex_sett` row icons at 18/28 px, the confirm/apply/result family and per-page cue evidence (11.2/11.4/11.5/11.6). Open on the Theme lists: the measured Color down-chevron is not authored, the live focus preview (the console recolours before commit) is not applied, the `Brightness` second level does not exist, and the other seven month palettes are drawn disabled rather than mapped. Closes with a dump assertion per page plus a frame probe on the two page classes. | L |
+| M8 | PS system menu | Measured RPCS3 capture of a PS hold (`audit/PS-BUTTON.md`) | **Updated 2026-10-28 (third wave)**: measured against its first console frame and fixed (`af30d9e`) - entries left-aligned at x831 on a 40 px pitch with the selected row one size larger (24 px focused, 23 px unfocused) and white, the focus bloom a sigma-5 blur of the label mask, the controller/charge panel at its measured ink rect x132-502 y803-865 with 17x17 slots and their active red, plus the menu's own clock, header rule and footer legend (rule y880, X/Enter 726/762, O/Back 1155/1192 at y897-916). The PS-tap plate is 134x46 at (1191,81) with the measured 155/66/2001/66 ms envelope, and the reason it had never appeared was that the `ps` token never reached the tap handler (the pad gate freezes the watcher) | Real controller slot/charge data, and Quit Game covers only titles this app launched (Steam handoff is watched through the registry). Score: frame 28.82/0.9918 PASS, entries 30.89/0.9857 PASS (budget 26.0/0.95), legend 23.93/0.9423; the indicator region passes at 22.37/0.9277 while its frame fails on the background. | S |
 | M9 | Cold-boot intro | coldboot.raf, coldboot.jsx, raf.qrc vert0/sce01, anim_coldboot2 events, coldboot_stereo.ac3 | Ported (`src/coldboot.cpp`, `src/view.cpp:606-623`) with script timeline, sound and background boot presets | Epilepsy notice after ShowGUI, the SD actor branch (HD only, `src/coldboot.cpp:277`), the RPCS3 pre-exposure brightness, and the gameboot sequence | M |
 | M10 | Photo / music / video overlays | Specified 2026-10-27 (`79f377d`, `audit/MEDIA-PANELS-FIRMWARE.md`): `videoplayer_plugin`'s 25-button 13x3 matrix over a time/chapter page with Progress widgets; the music panel exists twice (`audioplayer_plugin` and `explore_plugin_full`'s XMB panel); the photo viewer is a 20-button panel plus a slideshow panel and screen planes; the volume display is a paf `PhLevelMeter` with 20x40 textures and a 150 ms fade | **Updated 2026-10-28 (second wave)**: implemented with fits (`320a69e`). The volume display is the real `PhLevelMeter` - ten 20x40 `tex_default_lvmeter` segments over a nine-sliced 48x48 backing, 150 ms fade at delay 0, mute drawn as an unlit meter, **no caption, percentage, plate or border**; the old HUD survives only as a logged fallback. Video chrome draws `tex_progress_bar`/`in`, the jump marker, 16x16 digit cells at the bar's ends and the six `tex_cp_help_*` icons with the container's own strings instead of an ASCII hint sentence. The previously missing music control panel exists as the XMB form: `tex_cp_panel` nine-slice at 1.3, status planes only where a native state exists, 200x6 progress, seven 90x60 buttons on the shared focus, Triangle toggle with a 150 ms fade, the audio chrome fading under it | Photo and audio chrome are unchanged by design. Still open: 15 recorded fits (face stops, caption positions, button rects where no object gives them), the per-row faces and thumbnails, EXIF, the track/subtitle selectors, the photo viewer's screen planes, and one cross-fence cue gap. Closes with panel crops and the object-level draw | L |
 
@@ -241,22 +317,24 @@ code, one to two weeks. L = missing subsystem or unresolved firmware mechanism, 
 
 Each row is a surface that used to be drawn by hand from screenshots. "Specified" means the firmware
 data exists and is recorded in an audit; "applied" means `src/` reads or draws it. The distinction
-matters more than any percentage above: **six of the nine are now applied to the draw** (the message
-surfaces, the item menu, the information bar, the media panels, the volume display and the OSK), **two
-are partly applied** (the settings surfaces - band yes, list page class no; and the runtime object
-model - scene yes, view no), and **one is still a documented target** (the root/page geometry, which is
-also where the Tier B scorecard says the frames lose).
+matters more than any percentage above: **five of the nine are applied to the draw** (the message
+surfaces, the information bar, the media panels, the volume display and the OSK), and **four are partly
+applied** (the item menu - band yes, nested planes no; the settings surfaces - band, Theme lists and row
+sets yes, list page class no; the root/page geometry - label pen, parent icon, faint alpha and depth-1
+pen yes, the receding bar and incoming scale no; and the runtime object model - scene yes, view no).
+**No row is a bare documented target any more**, which is the wave's real change: the frames the
+scorecard loses on now have at least part of their measured geometry in `src/`.
 
 | Surface | Firmware specification | What is now known instead of free-hand | Applied to `src/`? |
 |---|---|---|---|
-| Message surfaces (inline line, titled page, box, error page, information page) | [DIALOGS-FIRMWARE.md](DIALOGS-FIRMWARE.md), `e4e3c23`; verification `6cf54a4` | No dialog RCO exists (`msgdialog_plugin.rco` holds two objects, no `mbox_*`); the box, plate (flat 12x12 `tex`, no nine-slice), two bars, hint row and fades (100/200/1000 units) are assembled by `vsh.elf`; measured inline and titled-page layouts; the full button/error/info string map | **Yes** (`e171263`): all five `MessageKind` surfaces in `src/dialogs.cpp`, plate/bars/hint from RCO values, flat rules, `page_btnnavi` glyphs with `msg_*` labels, two-button boxes, the confirm cue from the box's own path, and the invented 53% dim and "OK" hint removed. The dialogs audit's own table has items 1-14 done. Remaining: the modal box's geometry is still a native fit (no firmware frame), and no numeric 800xxxxx error code is producible on this console (`3f5b0bd`) - the measured network-test error page is a catalogue state instead (`2d9cd30`). |
+| Message surfaces (inline line, titled page, box, error page, information page) | [DIALOGS-FIRMWARE.md](DIALOGS-FIRMWARE.md), `e4e3c23`; verification `6cf54a4`; box frame `9723cb4` (section 10) | No dialog RCO exists (`msgdialog_plugin.rco` holds two objects, no `mbox_*`); the box, plate, two bars, hint row and fades (100/200/1000 units) are assembled by `vsh.elf`; measured inline and titled-page layouts; the full button/error/info string map; and since `9723cb4` the two-button box's real frame: plate 319x176 at (482,452) with a white 43/255 wash, no bars, no heading, the item's own 56x56 icon, body x1074 on a 34 px pitch, `Yes`/`No` 120 px apart with `No` haloed, footer rule y879 | **Yes** (`e171263`): all five `MessageKind` surfaces in `src/dialogs.cpp`, plate/bars/hint from RCO values, flat rules, `page_btnnavi` glyphs with `msg_*` labels, two-button boxes, the confirm cue from the box's own path, and the invented 53% dim and "OK" hint removed. The box is now drawn from its measured frame (`9723cb4`). Remaining: the drawn `Yes`/`No` focus is presentational (`Shell::activate` has no choice index), the catalogue's `dialog` route still captures the inline line, and no numeric 800xxxxx error code is producible on this console (`3f5b0bd`) - the measured network-test error page is a catalogue state instead (`2d9cd30`). |
 | Item options menu | [ITEM-MENU-INFO-FIRMWARE.md](ITEM-MENU-INFO-FIRMWARE.md) A, `969c9ac`; band form corrected in `110f89d` | `explore_plugin`'s `expage_menu`: BG0/BG1 plates plus MLists, rows installed at run time as strings, no scroll object, nested 128x272 levels, labels from the RCO text table (no "Close" string exists; the eject label is "Remove Disc"); the measured form is a **full-height right band over the dimmed page**, not a floating plate | **Yes, partly** (`828518e`, `b760278`, `3f3a445`, `8f02123`): two groups with `dividerBefore` as data and a 237 px gap, the measured x1320 origin and 38 px pitch, the RCO's labels with their firmware conditions, no Close row, no scroll, `snd_cancel` on close. The nested Sort By level is still one band, and the open is the native 200 ms against 245-255 ms. |
 | Information panel + indicators | ITEM-MENU-INFO-FIRMWARE B, `969c9ac`; [GEOMETRY-ROOT.md](GEOMETRY-ROOT.md) 2.1, 3.7 | `xmb_plugin_normal` `page_xmb_indicator`: `indi_base` 560x82 at `posY -74`, `tex_indi_bg` 9-slice drawn 591x58 at 1329,75, a **drawn** 32 px analog clock, five 32x32 slots at -244/-274/-342/-376/-410, and no trophy/download/What's New objects | **Yes, for the bar** (`6ead87c`): the plate is drawn from its own tile with the measured interior and ramps, and `tex_indi_online` is bound from real Steam presence. The other four slots have no real state and stay undrawn; the busy icon and the clock setter are open. The information *page* (Triangle > Information) is the message-surface family and is applied (`e171263`). |
 | Media panels (video, music, photo) | [MEDIA-PANELS-FIRMWARE.md](MEDIA-PANELS-FIRMWARE.md), `79f377d` | `videoplayer_plugin`'s 25-button 13x3 matrix over a time/chapter page with Progress widgets; the music panel exists twice (`audioplayer_plugin` and `explore_plugin_full`'s XMB panel) and the native had neither; the photo viewer is a 20-button panel plus a slideshow panel and screen planes | **Yes, with fits** (`320a69e`): the music panel is the XMB form (seven 90x60 buttons, 200x6 progress, Triangle toggle, 150 ms fade, audio chrome fading under it); video chrome is `tex_progress_bar`/`in` plus the jump marker, digit cells and the six `tex_cp_help_*` icons with the container's strings. Photo and audio chrome are unchanged by design; 15 fits are recorded. |
 | Volume display | MEDIA-PANELS-FIRMWARE 5; [HTPC-IDEAS.md](HTPC-IDEAS.md) 6 | A paf `PhLevelMeter` with 20x40 `system_plugin` `tex_default_lvmeter_*` textures and a 150 ms fade - **no caption, percentage, plate or border** | **Yes** (`320a69e`): ten 20x40 lit/off/focus segments over a nine-sliced 48x48 backing, 150 ms fade at delay 0, mute drawn as an unlit meter, no caption or percentage. The invented plate/caption HUD is a logged fallback only. PHASES section 5's "do not build" entry is now enforced in code. |
 | On-screen keyboard | [OSK-FIRMWARE.md](OSK-FIRMWARE.md), `68134a6`; runtime loader `src/osk_layout.*` | `oskfullkeypanel_plugin.rco` plus the module: panel 493,290 934x500, 6x10 grid at 72x54 cells, 55 key objects (40 character), 7x7 palette with 32 symbols, 52 named textures, a measured caret (12 x 27, 2 px shaft, ~936 ms period from `110f89d`) and dim 0.70 | **Yes** (`6ead87c`, verified `78ccde9`): the draw reads the resolved layout - nine-slice panel, 10x6 grid, LABEL_* badges, SBTN/LBTN rings, prediction column with tinted KEYTOP masks, 7x5 palette, 0.70 dim, green I-beam - and `osk_layout` carries 33/33 self-checks against the RPCS3 captures. Remaining: faces from geometry, caption x, palette frame x, opaque panel, no fade, and the blink still at 500 ms in code against the measured ~936 ms (OSK-FIRMWARE 15). |
-| Settings pages | [SETTINGS-FIRMWARE.md](SETTINGS-FIRMWARE.md), `4bbff6e`; application `937babe`, `4c4b25e`, `416d13c`, `3f3a445`, `5094833` | 16 retail rows from `seg_fixed_items`; two page classes - a list page with label x 625 / value x 1301 and an expanding focused row, and a **full-height right-hand choice band** over the dimmed page (the 2026-10-26 "opens its own page" reading is corrected by `110f89d`); 29 numbered diffs | **Partly**: the column, the three segment pages, every one-level page's row set and every choice list (63 lists / 434 items) are the firmware's, and the band is drawn at the measured origin, pitch and dim with the committed value focused and no dot or check. The list page's expanding focused row, `tex_sett` icons and the confirm/apply/result family are still open (11.2/11.4/11.5). |
-| Root/page geometry | [GEOMETRY-ROOT.md](GEOMETRY-ROOT.md), `4bbff6e` | `xmenu.posX -395` is the **only** geometry-bearing RCO object (screen x 565); page/list/menu planes carry zero geometry, so every row is per-draw paf output; level-0 label 113 (not 99), parent unfocused 109.46, incoming column 210 at 1.1022x, 262 keyed on depth; the receding-bar model with `dRecede` 2700 -> 2483.53 | **No**: `view.cpp` still ships 186/189, the `kColumnX-40` anchor, 250 and 110. Phase 13.1-13.4. |
+| Settings pages | [SETTINGS-FIRMWARE.md](SETTINGS-FIRMWARE.md), `4bbff6e`; application `937babe`, `4c4b25e`, `416d13c`, `3f3a445`, `5094833`, `7eafa75`, `abfc80b` | 16 retail rows from `seg_fixed_items`; two page classes - a list page with label x 625 / value x 1301 and an expanding focused row, and a **full-height right-hand choice band** over the dimmed page (the 2026-10-26 "opens its own page" reading is corrected by `110f89d`); the four Theme lists' real contents (Color 13 = Original + 12 month chips, Background 4 with `Brightness`, Font 3); 29 numbered diffs | **Partly**: the column, the three segment pages, every one-level page's row set, every choice list (63 lists / **442 items**) and the four Theme lists are the firmware's, and the band is drawn at the measured per-page origin (1260 / 1324), 40 px pitch and **0.40** dim with the committed value focused and no dot or check. Six Theme values are writable (Original plus the five month tints) and seven are drawn disabled with a logged reason; a disabled sentinel commits nothing. The list page's expanding focused row, `tex_sett` icons and the confirm/apply/result family are still open (11.2/11.4/11.5), as are the Color down-chevron, the live focus preview and the `Brightness` second level. |
+| Root/page geometry | [GEOMETRY-ROOT.md](GEOMETRY-ROOT.md), `4bbff6e` | `xmenu.posX -395` is the **only** geometry-bearing RCO object (screen x 565); page/list/menu planes carry zero geometry, so every row is per-draw paf output; level-0 label 113 (not 99), parent unfocused 109.46, incoming column 210 at 1.1022x, 262 keyed on depth; the receding-bar model with `dRecede` 2700 -> 2483.53 | **Partly** (updated 2026-10-28, third wave): the level-0 label pen (113 / 678), the category title (-5), the parent unfocused icon (455.54) and the faint-neighbour alpha (.067) are applied (`2ecc49c`), and the depth-1 pen is 60 (`80f4ae4`). Still shipping the old values: the 186/189 pitch, the `kColumnX-40` anchor, 250 incoming and the 1.10223 scale. Phase 13.1/13.3/13.4. |
 | Runtime object model and materials | [RCO-OBJECT-MODEL.md](RCO-OBJECT-MODEL.md), `6096dbf` | 32 object types, 12 animation types, 728+43 schema fields, 122 containers / 8,070 objects / 165 animations parsed with zero failures; a `Materials` reader for the MNU and override files; four hardcoded-vs-RCO contradictions recorded | **Partly**: the reader and `Materials` ship and the scene now consumes them (`9545047`); the **view** still derives transforms from captures instead of reading the reader (P1.1 partly). |
 
 Two rules this table makes concrete. A "specified" surface is not a shipped surface, and the ledger
@@ -273,29 +351,38 @@ this list:
 - Fitted or assumed: the page-move 300 ms / mode 4 pair (L2 - actively contradicted by `3c0c87b`, which
   reads the plugin's own driver at 200 ms / mode 5); the category cross-fade 150 px offset (L3); the
   189 px faint-category pitch and the 290/280 icon-row scene transform (L1); the 95 px deeper-level
-  above-focus offset (R10); time-of-day `_DayTime` curve (R1); particle emission volume, Brownian kick
-  and the depth-fade alpha chain (R4); the opaque icon material's lighting, bevel and mix (R7);
-  Original's 0.45 month-tint strength (R7); halo sigma/radius and breathing (R14); the info bar's
-  **drawn** rectangle and the Qt analog clock (L5 - the RCO plane is 560x82 but the drawn box is a
-  measured 591x58, and the minute tick is untraced); the media panels' 15 fits (M10 - face stops,
-  caption positions and button rects where no object gives them); the wallpaper dim wash (L8); the OSK
-  draw's remaining differences (M6 - faces from geometry, caption x, palette frame x); and the 500 ms
-  caret period still carried by `osk_layout.h`, which the 936 ms measurement supersedes but has not
-  replaced.
+  above-focus offset (R10); time-of-day `_DayTime` curve (R1) and the `_MonthTime` time-of-day term
+  (`8ef9ecd` keeps it because the day-quantised constant renders the wrong palette at the canonical
+  pin); particle emission volume, Brownian kick and the depth-fade alpha chain (R4); the opaque icon
+  material's lighting, bevel and mix (R7); Original's 0.45 month-tint strength (R7); halo sigma/radius
+  and breathing (R14); the Qt analog clock and its minute tick (L5 - the plate rect itself is now
+  measured); the media panels' 15 fits (M10 - face stops, caption positions and button rects where no
+  object gives them); the wallpaper dim wash (L8); the OSK draw's remaining differences (M6 - faces
+  from geometry, caption x, palette frame x); the five non-Original colour names (M7 - measured swatches,
+  this build's names); the two-button box's open/close fades and hint fade (M5 - TRACED only, no burst);
+  and the 500 ms caret period still carried by `osk_layout.h`, which the 936 ms measurement supersedes
+  but has not replaced.
 - Traced or measured: background/ribbon/HDR programs and presets; icon quad sizes, pitches, row
   positions, brightnesses, camera distances; focus column x (`xmenu.posX`); the depth-keyed 262 shift;
   both paf ease modes and the 200 ms durations; held-repeat 300/66.7 ms; help-text timing; the nine
-  system cues, their unity gain and the five theme sound roles; the PS menu layout; cold-boot timeline
-  and sound length; the particle spot direction and near/far focus band (`9545047`); the dialog
-  geometry, colours, strings and four fades (`e4e3c23`, `6cf54a4`); the OSK panel, grid, palette,
-  texture list, 52/52 decode and the ~936 ms caret (`68134a6`, `e90b196`, `110f89d`); the settings
-  column and page row sets (`937babe`); the settings page facts and root/page geometry constants
-  (`4bbff6e`); all 3,174 named images decoding across 89 containers (`4c4b25e`); the two choice-band
-  origins and pitches and the 237 px item-menu group gap (`3f5b0bd`, `3f3a445`, `8f02123`); the 63
-  settings choice lists from the RCO (`416d13c`); the info bar plate rect, 13/255 interior and ramp
-  profile (`6ead87c`); the media panels' object rects and the meter's ten 20x40 segments (`320a69e`);
-  and the theme picture path's 65/65 identity (`1781dd3`).
-- Specified but not applied: every row of section 2.6. A firmware value that the native does not read
+  system cues, their unity gain and the five theme sound roles; the PS menu layout (`af30d9e`: entry
+  pitch 40, x831, panel rects, legend and rules); cold-boot timeline and sound length; the particle spot
+  direction and near/far focus band (`9545047`); the dialog geometry, colours, strings and four fades
+  (`e4e3c23`, `6cf54a4`) and the two-button box's plate/body/answers/footer (`9723cb4`); the OSK panel,
+  grid, palette, texture list, 52/52 decode and the ~936 ms caret (`68134a6`, `e90b196`, `110f89d`);
+  the settings column and page row sets (`937babe`); the settings page facts and root/page geometry
+  constants (`4bbff6e`); all 3,174 named images decoding across 89 containers (`4c4b25e`); the two
+  choice-band origins and pitches, the 0.40 band dim and the 237 px item-menu group gap (`3f5b0bd`,
+  `3f3a445`, `abfc80b`, `8f02123`); the 63 settings choice lists / 442 items from the RCO (`416d13c`,
+  `7eafa75`) and the four Theme list contents (Color 13, Background 4, Font 3); the info bar plate rect,
+  13/255 interior and ramp profile (`6ead87c`); the PS-tap plate rect, fill and envelope (`af30d9e`);
+  the media panels' object rects and the meter's ten 20x40 segments (`320a69e`); the theme picture
+  path's 65/65 identity (`1781dd3`); and the applied layout/text constants - label pen 113, title -5,
+  parent icon 109.46, faint alpha .067, depth-1 pen 60, item-label em 32 and ink .455+.545
+  (`2ecc49c`, `80f4ae4`).
+- Not applied, per row of section 2.6: the item menu's nested 128x272 planes, the settings list page
+  class / `tex_sett` icons / confirm pages, the root geometry's receding-bar and incoming-column
+  transform, and the runtime object model's view half. A firmware value that the native does not read
   yet is not "measured parity"; it is a documented target.
 
 ## 3. Ranked next ten: smallest honest slice, and the evidence it produces
@@ -310,9 +397,12 @@ this list:
 
 Ordered by fidelity gained per unit of work, using only what the existing scripted-capture harness
 (`--script` tokens + `work/ab-layers.ts`) can score. Current canonical-capture numbers, for
-reference (`work/ab-layers.thresholds.json` captureBaseline, re-measured on a text-bearing build in
-`b0defd8`): frame 18.29 dB / 0.8342 SSIM, top background 20.25 / 0.9363, category icon row 20.93 /
-0.8990, item label row 11.95 / 0.3925, clock text 11.39 / 0.4500, info bar 14.98 / 0.7639.
+reference (`work/ab-layers.thresholds.json` captureBaseline at the 2026-10-28 background pin,
+`revisionNote20261028b`): frame 18.76 dB / 0.8360 SSIM, top background 21.06 / 0.9434, category icon
+row 21.62 / 0.9062, item label row 11.99 / 0.3895, clock text 11.41 / 0.4528, info bar 15.05 / 0.7667.
+The previous 10-25-pin set (18.29/0.8342, 20.25/0.9363, 20.93/0.8990, 11.95/0.3925, 11.39/0.4500,
+14.98/0.7639) is what `b0defd8` measured after the glyph correction; section 1.4 and HANDOFF 4.2 record
+the pin move and its per-layer gains.
 
 
 1. **Text coverage compositing (R13), rendering.** Smallest slice: draw one string into an offscreen
@@ -502,10 +592,11 @@ or a commit, not against another document:
   Corrected: 31/66, ISC-42/42.1 re-opened with the re-run recipe, and every tick annotated where its
   scope is narrower than its ledger row.
 - **Section 1's score (47%)** is now section 1.1: re-scored to about 52% (45-55 band) with the
-  components and the reason for each move; section 1.2 carries the first 2026-10-28 moves to 53%, and
-  section 1.3 carries the second wave to 57% (50-64 band). Section 1.3 also states plainly that the
-  score is a judgement and puts the scorecard's tier counts beside it (Tier A 35/35, Tier B 0/35 with
-  22 measured, Tier C 9, zero states 1:1).
+  components and the reason for each move; section 1.2 carries the first 2026-10-28 moves to 53%,
+  section 1.3 the second wave to 57% (50-64 band), and section 1.4 the third wave to 59% (52-66 band).
+  Sections 1.3 and 1.4 also state plainly that the score is a judgement and put the scorecard's tier
+  counts beside it (at `49acac6`: Tier A 35/35, Tier B 0 pass / 2 informative / 23 gating, Tier C 9,
+  zero states 1:1).
 - **The 300 ms / mode 4 page move**, cited here as "fitted but plausible", is **contradicted**: the only
   bar animator mode is 5, `0x68f020` is a target value, and the plugin's driver feeds 200 ms
   (`3c0c87b`, L2 above). The native constants are unchanged, which is the point: this is a stale native
@@ -540,10 +631,10 @@ Still stale and **not** fixed here, because they are outside this pass's write f
 
 - Source reading plus the recorded measurements in the audits. No build, no window, no RPCS3 run and
   no capture was performed here; every runtime claim is cited to the audit that records the run and is
-  therefore of the recorded-run class above. The 2026-10-27/28 re-scores (sections 1.1-1.3) are the same
+  therefore of the recorded-run class above. The 2026-10-27/28 re-scores (sections 1.1-1.4) are the same
   class: they re-read the audits, the commits and the source, and ran nothing.
 
 - The layer scores quoted are the recorded baselines. They gate regressions and are not firmware
-  fidelity thresholds; the "item label row" gate at 11.94 dB / 0.3910 in particular is a
+  fidelity thresholds; the "item label row" gate at 11.99 dB / 0.3895 in particular is a
   content-difference gate, not a pass.
 - Firmware-derived files stay local; only addresses, constants, values and conclusions appear here.
