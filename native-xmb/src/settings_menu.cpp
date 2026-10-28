@@ -25,6 +25,95 @@
 namespace xmb {
 namespace {
 struct Choice {QString title;QVariant value;};
+// --- Phase 11.4: the Theme page's run-time lists (audit/SETTINGS-FIRMWARE.md 16) -------------------
+// All four Theme pages are empty Page objects in sysconf_plugin.rco (SETTINGS 12.4, 15.1), so the plugin
+// builds their contents at run time and the RCO carries no labels for them. The 2026-10-28 capture is the
+// only authority for the contents (out/rpcs3-ref2-2026-10-28/lists/):
+//   Theme       Install / Original / Classic / Air Paint           (already modelled, unchanged)
+//   Color       `Original` text row + 12 unlabelled colour chips   (one 40 px grid, row 0 text)
+//   Background  `Brightness` (submenu) / Original / Classic / Wallpaper
+//   Font        Original / Rounded / Pop
+// Color's twelve chips are the month palettes, in month order: the measured chip colours equal
+// qgl/lines' textures/month_bg/rgb/01..12 day palettes, which are the textures View::renderBackground
+// uses for `appearance/colour` = Original (the month follows the date). Five months have a value in this
+// build's tint table (View::renderBackground's colours[] and fixedMonth[]: 1 Blue is August, 2 Purple is
+// June, 3 Red is December, 4 Green is May, 5 Silver is January); the other seven are drawn and disabled
+// with the reason, never mapped to a neighbouring tint. `valueName` is what the row's value column says
+// for the value the item writes; a chip has no row label at all (the capture draws a swatch only).
+constexpr quint32 chipRgb(quint8 r,quint8 g,quint8 b) {
+    return (quint32(r)<<16)|(quint32(g)<<8)|quint32(b);
+}
+// A disabled item's value: outside every bounded key, so Preferences refuses the commit (an RCO list's
+// inert items keep their ordinal; the Theme lists' real values are 0..5, so they need another range).
+constexpr int kInertValue=1000;
+struct ThemeItemSpec {
+    const char* label=nullptr;      // the row's own text; empty for an unlabelled colour chip
+    const char* valueName=nullptr;  // the value column's name for this value (empty when !writes)
+    int value=0;                    // the stored value (ignored when !writes)
+    bool writes=false;
+    quint32 colour=0;               // the swatch measured on the capture, 0xRRGGBB (0: no swatch)
+    bool submenu=false;             // the firmware's right-hand chevron row (`Brightness`)
+    const char* note=nullptr;       // why the item cannot be committed (empty when it writes)
+};
+const char* kMonthNote="this build has no theme tint for this month's palette; its six tints are Original, "
+    "Blue=August, Purple=June, Red=December, Green=May, Silver=January";
+const QVector<ThemeItemSpec>& themeColourSpec() {
+    // Chip colours sampled at x 1355, chip top + 14 on out/rpcs3-ref2-2026-10-28/lists/color-list-rest.png
+    // (tops 531 + 40n; the 12th chip is revealed by the last scroll, -down12/14). The other seven months
+    // are disabled because the tint table has no value for them, not because the chip is doubtful.
+    static const QVector<ThemeItemSpec> table{
+        {"Original","Original",0,true,0,false,nullptr},
+        {"","Silver",5,true,chipRgb(184,191,202),false,nullptr},                 // January
+        {"","",0,false,chipRgb(204,184,28),false,kMonthNote},                    // February
+        {"","",0,false,chipRgb(115,169,40),false,kMonthNote},                    // March
+        {"","",0,false,chipRgb(222,110,129),false,kMonthNote},                   // April
+        {"","Green",4,true,chipRgb(29,123,29),false,nullptr},                    // May
+        {"","Purple",2,true,chipRgb(146,111,189),false,nullptr},                 // June
+        {"","",0,false,chipRgb(36,184,171),false,kMonthNote},                    // July
+        {"","Blue",1,true,chipRgb(8,55,166),false,nullptr},                      // August
+        {"","",0,false,chipRgb(141,53,155),false,kMonthNote},                    // September
+        {"","",0,false,chipRgb(195,144,17),false,kMonthNote},                    // October
+        {"","",0,false,chipRgb(100,67,23),false,kMonthNote},                     // November
+        {"","Red",3,true,chipRgb(184,53,36),false,nullptr}};                     // December
+    return table;
+}
+const QVector<ThemeItemSpec>& themeBackgroundSpec() {
+    // lists/background-list-rest.png: `Brightness` at ink top 381 with a right-pointing chevron measured at
+    // x 1786-1796, y 387-396 (a submenu row), then Original/Classic/Wallpaper at 541/581/621.
+    static const QVector<ThemeItemSpec> table{
+        {"Brightness","",0,false,0,true,
+            "the firmware opens a second level here; this build has no background-brightness control "
+            "(Preferences holds no such key) and the second level's contents were not captured (SETTINGS "
+            "12.4c/12.8), so the row is shown where the firmware puts it and cannot be committed"},
+        {"Original","Original",0,true,0,false,nullptr},
+        {"Classic","Classic",1,true,0,false,nullptr},
+        {"Wallpaper","Wallpaper",2,true,0,false,nullptr}};
+    return table;
+}
+const QVector<ThemeItemSpec>& themeFontSpec() {
+    // lists/font-list-rest.png: Original / Rounded / Pop. All three are applied: appearance/font 0..2
+    // selects Assets' registered family. The name-to-file mapping is F (THEMES 6): SCE-PS3 Rodin LATIN is
+    // 0, SCE-PS3 Seurat LATIN is 1 and VAGRundschriftDLig is 2, so Rounded writes 2 and Pop writes 1.
+    static const QVector<ThemeItemSpec> table{
+        {"Original","Original",0,true,0,false,nullptr},
+        {"Rounded","Rounded",2,true,0,false,nullptr},
+        {"Pop","Pop",1,true,0,false,nullptr}};
+    return table;
+}
+// The Theme lists' Choice form, for the column model (Shell::openChoices) and the value column
+// (Shell::valueText): a disabled item is present, so it can take the focus, with a sentinel value that no
+// bounded key accepts. One table drives both halves, so the band and the commit path cannot disagree.
+QVector<Choice> themeChoices(const QVector<ThemeItemSpec>& spec) {
+    QVector<Choice> result;
+    int index=0;
+    for(const auto& item:spec) {
+        const char* title=item.valueName?item.valueName:item.label;
+        result.push_back({title?QString::fromLatin1(title):QString{},
+            item.writes?QVariant(item.value):QVariant(kInertValue+index)});
+        ++index;
+    }
+    return result;
+}
 // The console's Date Format and Time Format options (sysconf_plugin msg_datetime_fmt_* and msg_time_fmt_*).
 // The short forms feed the information-panel clock, the full forms the Date and Time screen. Fields are
 // zero-padded like the firmware's own option labels and its reference frame (25/10); the hour is not padded,
@@ -35,15 +124,15 @@ QString clockTime(int format) {return format?"h:mm AP":"HH:mm";}
 QString clockFullTime(int format) {return format?"h:mm:ss AP":"HH:mm:ss";}
 QVector<Choice> choices(const QString& key,Assets& assets) {
     const auto text=[&](const QString& id,const QString& fallback){return assets.text("sysconf_plugin",id,fallback);};
-    if(key=="appearance/colour")return {{"Original",0},{"Blue",1},{"Purple",2},{"Red",3},{"Green",4},{"Silver",5}};
+    // Phase 11.4: the three run-time Theme lists, in the console's authored order (SETTINGS 16). Color's
+    // items carry no row label; the six values this build can store keep the names the value column shows
+    // (Original, Silver, Green, Purple, Blue, Red), and every item is present so the focus can reach it - a
+    // disabled item's option is a sentinel Preferences refuses (kInertValue).
+    if(key=="appearance/colour")return themeChoices(themeColourSpec());
     // The theme chosen with Select Theme joins this list in openChoices (it is read from the user's .p3t).
     if(key=="appearance/theme")return {{text("msg_theme_default","Original"),QString{}}};
-    if(key=="appearance/background")return {{text("msg_theme_default","Original"),0},{text("msg_theme_classic","Classic"),1},{"Wallpaper",2}};
-    if(key=="appearance/font") {
-        QVector<Choice> result;const auto families=assets.fontFamilies();
-        for(int i=0;i<families.size();++i)result.push_back({i==0?text("msg_theme_default","Original"):families[i],i});
-        return result;
-    }
+    if(key=="appearance/background")return themeChoices(themeBackgroundSpec());
+    if(key=="appearance/font")return themeChoices(themeFontSpec());
     if(key=="clock/dateFormat")return {{text("msg_datetime_fmt_dmy","DD/MM/YYYY"),0},{text("msg_datetime_fmt_mdy","MM/DD/YYYY"),1},{text("msg_datetime_fmt_ymd","YYYY/MM/DD"),2}};
     if(key=="clock/hourFormat")return {{text("msg_time_fmt_24","24-Hour Clock"),0},{text("msg_time_fmt_12","12-Hour Clock"),1}};
     if(key=="clock/timeZone") {
@@ -650,6 +739,49 @@ void markCurrentRow(ChoiceList& list,const QVariant& current) {
         qInfo().noquote()<<QStringLiteral("settings: clock/timeZone %1 is not one of the firmware's %2 zone "
             "items; no current row (the band marks no item as current)").arg(text).arg(list.items.size());
 }
+// The Theme page's run-time lists (Color, Background, Font): the capture's contents with this build's
+// values. `windowRows` is the number of rows the captured list shows at once (Color: 12). A disabled item
+// keeps its measured label/swatch, carries kInertValue+index as its value (so it can take the focus but no
+// bounded key accepts a commit) and its reason is logged once per process.
+ChoiceList themeRunTimeChoices(const QString& rowId,const QString& rowTitle,const QString& setting,
+                               const QVector<ThemeItemSpec>& spec,const QVariant& current,
+                               const QString& note,int windowRows) {
+    ChoiceList list;
+    list.pageId=QStringLiteral("theme");list.rowId=rowId;list.rowTitle=rowTitle;list.setting=setting;
+    list.source=QStringLiteral("capture");list.note=note;list.windowRows=windowRows;
+    static QSet<QString> logged;
+    int index=0;
+    for(const auto& theme:spec) {
+        ChoiceItem item;
+        item.label=theme.label?QString::fromLatin1(theme.label):QString{};
+        item.source=QStringLiteral("capture");
+        item.rcoIndex=index;
+        item.swatch=theme.colour!=0;
+        item.colour=theme.colour;
+        item.submenu=theme.submenu;
+        if(theme.writes) {
+            item.value=theme.value;item.writes=true;
+            item.isCurrent=choiceValueMatches(current,item.value);
+        } else {
+            item.value=kInertValue+index;item.writes=false;
+            item.note=theme.note?QString::fromLatin1(theme.note):QString{};
+            const QString key=setting+QStringLiteral("/%1").arg(index);
+            if(!item.note.isEmpty() && !logged.contains(key)) {
+                logged.insert(key);
+                qWarning().noquote()<<QStringLiteral("settings: %1 item %2 (%3) is disabled: %4")
+                    .arg(setting).arg(index)
+                    .arg(item.label.isEmpty()?QStringLiteral("unlabelled chip"):item.label)
+                    .arg(item.note);
+            }
+        }
+        list.items.push_back(item);
+        ++index;
+    }
+    list.scrollable=windowRows>0?list.items.size()>windowRows:list.items.size()>kBandRows;
+    for(auto& item:list.items)item.scrollable=list.scrollable;
+    markCurrentRow(list,current);
+    return list;
+}
 // One row's list. `entry` is the page's own row (id, title, setting, action), so a row's write path and
 // its list cannot disagree.
 ChoiceList buildChoiceList(const QString& pageId,const Entry& entry,Assets& assets,const QVariant& current) {
@@ -685,6 +817,46 @@ ChoiceList buildChoiceList(const QString& pageId,const Entry& entry,Assets& asse
         auto captured=themeCaptureChoices(current);
         captured.rcoPageOffset=page.page?page.page->offset:0;
         markCurrentRow(captured,current);
+        return captured;
+    }
+    // Phase 11.4: the other three Theme rows. Their pages are empty in the RCO for the same reason, but the
+    // capture measured each one's rows, so the list is the capture's (source "capture", the same provenance
+    // value the Theme row uses) and the note says what the contents are and where they were measured. The
+    // Color list's 12-row window is the measured one; the other two fit.
+    if(pageId==QLatin1String("theme") && (entry.id==QLatin1String("color")
+        || entry.id==QLatin1String("background") || entry.id==QLatin1String("font"))) {
+        const bool colour=entry.id==QLatin1String("color");
+        const bool background=entry.id==QLatin1String("background");
+        const auto& spec=colour?themeColourSpec():background?themeBackgroundSpec():themeFontSpec();
+        const QString note=colour
+            ?QStringLiteral("page_theme_config_color is an empty Page in sysconf_plugin.rco (0 children), so the "
+                "plugin builds this list at run time. Contents are the 2026-10-28 capture's "
+                "(out/rpcs3-ref2-2026-10-28/lists/color-list-rest.png and -down1..14): a first text row `Original` "
+                "and twelve unlabelled colour chips on one 40 px grid, 12 rows visible then a down-chevron. The "
+                "twelve chip colours equal qgl/lines' textures/month_bg/rgb/01..12 day palettes in order (the "
+                "textures View::renderBackground uses for Original), so chip n is month n. Five months write this "
+                "build's tint table (view.cpp colours[]/fixedMonth[]): January=Silver 5, May=Green 4, June=Purple "
+                "2, August=Blue 1, December=Red 3; the other seven are drawn and disabled with their reason.")
+            :background
+            ?QStringLiteral("page_theme_config_background is an empty Page in sysconf_plugin.rco (0 children), so "
+                "the plugin builds this list at run time. Contents are the 2026-10-28 capture's "
+                "(out/rpcs3-ref2-2026-10-28/lists/background-list-rest.png): `Brightness` (a submenu row with the "
+                "measured right-hand chevron at x 1786-1796, four 40 px pitches above the value block), then "
+                "`Original`, `Classic`, `Wallpaper`. The three values are this build's appearance/background 0/1/2; "
+                "`Brightness` is disabled because this build has no background-brightness control and the "
+                "firmware's second level was not captured.")
+            :QStringLiteral("page_theme_config_font is an empty Page in sysconf_plugin.rco (0 children), so the "
+                "plugin builds this list at run time. Contents are the 2026-10-28 capture's "
+                "(out/rpcs3-ref2-2026-10-28/lists/font-list-rest.png): `Original`, `Rounded`, `Pop`. All three are "
+                "applied through appearance/font 0..2, which selects Assets' registered family - 0 SCE-PS3 Rodin "
+                "LATIN, 1 SCE-PS3 Seurat LATIN, 2 VAGRundschriftDLig - so `Rounded` writes 2 and `Pop` writes 1. "
+                "Which family is the firmware's `rounded` and which its `pop` is not traced locally (THEMES 6).");
+        auto captured=themeRunTimeChoices(entry.id,entry.title,entry.setting,spec,current,note,
+            colour?12:0);
+        captured.rcoPage=QString::fromLatin1(binding->rcoPage?binding->rcoPage:"");
+        captured.container=QStringLiteral("sysconf_plugin");
+        captured.rcoPageOffset=page.page?page.page->offset:0;
+        captured.scrollObject=page.scrollObject;
         return captured;
     }
     list.rcoPageOffset=page.page?page.page->offset:0;
@@ -761,7 +933,10 @@ QJsonObject choiceItemJson(const ChoiceItem& item) {
     }
     return QJsonObject{{"label",item.label},{"value",value},{"isCurrent",item.isCurrent},
         {"source",item.source},{"scrollable",item.scrollable},{"item",item.item},
-        {"rcoIndex",item.rcoIndex},{"rcoOffset",qint64(item.rcoOffset)},{"writes",item.writes}};
+        {"rcoIndex",item.rcoIndex},{"rcoOffset",qint64(item.rcoOffset)},{"writes",item.writes},
+        // Phase 11.4: a Theme colour chip's only identity, and the reason a disabled item cannot commit.
+        {"swatch",item.swatch},{"colour",item.swatch?QStringLiteral("#%1").arg(item.colour,6,16,QChar('0')):QString{}},
+        {"submenu",item.submenu},{"note",item.note}};
 }
 QJsonObject choiceListJson(const ChoiceList& list) {
     QJsonArray items;
@@ -769,7 +944,7 @@ QJsonObject choiceListJson(const ChoiceList& list) {
     return QJsonObject{{"row",list.rowId},{"rowTitle",list.rowTitle},{"setting",list.setting},
         {"rcoPage",list.rcoPage},{"rcoPageOffset",qint64(list.rcoPageOffset)},
         {"container",list.container},{"source",list.source},{"note",list.note},
-        {"scrollable",list.scrollable},{"scrollObject",list.scrollObject},
+        {"scrollable",list.scrollable},{"scrollObject",list.scrollObject},{"windowRows",list.windowRows},
         {"currentRow",list.currentRow},{"count",list.count()},{"items",items}};
 }
 // The Settings-column page order (SETTINGS 1.1/10.2), for the aggregate catalogue.
