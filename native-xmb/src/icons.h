@@ -10,11 +10,12 @@
 #include <QOpenGLShaderProgram>
 
 namespace xmb {
-// Firmware diagnostics use the glass icons (qgl/icons.qrc): quad.vpo and icons_no_ss_no_shad.fpo, the
-// variant the firmware runs at 1920x1080 with ICONS.mnu SHADOW STREN 0 (captured from RPCS3, audit/PIPELINE.md).
-// Per icon the shader reads the icontex normal map (tex0), icontex "dif" (tex1), widgets/other/texenv.dds rotated by
-// _EnvRot (tex2) and a 128x128 px cut of the frame behind the icon (tex3, glutils CookieCutter), which it refracts.
-// Normal presentation uses the same quad/normal maps with an opaque theme material (audit/CATEGORY-ICON-FIX.md).
+// Firmware icons (qgl/icons.qrc): quad.vpo and icons_no_ss_no_shad.fpo, the variant the firmware runs at
+// 1920x1080 with ICONS.mnu SHADOW STREN 0 (captured from RPCS3, audit/PIPELINE.md). Per icon the shader reads
+// the icontex normal map (tex0), icontex "dif" (tex1), widgets/other/texenv.dds rotated by _EnvRot (tex2) and a
+// 128x128 px cut of the frame behind the icon (tex3, glutils CookieCutter), which it refracts.
+// That glass program is the normal path for an icon at full state brightness; a dimmed icon keeps the opaque
+// theme material instead (the measured routing and its numbers are in render(), audit/ITEM-ICONS.md).
 //
 // Uniforms follow the capture of custom_render_plugin's values (fragment constants patched into the microcode):
 //   _PackedLightParams[i] = (attenuation i, light1.i, light2.i, 0) for i = DIFF, SPEC1, SPEC2; [3] = (ENV, SPEC1 POW,
@@ -31,7 +32,7 @@ public:
         QString normalMap;   // icontex name, e.g. "6n"
         QPointF centre;      // 1920x1080 reference pixels
         double size=117.13;  // firmware units (= reference pixels at d 2700): 117.13 unfocused, 167.33 focused
-        double brightness=.698;
+        double brightness=.698; // _Ambiant.w (1 focused/open column, 0.698 unfocused, 0.247 behind a page); also selects the glass vs opaque material
         double opacity=1;
         double distance=2700; // camera distance: 2700, or 2857.2 for a parent column behind an open page
     };
@@ -53,7 +54,7 @@ private:
     float tintStrength_=.12f;
     GLuint vao_=0,vbo_=0,diffuse_=0,environment_=0,cut_=0,cutFbo_=0;
     QHash<QString,GLuint> normalMaps_;
-    QHash<QString,float> day_,night_;
+    QHash<QString,float> day_,night_,yoake_,higure_;
     QImage ambientPalette_;
     QDateTime clock_;
     QVector3D changingColour(const QDateTime& when) const;

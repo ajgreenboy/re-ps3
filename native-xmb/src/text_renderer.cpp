@@ -638,6 +638,40 @@ void TextRenderer::selfCheck(QOpenGLFunctions_3_3_Core& gl) {
     report("metric-authority",std::abs(pafScene-shaped)<=1.0,
            QString("PAF advance %1 px vs Qt shaped %2 px at %3 px font").arg(pafScene,0,'f',2).arg(shaped,0,'f',2)
                .arg(raw.pixelSize()/std::max(1.,rasterScale_)));
+    // Every size the UI actually draws, not only the clock's: the label loop uses 27, the panels 23/22/21/20,
+    // the page heading 19, the subtitle cue 17, the option note 16 and the PS menu badges 14. At each size the
+    // PAF 26.6 advance sum and the width the renderer shapes with must agree, because elision, the caret and
+    // the glyph positions all come from that one sum: a size-dependent gap would elide at the wrong pen.
+    const struct { int size; const char* sample; } sizes[]={
+        {27,"Game Data Utility"},{26,"PS3XMBpassword"},{23,"Display All"},{22,"System Information"},
+        {21,"Photo Settings"},{20,"Charge Level"},{19,"Sort By"},{17,"A subtitle cue line"},
+        {16,"This build cannot play it"},{14,"Triangle"}};
+    for(const auto& at:sizes) {
+        QRawFont scaled=raw;
+        scaled.setPixelSize(std::max(1,int(std::lround(at.size*rasterScale_))));
+        const QString sample=QString::fromLatin1(at.sample);
+        qreal sum=0;
+        for(const quint32 glyph:scaled.glyphIndexesForString(sample))sum+=raster_.advance(scaled,glyph);
+        QFont sized=font;
+        sized.setPixelSize(at.size);
+        const qreal pafWidth=sum/std::max(1.,rasterScale_),shapedWidth=measure(sized,sample);
+        report(QString("metric-size-%1").arg(at.size).toLatin1().constData(),
+               std::abs(pafWidth-shapedWidth)<=1.0,
+               QString("\"%1\" PAF %2 px vs shaped %3 px (delta %4)").arg(sample).arg(pafWidth,0,'f',2)
+                   .arg(shapedWidth,0,'f',2).arg(pafWidth-shapedWidth,0,'f',2));
+    }
+    // The OSK caret asks for one thing: the pen x of the composed prefix. It now comes from measure(), which
+    // is this same advance sum, so at the field's 26 px the QPainter fallback must land on the same pen too;
+    // otherwise a caret drawn on the fallback would sit elsewhere than the glyphs the atlas places.
+    {
+        const QString field=QStringLiteral("PS3XMBpassword");
+        QFont fieldFont=font;
+        fieldFont.setPixelSize(26);
+        const qreal byAdvance=measure(fieldFont,field.left(7));
+        const qreal byQt=QFontMetricsF(fieldFont).horizontalAdvance(field.left(7));
+        report("caret-metric",std::abs(byAdvance-byQt)<=0.5,
+               QString("prefix \"%1\" advance %2 px vs Qt metrics %3 px").arg(field.left(7)).arg(byAdvance,0,'f',2).arg(byQt,0,'f',2));
+    }
     // Keep-larger union versus the alpha-over this renderer's per-glyph quads actually produce.
     // e + U+0301 at one pen first: if the accent's ink does not touch the base there is nothing for
     // the union rule to change in an accented pair.
