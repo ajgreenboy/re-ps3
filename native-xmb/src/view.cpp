@@ -1176,7 +1176,7 @@ const BandStop kThemeBandStops[]={
     {0.,20},{.00238,31},{.00952,26},{.02381,34},{.04762,42},{.09524,50},{.181,56},
     {.31,53},{.41905,44},{.5619,35},{.65714,27},{.75238,15},{.84762,6},{.94286,1},{1.,0}};
 const PanelBand kChoiceBand{.firmware=true,.x0=1260.,.fadeEnd=1690.,.pitch=40.,.fixedRows=false,
-    .rowCentre=505.,.labelInset=16.,.contentDim=.52,.stops=kChoiceBandStops,
+    .rowCentre=505.,.labelInset=16.,.contentDim=.40,.stops=kChoiceBandStops,
     .stopCount=int(std::size(kChoiceBandStops))};
 // The Theme page's choice bands are NOT the Screensaver band. All four Theme-page lists share ONE
 // plane: theme-list, color-list, background-list and font-list give the same fill delta over the
@@ -1190,18 +1190,18 @@ const PanelBand kChoiceBand{.firmware=true,.x0=1260.,.fadeEnd=1690.,.pitch=40.,.
 // and the rows are anchored (they do not travel with focus). SETTINGS 12.4(e) forbids hardcoding
 // `505-(n-1)*20`; this anchors the measured origin and keeps the measured 40 px pitch.
 const PanelBand kThemeBand{.firmware=true,.x0=1324.,.fadeEnd=1744.,.pitch=40.,.fixedRows=true,
-    .rowCentre=505.,.labelInset=17.,.groupGap=239.,.groupBreakRow=1,.contentDim=.52,
+    .rowCentre=505.,.labelInset=17.,.groupGap=240.,.groupBreakRow=1,.contentDim=.40,
     .stops=kThemeBandStops,.stopCount=int(std::size(kThemeBandStops))};
 // Colour and Font anchor their first row on the same 505 focus row (Font's ink tops 497/539/579,
 // Colour's value line 494), so they are the Theme band without a utility group.
 const PanelBand kThemeLowerListBand{.firmware=true,.x0=1324.,.fadeEnd=1744.,.pitch=40.,.fixedRows=true,
-    .rowCentre=505.,.labelInset=17.,.contentDim=.52,.stops=kThemeBandStops,
+    .rowCentre=505.,.labelInset=17.,.contentDim=.40,.stops=kThemeBandStops,
     .stopCount=int(std::size(kThemeBandStops))};
 // Background is the one Theme-page list whose block sits lower: its matched frame reads `Original`
 // 539, `Classic` 581 and `Wallpaper` 621 as ink tops, against this build's 494/536/576, i.e. +45 px
 // on the same 40 px pitch (SETTINGS 12.4(e)'s 43 px difference, re-measured here).
 const PanelBand kBackgroundBand{.firmware=true,.x0=1324.,.fadeEnd=1744.,.pitch=40.,.fixedRows=true,
-    .rowCentre=548.,.labelInset=17.,.contentDim=.52,.stops=kThemeBandStops,
+    .rowCentre=545.,.labelInset=17.,.contentDim=.40,.stops=kThemeBandStops,
     .stopCount=int(std::size(kThemeBandStops))};
 // The settings lists whose band geometry a matched frame measures, by Preferences key (SETTINGS
 // 11.3/12.4). Null means "not measured here": that list keeps the band or panel it had, so no other
