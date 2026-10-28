@@ -5,21 +5,24 @@ RPCS3 VSH recording. Project goal: a complete native C++ recreation.
 
 ## Read this set
 
-Current handoff (2026-10-28): [HANDOFF-2026-10-28.md](../HANDOFF-2026-10-28.md) - the tree at `e818e25`,
-what ships after the firmware-recovery week, the four gate instruments with their last recorded numbers,
-the 2026-10-28 baselines correction, and where the work goes next. The plan of record is
+Current handoff (2026-10-28): [HANDOFF-2026-10-28.md](../HANDOFF-2026-10-28.md) - the tree at `49acac6`,
+what ships after the firmware-recovery week and the layout/text/Theme/composite waves, the four gate
+instruments with their last recorded numbers, the 2026-10-28 baselines correction and the canonical pin
+correction, and where the work goes next. The plan of record is
 [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) (phases 8-16, with the 88-item completion ledger:
-16 done / 48 partly / 23 not started / 1 obsolete); ownership and write fences are in
+16 done / 49 partly / 22 not started / 1 obsolete); ownership and write fences are in
 [WORKSPACES.md](../WORKSPACES.md). The previous handoff,
 [HANDOFF-2026-10-27.md](../HANDOFF-2026-10-27.md), is a dated snapshot of `0c8faee` and still carries the
 operational reference (build/run, config migration, crash reporting, release checklist, ground rules).
 
 Fidelity instrument and register (2026-10-28): [PARITY-SCORECARD.md](PARITY-SCORECARD.md) - the
-three-tier method, the catalogue and its 720-cell matrix, and the text-bearing scorecard (`e818e25`:
-0 of 35 capturable states at A+B+C; Tier A 35, Tier B 0 with 22 measured at 17.6-19.0 dB / 0.83-0.87
-SSIM, Tier C 9, 22 of 30 firmware states referenced) - and
-[FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md), re-scored in sections 1.1-1.3 with section 2.6
-listing every surface that moved from free-hand to firmware-derived.
+three-tier method, the catalogue and its 720-cell matrix, and the consolidated text-bearing scorecard
+(`49acac6`, section 18: 0 of 35 capturable states at A+B+C; Tier A 35, Tier B 0 pass / 2 informative /
+23 gating, Tier C 9, 25 of 30 firmware states referenced, 40 of 720 cells) - and
+[FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md), re-scored in sections 1.1-1.4 with section 2.6
+listing every surface that moved from free-hand to firmware-derived. The capture plan for the five
+states that still owe a reference is [REFERENCE-GAPS.md](REFERENCE-GAPS.md) (`6a735e8`, corrected by
+`61d4e8c`: 3 attainable in one boot, 1 unattainable on this rig, 4 unreachable).
 
 Firmware recoveries (2026-10-27, all with measured specs):
 [dialogs and message boxes](DIALOGS-FIRMWARE.md) (`e4e3c23`, implemented in `e171263`),
