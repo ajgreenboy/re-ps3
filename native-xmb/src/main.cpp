@@ -10,6 +10,7 @@
 #include "catalog.h"
 #include "rsx_program.h"
 #include "p3t.h"
+#include "rco_objects.h"
 #include "content_registry.h"
 #include "steam_library.h"
 #include "steam_downloads.h"
@@ -118,6 +119,7 @@ int main(int argc,char** argv) {
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
+    parser.addOption({"rco-tree","Write the RCO object model (objects, animations, typed properties) of named containers (<name>[,<name>...][@file]; * = every vsh/resource RCO) and exit","spec"});
     parser.addOption({"month-sheet","Write a local contact sheet of the qgl/lines month_bg day/night textures and exit","image-file"});
     parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
     parser.addOption({"decode-fp","Decode RSX fragment-program captures (archive:lib/x.fpo@dir) into named parameter values and exit","spec"});
@@ -463,6 +465,95 @@ int main(int argc,char** argv) {
         }
         return 0;
     }
+    if(parser.isSet("rco-tree")) {
+        // Local analysis (P1.1): the RCO object model, read from the firmware's own bytes at run time.
+        // "<container>[,<container>...][@file]"; "*" dumps every vsh/resource RCO. Each container's read
+        // cost is measured here so the audit can cite it (a repeated name shows the cache: 0.00 ms).
+        const auto spec=parser.value("rco-tree").split('@');
+        if(spec.size()>2 || spec[0].trimmed().isEmpty()){qCritical()<<"use --rco-tree container[,container...][@file]";return 2;}
+        QElapsedTimer total;total.start();
+        xmb::RcoObjects objects(assets);
+        QStringList names;
+        for(const auto& name:spec[0].split(',',Qt::SkipEmptyParts))names<<name.trimmed();
+        if(names.size()==1 && (names[0]=="*" || names[0]=="all"))names=objects.containers();
+        QFile out;
+        if(spec.size()==2) {
+            out.setFileName(spec[1]);
+            if(!out.open(QIODevice::WriteOnly|QIODevice::Text)){qCritical()<<out.errorString();return 2;}
+        }
+        const auto writeLine=[&](const QString& line){if(out.isOpen())out.write(line.toUtf8()+'\n');else qInfo().noquote()<<line;};
+        // Firmware strings are rendered ASCII-only (\uXXXX), so a dump can be quoted in an ASCII document.
+        const auto escape=[](const QString& text){
+            QString result;
+            for(const QChar c:text) {
+                const ushort code=c.unicode();
+                if(code>=0x20 && code<0x7f)result+=c;
+                else if(code=='\n')result+="\\n";
+                else result+=QString("\\u%1").arg(code,4,16,QChar('0'));
+            }
+            return result;
+        };
+        const auto writeEntry=[&](const xmb::RcoObjects::Container& container,const QString& indent,const QString& type,
+                                  const QString& name,quint32 offset,const QByteArray& extra,
+                                  const QVector<xmb::RcoObjects::Property>& properties) {
+            using Kind=xmb::RcoObjects::ValueKind;
+            using RefKind=xmb::RcoObjects::RefKind;
+            QString line=indent+type;
+            line+=name.isEmpty()?QString(" (anon)"):QString(" ")+name;
+            line+=QString(" @%1 +%2B").arg(offset).arg(extra.size());
+            int named=0;
+            for(const auto& property:properties) {
+                const auto& value=property.value;
+                named+=value.kind==Kind::Float || value.kind==Kind::Int || value.kind==Kind::Unknown?4:8;
+                line+=' ';line+=property.name;line+='=';
+                if(value.kind==Kind::Float)line+=QString::number(value.real,'g',8);
+                else if(value.kind==Kind::Int)line+=QString::number(value.integer);
+                else if(value.kind==Kind::Unknown)line+=QString("0x")+QString::number(value.integer,16);
+                else {
+                    line+=escape(container.resolve(value));
+                    if(value.refKind()==RefKind::Text) {
+                        const auto text=container.text(value.target);
+                        if(!text.isEmpty())line+=QString("=\"%1\"").arg(escape(text));
+                    }
+                }
+            }
+            if(extra.size()>named) { // bytes past the schema fields: the entry's own float series
+                QStringList values;
+                for(float value:xmb::RcoObjects::Container::floatsOf(extra.mid(named)))values<<QString::number(value,'g',8);
+                line+=QString(" tail=[%1]").arg(values.join(','));
+            }
+            writeLine(line);
+        };
+        int failures=0,objectCount=0,animationCount=0;
+        for(const auto& name:names) {
+            const qint64 before=objects.cost().nanoseconds;
+            const auto& container=objects.container(name);
+            const double readMs=double(objects.cost().nanoseconds-before)/1e6;
+            if(!container.ok) {
+                ++failures;
+                writeLine(QString("# rco-tree %1: ERROR %2").arg(name,container.error));
+                continue;
+            }
+            objectCount+=container.objects.size();animationCount+=container.animations.size();
+            writeLine(QString("# rco-tree %1 version=0x%2 compression=%3 file=%4 tables=%5 objects=%6 animations=%7 read=%8ms")
+                .arg(name,QString::number(container.version,16),QString::number(container.compression),
+                     QString::number(container.fileBytes),QString::number(container.tableBytes))
+                .arg(container.objects.size()).arg(container.animations.size()).arg(QString::number(readMs,'f',2)));
+            for(const auto& entry:container.objects)
+                writeEntry(container,QString(entry.depth*2,' '),entry.type,entry.name,entry.offset,container.extra(entry),
+                           container.properties(entry));
+            for(const auto& entry:container.animations)
+                writeEntry(container,QString(entry.depth*2,' '),entry.type,entry.name,entry.offset,container.extra(entry),
+                           container.properties(entry));
+        }
+        const auto cost=objects.cost();
+        writeLine(QString("# rco-tree: %1 containers, %2 objects, %3 animations, %4 bytes read, read+parse %5 ms, total %6 ms")
+            .arg(cost.containers).arg(objectCount).arg(animationCount).arg(cost.bytesRead)
+            .arg(QString::number(double(cost.nanoseconds)/1e6,'f',2)).arg(total.elapsed()));
+        if(out.isOpen())out.close();
+        return failures?1:0;
+    }
+
     if(parser.isSet("month-sheet")) { // local analysis only: firmware-derived pixels, keep out of Git
         constexpr int scale=6;QImage sheet;QPainter painter;
         for(int m=1;m<=12;++m)for(int kind=0;kind<2;++kind) {
