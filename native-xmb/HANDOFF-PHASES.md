@@ -1,5 +1,9 @@
 # Native XMB — handoff: what remains for an exact match
 
+**Forward plan (2026-10-27): [PHASES-2026-10-27.md](PHASES-2026-10-27.md)** supersedes the phase list below as the
+plan of record. This file remains the record of the 2026-10-25/27 pass, including the RPCS3 capture how-to, the
+values traced in that pass and the evidence links.
+
 **Goal.** A C++ program whose output is identical to the PS3 4.93 XMB. Every layer comes from the firmware's own
 programs, parameters and assets, read from the user's local dev_flash. Where porting isn't practical, a layer is
 reimplemented, and its result is measured against the reference video (`nDL5YJt2aaA`, 60 fps, 1080p).
