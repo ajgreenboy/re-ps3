@@ -1186,6 +1186,14 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     player_->setAudioOutput(audio_.get());player_->setVideoSink(video_.get());
     connect(&preferences_,&Preferences::failed,this,[this](const QString& error){showMessage(error,MessageKind::Page);emit changed();});
     connect(&preferences_,&Preferences::changed,this,[this]{applyPreferences();emit changed();});
+    // The store's documented profile switch (preferences.h). Re-applying the settings here is what makes
+    // a user switch a session change rather than an activeId rewrite (BEHAVIOUR-GAP-AUDIT D16): the
+    // volume, key tones, theme, slideshow interval and repeat/shuffle all come from the new profile.
+    connect(&preferences_,&Preferences::profileChanged,this,[this](const QString& id){
+        applyPreferences();
+        qInfo().noquote()<<"shell: profile changed to"<<id;
+        emit changed();
+    });
     connect(&library_,&MediaLibrary::loaded,this,[this](quint64 request,const QString& path,const MediaEntries& files,const QString& error,bool truncated){
         const bool refreshed=directoryRefresh_;directoryRefresh_=false;
         if(request!=scanRequest_ || pages_.isEmpty())return;
@@ -1441,7 +1449,17 @@ void Shell::horizontal(int delta) {
 }
 void Shell::vertical(int delta) {
     touch();
-    if(mediaOpen_){if(photoOpen() && !photo_.isNull()){photoRotation_=(photoRotation_+delta*90+360)%360;showPhoto();}return;}
+    if(mediaOpen_) {
+        // Photo viewer, Up/Down (BEHAVIOUR-GAP-AUDIT A32; MEDIA-PANELS-FIRMWARE 6.2). The console's photo
+        // viewer gives Up/Down/Left/Right the four cursor buttons - "Move the image to display any hidden
+        // portions ... when Display Mode is set to Zoom" (the console's own photo control-panel page) - and
+        // Previous/Next and Rotate Left/Right are separate panel entries, not a d-pad binding. The view
+        // pans an overflowing image before it ever reaches this call (View::pollController's
+        // photoViewport_.canPan() branch); an image that fits has nothing hidden, so an Up/Down press
+        // changes nothing. It is deliberately not a 90-degree rotation any more: rotatePhoto() owns that.
+        if(photoOpen())qInfo().noquote()<<"photo: Up/Down are the viewer's pan cursor; nothing to pan (no rotation)";
+        return;
+    }
     if(!message_.isEmpty() || loading_)return;
     const int previous=selection();currentSelection()=std::clamp(selection()+delta,0,std::max(0,int(entries().size())-1));
     if(previous!=selection())interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
@@ -1505,7 +1523,50 @@ void Shell::activate() {
         break;
     case Action::EditName:emit requestSystemName(preferences_.value("system/name").toString());break;
     case Action::CreateUser:emit requestNewUser();break;
-    case Action::SelectUser:profiles_.select(entry.value);break;
+    case Action::SelectUser: {
+        // D16 (BEHAVIOUR-GAP-AUDIT): selecting a user switches the whole session - that user's settings,
+        // libraries, friends and trophies - not just the id in profiles.json. The settings store's
+        // documented switch (Preferences::setProfile, preferences.h) is the only way the active profile
+        // changes, so it is called here; rewriting profiles.json's activeId alone left every setting and
+        // every library/... path resolving against the previous user.
+        const QString id=entry.value;
+        if(id.isEmpty())break;
+        const QString previous=profiles_.activeId();
+        // The resolved values of the user being left, read before the switch, so the log line below is
+        // the before/after pair rather than a single number either side could be mistaken for.
+        const int previousVolume=preferences_.value("audio/volume").toInt();
+        const QString previousLibrary=preferences_.value("library/video").toString();
+        if(!profiles_.select(id))break;              // failed() already raised the store's own reason
+        if(!preferences_.setProfile(id)) {
+            // The settings store refused (a read-only or full data directory): put the user record back
+            // so profiles.json and preferences.json still name the same user, and keep the session as it
+            // was. Preferences::failed already raised the page.
+            if(!previous.isEmpty())profiles_.select(previous);
+            break;
+        }
+        // Nothing of the previous user's surface may survive a switch: the console reloads that user's
+        // XMB. Playback ends, pages/panels/messages close, and the columns and settings are rebuilt
+        // against the new profile's values. rebuildUsers() also runs through Profiles::changed; it is
+        // called again because selecting the already-active user emits nothing.
+        ++mediaRequest_;++photoRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;
+        mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};photoRotation_=0;player_->stop();player_->setSource(QUrl{});
+        resumePath_.clear();resumePending_=0;loading_=false;status_.clear();
+        pages_.clear();resetOptions();clearMessage();
+        applyPreferences();
+        rebuildUsers();
+        refreshContent();
+        // The switch line carries the resolved per-profile values on both sides, so a scripted run shows
+        // that the settings and the library path really changed user (not only activeId).
+        qInfo().noquote()<<"shell: user switched from"<<previous
+            <<"volume="<<previousVolume
+            <<"library/video="<<QDir::toNativeSeparators(previousLibrary)
+            <<"to"<<id
+            <<"volume="<<preferences_.value("audio/volume").toInt()
+            <<"library/video="<<QDir::toNativeSeparators(preferences_.value("library/video").toString())
+            <<"library/photo="<<QDir::toNativeSeparators(preferences_.value("library/photo").toString());
+        emit changed();
+        break;
+    }
     case Action::Wallpaper:emit requestWallpaper();break;
     case Action::Theme:emit requestTheme();break;
     case Action::Information: {
@@ -1858,6 +1919,15 @@ void Shell::logOptions(const Entry& entry) {
         {"msg_open","Open"},{"msg_play","Play"},{"msg_display","View"},{"msg_game_start","Start"},
         {"msg_resume","Resume"},{"msg_play_begin","Play from Beginning"},{"msg_info","Information"},
         {"msg_sort","Sort By"},{"msg_display_all","Display All"},{"msg_folder_class","Group Content"},
+        // The six sort pairs the firmware's table carries (A3). The two this build offers and the four
+        // it cannot (no source) are all resolved here, so a dump shows the firmware's own label for each
+        // and the missing sources are checkable rather than an assertion in a comment.
+        {"msg_created_date_time_f","Creation Date"},{"msg_created_date_time_r","Creation Date"},
+        {"msg_updated_date_f","Update Date"},{"msg_updated_date_r","Update Date"},
+        {"msg_importeddate_f","Import Date"},{"msg_importeddate_r","Import Date"},
+        {"msg_sale_year_f","Release Year"},{"msg_sale_year_r","Release Year"},
+        {"msg_shootdate_f","Film Date"},{"msg_shootdate_r","Film Date"},
+        {"msg_trophy_earned_f","Earned Date"},{"msg_trophy_earned_r","Earned Date"},
         {"msg_add_to_playlist","Add to Playlist"},{"msg_copy","Copy"},{"msg_copy_plural","Copy Multiple"},
         {"msg_del","Delete"},{"msg_del_plural","Delete Multiple"},{"msg_eject","Remove"},
         {"msg_disc_eject","Remove Disc"},{"msg_cancel","Cancel"},{"msg_cancel2","Cancel"},
@@ -1988,11 +2058,17 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     case OptionCommand::SortMenu: {
-        // The firmware's sort rows are date pairs with the direction glyph in the string itself (A3:
-        // msg_created_date_time_f/_r, msg_updated_date_f/_r). Only the two pairs whose dates this build can
-        // read (a file's or folder's creation and modification times) are offered; Import Date, Release Year,
-        // Film Date and Earned Date have no source in this build, so they are not invented. There is no Close
-        // row: Circle steps back to the item list.
+        // The firmware's sort rows are six date pairs with the direction glyph in the string itself
+        // (ITEM-MENU-INFO-FIRMWARE A3): msg_created_date_time_f/_r, msg_updated_date_f/_r,
+        // msg_importeddate_f/_r, msg_sale_year_f/_r, msg_shootdate_f/_r, msg_trophy_earned_f/_r.
+        // Only the two pairs this build has a per-row source for are offered: a local page row is a file
+        // or folder, and QFileInfo gives its creation (birthTime, falling back to lastModified) and
+        // modification time. The other four have no source at all (see the log line below and the audit's
+        // D10 note): Import Date needs an import/first-seen record the scanner does not keep, Release Year
+        // needs a per-row year nothing stores, Film Date needs an EXIF/container date parser that does not
+        // exist in src/, and Earned Date needs trophy data (no PSN/trophy backend). A label that sorts
+        // nothing would be worse than its absence, so they are not listed. There is no Close row: Circle
+        // steps back to the item list.
         //
         // Nested level: the firmware's plane_menu1/2 are separate 128x272 plates (A2), while this build draws
         // the nested list in the same full-height band with the parent rows hidden; that is a recorded
@@ -2015,7 +2091,30 @@ void Shell::optionsActivate() {
         interactionAudio_.play(InteractionAudio::Cue::Options);
         qInfo().noquote()<<"shell: options sort menu opened rows="<<options_.size()
             <<"labels=creation/update date pairs groups=1 parentGroups="<<parentGroups
-            <<"heading=fit(unmeasured)";
+            <<"heading=fit(unmeasured)"
+            <<"unsupported=msg_importeddate_f/_r(no import record),msg_sale_year_f/_r(no per-row year),"
+              "msg_shootdate_f/_r(no EXIF date),msg_trophy_earned_f/_r(no trophy data)";
+        // The machine-readable half of the same record: the rows this build offers, and the four firmware
+        // pairs it cannot, each with the missing source. Written beside the item-menu dump a scripted run
+        // already asks for (XMB_DUMP_ENTRIES), so D10 is checkable without reading the log.
+        if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
+            QJsonArray rows;
+            for(const auto& row:options_)rows.push_back(QJsonObject{{"title",row.title},
+                {"key",row.labelKey},{"command",int(row.command)}});
+            const QJsonArray unsupported{
+                QJsonObject{{"keys","msg_importeddate_f/_r"},
+                            {"reason","no import record: a page row is a file or folder and MediaEntry carries only path/title/size/modified, with no first-seen time"}},
+                QJsonObject{{"keys","msg_sale_year_f/_r"},
+                            {"reason","no per-row year: Entry and MediaEntry have no year field and no row source reads one"}},
+                QJsonObject{{"keys","msg_shootdate_f/_r"},
+                            {"reason","no EXIF or container date parser exists in src/"}},
+                QJsonObject{{"keys","msg_trophy_earned_f/_r"},
+                            {"reason","no trophy data: the PSN/trophy services are absent by decision"}}};
+            QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".sort.json");
+            if(file.open(QIODevice::WriteOnly))
+                file.write(QJsonDocument(QJsonObject{{"page",pages_.isEmpty()?QString{}:pages_.last().title},
+                    {"rows",rows},{"unsupported",unsupported}}).toJson());
+        }
         emit changed();
         break;
     }
@@ -2794,6 +2893,17 @@ QString Shell::mediaQueueSummary() const {
     if(!status_.isEmpty())result+="  Â·  "+status_;
     return result;
 }
+void Shell::rotatePhoto(int delta) {
+    touch();
+    if(!photoOpen() || photo_.isNull() || !delta)return;
+    // 90 degrees per press, either way, kept inside 0..270. The console rotates from its photo control
+    // panel (MEDIA-PANELS-FIRMWARE 6.2); the panel is not drawn here, so this is the native binding the
+    // keyboard keeps (Q/E, and the script's ROTATELEFT/ROTATERIGHT tokens).
+    photoRotation_=(photoRotation_+delta*90+360)%360;
+    showPhoto();
+    qInfo().noquote()<<"photo: rotated to"<<photoRotation_<<"degrees";
+    emit changed();
+}
 bool Shell::photoOpen()const{return mediaOpen_ && !jellyfinQueue_ && categories_[category_].id=="photo";}
 void Shell::showPhoto(){if(!photo_.isNull())emit mediaFrame(photo_.transformed(QTransform().rotate(photoRotation_)));}
 void Shell::stepPhoto(int delta) {
@@ -2818,7 +2928,15 @@ bool Shell::mediaPaused()const{return photoOpen()?!slideshow_.isActive():player_
 bool Shell::videoOpen()const{return mediaOpen_ && player_->hasVideo();}
 void Shell::seekMedia(qint64 delta){
     if(!mediaOpen_ || photoOpen() || !player_->isSeekable())return;
-    touch();player_->setPosition(MediaControls::seekTarget(player_->position(),player_->duration()>0?player_->duration():-1,delta));emit changed();
+    touch();
+    const qint64 from=player_->position();
+    player_->setPosition(MediaControls::seekTarget(from,player_->duration()>0?player_->duration():-1,delta));
+    // XMB_MEDIA_TRACE=1: the seek pair's actual result, so a scripted run can prove what the input did
+    // without reading pixels. The video player's L2/R2 binding (the firmware's Fast Reverse/Forward,
+    // MEDIA-PANELS-FIRMWARE 3.4/3.6) drives this same method; Left/Right keeps the keyboard binding.
+    if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))
+        qInfo().noquote()<<"media: seek"<<delta<<"ms from"<<from<<"to"<<player_->position();
+    emit changed();
 }
 void Shell::applyPreferences(){
     audio_->setVolume(preferences_.value("audio/volume").toInt()/100.f);audio_->setMuted(preferences_.value("audio/muted").toBool());
