@@ -37,7 +37,7 @@
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "top background", "crop": [0, 0, 700, 200], "required": true },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
-        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true, "contentDiffers": true, "contentDiffersReason": "reference Game column holds PlayStation Store / Saved Data Utility (PS3) / Corrupted Data; the native column holds Steam Store rows, so the focused label is PS Vita System Application Utility on the console and Steam Store here" },
         { "name": "clock text", "crop": [1570, 80, 260, 50], "psnrDb": 16.0, "ssim": 0.70 },
         { "name": "info bar", "crop": [1329, 75, 591, 58], "required": true, "psnrDb": 17.0, "ssim": 0.75 }
       ]
@@ -54,7 +54,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
-        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true, "contentDiffers": true, "contentDiffersReason": "reference Users column focuses Turn Off System from the console account rows; the native column focuses Create New User from the host profile store" }
       ]
     },
     {
@@ -84,7 +84,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
-        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true, "contentDiffers": true, "contentDiffersReason": "reference Photo column focuses Search for Media Servers over an empty console VFS; the native column focuses Photo Library from the host photo folder" }
       ]
     },
     {
@@ -99,7 +99,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
-        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true, "contentDiffers": true, "contentDiffersReason": "reference Music column focuses Search for Media Servers over an empty console VFS; the native column focuses Music Library from the host music folder" }
       ]
     },
     {
@@ -114,7 +114,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
-        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true, "contentDiffers": true, "contentDiffersReason": "reference Video column focuses BD Data Utility; the native column focuses Continue Watching from the host video folder" }
       ]
     },
     {
@@ -159,7 +159,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
-        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true, "contentDiffers": true, "contentDiffersReason": "reference PSN column shows the console signed-out Sign Up row over its sign-up artwork; the native column shows Sign In from its own signed-out list" }
       ]
     },
     {
@@ -180,7 +180,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
-        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true, "contentDiffers": true, "contentDiffersReason": "reference Friends column is rowless because the console is signed out and offline; the native column draws its own Open Steam Friends row" }
       ]
     },
     {
@@ -195,7 +195,7 @@
       "expect": { "category": "settings", "depth": 1, "entryCount": { "ge": 4 } },
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "page rows", "crop": [400, 380, 1000, 620], "required": true },
+        { "name": "page rows", "crop": [400, 380, 1000, 620], "required": true, "contentDiffers": true, "contentDiffersReason": "reference page is the console 25 firmware rows with console values (PS3-354, English (UK)); the native page is built from sysconf_plugin schemas and host strings, so the row set and values differ" },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "psnrDb": 18.0, "ssim": 0.84 }
       ]
     },
@@ -236,7 +236,7 @@
       "tierANote": "Page-scoped Tier A, like the OSK's: Shell::showMessage writes no sidecar field and no log line, so the assertions prove the Network Settings page and the focused row under it, not the information page itself (neither the firmware's 13 rows nor the host report is asserted). The firmware page is rules y 199 and y 879 with 13 label/value rows at pitch 40, labels right-aligned at x 939 and values left at x 979 (SETTINGS-FIRMWARE.md 12.2); the native page is the same D5 shape over the host's values.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "status rows", "crop": [400, 280, 800, 500], "required": true },
+        { "name": "status rows", "crop": [400, 280, 800, 500], "required": true, "contentDiffers": true, "contentDiffersReason": "reference rows are the console fixed 13-row network report (Internet Connection Enabled through UPnP Enabled); the native page answers with the host own network report" },
         { "name": "title rule", "crop": [80, 150, 1520, 60], "required": true }
       ]
     },
@@ -253,7 +253,7 @@
       "tierANote": "Page-scoped Tier A: the message has no dump field, so the assertions prove the page and the focused row, not the message. Content difference by construction: the firmware's body is `An Ethernet cable is not connected.` after a variable timeout (measured at 12 s, 15 s and 26 s across three runs), while this build draws its own `not available in the native recreation yet` explanation - no test runs and no firmware string is reproduced. The firmware body rect the regions frame is the measured one; the native body is at the shared message position, so Tier B on this state compares the surface shape, not the text.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "message body", "crop": [700, 470, 520, 100], "required": true },
+        { "name": "message body", "crop": [700, 470, 520, 100], "required": true, "contentDiffers": true, "contentDiffersReason": "reference body reads An Ethernet cable is not connected.; the native row answers with this build own not available in the native recreation yet message" },
         { "name": "back hint", "crop": [1140, 880, 120, 56], "required": true }
       ]
     },
@@ -270,7 +270,7 @@
       "tierANote": "Page-scoped Tier A (the message has no dump field). Content difference by construction: the firmware body is the two-line connection advice, this build's is its own unavailable explanation, and no connection-setting flow runs. The batch's `depth2/ics-page-01.png` is the same page reached from the Network Settings row, so it is the right reference for this state rather than for a separate one. The body region is the frame's own ink box (checked on `error/icp-page-rest.png`: two left-aligned lines at x about 528-1390, y about 485-525), not a measured constant.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "message body", "crop": [500, 460, 900, 110], "required": true },
+        { "name": "message body", "crop": [500, 460, 900, 110], "required": true, "contentDiffers": true, "contentDiffersReason": "reference body is the firmware Adjust settings for connection to the Internet text; the native row answers with this build own not available message" },
         { "name": "back hint", "crop": [1140, 880, 120, 56], "required": true }
       ]
     },
@@ -343,7 +343,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
-        { "name": "chip column", "crop": [1324, 470, 420, 520], "required": true }
+        { "name": "chip column", "crop": [1324, 470, 420, 520], "required": true, "contentDiffers": true, "contentDiffersReason": "reference draws 12 unlabelled colour chips; the native list draws six labelled colours in its own panel, so the chip content has no native counterpart" }
       ]
     },
     {
@@ -367,7 +367,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
-        { "name": "band rows", "crop": [1324, 360, 420, 300], "required": true }
+        { "name": "band rows", "crop": [1324, 360, 420, 300], "required": true, "contentDiffers": true, "contentDiffersReason": "reference rows are Brightness (submenu), Original, Classic, Wallpaper; the native list has three values and no Brightness row" }
       ]
     },
     {
@@ -391,7 +391,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
-        { "name": "band rows", "crop": [1324, 470, 420, 150], "required": true }
+        { "name": "band rows", "crop": [1324, 470, 420, 150], "required": true, "contentDiffers": true, "contentDiffersReason": "reference rows are Original, Rounded, Pop; the native list draws the firmware faces this build registers (SCE-PS3 Seurat LATIN, VAGRundschriftDLig)" }
       ]
     },
     {
@@ -414,7 +414,7 @@
       "tierANote": "Row set difference stated, not averaged away: the firmware's page has 19 BD/DVD rows (batch 2 walked all of them to `50 Hz Video Output`), this build lists the seven measured rows and then three native-only rows (Repeat, Shuffle, Volume) that are the page's only working settings on a PC. Its rows are all explained refusals where no drive or decoder exists.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "page rows", "crop": [400, 380, 1000, 620], "required": true },
+        { "name": "page rows", "crop": [400, 380, 1000, 620], "required": true, "contentDiffers": true, "contentDiffersReason": "reference page is the console 19 BD/DVD rows; the native page draws seven measured rows plus three native-only media rows" },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "psnrDb": 18.0, "ssim": 0.84 }
       ]
     },
@@ -630,7 +630,7 @@
       "trace": [{ "pattern": "shell: options opened .*rows= 5 Sort By\\|Open\\|Copy\\|Delete\\|Information" }],
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "options panel", "crop": [1300, 430, 620, 300], "required": true }
+        { "name": "options panel", "crop": [1300, 430, 620, 300], "required": true, "contentDiffers": true, "contentDiffersReason": "reference panel was opened on Game Corrupted Data and lists Sort By, Group Content, Start, Delete, Information; the native route opens Video Library and lists Open, Copy, Delete, Information" }
       ]
     },
     {
