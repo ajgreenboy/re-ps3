@@ -335,9 +335,9 @@
         "category": "settings",
         "depth": 2,
         "entryId": "appearance/colour/0",
-        "entryCount": 6,
+        "entryCount": 13,
         "pageKind": "page",
-        "log": [{ "pattern": "view: settings choice panel appearance/colour keeps this build's options panel" }]
+        "log": [{ "pattern": "view: settings choice band appearance/colour -> 13 items from capture" }]
       },
       "tierANote": "Content and drawing both differ by construction, and the log line is the assertion that says so: the firmware's list is 12 unlabelled colour chips with a live full-screen preview, this build's is 6 labelled values in its own panel (not the firmware band). The regions frame the Theme page's measured band origin (x 1324) and the Color list's measured ink (label line 494-523, chips from 531 at pitch 40, chevron 969-977); the Color page's own left edge was not measured separately, so the crop borrows the Theme page's border. The per-list row origin is a known open item (12.4e), not a constant this catalogue can assume.",
       "regions": [
@@ -359,9 +359,9 @@
         "category": "settings",
         "depth": 2,
         "entryId": "appearance/background/0",
-        "entryCount": 3,
+        "entryCount": 4,
         "pageKind": "page",
-        "log": [{ "pattern": "view: settings choice panel appearance/background keeps this build's options panel" }]
+        "log": [{ "pattern": "view: settings choice band appearance/background -> 4 items from capture" }]
       },
       "tierANote": "Content difference by construction: the firmware has a fourth row (the Brightness submenu) this build does not draw, and the labels below it are this build's three; the view logs that it keeps its own panel rather than the firmware band. Regions use the Theme page's measured band origin (x 1324) and the firmware's measured row ink tops 381/537/581/621.",
       "regions": [
@@ -385,7 +385,7 @@
         "entryId": "appearance/font/0",
         "entryCount": 3,
         "pageKind": "page",
-        "log": [{ "pattern": "view: settings choice panel appearance/font keeps this build's options panel" }]
+        "log": [{ "pattern": "view: settings choice band appearance/font -> 3 items from capture" }]
       },
       "tierANote": "Content difference by construction: same three-row count as the firmware, different labels - the firmware's Rounded and Pop are not shipped here, so the two extra rows name the firmware font faces this build registers (SCE-PS3 Seurat LATIN, VAGRundschriftDLig). The view logs its own panel rather than the firmware band. Regions use the Theme page's measured band origin and the firmware's measured row ink tops 491/539/578.",
       "regions": [
