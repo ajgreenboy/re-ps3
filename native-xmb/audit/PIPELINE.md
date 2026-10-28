@@ -1003,3 +1003,152 @@ onto the current `GlareSourceNoTone` feed.
 
 Scratch scripts and dumps for this pass live under `out/hdrprobe/` (`analyze.py`, `fit.py`, the two scene dumps, the
 21:53 capture) and are local only; no budget, reference or harness file was touched.
+## The program evaluated on the CPU, and the day term located past it, 2026-10-28 (fourth pass)
+
+This pass ran the decisive experiment the third pass asked for: `moyou/back_colours0.fpo` evaluated on a CPU over
+the console's own microcode, its own constants and its own month palettes, then compared with this build's
+`XMB_BG_SCENE` dump and with the console's implied scene. The answer is that **the translation is exact and the
+64x32 draw stage is not the cause**: the console's own 395-instruction program, fed the console's own numbers,
+reproduces *this build's* value to 0.75/255, not the console's. The day term is therefore applied to the background
+layer's **output** - the 64x32 surface the draw leaves behind holds a value the program did not compute. No source
+file was edited (the fence holds); helpers are under `work/` and local.
+
+### 1. The instrument, and why it can be trusted
+
+Three independent implementations now exist for the same program and they agree:
+
+1. `work/fp-interp.py` decodes the microcode directly (RPCS3 `FragmentProgramDecompiler` rules: opcode =
+   `((dst>>24)&0x3F)|((s1w>>31)<<6)`, 16-byte literal slot after any instruction that reads a constant, H/R split,
+   fp16 destination rounding, fixed12/fixed9/saturate clamps, per-source precision modifiers) and executes it with
+   numpy. It reports **395 instructions, 143 literal slots**, and the four TEX reads on units 0..3.
+2. `work/fp-glsl-eval.py` parses the translated GLSL from `out/native-reference/lines/glsl/back_colours0.fpo.glsl`
+   (the translator emits exactly one statement per non-sync instruction, so it can be stepped in lockstep) and
+   evaluates it with the same vec4 semantics.
+3. The GPU's own output: `out/hdrprobe/scene-root-day.png`, the `XMB_BG_SCENE` dump at the canonical pins.
+
+Instruction-stepped comparison of (1) against (2) at (960,10): **identical to 0.0 over all 380 data instructions and
+all 96 H registers** - the only divergences this pass found were two bugs in the *new* helper (a scalar op must read
+lane x of the swizzled source, `EX2 r6.z, -r6` is `exp2(-r6.x)` and not `exp2(-r6.z)`; and the patched constant
+block must be written back into the literal slots), after which the two agree bit for bit. (1) against (3) over the
+full top window (1400 x 70 px): **mean |delta| 0.24 / 0.32 / 0.42 of 255, maximum 0.75** - the CPU evaluation
+reproduces the GPU render. That is also an independent confirmation of `src/rsx_program.cpp`'s decoder for this
+program: no instruction, swizzle, mask, clamp or literal is mistranslated.
+
+Inputs recovered for the CPU run, in the order the task asked for:
+
+- The console's **microcode**: `out/native-reference/fp-dump2/*.ucode` holds 97 captures of 8608 bytes each. Against
+  the shipped `.fpo` they differ in **5 words of 2152** (`0x10`, `0x3a0`, `0x13e0`, `0x1680`, `0x2190`), and all
+  five are constant-slot payloads rather than instruction words (the last, `0x2190`, is the 16 bytes at
+  `base+16` of the final instruction, i.e. slot 142 = `_NightDayBlend`); three of them also change between
+  captures. So the console runs this program with its constants patched into the literal slots, exactly as the
+  second pass described, and the shipped bytes are the same program with those slots left at zero. The interpreter reads the literals straight out of the capture, so it
+  starts from the console's real constant block and then overwrites the seven named slots with the values under test.
+- The **palettes** are decoded here from `lines.qrc` (`C:\dev\rpcs3-cap\dev_flash\vsh\resource\qgl\lines.qrc`), not
+  from the build: `textures/month_bg/{rgb,night}/{10,11}.dds`, A8R8G8B8 64x32 with five mips, masks
+  0x00FF0000/0x0000FF00/0x000000FF. Row 0 texel 0 of `rgb/10` is 226/177/15, (0,32) is 225/162/14, (31,0) is
+  216/197/0, matching the values the second pass printed, so the decode is the same one the app does.
+- The **sample coordinate rule**: the program builds it itself, and it is richer than the dossier's summary. In
+  ucode terms `r0.xy = floor(uv*64 + 0.5, uv*32 + 0.5) * (1/64, 1/32)` is only the first half; the sub-texel
+  remainder `r5.zw = frac(...)` is then run through `x^3*(6x^2 - 15x + 10)` (smootherstep) and added, so the sample
+  coordinate is `(floor(uv*64+0.5) - 0.5 + smootherstep(frac(uv*64+0.5))) / 64`. At the console's own 64x32 draw
+  size `frac` is exactly 0 and the coordinate is the exact texel centre of texel `floor(...)`; at 1920x1080 it
+  sweeps a texel over each 30 px block. This is why the console reads texels and this build reads smooth blends of
+  them - and it is *not* the day term (section 3).
+- **uv** is this build's fullscreen triangle: `v_tc[0] = (p.x, p.y, 0, 1)`, `p = gl_Position*0.5 + 0.5`, so at image
+  row y (top down) `uv = ((x+0.5)/1920, 1-(y+0.5)/1080)`. The interpreter is given the same uv, so the comparison is
+  per pixel.
+
+### 2. The sample points
+
+All values are linear scene units in the window y<70, x<1400 unless stated; display values are those of the shipped
+day preset (EXPOSURE 1.05, WHITE LEVEL 0.899181). "Console" is the reference frame's display run backwards through
+that curve (the third pass's method; reproduced here to 0.0001 and re-checked by the round trip).
+
+| point | CPU, app MonthTime 23.629 | our GL scene (XMB_BG_SCENE) | CPU, console MonthTime 26.129 | console-implied | CPU(23.629) - GL | CPU(26.129) - console |
+|---|---|---|---|---|---|---|
+| (60,10) | 0.3862 / 0.3218 / 0.1761 | 0.3843 / 0.3216 / 0.1765 | 0.3748 / 0.3049 / 0.1690 | 0.3174 / 0.2458 / 0.1094 | +0.0019 / +0.0002 / -0.0004 | +0.0575 / +0.0591 / +0.0597 |
+| (400,10) | 0.4307 / 0.3640 / 0.2169 | 0.4314 / 0.3647 / 0.2157 | 0.4177 / 0.3466 / 0.2085 | 0.3612 / 0.2902 / 0.1519 | -0.0006 / -0.0007 / +0.0012 | +0.0565 / +0.0564 / +0.0566 |
+| (960,10) | 0.4662 / 0.3977 / 0.2521 | 0.4667 / 0.3961 / 0.2510 | 0.4506 / 0.3796 / 0.2417 | 0.3913 / 0.3207 / 0.1800 | -0.0004 / +0.0016 / +0.0011 | +0.0593 / +0.0589 / +0.0617 |
+| (1380,10) | 0.4162 / 0.3474 / 0.2031 | 0.4157 / 0.3490 / 0.2039 | 0.4023 / 0.3314 / 0.1939 | 0.3410 / 0.2697 / 0.1343 | +0.0005 / -0.0016 / -0.0008 | +0.0613 / +0.0617 / +0.0596 |
+| (60,40) | 0.3846 / 0.3185 / 0.1752 | 0.3843 / 0.3176 / 0.1765 | 0.3750 / 0.3034 / 0.1674 | 0.3174 / 0.2458 / 0.1094 | +0.0003 / +0.0008 / -0.0013 | +0.0576 / +0.0576 / +0.0581 |
+| (700,40) | 0.4630 / 0.3932 / 0.2494 | 0.4627 / 0.3922 / 0.2471 | 0.4499 / 0.3772 / 0.2391 | 0.3913 / 0.3207 / 0.1800 | +0.0002 / +0.0010 / +0.0023 | +0.0586 / +0.0564 / +0.0591 |
+| (1300,40) | 0.4252 / 0.3548 / 0.2123 | 0.4275 / 0.3569 / 0.2118 | 0.4132 / 0.3405 / 0.2024 | 0.3511 / 0.2800 / 0.1413 | -0.0022 / -0.0021 / +0.0006 | +0.0621 / +0.0605 / +0.0611 |
+| (60,68) | 0.3816 / 0.3158 / 0.1756 | 0.3804 / 0.3176 / 0.1765 | 0.3733 / 0.3024 / 0.1676 | 0.3174 / 0.2458 / 0.1094 | +0.0012 / -0.0019 / -0.0009 | +0.0560 / +0.0567 / +0.0582 |
+| (960,68) | 0.4583 / 0.3888 / 0.2485 | 0.4588 / 0.3882 / 0.2471 | 0.4471 / 0.3750 / 0.2380 | 0.3846 / 0.3140 / 0.1765 | -0.0005 / +0.0005 / +0.0014 | +0.0625 / +0.0611 / +0.0615 |
+| **window mean** | **0.4358 / 0.3674 / 0.2234** | **0.4354 / 0.3674 / 0.2232** | **0.4235 / 0.3516 / 0.2140** | **0.3641 / 0.2926 / 0.1549** | **+0.0004 / +0.0000 / +0.0002** | **+0.0594 / +0.0590 / +0.0591** |
+
+The decisive column is the last one. **The console's program, on the console's constants and the console's palettes,
+does not produce the console's value; it produces ours.** Against the GPU's own dump the per-pixel agreement is
+0.24-0.42 of a level (max 0.75) over 98,000 pixels, so this is not an artefact of the CPU implementation. Feeding the
+app's own `_MonthTime` (23.629 = `(25-1+0.4167)/31*30`) instead of the 10-25 capture's 23.2258 makes the agreement
+even tighter: 0.4358 / 0.3674 / 0.2234 against the dump's 0.4354 / 0.3674 / 0.2232.
+
+### 3. The draw stage, tested rather than assumed
+
+The task's second candidate was the 64x32 draw and sampling stage. Four tests, all negative:
+
+1. **Draw size.** Evaluating the same program on the console's own grid (`uv = ((i+0.5)/64, 1-(j+0.5)/32)`, 2048
+   fragments) instead of 1920x1080 changes the whole-frame mean by 0.06 / 0.28 / 0.07 of 255 and the top window by
+   under 3.5/255 (the 70-row window is 2.2 surface rows, so that is the whole difference). The +0.059 survives at
+   both sizes. Resolution, fragment density and the smootherstep sub-texel sweep are excluded.
+2. **Texture assignment.** Every month pair (`m/m+1` for m = 1..12) and phase 0..30 in 1.5 steps was evaluated
+   (`work/fp-broad.py`). The best *raw* match to the console's field is 13.9/255 (pair 10/11 at phase 30, mean
+   0.4233 / 0.3479 / 0.2036); no assignment or phase reaches the console's level (0.3641 / 0.2926 / 0.1549), and the
+   console's R/B ratio of 2.35 is not on the program's phase curve at that level at all. Swapping the two groups (night
+   palettes on tex0/tex1) gives 0.0521 / 0.0510 / 0.0469, i.e. rms 60.5/255 against the console - 4x worse, not better.
+   Filtering is not in play either: the palettes are uncompressed, bound Linear/ClampToEdge at LOD 0 and magnified
+   30x, and at the console's own 1:1 draw the program's own coordinate lands on texel centres.
+3. **Month phase (a real confound in the earlier comparisons).** The day reference frame is console 10/28 10:00
+   (`root__original__day__1080p.state.json`), so the console's `_MonthTime` there is 26.129
+   (`(28-1)/31*30`), not the 23.2258 captured in a 10-25 session. Evaluating at 26.129 lowers the program's output
+   to 0.4235 / 0.3516 / 0.2140, i.e. **0.012 / 0.016 / 0.010 of the 0.079 / 0.082 / 0.070 residue is the date pin**
+   (3.7/255 display, the "about 3 levels" the second pass measured). What is left is a clean constant.
+4. **Geometry.** Neither a vertical shift (-200..+200 px) nor a vertical scale (0.6..1.2) of the field improves the
+   match: the unshifted field is already the best at 15.15/255 and the best shifted one is 15.10/255, with everything
+   else worse, so the residue is not a misregistration of the background.
+
+After (3) the residual in the window is **+0.0594 / +0.0590 / +0.0591** in linear scene units: equal across
+channels to 0.0004, and the best single-parameter description of the whole 98,000-pixel window is "subtract
+0.0593": **rms 0.653/255, maximum 1.81** - i.e. at the 8-bit quantisation floor of the reference, flat in x (rms
+0.63 / 0.61 / 0.49 / 0.84 per x-quartile) and in y (0.65 / 0.66 / 0.65 per tercile). A single gain fits six times
+worse (0.833 gives rms 3.98/255), a day/night blend leak fits 6.6x worse (best single b = 0.816, rms 4.30/255, and
+its per-channel optimum splits 0.85 / 0.81 / 0.68), and a per-channel gain fits 1.27/255 only by spending three
+parameters on a range in which gain and offset are nearly degenerate.
+
+In display units that constant is **+17.8 / +17.4 / +16.9 of 255** at the console's own month phase, and +21.4 /
++22.1 / +19.6 at the 10-25 pin - which is where the earlier passes' numbers came from.
+
+### 4. What this pass concludes, and what it does not
+
+- **The translation is not the cause, and that is now a measurement rather than an exclusion.** The console's own
+  microcode at the console's own constants reproduces this build's scene to 0.75/255 over the window, and the
+  translated GLSL is instruction-identical to that microcode. There is no instruction, expression, swizzle or
+  constant slot in `src/rsx_program.cpp` to fix for this defect; the file was not touched.
+- **The 64x32 draw stage is not the cause either**, in the four senses the task listed that a CPU can test:
+  sampling, filtering, texture assignment and draw resolution all reproduce our value when exercised on the console's
+  own terms. What remains of that list is the *surface format*, and the experiment above reframes it: the question is
+  no longer how the surface is sampled but **what the surface contains**, because the value the console's chain acts
+  on is 0.059 lower than the value the console's own program computes.
+- The residue therefore behaves like a term applied to the background layer's output: an achromatic -0.059 in linear
+  scene units at the day state, +0.004 at the night state, present before `Hdr::finish` (third pass) and after the
+  program (this pass). Two families survive: the 64x32 surface holds a value the program did not write (a blend or
+  format behaviour of that draw on real hardware), or a scene-space offset sits between that surface and the tone
+  map. This pass cannot separate them locally, and it did not fit either one into `hdr.cpp`; a subtraction there
+  would be the same fitted constant the first pass already refused.
+- **The one artifact that closes it** is unchanged from the second pass's item 7, and it is now a one-line
+  comparison: dump the 64x32 surface after the 8608-byte draw on the console at the pinned clock and compare against
+  this pass's evaluation of the same texels. The interpreter can emit that 64x32 surface exactly (it is
+  `work/fp-grid-day.npy`), so the dump either reads 0.4235 (the draw is right and the offset is later in the chain)
+  or 0.3641 (the draw writes less than the program computes) with no ambiguity.
+- The `_MonthTime` conformance hunk stands as before and is worth **0.012 / 0.016 / 0.010 in scene units, 3.7/255
+  display** - now measured on the console's own date rather than fitted. It is in `view.cpp`, which is outside this
+  pass's fence, so it is returned as a hunk: `backgroundTime()` should pass `(day-1)/daysInMonth*30` with no
+  time-of-day term.
+
+Helpers, all local and firmware-derived, under `work/`: `fp-interp.py` (microcode interpreter), `fp-disasm.py`
+(listing), `fp-glsl-eval.py` (GLSL evaluator), `fp-batch.py` (vectorised interpreter), `fp-eval.py`,
+`fp-diff.py` (instruction-stepped comparison), `fp-vs-gl.py`, `fp-console-scene.py`, `fp-fit.py`, `fp-broad.py`,
+`fp-align.py`, `fp-matrix.py`, `fp-blend.py`, `fp-final.py`, `fp-ucompare.py`, `fp-tex-pairs.py`,
+`fp-res-test.py`, `fp-artifacts.py`, plus `fp-day-scene.npy` (1920x1080 at the app month phase), `fp-cpu28.npy`
+(1920x1080 at the console month phase), `fp-grid-day.npy` (the same program on the console's 64x32 grid) and
+`fp-console-scene.npy` (the reference frame's inverted scene). No budget, reference or harness file was touched.
