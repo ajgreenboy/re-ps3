@@ -679,3 +679,324 @@ $env:XMB_UI_GLARE="0.35"   # or 0.15 / 1.0; unset = shipped path
 $env:XMB_TEXT_CHECK="1"   # deterministic renderer assertions, including metric-size-* and caret-metric
 $env:XMB_LABEL_LIMIT="120" # elision probe: "Steam Store" renders as "Steam" + the separate ellipsis draw
 ```
+
+## Text shadow from the firmware material (P3), 2026-10-27
+
+Scope: `src/text_renderer.cpp`, `src/text_renderer.h` and this section. `view.cpp` is another pass's
+fence, so the call-site wiring is returned as hunks in section 10, not applied. Build:
+`& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-text`.
+
+The slice replaces the renderer's invented shadow (offset 0, black, alpha 0.2) with the shadow a
+firmware `Text` object carries, and adds the surface trace that lets the next pass check the material
+it drew with.
+
+### 1. What the renderer drew before
+
+- Per-tile path: `shadowOffset` one output pixel, `shadowColor` black, `shadowAlpha` 0.2
+  (`text_renderer.cpp`, the old `program_` uniforms).
+- Union-mask path: the same black 0.2 shadow, offset one layer pixel (`reach = rasterScale_`).
+- Measured on the reference (section 4): that shadow never leaves the glyph's own antialiased edge.
+  The reference's shadow lands 4-5 px away and is roughly twice as dark, so the native frame had no
+  shadow where the reference has one.
+
+### 2. The material, and where it comes from
+
+`Materials::textMaterial(container, object)` reads the Text object's own fields: `size`,
+`topRed..bottomBlue`, `spacingHorizontal/Vertical`, `shadowX/shadowY/shadowPerspective`,
+`shadowRed/Green/Blue/Alpha` and the `font` reference (audit/RCO-OBJECT-MODEL.md 5.3, 9.4).
+`TextRenderer` now takes that material three ways:
+
+- `draw(..., const Materials::TextMaterial&, const char* labelClass, ...)` - a caller-supplied material.
+- `draw(..., Materials&, container, object, const char* labelClass, ...)` - resolves and caches
+  `textMaterial(container, object)` for the caller; this is the label path's one-call entry point.
+- `draw(..., labelClass)` - no material. The renderer applies `defaultMaterial()`.
+
+`defaultMaterial()` is the firmware's own shared block, not a renderer constant: 1304 of the 1305 Text
+templates in 4.93 carry `shadowX=4 shadowY=-5`, 1197 carry shadow RGB .25 (107 carry .9, one disables
+the shadow), all carry `shadowAlpha=1` and `shadowPerspective=0` (audit/TEXT-RENDERER.md section
+"RCO Text attributes for Phase 3", audit/RCO-OBJECT-MODEL.md 9.4). The trace names its provenance as
+`firmware/text-template`, and `XMB_TEXT_MATERIAL=1` proves that block against a real object on every
+run (section 7): the renderer derives the firmware root from the font directory, reads
+`xmb_plugin_normal/clock` through `Materials::textMaterial`, and compares.
+
+Why the item labels use the default rather than an object: **no RCO in the local 4.93 tree holds a
+label Text object**. A tree dump of every `vsh/resource` container (`--rco-tree "*"`: 122 containers,
+8070 objects, 8358 lines) contains no `label2_text`/`label2_text_ellipsis` object; those names survive
+only as strings in `explore_plugin.prx`, and TEXT-RASTER.md 4.2 shows paf creating/positioning them at
+run time from XMBML. So for the item-label class the shared template block is the only firmware
+authority, and `view.cpp` can only name the class (hunk B).
+
+### 3. The mapping: traced vs fit
+
+Traced (read from the object, no interpretation):
+
+| field | value | source |
+|---|---|---|
+| offset | `shadowX=4`, `shadowY=-5` | `xmb_plugin_normal/clock`, 1304/1305 templates |
+| screen direction | `(shadowX, -shadowY)` = (+4, +5) px right/down | PAF object space is y-up (the notification label set steps +0.5, -0.375, -0.5 from the top line down), so -5 is down |
+| unit | 1 template unit = 1 scene px at 1920x1080 | reference measurement, section 4: 4/-5 lands as 5/4 (+-1) px; scaling by the object's size (10) would be 10.8/13.5 px and is not what the frame shows |
+| colour | shadow RGB 0.25/0.25/0.25, multiply | field names, 1197 templates |
+| alpha | shadowAlpha 1.0 | every template |
+| coverage | shadow coverage = mask coverage x shadowAlpha x text colour alpha | composite choice, below |
+| size / spacing / font | reported by the trace, NOT applied | this slice must not move geometry; the objects store `size=0`/`font=null`, the plugin supplies both |
+
+Fit (labelled, because the firmware's shadow blend state is not recovered):
+
+- The shadow **multiplies** the layer by the material's shadow RGB instead of painting a flat grey.
+  The reference measures a multiplicative darkening (section 4); the literal reading (a 0.25 grey
+  premultiplied at alpha 1) is a *fixed* 64 levels whatever is underneath, which is invisible over
+  the info bar's 66-level band and 30-40 levels too light where the reference shows its shadow.
+- Because the UI layer is display-referred while PAF composites in linear light, the factor actually
+  multiplied is `pow(shadowRGB, 1/2.2)`, i.e. 0.533 for 0.25. The exponent is a fit. In premultiplied
+  terms the shadow is a black shutter: `dst *= mix(1, 0.533, coverage * shadowAlpha * textAlpha)`.
+- `shadowAlpha` still scales coverage (alpha 1.0 = no attenuation), and the text colour's own alpha
+  scales it again, so a shadow is never stronger than the glyph that casts it. This is the coverage /
+  alpha product TEXT-RASTER.md 3.3 left unrecovered; the factor above is the only free parameter.
+- `XMB_TEXT_SHADOW=premultiplied` restores the literal reading for the A/B (section 5). Diagnostic
+  switch only; the capture harness leaves it unset.
+
+Offset in layer pixels is `(shadowX, -shadowY) * rasterScale`; the mask composite samples the union
+mask at `p - offset` (its v is flipped with the layer, so the uniform is `(+dx, -dy)`), and the
+per-tile path samples the atlas tile at `p - offset` in atlas texels.
+
+### 4. Reference measurement
+
+Reference frame `out/native-reference/ab-rpcs3-root.png` (RPCS3 1080p), clock region
+`1560,70..1840,140`. Ink = luma > 200; the ink mask is eroded (3x3) so a shifted sample lands on a
+solid stroke interior; a pixel counts as shadow when it is more than 6 levels darker than a 31 px
+median background.
+
+- Offset: shifting the eroded ink by (dx, dy), the fraction of shifted pixels that land on shadow
+  peaks at **(+5, +4) with 0.579**; (+5,+5) 0.575, (+6,+4) 0.575, (+4,+6) 0.558. The firmware's
+  (+4, +5) is inside that peak's 1 px spread. The same test on the old native frame finds **zero**
+  shadow pixels more than 2 px from ink, i.e. no shadow at all.
+- Strength: at (+4, +5) the median level under the shadow is **31.8 against a 66-level band**, i.e. a
+  **0.48** display factor. Candidates over that band: premultiplied 25% grey = 64 (invisible), black at
+  25% alpha = 48, display multiply by 0.25 = 16. The measured 0.48 is a multiply, close to the fit's
+  0.533 (the frame is video-compressed and the shadow is blurred by the scene glare, so +-0.1 is the
+  measurement's own spread).
+- The focused label's own shadow is not measurable this way: its glow bloom is brighter than the
+  shadow is dark, and the reference string ("Corrupted Data") differs from the native one anyway.
+
+### 5. A/B: the two composites
+
+Same executable, one capture per mode, every clock pinned:
+
+| mode | frame | item label row | clock text | info bar |
+|---|---|---|---|---|
+| before this change (no material) | 18.30 / 0.8323 | 11.95 / 0.3927 | 11.39 / 0.4105 | 14.78 / 0.6117 |
+| material, premultiplied colour/alpha (`XMB_TEXT_SHADOW=premultiplied`) | 18.28 / 0.8315 | 11.91 / 0.3918 | 11.35 / 0.4102 | 14.73 / 0.6100 |
+| material, multiplicative (shipped) | 18.28 / 0.8322 | 11.95 / 0.3925 | 11.39 / 0.4128 | 14.77 / 0.6113 |
+
+The literal premultiplied reading loses a little on every text layer (-0.03..-0.05 dB), which is what
+"shadowAlpha 1.0 makes the shadow a fixed 0.25 grey" predicts: it darkens where the reference has no
+shadow and leaves the band untouched where it does. The multiplicative reading keeps the label and
+the info bar neutral and **gains +0.0023 SSIM on the clock text**, which is the one text layer whose
+pixels sit where the reference's own shadow is. The shipped default is therefore the multiplicative
+mapping; the premultiplied one stays available as the documented alternative.
+
+Note on what these numbers can arbitrate: the canonical clock string is MM/DD 12-hour ("10/25 12:32
+PM") while the reference frame is DD/MM 24-hour ("25/10 12:32"), by design
+(`ab-layers.thresholds.json` capture note), and the item label is "Steam Store" against "Corrupted
+Data". So the layer scores bound the change and compare its *style*, not its glyph alignment; the
+mapping itself was chosen from the reference's measured shadow (section 4), and the A/B only decided
+which composite expresses it.
+
+### 6. Per-layer numbers (canonical capture, shipped build)
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-text
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --capture --exe C:/dev/out/native-text/re-ps3-native.exe
+```
+
+| layer | before | after | delta | gate |
+|---|---|---|---|---|
+| frame | 18.30 / 0.8323 | 18.28 / 0.8322 | -0.02 / -0.0001 | PASS |
+| top background | 20.25 / 0.9363 | 20.25 / 0.9363 | +0.00 / +0.0000 | PASS |
+| category icon row | 20.92 / 0.8990 | 20.93 / 0.8990 | +0.01 / +0.0000 | PASS |
+| item label row | 11.95 / 0.3927 | 11.95 / 0.3925 | +0.00 / -0.0002 | PASS |
+| clock text | 11.39 / 0.4105 | 11.39 / 0.4128 | +0.00 / **+0.0023** | PASS |
+| info bar | 14.78 / 0.6117 | 14.77 / 0.6113 | -0.01 / -0.0004 | PASS |
+
+PASS 6/6 (budget 0.5 dB / 0.004). Only the text layers moved, which is the attribution: no geometry,
+no string and no other material was touched. Grabs: `out/native-text/before-frame.png`,
+`after-frame.png`, plus `label-before/after.png` (crop 400,425,800,100) and `clock-before/after.png`
+(crop 1570,80,260,30). The after crops show the shadow the firmware material asks for: right and
+down, darker than the band, on the clock digits and on the item label.
+
+`XMB_TEXT_MASK=0`, auto and `=1` produce the same 1920x1080 frame on this build (SHA-256
+`9E430CAFAA5A4B31C1D451BE7F6312C27248D292ED7FED655CF07D1D4F48654C` all three): the union path's
+single-quad shadow and the per-tile per-glyph shadow agree on every string in the canonical state.
+The shadow is drawn identically under both, so the mask path's shadow is not a second unresolved
+variable.
+
+### 7. The trace (`XMB_TEXT_MATERIAL=1`)
+
+Diagnostic only; the capture harness never sets it. Output of the shipped build on the canonical
+state (one line per surface, plus the per-surface assertion):
+
+```
+text material: trace on; shadow from the firmware material, mapping offset=(shadowX,-shadowY) scene px, colour=shadowRGB multiplies the layer as pow(rgb,1/2.2), coverage scaled by shadowAlpha*textAlpha (the composite is a fit; the firmware shadow blend state is unrecovered)
+text material: default = firmware Text template (4.93: 1304/1305 objects shadowX=4 shadowY=-5 RGB=0.25,0.25,0.25 alpha=1.00) -> screen (+4.00,+5.00) scene px; no RCO Text object holds an item label (paf draws XMBML text at run time)
+text material: RCO read xmb_plugin_normal/clock present=1 size=10 shadow=(4,-5) RGB=(0.250,0.250,0.250) alpha=1.00 spacing=(0,0) font=<null> container=read
+text material: PASS default == xmb_plugin_normal/clock shadow block (shadow 4/-5 vs 4/-5; colour 0.250,0.250,0.250 vs 0.250,0.250,0.250; alpha 1.00 vs 1.00)
+text material: class=unattributed drawn=21px source=firmware/text-template size=0 spacing=(0,0) font=<null> shadow=(4,-5) screen=(4.00,5.00) scene px colour=(0.250,0.250,0.250) alpha=1.00 applied=shadow
+text material: PASS class=unattributed shadowX=4 shadowY=-5 shadowAlpha=1.00 offset-within-tile-pad=yes
+text material: class=unattributed drawn=27px source=firmware/text-template size=0 spacing=(0,0) font=<null> shadow=(4,-5) screen=(4.00,5.00) scene px colour=(0.250,0.250,0.250) alpha=1.00 applied=off (shadow=false)
+text material: PASS class=unattributed shadowX=4 shadowY=-5 shadowAlpha=1.00 offset-within-tile-pad=yes
+text material: class=unattributed drawn=27px source=firmware/text-template size=0 spacing=(0,0) font=<null> shadow=(4,-5) screen=(4.00,5.00) scene px colour=(0.250,0.250,0.250) alpha=1.00 applied=shadow
+text material: PASS class=unattributed shadowX=4 shadowY=-5 shadowAlpha=1.00 offset-within-tile-pad=yes
+text material: class=unattributed drawn=17px source=firmware/text-template size=0 spacing=(0,0) font=<null> shadow=(4,-5) screen=(4.00,5.00) scene px colour=(0.250,0.250,0.250) alpha=1.00 applied=shadow
+text material: PASS class=unattributed shadowX=4 shadowY=-5 shadowAlpha=1.00 offset-within-tile-pad=yes
+text material: class=unattributed drawn=18px source=firmware/text-template size=0 spacing=(0,0) font=<null> shadow=(4,-5) screen=(4.00,5.00) scene px colour=(0.250,0.250,0.250) alpha=1.00 applied=shadow
+text material: PASS class=unattributed shadowX=4 shadowY=-5 shadowAlpha=1.00 offset-within-tile-pad=yes
+```
+
+The 27 px class appears twice because the focused row draws a glow pass (`shadow=false`) and then the
+ink pass (`applied=shadow`); the trace keys on (class, size, shadow applied) so the glow pass cannot
+hide the shadow the ink pass uses. Classes read `unattributed` until the `view.cpp` hunks land; after
+that the same lines read `class=item-label`, `class=clock` (source
+`xmb_plugin_normal/clock`), `class=notification` (source `system_plugin/notification_label0_b`, ...).
+
+Two things this trace is for, per the slice's goal:
+
+1. **Authority, not agreement.** The `RCO read xmb_plugin_normal/clock` line is a real
+   `Materials::textMaterial` read of the firmware's container during the same run, and the next line
+   asserts the default block equals it. The material is not hardcoded *and* assumed: the code holds
+   one default for the surfaces that have no object, and the trace proves that default is a real
+   object's block.
+2. **Per-surface.** Once the hunks are applied, a class with the wrong material (or a failed
+   `textMaterial` returning `present=0`) prints `source=<absent>` and `FAIL`, instead of drawing
+   silently with the default.
+
+### 8. Assertions (`XMB_TEXT_CHECK=1`)
+
+Two deterministic assertions were added; every existing assertion still passes:
+
+```
+text check: PASS shadow-material firmware default shadow (4,-5) .25 grey alpha 1 -> screen (4.00,5.00) scene px, colour alpha 1.00
+text check: PASS shadow-tile-pad offset 4.0x5.0 layer px <= 8.0 px glyph-tile padding
+...
+text check: all assertions passed
+```
+
+`shadow-material` pins the mapping (screen sign included, so a y-up/y-down regression fails).
+`shadow-tile-pad` pins the per-tile path's physical limit: the tile's halo padding is
+`ceil(haloRadius*rasterScale)+2` (14 layer px at the 2x layer, 8 at the 1x layer the check first runs
+on), and a material whose shadow is larger would clip it per glyph. The firmware's 8x10 layer px fits
+both; a material that does not fits is traced as `offset-within-tile-pad=no` and warned once.
+
+### 9. Determinism
+
+- Two `--render-clock 20` captures of the shipped build: SHA-256
+  `66B737CDF5ADE40D10367E2125CA978765DE0F82F67BC19C7035F723A902A9D0`, identical.
+- The canonical `--render-clock 30` frame hashes
+  `9E430CAFAA5A4B31C1D451BE7F6312C27248D292ED7FED655CF07D1D4F48654C` with and without
+  `XMB_TEXT_MATERIAL=1`, so the trace does not alter the frame. Before the change the same capture
+  hashed `F68732A7F9A135D55D097710EE4B45B2779594BD1AD886E3FF2BB084CC97BF18` - the delta is the shadow.
+- The per-tile shadow samples the atlas at a fixed material offset and the mask shadow samples the
+  R8 mask at the same offset; both are integer layer-pixel displacements, so no new fractional
+  sampling was introduced.
+
+### 10. `view.cpp` hunks (returned, not applied)
+
+A. The shared `text()` helper (around line 1124) gains the class name; existing calls are unaffected.
+
+```cpp
+auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter,
+              const char* labelClass=nullptr){
+    if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);
+        textRenderer_.draw(*this,p,r,value,f,colour,flags,0,true,true,labelClass);return;}
+    QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);
+    f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(QColor(0,0,0,38));
+    p.drawText(r.translated(1,1),flags,value);p.setPen(colour);p.drawText(r,flags,value);
+};
+```
+
+B. The item-label draws (around lines 1417-1420). The class name is all this surface can supply: no
+RCO holds its Text object, so the renderer's firmware default applies.
+
+```cpp
+text(labelRect,label,27,QColor(255,255,255,int(255*alpha)),Qt::AlignLeft|Qt::AlignVCenter,"item-label");
+if(elided.elided)
+    text(QRectF(labelRect.left()+elided.ellipsisX,labelRect.top(),40,labelRect.height()),
+         QString(QChar(0x2026)),27,QColor(255,255,255,int(255*alpha)),
+         Qt::AlignLeft|Qt::AlignVCenter,"item-label");
+```
+
+C. The clock (line 1471) is the one text surface with a Text object of its own
+(`xmb_plugin_normal/clock`, size 10, shadow 4/-5 .25 alpha 1). Read the material and let the renderer
+apply its shadow; the object's size/gradient stay unapplied so the label column does not move.
+
+```cpp
+if(textRenderer_.ready()) {
+    QFont clockFont(shell_.fontFamily());clockFont.setPixelSize(27);
+    textRenderer_.draw(*this,p,{1240,82,525,45},shell_.clockText(),clockFont,Qt::white,
+                       Qt::AlignRight|Qt::AlignVCenter,sceneMaterials(assets_),
+                       QStringLiteral("xmb_plugin_normal"),QStringLiteral("clock"),"clock");
+} else text({1240,82,525,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+```
+
+D. The notification (`drawNotification`, lines 1036-1050). Its three label objects are
+`system_plugin/notification_label0_b`, `_1_b`, `_2_b`, and the one-line form is
+`notification_message_a`; pass the object per call so the trace can print the real source.
+
+```cpp
+const auto label=[&](const QRectF& rect,const QString& value,int size,QColor colour,const char* object) {
+    if(textRenderer_.ready()) {
+        QFont font(shell_.fontFamily());font.setPixelSize(size);
+        textRenderer_.draw(*this,p,rect,value,font,colour,Qt::AlignLeft|Qt::AlignVCenter,
+                           sceneMaterials(assets_),QStringLiteral("system_plugin"),
+                           QString::fromLatin1(object),object);
+        return;
+    }
+    QFont font(shell_.fontFamily());font.setPixelSize(size);font.setStyleStrategy(QFont::PreferAntialias);
+    font.setHintingPreference(QFont::PreferNoHinting);p.setFont(font);
+    p.setPen(QColor(0,0,0,38));p.drawText(rect.translated(1,1),Qt::AlignLeft|Qt::AlignVCenter,value);
+    p.setPen(colour);p.drawText(rect,Qt::AlignLeft|Qt::AlignVCenter,value);
+};
+if(twoLines) {
+    label(QRectF(textLeft,plaque.top()+10.,textRight-textLeft,titleSize+6.),title,titleSize,
+          QColor(245,245,245),"notification_label0_b");
+    label(QRectF(textLeft,plaque.top()+10.+titleSize+4.,textRight-textLeft,detailSize+6.),
+          notificationShown_.detail,detailSize,QColor(206,206,206),"notification_label1_b");
+} else label(QRectF(textLeft,plaque.top()+8.,textRight-textLeft,plaque.height()-16.),title,titleSize,
+             QColor(245,245,245),"notification_message_a");
+```
+
+Every other `text()` call site can pass a class name alone (`"options"`, `"panel-heading"`,
+`"osk-field"`, ...) to appear in the trace; no material is needed where the surface has no object.
+`info bar`'s status text has the system_plugin `infotext1/infotext2` objects available if that surface
+is wanted next.
+
+### 11. Limits
+
+- The shadow is a hard copy of the coverage. The reference's is soft: the scene glare blurs it and
+  the capture compresses it. No blur was added - it would be a new pass, and 4.93 gives no evidence
+  for one (TEXT-RASTER.md 1.5, 3.2). This is the largest remaining visual difference.
+- The per-tile path can only paint a shadow that lands inside the glyph tile's halo padding (14 layer
+  px at 2x). The firmware's 8x10 fits; a material with a larger offset would clip there and is warned
+  about once and traced (`offset-within-tile-pad=no`). The mask path has no such limit.
+- The union mask and the per-tile path produce the same canonical frame, so the case the union would
+  really change - two glyph shadows overlapping where their inks do not - is not present in the
+  canonical state. A state with tight/overlapping text would decide whether the auto rule should
+  union the *grown* ink boxes; it does not today.
+- The layer scores compare against reference strings that differ from the native ones by design
+  (clock format, item titles), so they bound the change but cannot certify glyph-level shadow
+  placement. The placement rests on the reference measurement in section 4.
+- `size`, `top`/`bottom` and `spacing*` are reported, not applied. The objects store `size=0` and
+  `font=null` on the label surfaces, and applying the gradient would be a colour change beyond this
+  slice.
+- The trace's per-surface lines stay `unattributed` until the `view.cpp` hunks land; the material
+  path itself is proven by the `RCO read` line, which runs every time the trace is on.
+
+### 12. Reproduction
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-text
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --capture --exe C:/dev/out/native-text/re-ps3-native.exe
+
+$env:XMB_TEXT_MATERIAL="1"   # per-surface material trace + the RCO-read comparison (does not change the frame)
+$env:XMB_TEXT_CHECK="1"      # assertions, including shadow-material and shadow-tile-pad
+$env:XMB_TEXT_SHADOW="premultiplied"  # A/B: the literal colour/alpha shadow instead of the shipped multiply
+```
