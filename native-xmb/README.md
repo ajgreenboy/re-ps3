@@ -260,7 +260,7 @@ The main category/menu catalog is currently curated from the reference. A comple
 XMBML/resource-driven catalog and localization are required before fidelity can
 be claimed.
 
-See the [full feature/presentation audit and new handoff](audit/README.md),
+See the [forward phase plan](PHASES-2026-10-27.md), the [full feature/presentation audit and new handoff](audit/README.md),
 [handoff](HANDOFF.md) and [completion criteria](ISA.md).
 
 **Previous handoff snapshot (2026-10-26, historical):** [HANDOFF-2026-10-26.md](HANDOFF-2026-10-26.md) - the tree at
