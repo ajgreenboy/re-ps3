@@ -472,6 +472,126 @@ difference is this machine's load, not the build. The phase target was "under th
 1.35-1.62 s under load and ~1.2 s quiet, this build is not inside 1 s, and the number to attack is the
 text atlas / GL init block, not the loaders.
 
+### 5.4a Where the 714 ms actually goes (measured, 2026-10-27)
+
+This section is appended here, next to the numbers it corrects, rather than to `TEXT-RASTER.md`: the
+startup budget lives in 5.4 and the text renderer's share of it is only one line of that table.
+
+The 5.4 table's "text atlas" row is a **timestamp, not a duration**. `text atlas:` is printed by
+`TextRenderer::init()` on return, so 714 ms is the process time at the end of GL init - it contains the
+QApplication, the Shell constructor, the View constructor, the first native window, the GL context and
+the shader programs. The glyph atlas is built lazily during the first frame and costs ~21 ms.
+
+Measurement: `XMB_TEXT_PROFILE=1` (timers compiled in, no timer runs when it is unset; one line per
+interesting point), one quiet-machine run with the ui3-data seed and the stored window geometry:
+
+| process time | segment | ms |
+|---|---:|---:|
+| 0.048 | Qt + Assets + Shell constructor to the View constructor's volume read (XMBML loaders 20-25 ms of it) | 48 |
+| 0.048 -> 0.497 | View constructor tail + QMainWindow setup + `restoreGeometry()` = **first native window creation** | 449 |
+| 0.497 -> 0.505 | show() -> GL context current -> `initializeGL` entry | 8 |
+| 0.505 -> 0.523 | `TextRenderer::init`: font configure 13.3, atlas program link 4.1, mask programs 0.2, VAO 0.1 | 17.7 |
+| 0.523 -> 0.750 | `initializeGL` rest: ribbon (shader translation + a 14,400-step cloth settle, `ribbon.cpp:241`) 221-230, hdr/icons/particles/coldboot 8 | 238 |
+| 0.750 -> 0.795 | first paintGL: MSAA layer FBOs, background, RCO image inventory | 45 |
+| 0.795 -> 0.950 | first `QTextLayout` shaping (`"Game"` at 42 px) - Qt application-font startup | 155 |
+| 0.950 -> 0.969 | 55 glyph tiles + composite + swap | 19 |
+
+Total 0.97-1.00 s on a quiet machine with the warm-up disabled. The 714 ms timestamp = 48 + 449 + 8 +
+17.7 + 238 (about 760 at this run's speed; the committed 714 ms is the same segment on a loaded run
+whose first frames were 1354-1617 ms, and this tree's 10-run median for that line is 537 ms).
+
+The text renderer's own parts, from the same run (55 tiles rasterised on the first frame, 175 glyph
+quads drawn, 10 draw calls):
+
+| part | ms | note |
+|---|---:|---|
+| `FontRaster::configure` (28 faces, 24 MB of TTF, head+cmap copies, sha256) | 13.3 | part of init |
+| three shader programs (link) | 4.3 | part of init |
+| FreeType rasterisation + coverage conversion (55 tiles) | 0.85 | 0.015 ms/tile |
+| halo Gaussian (`tileFor`, 2-pass, sigma 4.4 at the 2x layer) | 19.4-20.6 | 0.35-0.37 ms/tile |
+| atlas page allocation (4 MB RGBA8 zero upload) | 1.9-2.1 | once, first page |
+| `glTexSubImage2D` of the 55 tiles + 1 page | 0.31-0.35 |  0.006 ms/tile |
+| R8 union mask target (3840x2160) creation | 0.55-0.74 | once |
+| GL state / painter begin-endNativePainting / glBufferData | 1.2 | whole first frame |
+| first `QTextLayout` shaping | 155 | Qt, once per process, not glyph work |
+
+So the 714 ms is 97% not the atlas: about 450 ms is the first native window, 240 ms is ribbon/hdr/
+icon/particle GL init, 155 ms is Qt's first application-font shaping, and the glyph atlas itself
+(rasterise + halo + upload + mask) is 21 ms. "Rasterise only the glyphs the first frame needs" is
+already the behaviour (55 tiles, 175 quads); "avoid re-uploading the atlas" has nothing to avoid
+(0.35 ms of uploads); batching uploads cannot beat 0.35 ms; a disk atlas cache would have to beat the
+21 ms of rasterise+halo it replaces, and would have to be proven byte-identical - not worth the proof
+surface at this size. The one part of the 714 ms that is both large and inside the text renderer was
+the 155 ms first shaping, and it is process-global: a system face costs 0.66 ms, a first firmware face
+155 ms, a second firmware family 0.83 ms (measured by warming each from `init`).
+
+Change kept: the first firmware-family layout is warmed on a worker thread started in
+`TextRenderer::init()` before the shader programs, and `layout()` joins it before the first real
+shaping. The worker runs while `initializeGL` finishes and the first paint begins; the shaping result is
+discarded and no renderer state is touched, so the frame is unchanged. `XMB_TEXT_WARM=0` restores the
+synchronous path for the A/B.
+
+`bun work/perf-harden.ts startup --runs 5` x 2 batches per arm, same binary, same seed, alternating
+arms (`out/startup-warm0-*.json`, `out/startup-warm1-*.json`; 10 runs each):
+
+| milestone | warm=0 median (min-max) | warm=1 median (min-max) |
+|---|---:|---:|
+| XMBML Network column | 20 (18-24) | 19 (19-23) |
+| text atlas (end of init; unchanged by design) | 538 (482-607) | 537 (511-698) |
+| native renderer (end of `initializeGL`) | 766 (708-868) | 804 (747-983) |
+| **first frame** | **1063 (987-1194)** | **916 (848-1105)** |
+| Steam content scan (async) | 1205 (1100-1369) | 1040 (961-1246) |
+| Steam owned library (async) | 1554 (1382-1730) | 1414 (1321-1617) |
+
+The first frame median drops 147 ms (13.9%). The 155 ms shaping leaves the first paint but 38 ms of it
+reappears at the end of `initializeGL` (the worker competes with the ribbon settle for CPU), so the net
+is 147 ms. The arms were interleaved in time, so machine drift affects both equally.
+
+Measured and rejected (numbers from the same profiled runs): synchronous warm-up in `init()` (moves the
+155 ms, saves nothing); clearing the stored fullscreen flag (the 449 ms reappears inside show(), net 0);
+dropping `restoreGeometry()` entirely (same).
+
+Still outside this fence, largest first: the first native window creation (420-450 ms, moves between
+`restoreGeometry()` and `show()` but never goes away; clearing the stored fullscreen state so that
+show() opens a plain window does not help, measured); the ribbon's 14,400-step cloth settle in
+`initializeGL` (221-230 ms,
+`ribbon.cpp:241` - a candidate for the ribbon owner to make lazy or table-cached); the 45 ms first-paint
+layer setup. The Steam scan and owned library still land after the first frame.
+
+Frame proof (pinned clocks, `--render-clock 20`, the 5.4 capture recipe): four captures, two with
+`XMB_TEXT_WARM=1` and two with `=0`, are all SHA-256
+`C5CBA50A5B7CE84BCAE532F10A4047C96912BEC8BA36CBD493BFA74A38EA75ED`, i.e. the warm-up is
+render-neutral and the capture is deterministic. A reference build of the same tree with these four
+files' changes reverted (`out/head-src`, `out/native-headref`) produces the *same* hash, so the pixels
+below are the tree's, not this change's.
+
+Canonical gate on this build (`bun work/ab-layers.ts --capture --exe
+C:/dev/out/native-startup/re-ps3-native.exe`):
+
+| layer | PSNR | base | SSIM | base | gate |
+|---|---:|---:|---:|---:|---|
+| frame | 18.92 | 18.02 | 0.8553 | 0.8301 | PASS |
+| item label row | 12.04 | 11.94 | 0.3860 | 0.3910 | FAIL (SSIM floor 0.3870) |
+| clock text | 13.64 | 11.39 | 0.5128 | 0.4105 | PASS |
+| info bar | 17.61 | 14.78 | 0.8244 | 0.6117 | PASS |
+
+The item-label-row SSIM miss is **pre-existing at the tree this phase started from**, and the reference
+build above scores it identically (12.04 / 0.3860), as it does every other layer. The clock and info-bar
+numbers are also above the 5.4 baselines on both builds (the tree gained a clock/information-bar change
+after those baselines were saved). So the change in this phase moves no layer: 5/6 is the tree's
+current state, not a regression from the warm-up.
+
+`XMB_TEXT_CHECK=1` has one failing assertion on this build, `union-mask` ("GPU GL_MAX mask ==
+keep-larger helper on 169 px"), and the same assertion fails identically on the reference build, so it
+also predates this change. The probe reads back an empty mask while the shipped mask pass keeps
+rendering: forcing the union (`XMB_TEXT_MASK=1`), disabling it (`=0`) and the auto rule all produce the
+byte-identical canonical frame on the current build and on the 22:48 build, so the failure is in the
+self-check's GL probe state, not a visible regression in the frame. Not fixed here: the probe's
+readback path is shared with the shipped path and belongs with the change that made it fail.
+
+Reproduce: `XMB_TEXT_PROFILE=1 XMB_TEXT_WARM=0` + the 5.4 recipe prints the init split, the per-frame
+tile split and the slow-layout line; the gate and check commands are the ones above.
+
 ### 5.5 Soak
 
 `bun work/perf-harden.ts soak --minutes <n>` runs one process for n minutes of wall clock, samples the

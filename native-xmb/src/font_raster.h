@@ -4,6 +4,7 @@
 #include <QPoint>
 #include <QRawFont>
 #include <QString>
+#include <QStringList>
 #include <memory>
 
 namespace xmb {
@@ -25,6 +26,9 @@ public:
 
     bool configure(const QString& fontDirectory);
     QString version() const;
+    // The family name of every configured face, first occurrence only. The renderer uses it to warm the
+    // one-time Qt application-font startup on a worker thread (audit/VERIFICATION-HARNESS.md 5.4a).
+    QStringList families() const;
     QString sourceFor(const QRawFont& font) const;
     // PAF's private control codes (FUN_0037a774); U+2715 is the native UI's legacy cross alias.
     static QString mapSymbols(QString text);
