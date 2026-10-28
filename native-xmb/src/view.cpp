@@ -1137,6 +1137,7 @@ struct PanelBand {
     double rowCentre=505.;    // fixed rows: row 0's text centre; scrolling list: the focus row's centre
     double labelInset=16.;    // row text left = x0 + labelInset
     double groupGap=0.;       // fixed rows: distance up to a divider group's origin
+    int groupBreakRow=0;      // fixed rows: rows before this index are the upper group (a band has no MenuOption)
     double contentDim=1.;     // brightness of the page the band covers, at rest (measured)
     const BandStop* stops=nullptr;
     int stopCount=0;
@@ -1167,9 +1168,57 @@ const BandStop kOptionsBandStops[]={
 // Screensaver still reads 104 (0.408) - a measured bracket, so 0.52 is a fit inside it. The category band
 // and the background are bit-identical with and without the band (the briefcase icon reads 123.2 vs
 // 123.1 luma), so the dim belongs to the page and not to a plate over the frame (SETTINGS 13.2).
+// The Theme page's own fill profile (SETTINGS 12.3, re-measured on the matched frame): border step
+// 31 at 1324-1325, peak 55-56 at about 1400, then 44 @1500, 35 @1560, 27 @1600, 15 @1640, 6 @1680,
+// 1 @1720, 0 @1744. It is not the Screensaver band's 61-peak curve, so the two lists do not share
+// one ramp; the stops below are the Theme band's own fractions of 1324..1744.
+const BandStop kThemeBandStops[]={
+    {0.,20},{.00238,31},{.00952,26},{.02381,34},{.04762,42},{.09524,50},{.181,56},
+    {.31,53},{.41905,44},{.5619,35},{.65714,27},{.75238,15},{.84762,6},{.94286,1},{1.,0}};
 const PanelBand kChoiceBand{.firmware=true,.x0=1260.,.fadeEnd=1690.,.pitch=40.,.fixedRows=false,
     .rowCentre=505.,.labelInset=16.,.contentDim=.52,.stops=kChoiceBandStops,
     .stopCount=int(std::size(kChoiceBandStops))};
+// The Theme page's choice bands are NOT the Screensaver band. All four Theme-page lists share ONE
+// plane: theme-list, color-list, background-list and font-list give the same fill delta over the
+// parent page at y=100 (25 at x1340, 35 at 1380-1420, 33 at 1460, 30 at 1500, 27 at 1540, 38 at
+// 1620, 17 at 1700, 6 at 1740, 1-3 to the right edge), so the plane is a page-class band and only
+// the ROW ORIGIN differs per list (SETTINGS 12.4e). The plane's own step is at x 1324-1325 (77 -> 85
+// -> 97 luma over three columns), its row text at x 1340-1341 (border + 17) and it is 64 px right of
+// the Display page's band - 9.1/U2's 1260 is page-specific, which 12.3(a) already records.
+// Theme's rows: ink tops 261 (Install), 499 (Original, focused), 541 (Classic) and 578 (Air Paint).
+// The utility row sits 239 px above the first theme row - the item menu's group-gap language (E1) -
+// and the rows are anchored (they do not travel with focus). SETTINGS 12.4(e) forbids hardcoding
+// `505-(n-1)*20`; this anchors the measured origin and keeps the measured 40 px pitch.
+const PanelBand kThemeBand{.firmware=true,.x0=1324.,.fadeEnd=1744.,.pitch=40.,.fixedRows=true,
+    .rowCentre=505.,.labelInset=17.,.groupGap=239.,.groupBreakRow=1,.contentDim=.52,
+    .stops=kThemeBandStops,.stopCount=int(std::size(kThemeBandStops))};
+// Colour and Font anchor their first row on the same 505 focus row (Font's ink tops 497/539/579,
+// Colour's value line 494), so they are the Theme band without a utility group.
+const PanelBand kThemeLowerListBand{.firmware=true,.x0=1324.,.fadeEnd=1744.,.pitch=40.,.fixedRows=true,
+    .rowCentre=505.,.labelInset=17.,.contentDim=.52,.stops=kThemeBandStops,
+    .stopCount=int(std::size(kThemeBandStops))};
+// Background is the one Theme-page list whose block sits lower: its matched frame reads `Original`
+// 539, `Classic` 581 and `Wallpaper` 621 as ink tops, against this build's 494/536/576, i.e. +45 px
+// on the same 40 px pitch (SETTINGS 12.4(e)'s 43 px difference, re-measured here).
+const PanelBand kBackgroundBand{.firmware=true,.x0=1324.,.fadeEnd=1744.,.pitch=40.,.fixedRows=true,
+    .rowCentre=548.,.labelInset=17.,.contentDim=.52,.stops=kThemeBandStops,
+    .stopCount=int(std::size(kThemeBandStops))};
+// The settings lists whose band geometry a matched frame measures, by Preferences key (SETTINGS
+// 11.3/12.4). Null means "not measured here": that list keeps the band or panel it had, so no other
+// page or surface moves.
+const PanelBand* pageBandForSetting(const QString& setting) {
+    if(setting==QLatin1String("appearance/theme"))return &kThemeBand;
+    if(setting==QLatin1String("appearance/colour")||setting==QLatin1String("appearance/font"))
+        return &kThemeLowerListBand;
+    if(setting==QLatin1String("appearance/background"))return &kBackgroundBand;
+    return nullptr;
+}
+// A firmware-labelled list falls back to kChoiceBand (the Display page's measured band); a list this
+// build labels itself keeps its own panel unless a frame measures a Theme-page band for it.
+const PanelBand* bandForSetting(const QString& setting) {
+    const PanelBand* page=pageBandForSetting(setting);
+    return page?page:&kChoiceBand;
+}
 // The item options menu: ITEM-MENU-INFO-FIRMWARE E1 measures baselines 560/598/636 at a 38 px pitch and
 // row text at 1334. E1's band numbers were approximate ("edge ~1330, fading to nothing by ~1690"); the
 // frame's own columns are exact - the first lit column is 1320 (a 2 px step, 15 at 1320 and 34 at 1322),
@@ -1323,6 +1372,9 @@ void View::drawScene(QPainter& p) {
         // measured numbers, so no menu-specific y offset enters the view.
         int groupBreak=0;
         if(rows)for(int i=0;i<int(rows->size());++i)if((*rows)[i].dividerBefore){groupBreak=i;break;}
+        // A settings band carries its utility row as a measured index (the Theme list's `Install`),
+        // because a choice list has no MenuOption and therefore no dividerBefore flag.
+        if(groupBreak==0 && firmwareBand)groupBreak=band->groupBreakRow;
         for(int i=0;i<int(rowCount);++i) {
             const double distance=i-position;
             // Firmware rows are anchored on the measured baselines and do not travel with focus; the
@@ -1453,7 +1505,7 @@ void View::drawScene(QPainter& p) {
             const double focus=std::max(0.,1.-std::abs(distance));
             // No dim behind a message: both measured reference frames keep the XMB at full brightness
             // (audit 4.1 "frame dim behind a message"), so the 0.18 and 135-alpha washes are gone.
-            const double opacity=open?1.:(1.-childAmount)+(distance>0?.1*childAmount:0.);
+            const double opacity=open?1.:(1.-childAmount)+(distance>0?.067*childAmount:0.);
             p.save();p.setOpacity(opacity);
             if(const auto themed=shell_.themeIcon(cat.themeIcon);!themed.isNull()) {
                 // A PS3 theme's icon keeps its own colours and takes the quad of the firmware's glass icon.
@@ -1463,7 +1515,7 @@ void View::drawScene(QPainter& p) {
             else if(cat.container=="qgl/icontex" && icons_.ready())
                 iconQueue_.push_back({cat.texture,{x,290-10*focus},117.13+50.2*focus,.698+.302*focus,opacity});
             else {const double size=76+focus*16;p.setOpacity(opacity*(.67+.33*focus));drawCategory(p,cat,{x-size/2,290-size/2,size,size});}
-            if(i==shell_.category()){p.setOpacity((1.-childAmount));text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
+            if(i==shell_.category()){p.setOpacity((1.-childAmount));text({x-140,330,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
         }
         const auto isChoiceColumn=[](const Column& column) {
@@ -1539,7 +1591,8 @@ void View::drawScene(QPainter& p) {
                                     bandColumn->rcoPage.isEmpty()?QStringLiteral("no page object"):bandColumn->rcoPage)
                                 .arg(from).arg(bandColumn->scrollable?QStringLiteral("scrolls"):QStringLiteral("fits the band"));
                         }
-                        drawOptionsPanel(titles,drawn,columnAlpha,ahead,QString(),nullptr,&kChoiceBand,&bandColumn->writable);
+                        drawOptionsPanel(titles,drawn,columnAlpha,ahead,QString(),nullptr,
+                                         bandForSetting(setting),&bandColumn->writable);
                     } else {
                         if(!choiceBandsLogged_.contains(setting)) {
                             choiceBandsLogged_.insert(setting);
@@ -1552,7 +1605,8 @@ void View::drawScene(QPainter& p) {
                             qInfo().noquote()<<QStringLiteral("view: settings choice panel %1 keeps this build's options panel: %2")
                                 .arg(setting,why);
                         }
-                        drawOptionsPanel(titles,column.position,columnAlpha,ahead,QString());
+                        drawOptionsPanel(titles,column.position,columnAlpha,ahead,QString(),nullptr,
+                                         pageBandForSetting(setting));
                     }
                 }
                 continue;
@@ -1570,11 +1624,12 @@ void View::drawScene(QPainter& p) {
                 const double focus=std::max(0.,1.-std::abs(distance));
                 // A column behind an open page (RPCS3 capture): its unfocused rows move back to camera distance 2857.2,
                 // so they shrink toward the screen centre (scale 2700/2857.2) and the gap below focus closes by 15;
-                // the focused row stays at 2700 and steps 262 px left, the others 110 px.
+                // the focused row stays at 2700 and steps 262 px left, the others 109.46 px (GEOMETRY-ROOT 8: the
+                // measured parent-unfocused offset; the 262 stays the focused row's own step).
                 const double depth=behind*(1.-focus);
                 const double y=540+(505+row-540-15*depth*std::clamp(distance,0.,1.))*(1.-.055*depth);
                 if(y<-100 || y>1050)continue;
-                const double iconX=kColumnX-behind*(110+152*focus)+ahead*250+offset;
+                const double iconX=kColumnX-behind*(109.46+152*focus)+ahead*250+offset;
                 // Reference (RPCS3 4.x video): square icons ~60 px, ~105 px when focused; utility folders are icons too.
                 // Only media thumbnails (album art) keep a wide tile.
                 // Setting rows carry the small round settings bullet: 18 px, 39 px focused (reference 95 s).
@@ -1645,8 +1700,9 @@ void View::drawScene(QPainter& p) {
                 // line sits where the list row would be (measured x 630, centre y 504), so the row keeps its
                 // icon and focus but not its title. No other row is affected.
                 const bool inlineStandIn=inlineMessage && active && level==shell_.depth() && i==column.selection;
-                // One label column per level, as on the PS3 (reference: icon centre +99 at the top level, +57 inside a page).
-                const double labelX=kColumnX+(level==0?(tile?173:99):57)+ahead*250+offset;
+                // One label column per level, as on the PS3 (GEOMETRY-ROOT 8: icon centre +113 at the top
+                // level - the measured 678 px origin, not the 664 the +99 gave - and +57 inside a page).
+                const double labelX=kColumnX+(level==0?(tile?173:113):57)+ahead*250+offset;
                 const double alpha=(.72+.28*focus)*(entry.disabled?.55:1.);
                 // A row's own value wins when it sets one (the sign-in page's fields: server URL, user name and
                 // the password as dots). Every other row leaves Entry::fieldValue empty, so this falls through to
@@ -1734,10 +1790,13 @@ void View::drawScene(QPainter& p) {
         // A firmware band owns the screen: the captured frames have neither the plate nor the analog clock
         // (SETTINGS 11.6 measured luma 0 at x1750..1918, y100 on screensaver-list-rest.png; options-open-01
         // shows the same), and the band does not reach the plate's area, so the absence is a state and not
-        // an occlusion. A native list drawn by the earlier panel keeps the bar, which is what it shipped.
+        // an occlusion. The Theme page's four bands measure the same absence (their clock-box maximum is 99
+        // luma against this build's 255), so a list with a measured Theme-page band suppresses the bar even
+        // when its labels are this build's own. A native list drawn by the earlier panel keeps the bar.
         const bool choiceBandUp=columns_.size()>=2 && isChoiceColumn(columns_.back())
             && depthPosition_>double(columns_.size()-2)+0.001
             && [&] {
+                if(pageBandForSetting(columns_.back().entries.value(0).setting))return true;
                 const ChoiceBand* choice=choiceBandFor(columns_.back().entries.value(0).setting);
                 return choice && !choice->labels.isEmpty()
                     && (choice->source==QLatin1String("rco")||choice->source==QLatin1String("capture"));
