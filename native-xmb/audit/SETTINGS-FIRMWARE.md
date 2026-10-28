@@ -2322,3 +2322,478 @@ Not opened here: the U5/U3 commit cue audio, the timer lists behind System Auto-
 and the `software_update_plugin` RCO - all unchanged from 12.8.
 
 No source file was edited for this section; no RCO, threshold or reference was touched.
+
+---
+
+## 16. Phase 11.4 applied: the Theme page's run-time lists (Color, Background, Font), 2026-10-28
+
+Status: the choice model for the four Theme rows is implemented in `src/settings_menu.{h,cpp}` only. The
+draw half (colour swatches, the 12-row window, the submenu chevron, the disabled-item note) is written out
+as hunks in 16.6 and **not applied** - `src/view.cpp` and `src/view.h` are untouched in this tree, because
+this pass's write fence is the model plus this section. Pixels of every existing surface are unchanged by
+construction and by the gate (16.7): `PASS: 6/6 layers within budget` with the text-presence line, and the
+12 named states pass 12/12. The Color list is the one surface whose *pixels* need the hunk; the hunk's
+build is captured separately under `out/native-theme-hunk/` for the crop scores in 16.7, never as the
+deliverable.
+
+### 16.1 What the model now says
+
+| file | change |
+|---|---|
+| `src/settings_menu.h` | `ChoiceItem` gains `swatch`, `colour`, `submenu`, `note` (a Theme run-time item's own form); `ChoiceList` gains `windowRows` (the measured number of rows a list shows at once) |
+| `src/settings_menu.cpp` | one spec table per Theme list (`themeColourSpec` 13, `themeBackgroundSpec` 4, `themeFontSpec` 3) drives both the choice model and `choices()`; `themeRunTimeChoices()` builds the lists and logs each disabled item once; `buildChoiceList` returns them for Color/Background/Font with `source=capture` and the empty RCO page as provenance; the JSON dump carries the new fields; `choices()` for the three keys is the same table, so the band and the commit path cannot disagree |
+
+The four keys and their stored value ranges are unchanged (`Preferences::validBare`): `appearance/colour`
+0..5, `appearance/background` 0..2, `appearance/font` 0..2. A disabled item is present in the column with a
+sentinel value (`1000 + authored index`) that no bounded key accepts, so it can take the focus and a Cross
+on it writes nothing (16.5). `appearance/theme` and its captured four-item list are untouched.
+
+Catalogue totals after the change: **63 lists, 442 items** (was 434): Color 6 -> 13 (+7), Background
+3 -> 4 (+1), Font 3 -> 3. The Theme rows now read: Theme 4 items (1 writable), Color 13 (6 writable),
+Background 4 (3 writable), Font 3 (3 writable).
+
+### 16.2 Color: the list is 13 rows, not 12 chips - a dated correction to 12.4b and 15.2
+
+12.4b reads "12: a white `Original` chip plus 11 colour chips", and 15.2 calls the row at ink 494-523 "the
+label line". Both are the same misreading of the same frame, and the frame's own last step disproves it.
+
+Measured on `out/rpcs3-ref2-2026-10-28/lists/color-list-rest.png` and `-down1..14.png`:
+
+| quantity | value |
+|---|---|
+| row 0 | **text**, ink x 1341..~1430, y 494-523: the word `Original` on the same 40 px grid as the chips (row 0 would sit at 491, the measured text ink at 494) |
+| rows 1..12 | **chips**, 27x28 px at x 1341-1367, ink tops 531 + 40n; 11 visible at rest (January..November), the 12th revealed by the last step |
+| the last step (`-down12/14`) | row 0 is **no longer text**: it is a 27 px flat chip (184,191,202) at 491..519 with the band fill to its right (x 1370 reads (89,59,31), not glyph ink); the visible rows are January..December, 12 chips, and the down-chevron at 969-977 is gone |
+| scroll | exactly one row: rest shows rows 0..11 (Original + Jan..Nov), the end shows rows 1..12 (Jan..Dec) |
+| chip pitch | 40 px exactly over the eleven measured tops (531..931) |
+| chip labels | none anywhere; no text column in the list |
+
+So the Color list has **13 items**: row 0 is the `Original` item (its own label, the only text in the
+list), rows 1..12 are twelve unlabelled colour chips. The "label line" 15.2 saw is the Original row, and
+the current value happened to be Original in both captured sessions. There is no separate heading (15.2:
+"No heading is drawn in any band"). A view that draws 12 chips plus a label line loses the Original item;
+a view that draws 13 rows reproduces the frame, including the last step.
+
+**What the twelve chips are.** The measured chip colours equal `qgl/lines`'
+`textures/month_bg/rgb/01..12.dds` day palettes, one-to-one and in month order. The comparison was made
+with the tree's own `--month-sheet` on the build (`out/native-.../re-ps3-native.exe --month-sheet`), which
+prints the twelve day palettes: 1 grey-white, 2 yellow, 3 lime, 4 pink, 5 green, 6 lavender, 7 teal,
+8 blue, 9 magenta, 10 amber, 11 brown, 12 red. The frames' chips are exactly that sequence (chip n is
+month n), and these are the textures `View::renderBackground` uses for `appearance/colour` = Original
+(the month follows the date). The chips are therefore the console's twelve fixed colour palettes, not
+eleven arbitrary colours plus Original.
+
+| authored row | month | measured swatch | this build | writable? |
+|---:|---|---|---|---|
+| 0 | - | text `Original` | `appearance/colour` 0 (month follows) | **yes** |
+| 1 | January | `#b8bfca` (184,191,202) | 5 Silver (`fixedMonth[5]` = 1) | **yes** |
+| 2 | February | `#ccb81c` (204,184,28) | - | **no**: no tint for February |
+| 3 | March | `#73a928` (115,169,40) | - | **no**: no tint for March |
+| 4 | April | `#de6e81` (222,110,129) | - | **no**: no tint for April |
+| 5 | May | `#1d7b1d` (29,123,29) | 4 Green (`fixedMonth[4]` = 5) | **yes** |
+| 6 | June | `#926fbd` (146,111,189) | 2 Purple (`fixedMonth[2]` = 6) | **yes** |
+| 7 | July | `#24b8ab` (36,184,171) | - | **no**: no tint for July |
+| 8 | August | `#0837a6` (8,55,166) | 1 Blue (`fixedMonth[1]` = 8) | **yes** |
+| 9 | September | `#8d359b` (141,53,155) | - | **no**: no tint for September |
+| 10 | October | `#c39011` (195,144,17) | - | **no**: no tint for October |
+| 11 | November | `#644317` (100,67,23) | - | **no**: no tint for November |
+| 12 | December | `#b83524` (184,53,36) | 3 Red (`fixedMonth[3]` = 12) | **yes** |
+
+The mapping is not a hue judgement: `View::renderBackground`'s `colours[]` and `fixedMonth[]`
+(`src/view.cpp:376,409`) already pin August for Blue, June for Purple, December for Red, May for Green and
+January for Silver. The six tints the app can apply are Original + those five; the other seven months have
+no value in the table, so they are **drawn and disabled with their reason**, never mapped to the nearest
+tint. Each disabled item logs once, e.g.:
+
+```
+settings: appearance/colour item 3 (unlabelled chip) is disabled: this build has no theme tint for this
+month's palette; its six tints are Original, Blue=August, Purple=June, Red=December, Green=May, Silver=January
+```
+
+(one line per disabled row, 2..4, 7, 9..11; the label is `unlabelled chip` because the console gives it
+none). The model's `note` carries the same sentence, so the draw half can print it while the row is
+focused (16.6).
+
+**Live preview on focus is not implemented, and is stated as open.** The captured list recolours the whole
+screen as the focus moves (`-down1..14`), before any commit. That is a render-path behaviour (apply the
+focused chip's value, revert on Back) in `view.cpp`/`shell.cpp`, outside this pass's fence and outside the
+data half; the model supplies the value the preview would use. The app still recolours on commit.
+
+**One row still carries a name in the value column.** The console gives the chips no text, so a chip's
+value has no firmware name. This build's value column (and the band's label) keeps the names it already
+used for the six values: Original, Silver (January), Green (May), Purple (June), Blue (August), Red
+(December). Only `Original` was measured in the value position; the other five names are this build's and
+the audit says so rather than inventing firmware strings.
+
+### 16.3 Background: four rows, the `Brightness` submenu 160 px above the block
+
+`lists/background-list-rest.png` measures four rows: `Brightness` at ink top 381 with a right-pointing
+chevron at x 1786-1796, y 387-396 (a filled triangle, measured column by column), then `Original` (current,
+focused), `Classic`, `Wallpaper` at 541/581/621. The gap is exactly four 40 px pitches (160 px), the same
+"utility row above the value block" shape as the Theme list's `Install` (240 px = 6 pitches).
+
+| row | value | this build |
+|---|---|---|
+| `Brightness` (submenu) | sentinel 1000 | **disabled**: the firmware opens a second level here; this build has no background-brightness control (`Preferences` holds no such key) and the second level's contents were not captured (12.4c/12.8). The row is drawn where the firmware puts it, dimmed, with the chevron; Cross is refused (16.5) |
+| `Original` | 0 | applied |
+| `Classic` | 1 | applied |
+| `Wallpaper` | 2 | applied (`Shell::activate` still asks for a file when no wallpaper is set) |
+
+The model logs the refusal once:
+`settings: appearance/background item 0 (Brightness) is disabled: the firmware opens a second level here; ...`.
+
+The deliverable build draws all four rows consecutively (its `kBackgroundBand` has no group break), so the
+Brightness row sits on the Original row's grid position; 16.6's hunk adds `groupGap=160`/`groupBreakRow=1`
+and the captured frame puts it at 381. The content is right in the deliverable; the row's *offset* needs
+the hunk.
+
+The deliverable also has no focused row while `Brightness` is focused: the committed `choiceBandFocus`
+rule 1 is gated on `writable`, so the disabled row resolves to -1 and the band draws no glow (captured:
+`out/native-theme-lists/cap-focus/background-brightness.png`, sidecar `selection 0`; `Brightness` stays
+dimmed at level 115 and no row glows). Hunk 3 removes that gate. Until the hunk lands, the disabled row is
+visibly disabled but not visibly focused - a state limit, stated rather than hidden.
+
+### 16.4 Font: Original / Rounded / Pop, all three applied
+
+`lists/font-list-rest.png`: `Original` (current, focused), `Rounded`, `Pop` at ink tops 498/538/578, 40 px
+pitch. The labels differ from what the model had (the registered family names). All three are **applied**:
+`appearance/font` 0..2 selects `Assets`' registered family in order, and the three families are
+`SCE-PS3 Rodin LATIN` (0), `SCE-PS3 Seurat LATIN` (1), `VAGRundschriftDLig` (2). The row order is the
+firmware's, so the values follow the labels: `Rounded` writes **2** (VAG Rounded) and `Pop` writes **1**
+(Seurat).
+
+What is applied is the family selection, not a proven name match: which of Seurat/VAG Rounded is the
+firmware's `rounded` and which is `pop` has no local trace (THEMES 6, the same F-grade limit). The evidence
+for the pair chosen is the family name (`VAG Rounded` -> Rounded, Seurat -> Pop); a console A/B with a font
+1 or 2 selected is what would close it. `Official`: all three rows are honoured (each selects a real
+family), the *mapping* is F.
+
+### 16.5 Values, refusals, and the column model
+
+`Shell::openChoices` still builds its column from `choices()`, and `choices()` for the three keys is now
+the same spec table the model uses. So the column has 13/4/3 entries, the current value sets the selection,
+and every item (including a disabled one) can be focused; `choiceBandFocus` (16.6) pairs the band's focus
+with the model's selection by value. A disabled entry's option is the sentinel (`1000 + index`), which
+`Preferences::validBare` refuses for its key, so a Cross plays the error cue, writes nothing and leaves the
+page up.
+
+Two scripted runs prove both halves on the deliverable build (`out/native-theme-lists/write-test/`):
+
+| case | script | result |
+|---|---|---|
+| applied: Color > January (value 5) > Cross | `... DOWN(Theme page to Color), ENTER, DOWN, ENTER` | band closes, page at depth 1, `preferences.json` -> `"appearance/colour": 5` |
+| disabled: Color > February (sentinel 1002) > Cross | `... ENTER, DOWN, DOWN, ENTER` | page stays at depth 2, selection 2 (`appearance/colour/2`), `preferences.json` holds no `appearance/colour` |
+
+The January chip committing 5 is the mapping at work: 5 is Silver, which is the January palette in
+`fixedMonth[]`. The disabled chip commits nothing, and that is the "no fabricated capability" requirement
+enforced by the store rather than by a comment.
+
+### 16.6 The view hunks (exact, not applied)
+
+The data half alone draws the Color list as `Original` plus empty rows (no chips): that is why the hunk
+below exists. All blocks are against the tree as committed (`git status` clean at the start of this pass);
+the built proof is `out/native-theme-hunk-src/` (a copy of the tree with only these blocks applied) and
+`out/native-theme-hunk/`. The same blocks are also written as a unified diff
+(`out/native-theme-lists/view-theme-lists.patch`, 194 lines, generated from the proof tree and **not**
+applied to the repository).
+
+**Hunk 1 - `src/view.h`, the `ChoiceBand` struct (replace the struct):**
+
+```cpp
+    struct ChoiceBand {
+        QString setting,pageId,rowId,rcoPage,source,note;
+        QStringList labels;
+        QVector<QVariant> values;
+        QVector<bool> writable;   // false: a firmware item this build cannot commit yet
+        bool scrollable=false;
+        // Phase 11.4: a Theme run-time list. `swatch` marks a colour chip (drawn from `colours`, no label),
+        // `submenu` the firmware's right-hand chevron row (`Brightness`), `notes` the per-item reason a
+        // disabled item carries, and `windowRows` the number of rows the captured list shows at once (the
+        // Color list's 12; 0 keeps every other band's own rule). The note line is this build's own.
+        QVector<bool> swatch,submenu;
+        QVector<quint32> colours;
+        QStringList notes;
+        int windowRows=0;
+    };
+```
+
+**Hunk 2 - `src/view.cpp`, `View::choiceBandFor` (replace the copy loop):**
+
+```cpp
+            for(const auto& item:list.items) {
+                band.labels<<item.label;band.values<<item.value;band.writable<<item.writes;
+                band.swatch<<item.swatch;band.colours<<item.colour;
+                band.submenu<<item.submenu;band.notes<<item.note;
+            }
+            band.windowRows=list.windowRows;
+```
+
+**Hunk 3 - `src/view.cpp`, `View::choiceBandFocus` rule 1 (replace the gated loop):**
+
+```cpp
+    // (1) The model's selected item, by the value it commits. This is what keeps the focused label and
+    // the committed value paired when the RCO's authored order differs from choices()'s (Date Format and
+    // Time Format: SETTINGS 11.3/11.6), and it is also the resting focus, because openChoices() starts
+    // the page's selection on the current value. Phase 11.4 drops the writable gate: a disabled Theme chip
+    // is a real row the cursor can reach (its value is the model's own sentinel), and the band must focus
+    // it so its reason can be read - `writable` is still what dims it.
+    for(int i=0;i<count;++i)
+        if(choiceValueMatches(model[picked].option,band.values.value(i)))return i;
+```
+
+**Hunk 4 - `src/view.cpp`, `drawOptionsPanel` signature (replace the parameter list):**
+
+```cpp
+    const auto drawOptionsPanel=[&](const QStringList& items,double position,double alpha,double ahead,const QString& heading,
+                                    const QVector<MenuOption>* rows=nullptr,const PanelBand* band=nullptr,
+                                    const QVector<bool>* writable=nullptr,const QVector<bool>* swatches=nullptr,
+                                    const QVector<quint32>* chipColours=nullptr,const QVector<bool>* submenus=nullptr,
+                                    const QStringList* notes=nullptr,int windowRows=0) {
+```
+
+**Hunk 5 - `src/view.cpp`, the window (insert after `const double first=...`):**
+
+```cpp
+        // Phase 11.4: a captured list may show fewer rows than it holds (the Color list: 12 of 13). The
+        // rows keep the measured grid and only the window moves, one row at a time, when the focus leaves
+        // it - the captured list's last step scrolls by exactly one row (SETTINGS 16.2). 0 keeps every
+        // other band's rule untouched.
+        const int windowStart=windowRows>0?std::clamp(int(std::floor(position+.5))-(windowRows-1),0,
+            std::max(0,int(rowCount)-windowRows)):0;
+        const bool chipList=swatches && !swatches->isEmpty();
+```
+
+**Hunk 6 - `src/view.cpp`, the row loop head (replace `for(...) {` through the `y` lines):**
+
+```cpp
+        for(int i=0;i<int(rowCount);++i) {
+            if(windowRows>0 && (i<windowStart || i>=windowStart+windowRows))continue;
+            const double distance=i-position;
+            // Firmware rows are anchored on the measured baselines and do not travel with focus; the
+            // settings list keeps its 40 px pitch and its centred-with-focus motion. A windowed list is a
+            // fixed grid whose window moves, so its rows are placed from the window start, not from focus.
+            const bool aboveBreak=firmwareBand&&band->fixedRows&&groupBreak>0&&i<groupBreak;
+            const double y=windowRows>0
+                ?focusRow+double(i-windowStart)*pitch
+                :(firmwareBand&&band->fixedRows)
+                    ?focusRow+double(aboveBreak?i:i-groupBreak)*pitch-(aboveBreak?band->groupGap:0.)
+                    :focusRow+distance*pitch;
+            if(y<-40 || y>1120)continue;
+```
+
+**Hunk 7 - `src/view.cpp`, the swatch and the submenu chevron (replace the `const int level=...`/`text(...)`
+pair, and the chevron follows it):**
+
+```cpp
+            const int level=!enabled?115:int(255*(.78+.22*focus));
+            const bool chip=chipList && swatches->value(i,false);
+            if(chip) {
+                // The console's colour item is a flat swatch, no label anywhere in the list (SETTINGS
+                // 12.4b): 27x28 px at the row's text column, the measured fill, and the 1 px outline the
+                // captured focused chip carries. A disabled chip is the same swatch at 40 % opacity, and
+                // the model's note for it is printed under the list.
+                const QRectF swatchRect(labelX,y-14.,27.,28.);
+                p.save();if(!enabled)p.setOpacity(p.opacity()*.40);
+                p.setPen(Qt::NoPen);p.setBrush(QColor::fromRgb(chipColours->value(i,0)));
+                p.drawRoundedRect(swatchRect,1.5,1.5);
+                p.restore();
+                if(focus>.5) {
+                    // The focused chip takes the captured 1 px outline whether or not it can be committed:
+                    // the dimmed fill already says disabled, and the outline has to say which row is focused.
+                    p.save();p.setBrush(Qt::NoBrush);
+                    p.setPen(QPen(QColor(255,255,255,enabled?215:150),1.));
+                    p.drawRoundedRect(swatchRect.adjusted(-1.,-1.,1.,1.),2.,2.);p.restore();
+                }
+            } else {
+                text(rect,title,23,QColor(255,255,255,level));
+            }
+            if(firmwareBand && submenus && submenus->value(i,false)) {
+                // The firmware's submenu row carries a right-pointing chevron: an 11x10 px triangle,
+                // measured on the Background list's `Brightness` row at x 1786-1796, y 387-396.
+                p.save();p.setBrush(QColor(255,255,255,enabled?225:115));p.setPen(Qt::NoPen);
+                QPolygonF chevron;chevron<<QPointF(1786.,y-5.)<<QPointF(1786.,y+5.)<<QPointF(1796.,y);
+                p.drawPolygon(chevron);p.restore();
+            }
+```
+
+**Hunk 8 - `src/view.cpp`, the disabled-item note (insert before the lambda's closing `p.restore();`):**
+
+```cpp
+        // A disabled choice item gives its reason under the list, in the same voice as the player panel's
+        // row note. It is this build's line, not the console's: the firmware has no disabled chip to label.
+        if(notes && !notes->isEmpty()) {
+            const int focused=int(std::floor(position+.5));
+            const QString note=notes->value(focused);
+            if(!note.isEmpty()) {
+                const double listBottom=windowRows>0?focusRow+double(windowRows-1)*pitch+28.
+                                                    :focusRow+double(rowCount-1)*pitch+28.;
+                text({labelX,std::min(1004.,listBottom+8.),1920.-labelX-24.,96.},note,15,
+                     QColor(225,225,225,235),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
+            }
+        }
+        p.restore();
+```
+
+**Hunk 9 - `src/view.cpp`, the choice-band call site (replace the call):**
+
+```cpp
+                        drawOptionsPanel(titles,drawn,columnAlpha,ahead,QString(),nullptr,
+                                         bandForSetting(setting),&bandColumn->writable,
+                                         &bandColumn->swatch,&bandColumn->colours,&bandColumn->submenu,
+                                         &bandColumn->notes,bandColumn->windowRows);
+```
+
+**Hunk 10 - `src/view.cpp`, `kBackgroundBand` (replace the initialiser):**
+
+```cpp
+const PanelBand kBackgroundBand{.firmware=true,.x0=1324.,.fadeEnd=1744.,.pitch=40.,.fixedRows=true,
+    .rowCentre=545.,.labelInset=17.,.groupGap=160.,.groupBreakRow=1,.contentDim=.40,.stops=kThemeBandStops,
+    .stopCount=int(std::size(kThemeBandStops))};
+```
+
+Hunk 10 is the measured 160 px group gap of 16.3; hunks 1-9 are the swatch/window/chevron/note set. Nothing
+in the hunk touches the existing band geometry: the Color list uses `kThemeLowerListBand` (x0 1324,
+`rowCentre` 505) unchanged, the Font list the same, and Background keeps its 545 with the new group gap.
+
+### 16.7 Verification
+
+**Build (deliverable).** `& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-theme-lists`
+-> clean at `/W4 /permissive- /utf-8`; the only warnings in the log are the three pre-existing ones in
+`view.cpp` (349/489/624); no warning from `settings_menu.cpp` or `settings_menu.h`. Binary
+`C:\dev\out\native-theme-lists\re-ps3-native.exe`, 3,756,544 bytes, 2026-10-28 07:16.
+
+**Dump** (`XMB_DUMP_ENTRIES=out/native-theme-lists/cap/entries.json`, one scripted run opening Theme
+Settings): `entries.json.settings-theme.json` -> 4 choice lists:
+
+```
+theme       4 items  capture  window 0  currentRow 1  (Install/Original/Classic/Air Paint, 1 writable)
+color      13 items  capture  window 12 currentRow 0  scrolls  (Original + 12 chips, 6 writable)
+background  4 items  capture  window 0  currentRow 1  (Brightness + Original/Classic/Wallpaper, 3 writable)
+font        3 items  capture  window 0  currentRow 0  (Original/Rounded/Pop, 3 writable)
+```
+
+Every item's JSON now carries `swatch`, `colour` (`#rrggbb`), `submenu`, `note`; the lists carry
+`windowRows`. The band log lines:
+
+```
+view: settings choice band appearance/colour -> 13 items from capture (page_theme_config_color), current row 0, scrolls
+view: settings choice band appearance/background -> 4 items from capture (page_theme_config_background), current row 1, fits the band
+view: settings choice band appearance/font -> 3 items from capture (page_theme_config_font), current row 0, fits the band
+```
+
+**Captures** (pinned: `--render-clock 20 --background-clock 2026-10-27T21:43:00 --ui-clock
+2026-10-27T21:43:00 --focus-time 2000`, 1920x1080): `out/native-theme-lists/cap/` has `theme-page`,
+`theme-list`, `color-list`, `background-list`, `font-list`; `out/native-theme-hunk/cap2/` has the same four
+lists plus `color-jan` (January focused) and `color-feb-disabled` (February focused, its note line drawn).
+The `cap/` and `cap-focus/` sets were made on the 07:00 build of this pass; the delivered 07:16 binary
+differs from it only in comments (no functional edit). The gate (below) was run on the final binary.
+`cap-focus/background-brightness.png` is the disabled row selected (sidecar `selection 0`). Both themes'
+list captions match the frame's contents: the deliverable's Color band draws `Original` and nothing else
+(the chips are the hunk), the Background band draws all four labels with `Brightness` visibly dimmed (the
+existing `writable` dim at level 115) at the value block's own grid position and with no focus row while it
+is selected (16.3).
+
+**Crop scores** (`bun work/ab-compare.ts`, reference `out/rpcs3-ref2-2026-10-28/lists/*.png`):
+
+| crop | deliverable (no hunk) | hunk build | delta |
+|---|---|---|---|
+| Color band `1300,0,460,1080` | 19.16 dB / 0.7358 | **19.67 / 0.7430** | +0.51 / +0.007 |
+| Color chip column `1330,460,120,540` | 15.66 / 0.6958 | **17.71 / 0.7637** | +2.05 / +0.068 |
+| Color frame `0,0,1920,1080` | - | 17.55 / 0.4658 | - |
+| Background band `1300,0,470,1080` | - | 19.34 / 0.7463 | - |
+| Background rows `1330,340,520,340` | - | 15.69 / 0.5450 | - |
+| Font band `1300,0,470,1080` | - | 20.39 / 0.7756 | - |
+| Font rows `1330,460,240,150` | - | 13.98 / 0.5757 | - |
+| Theme band `1300,0,470,1080` | - | 19.43 / 0.7427 | - |
+
+The text-row crops are low because the glyphs are this build's raster against the console's; the band
+crops sit at the same level as 13.5's measured settings band (19.08 / 0.7538 for the Display page).
+The chip column is the number this pass moves: +2.05 dB from adding the swatches. The whole-frame score is
+dominated by the app's own background, not the list.
+
+**Per-chip, hunk build against the frame** (27x28 px interior, mean absolute channel difference):
+
+| chip | frame | native | mean abs | reading |
+|---|---|---:|---:|---|
+| January | 184,191,202 | 184,191,202 | **0.0** | applied (Silver 5) |
+| February | 204,184,28 | 126,113,44 | 55.1 | disabled, 40 % over the band |
+| March | 115,169,40 | 91,108,49 | 31.4 | disabled |
+| April | 222,110,129 | 135,85,85 | 52.4 | disabled |
+| May | 29,123,29 | 29,123,29 | **0.0** | applied (Green 4) |
+| June | 146,111,189 | 146,111,189 | **0.0** | applied (Purple 2) |
+| July | 36,184,171 | 65,117,101 | 55.3 | disabled |
+| August | 8,55,166 | 8,55,166 | **0.0** | applied (Blue 1) |
+| September | 141,53,155 | 110,66,97 | 34.2 | disabled |
+| October | 195,144,17 | 134,105,42 | 41.8 | disabled |
+| November | 100,67,23 | 98,75,45 | 10.2 | disabled |
+| December | 184,53,36 | (not drawn at rest: row 12 of 13) | - | applied (Red 3), revealed by the last step |
+
+So every chip the build can apply is pixel-identical to the console's; the seven it cannot apply are the
+same swatch at the disabled opacity, which is the visible half of the same fact the log records.
+
+**Gate.** `bun work\ab-layers.ts --capture --exe C:\dev\out\native-theme-lists\re-ps3-native.exe` ->
+
+```
+  text presence: 1677 bright pixels in the clock crop (minimum 900) PASS
+frame              18.48 dB / 0.8327   PASS
+top background     20.25 / 0.9363      PASS
+category icon row  21.20 / 0.9029      PASS
+item label row     11.92 / 0.3891      PASS
+clock text         11.39 / 0.4500      PASS
+info bar           14.98 / 0.7639      PASS
+PASS: 6/6 layers within budget
+```
+
+Two consecutive runs of the final binary give identical numbers in every layer. An earlier run of the build
+before the last comment-only edit read frame 18.31 / 0.8356 and item label 11.95 / 0.3924; the difference
+(~0.2 dB on the frame) is capture-state jitter on this host, not this pass - the canonical frame is the
+XMB root and no settings page, no choice list and no list value is on its draw path. Every layer is inside
+the budget both times.
+
+**Named states.** `bun work\ab-layers.ts --states --exe C:\dev\out\native-theme-lists\re-ps3-native.exe`
+-> **states: 12/12 pass** (self-baseline, not firmware fidelity), run at 07:10 on the 07:03 build (the same
+functional code as the delivered binary). No reference was edited; nothing drifted. Two later attempts read
+**1/12** while another session's parity harness (`work/parity.ts`, an unrelated pass, started 07:20) was
+running its own fullscreen `re-ps3-native` (`out/native-text3`) on the same display: two exclusive
+fullscreen apps on one monitor contend for the foreground, so those attempts are contention, not drift, and
+are reported rather than used. The harness itself was not run concurrently by this pass.
+
+**Determinism.** Not re-measured for the deliverable set: the captures above are single runs; the four list
+bands were stable across the two hunk-build capture runs except the deliberate `color-feb` outline change
+(`background-list.png`, `font-list.png`, `theme-list.png` and `color-list.png` were byte-identical between
+`cap/` and `cap2/`).
+
+### 16.8 Corrections to earlier sections
+
+- **12.4b and the batch summary's "12 chips (white Original + 11 colour chips)" is wrong.** There are 13
+  rows: the `Original` text row and twelve chips (January..December). The frame's last step is the proof
+  (16.2). The chip pitch (40 px), the 11-visible-plus-chevron rest, the 1 px focus outline and the live
+  preview stand as measured.
+- **15.2's "Color ... label line 494-523" is the Original row, not a label line.** It scrolls with the
+  list; at the last step a chip occupies row 0.
+- **12.4e / 15.2's 43 px Theme-vs-Background difference is not involved here**: the Color list starts on
+  `kThemeLowerListBand`'s 505 anchor and its chips are the same grid (verified: the frame's chip tops are
+  the model's 531 + 40n with the view's 27x28 swatch at `rowCentre-14`).
+- **16.3's chevron position (x 1786-1796) is a measurement**, not the approximate "right-hand chevron" of
+  12.4c; the drawn y is the row centre, 6 px above the frame's chevron centre because the frame's row text
+  centre sits ~6 px lower than the band's rect centre (the same AlignVCentre residual as 13.5).
+
+### 16.9 Still open after this pass
+
+- **The live focus preview** (the console recolours the whole screen before commit): needs the focused
+  chip's value on the render path and a revert on Back; model-side value already supplied.
+- **The Brightness second level**: not captured; the row exists, is disabled, and says why. Wiring it needs
+  either a captured second level or an app brightness control (neither exists).
+- **The other seven month tints**: `View::renderBackground`'s table is six entries; adding the remaining
+  seven month palettes as values 6..12 would make those chips applicable, and is a `view.cpp` +
+  `Preferences` bound change (not this pass's fence). Until then they are drawn and disabled.
+- **The Color value column's non-Original names** (Blue/Silver/etc.) are this build's; only `Original` was
+  measured.
+- **The Font name-to-family mapping** (Rounded=VAG Rounded, Pop=Seurat) is F; a console A/B with font 1/2
+  selected closes it.
+- **The band's vertical fill profile** (the frame is ~10 luma darker at y 100 than the drawn horizontal
+  gradient) is unchanged from 13.3 and shows in the band crops above.
+- **The Color list's value line when a colour is current** was never captured; this build draws the
+  Original row and the value column's own name, not a firmware string.
+
+No other source file was edited for this section; no reference, threshold or RCO was touched.

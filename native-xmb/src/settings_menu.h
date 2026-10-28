@@ -34,10 +34,12 @@ QVector<Entry> settingsColumnEntries(const QVector<Entry>& builtin,Assets& asset
 // the same semantic item, so a view pass can draw this list and still call `Shell::openChoices`'
 // semantics unchanged (Phase 11.1 left `choices()` byte-identical; this is the list that replaces it
 // when the band renderer lands). `writes` is false for a firmware item this build cannot honour yet: its
-// `value` is then the item's ordinal in the page, not a preference value, and a view must not commit it.
+// `value` is then a sentinel outside every bounded key (an RCO list uses the item's ordinal; the Theme
+// page's run-time lists use 1000 + the authored index, because their real values are small integers), not
+// a preference value, and a view must not commit it.
 struct ChoiceItem {
     QString label;          // the item's own text, from the RCO's English table
-    QVariant value;         // what SetSetting stores (same as choices()); ordinal when !writes
+    QVariant value;         // what SetSetting stores (same as choices()); sentinel when !writes
     bool isCurrent=false;   // matches the persisted preference (never from the RCO: SETTINGS U4)
     QString source;         // "rco" | "native" | "capture"
     bool scrollable=false;  // the list is longer than the measured band, or the page carries a Scroll
@@ -45,6 +47,15 @@ struct ChoiceItem {
     int rcoIndex=-1;        // the item's position in the page's LowerMenu
     quint32 rcoOffset=0;    // its offset in sysconf_plugin.rco's table section
     bool writes=false;      // `value` is a real preference value for this build
+    // Phase 11.4 (audit/SETTINGS-FIRMWARE.md 16): the Theme page's run-time lists are not text rows.
+    // `swatch` says the row is a colour chip and `colour` is the 0xRRGGBB it is drawn with (measured on the
+    // capture, which is the chip's only identity - the console gives it no label); `submenu` is the
+    // firmware's right-hand chevron row (`Brightness`); `note` is the item's own reason when !writes, so a
+    // disabled item can say why instead of pretending. All four are empty/zero for every RCO list.
+    bool swatch=false;
+    quint32 colour=0;
+    bool submenu=false;
+    QString note;
 };
 struct ChoiceList {
     QString pageId;         // the settings page ("display", "date", ...)
@@ -58,6 +69,10 @@ struct ChoiceList {
     QString note;           // why a fallback, or which attestation the list has
     bool scrollable=false;
     QString scrollObject;   // the page's Scroll object when the RCO declares one
+    // The number of rows the captured band shows at once for this list (0: the band's own 27-row capacity,
+    // SETTINGS 11.4). The Color list measures 12 visible rows at the 40 px pitch, then a down-chevron; a
+    // longer list scrolls one row per focus step past the window (SETTINGS 16.2).
+    int windowRows=0;
     QVector<ChoiceItem> items;
     // The item the persisted value selects: its rcoIndex (the row the band focuses), or -1 when nothing
     // in the list is current. A time zone stored as an IANA id has no firmware item, so this is -1 and the
