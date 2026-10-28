@@ -75,6 +75,66 @@ struct SteamSwitchPlan {
 SteamSwitchPlan steamAccountSwitchPlan(const SteamAccount& account, const QString& steamRoot = {},
                                        QString* error = nullptr);
 
+// ---- The UI-facing switch prompt ------------------------------------------------------------
+// One row of the confirmation: the shell renders `body` on a page (or as the page's own text)
+// with `confirmLabel` and `cancelLabel` as its two rows. Nothing here performs process work.
+struct SteamSwitchStep {
+    QString heading;      // the page/dialog heading for this step
+    QString body;         // the complete user-facing text, with its own line breaks
+    QString confirmLabel; // the row that advances the handoff
+    QString cancelLabel;  // the row that leaves it alone
+};
+
+// Everything the XMB can honestly show, and ask, for one requested account. The strings are the
+// product text, not log lines: they say that Steam must restart, that the XMB does not sign in,
+// that no credentials are stored, and who completes the sign-in (the Steam client).
+struct SteamSwitchPrompt {
+    bool possible = false;     // the handoff can be attempted (steam.exe and the account resolved)
+    bool alreadyActive = false; // Steam already names this account as active: nothing to switch
+    bool clientSignedIn = false; // Steam's registry reports an active user id
+    QString steamExe;           // the resolved client executable
+    QString accountLabel;       // persona name, else the login name; empty when none was selected
+    QString xmbNote;            // the one-line promise shown in both steps
+    QStringList shutdownArguments; // step 1: pass to the running client
+    QStringList relaunchArguments; // step 2: pass to the fresh client
+    QVector<SteamSwitchStep> steps; // exactly two, in order, when the prompt can proceed
+    SteamSwitchStep blocked;    // shown instead of `steps` when it cannot, or nothing is to switch
+    QString outcomeText;        // what is true after step 2; never claims a sign-in happened
+    QString error;              // machine-facing reason when `possible` is false
+};
+
+// Builds the prompt for `account`. Fills `*error` (when given) with the same reason the blocked
+// step explains, so a caller can log it without parsing prose. Performs no process work.
+SteamSwitchPrompt steamSwitchPlanFor(const SteamAccount& account, const QString& steamRoot = {},
+                                     QString* error = nullptr);
+
+// The two-step confirmation model, as a small state machine so the ordering is testable without
+// a UI: Blocked (nothing may run) -> ConfirmClose --confirm--> ConfirmRelaunch --confirm--> Ready.
+// Only `Ready` means both steps were accepted and the caller may run the two launches. `cancel()`
+// from any live stage returns to Blocked/Cancelled and nothing may run.
+struct SteamSwitchConfirmation {
+    enum class Stage { Blocked, ConfirmClose, ConfirmRelaunch, Ready, Cancelled };
+    Stage stage = Stage::Blocked;
+    int accepted = 0; // how many of the two steps were confirmed
+    bool confirm();   // advances one step; false when the model is not in a confirmable stage
+    void cancel();    // leaves the sequence; never returns to a confirmable stage
+    bool ready() const { return stage == Stage::Ready; }
+};
+
+// A dry run of the same model: walks both steps, records the exact command lines, and performs no
+// process work at all (`executed` is always false). Used by tests and by the shell's log line; it
+// is also the proof that nothing runs before both confirmations.
+struct SteamSwitchDryRun {
+    bool possible = false;
+    bool executed = false;      // always false: a dry run never starts or stops Steam
+    QVector<QString> transcript; // headings, both bodies, the labels pressed, the command lines
+    QStringList commands;        // {"<steam.exe> -shutdown", "<steam.exe>"} in handoff order
+    SteamSwitchStep blocked;     // set when the prompt cannot proceed
+    QString error;
+};
+SteamSwitchDryRun steamSwitchDryRun(const SteamAccount& account, const QString& steamRoot = {},
+                                    QString* error = nullptr);
+
 } // namespace xmb
 
 Q_DECLARE_METATYPE(xmb::SteamAccount)

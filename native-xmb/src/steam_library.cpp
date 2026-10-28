@@ -592,17 +592,64 @@ SteamInstallation scanSteam(const QString& explicitRoot) {
     return result;
 }
 
+namespace {
+
+// Steam app ids are 32-bit decimal; anything else is not an id this client can name, and the
+// console takes arguments verbatim, so validation is the allow-list (audit/STEAM-CLI.md section 3.4).
+bool validSteamAppId(const QString& appId) {
+    if (appId.isEmpty() || appId.size() > 10) return false;
+    for (const QChar character : appId) {
+        if (!character.isDigit() || character.unicode() > 0x7f) return false;
+    }
+    bool valid = false;
+    const qulonglong numeric = appId.toULongLong(&valid, 10);
+    return valid && numeric != 0 && numeric <= 0xffffffffULL;
+}
+
+QString consoleLogPath(const QString& steamRoot) {
+    const QStringList roots = rootsToTry(steamRoot);
+    for (const QString& root : roots) {
+        const QString path = QDir(root).filePath(QStringLiteral("logs/console_log.txt"));
+        if (QFileInfo(path).isFile()) return path;
+    }
+    return {};
+}
+
+// Every line the client writes is prefixed with "[2026-10-26 20:39:50] ".
+QString stripLogTimestamp(const QString& line) {
+    if (!line.startsWith(QLatin1Char('['))) return line;
+    const int close = line.indexOf(QStringLiteral("] "));
+    if (close < 0) return line;
+    return line.mid(close + 2);
+}
+
+// The single argument after "+<command>" on a logged command line, with the client's quoting
+// removed: '"...\steam.exe" +app_stop 999999999"' must yield "999999999".
+QString commandArgument(const QString& line, const QString& command) {
+    const int at = line.indexOf(command);
+    if (at < 0) return {};
+    QString rest = line.mid(at + command.size()).trimmed();
+    while (rest.startsWith(QLatin1Char('"'))) rest.remove(0, 1);
+    int end = 0;
+    while (end < rest.size() && !rest.at(end).isSpace() && rest.at(end) != QLatin1Char('"')) ++end;
+    return rest.left(end);
+}
+
+} // namespace
+
 bool steamStopApp(const QString& appId,const QString& steamRoot,QString* error) {
     if (error) error->clear();
 #ifdef Q_OS_WIN
-    bool numeric = false;
-    appId.toULongLong(&numeric);
-    if (!numeric) { if (error) *error = QStringLiteral("Not a Steam app id."); return false; }
-    const QString roots[] = {steamRoot, rootsToTry(steamRoot).value(0)};
-    const QString exe = QDir(roots[0].isEmpty() ? roots[1] : roots[0]).filePath(QStringLiteral("steam.exe"));
-    if (!QFileInfo(exe).isFile()) { if (error) *error = QStringLiteral("Steam installation not found."); return false; }
+    const QString id = appId.trimmed();
+    if (!validSteamAppId(id)) { if (error) *error = QStringLiteral("Not a Steam app id."); return false; }
+    QString executable;
+    for (const QString& root : rootsToTry(steamRoot)) {
+        const QString candidate = QDir(root).filePath(QStringLiteral("steam.exe"));
+        if (QFileInfo(candidate).isFile()) { executable = candidate; break; }
+    }
+    if (executable.isEmpty()) { if (error) *error = QStringLiteral("Steam installation not found."); return false; }
     // The console command is undocumented and prints nothing; the registry Running flag is the proof.
-    if (!QProcess::startDetached(exe, {QStringLiteral("+app_stop"), appId})) {
+    if (!QProcess::startDetached(executable, steamStopArguments(id))) {
         if (error) *error = QStringLiteral("Steam could not be started."); return false;
     }
     return true;
@@ -611,6 +658,115 @@ bool steamStopApp(const QString& appId,const QString& steamRoot,QString* error) 
     if (error) *error = QStringLiteral("Steam is only supported on Windows.");
     return false;
 #endif
+}
+
+QStringList steamStopArguments(const QString& appId) {
+    const QString id = appId.trimmed();
+    if (!validSteamAppId(id)) return {};
+    return {QStringLiteral("+app_stop"), id};
+}
+
+SteamConsoleLogSlice steamConsoleLogTail(const QString& steamRoot, qint64 offset,
+                                         qsizetype maximumBytes) {
+    SteamConsoleLogSlice slice;
+    const qsizetype cap =
+        std::clamp<qsizetype>(maximumBytes > 0 ? maximumBytes : 64 * 1024, 1, 1024 * 1024);
+    const QString path = consoleLogPath(steamRoot);
+    if (path.isEmpty()) {
+        slice.error = QStringLiteral("Steam's console log was not found.");
+        return slice;
+    }
+    slice.path = path;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        slice.error = file.errorString();
+        return slice;
+    }
+    const qint64 size = file.size();
+    slice.size = size;
+    if (size < 0) {
+        slice.error = QStringLiteral("Steam's console log has no readable size.");
+        return slice;
+    }
+    qint64 start = offset;
+    if (offset < 0 || offset > size) {
+        // The file was truncated, rotated or never snapshotted: read the tail instead of nothing and
+        // say so, so a caller never treats a rotated log as "command not delivered".
+        slice.truncated = offset > size;
+        start = std::max<qint64>(0, size - qint64(cap));
+    }
+    slice.offset = start;
+    if (size > start && !file.seek(start)) {
+        slice.error = QStringLiteral("Steam's console log could not be positioned.");
+        return slice;
+    }
+    slice.bytes = file.read(std::min<qint64>(qint64(cap), size - start));
+    if (file.error() != QFileDevice::NoError) {
+        slice.error = file.errorString();
+        slice.bytes.clear();
+        return slice;
+    }
+    slice.available = true;
+    return slice;
+}
+
+qint64 steamConsoleLogSize(const QString& steamRoot) {
+    const QString path = consoleLogPath(steamRoot);
+    if (path.isEmpty()) return -1;
+    return QFileInfo(path).size();
+}
+
+SteamStopEvidence steamVerifyStop(const QString& appId, qint64 offset,
+                                  const QString& steamRoot) {
+    SteamStopEvidence evidence;
+    const QString id = appId.trimmed();
+    if (!validSteamAppId(id)) {
+        evidence.error = QStringLiteral("Not a Steam app id.");
+        return evidence;
+    }
+    const SteamConsoleLogSlice slice = steamConsoleLogTail(steamRoot, offset);
+    evidence.logAvailable = slice.available;
+    if (!slice.available) {
+        evidence.error = slice.error;
+        return evidence;
+    }
+    if (slice.truncated)
+        evidence.error = QStringLiteral(
+            "Steam's console log is shorter than the snapshot, so the command cannot be attributed.");
+
+    const QStringList lines = QString::fromUtf8(slice.bytes).split(QLatin1Char('\n'));
+    int matched = -1;
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString& line = lines.at(i);
+        if (!line.contains(QStringLiteral("ExecCommandLine:"))) continue;
+        if (!line.contains(QStringLiteral("+app_stop"))) continue;
+        if (commandArgument(line, QStringLiteral("+app_stop")) != id) continue;
+        matched = i;
+        evidence.delivered = true;
+        evidence.commandLine = stripLogTimestamp(line).trimmed();
+        break;
+    }
+    if (!evidence.delivered) {
+        if (evidence.error.isEmpty())
+            evidence.error = QStringLiteral(
+                "The client did not record this stop command after the snapshot offset.");
+        return evidence;
+    }
+    // A successful app_stop prints nothing, so this text is only the client's neighbouring spew; the
+    // "command not found" line is what turns delivery into a rejection.
+    QStringList context;
+    for (int i = matched + 1; i < lines.size() && context.size() < 8; ++i) {
+        const QString& line = lines.at(i);
+        if (line.contains(QStringLiteral("ExecCommandLine:"))) break;
+        const QString cleaned = stripLogTimestamp(line).trimmed();
+        if (cleaned.isEmpty()) continue;
+        if (cleaned.contains(QStringLiteral("command not found"))) evidence.rejected = true;
+        context.append(cleaned);
+        if (cleaned.size() > 256) break;
+    }
+    evidence.context = context.join(QLatin1Char('\n'));
+    if (evidence.context.size() > 2048) evidence.context.truncate(2048);
+    return evidence;
 }
 
 SteamAppState steamAppState(const QString& appId) {

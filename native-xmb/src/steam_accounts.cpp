@@ -651,4 +651,165 @@ SteamSwitchPlan steamAccountSwitchPlan(const SteamAccount& account, const QStrin
     return plan;
 }
 
+namespace {
+
+QString accountLabel(const SteamAccount& account) {
+    if (!account.personaName.trimmed().isEmpty()) return account.personaName.trimmed();
+    return account.accountName.trimmed();
+}
+
+// How a user would type it, and the same shape the shell logs. Windows quoting only: the
+// executable path gets quotes when it contains a space, arguments are passed unchanged.
+QString switchCommandLine(const QString& executable, const QStringList& arguments) {
+    QString line = executable.contains(QLatin1Char(' '))
+                       ? QLatin1Char('"') + executable + QLatin1Char('"')
+                       : executable;
+    for (const QString& argument : arguments) line += QLatin1Char(' ') + argument;
+    return line;
+}
+
+QString noSignInSentence() {
+    return QStringLiteral(
+        "The XMB cannot sign in to Steam and never stores a password, token or session file.");
+}
+
+} // namespace
+
+SteamSwitchPrompt steamSwitchPlanFor(const SteamAccount& account, const QString& steamRoot,
+                                     QString* error) {
+    SteamSwitchPrompt prompt;
+    QString planError;
+    const SteamSwitchPlan plan = steamAccountSwitchPlan(account, steamRoot, &planError);
+    prompt.possible = plan.possible;
+    prompt.alreadyActive = plan.alreadyActive;
+    prompt.clientSignedIn = plan.clientSignedIn;
+    prompt.steamExe = plan.steamExe;
+    prompt.accountLabel = accountLabel(account);
+    prompt.shutdownArguments = plan.shutdownArguments;
+    prompt.relaunchArguments = plan.relaunchArguments;
+    // The promise every step repeats: the XMB's own state is not part of the restart. It is true
+    // because the handoff only starts and stops the Steam client process.
+    prompt.xmbNote = QStringLiteral("Steam must restart; unsaved XMB state is unaffected.");
+    prompt.outcomeText = QStringLiteral(
+        "Steam is starting. The account is only known once Steam's own record changes; the XMB "
+        "re-reads that record and never reports a sign-in itself.");
+
+    if (!plan.possible) {
+        if (error && !planError.isEmpty()) *error = planError;
+        prompt.blocked.heading = QStringLiteral("Steam Account");
+        prompt.blocked.body = plan.explanation + QStringLiteral("\n\nNothing was started.");
+        return prompt;
+    }
+    if (plan.alreadyActive) {
+        // Nothing to hand off: the client already names this account. The step still explains why,
+        // so the row never looks like a dead end.
+        prompt.blocked.heading = QStringLiteral("Steam Account");
+        prompt.blocked.body = QStringLiteral(
+                                  "Steam's own record already names %1 as the active account. "
+                                  "Nothing was started.\n\n"
+                                  "To use another account, change it in Steam's own account menu; "
+                                  "the XMB cannot sign in.")
+                                  .arg(prompt.accountLabel);
+        return prompt;
+    }
+
+    SteamSwitchStep close;
+    close.heading = QStringLiteral("Switch Steam Account");
+    close.body = prompt.xmbNote + QStringLiteral("\n\n") +
+                 QStringLiteral("Steam will be asked to close. ") + noSignInSentence() +
+                 QStringLiteral("\n\nNext: start Steam again and sign in as %1 in Steam's own window.")
+                     .arg(prompt.accountLabel);
+    close.confirmLabel = QStringLiteral("Close Steam");
+    close.cancelLabel = QStringLiteral("Cancel");
+
+    SteamSwitchStep relaunch;
+    relaunch.heading = QStringLiteral("Start Steam Again");
+    relaunch.body = QStringLiteral(
+                        "Steam is closing. Start it again to reach Steam's own sign-in window.\n\n"
+                        "Sign in as %1 there. Steam asks for the password and Steam Guard, and the "
+                        "XMB cannot do either for you.\n\n"
+                        "Steam picks the account it signs in, so the XMB does not report a switch "
+                        "as done.")
+                        .arg(prompt.accountLabel);
+    relaunch.confirmLabel = QStringLiteral("Start Steam");
+    relaunch.cancelLabel = QStringLiteral("Not Now");
+
+    prompt.steps.append(close);
+    prompt.steps.append(relaunch);
+    return prompt;
+}
+
+bool SteamSwitchConfirmation::confirm() {
+    switch (stage) {
+    case Stage::ConfirmClose:
+        stage = Stage::ConfirmRelaunch;
+        accepted = 1;
+        return true;
+    case Stage::ConfirmRelaunch:
+        stage = Stage::Ready;
+        accepted = 2;
+        return true;
+    case Stage::Blocked:
+    case Stage::Ready:
+    case Stage::Cancelled:
+        break;
+    }
+    // Blocked, already accepted, or cancelled: nothing advances, so no command can be run twice
+    // or after a cancellation.
+    return false;
+}
+
+void SteamSwitchConfirmation::cancel() {
+    stage = Stage::Cancelled;
+    accepted = 0;
+}
+
+SteamSwitchDryRun steamSwitchDryRun(const SteamAccount& account, const QString& steamRoot,
+                                    QString* error) {
+    SteamSwitchDryRun run;
+    QString planError;
+    const SteamSwitchPrompt prompt = steamSwitchPlanFor(account, steamRoot, &planError);
+    run.blocked = prompt.blocked;
+    run.possible = prompt.possible && prompt.steps.size() == 2;
+    if (!run.possible) {
+        run.error = planError.isEmpty()
+                        ? (prompt.blocked.body.isEmpty() ? QStringLiteral("no switch is possible")
+                                                         : prompt.blocked.body)
+                        : planError;
+        run.transcript << prompt.blocked.heading << prompt.blocked.body;
+        if (error) *error = run.error;
+        return run;
+    }
+    if (error) error->clear();
+
+    SteamSwitchConfirmation confirmation;
+    confirmation.stage = SteamSwitchConfirmation::Stage::ConfirmClose;
+    const SteamSwitchStep& close = prompt.steps.at(0);
+    const SteamSwitchStep& relaunch = prompt.steps.at(1);
+
+    run.transcript << close.heading << close.body
+                   << QStringLiteral("[%1]").arg(close.confirmLabel);
+    if (!confirmation.confirm()) {
+        run.possible = false;
+        run.error = QStringLiteral("the confirmation model refused the first step");
+        if (error) *error = run.error;
+        return run;
+    }
+    const QString shutdown = switchCommandLine(prompt.steamExe, prompt.shutdownArguments);
+    run.commands << shutdown;
+
+    run.transcript << QStringLiteral("step 2 after: %1").arg(shutdown) << relaunch.heading
+                   << relaunch.body << QStringLiteral("[%1]").arg(relaunch.confirmLabel);
+    if (!confirmation.confirm()) {
+        run.possible = false;
+        run.error = QStringLiteral("the confirmation model refused the second step");
+        if (error) *error = run.error;
+        return run;
+    }
+    run.commands << switchCommandLine(prompt.steamExe, prompt.relaunchArguments);
+    run.transcript << prompt.outcomeText;
+    // executed stays false: this function is the dry run. The shell owns the real handoff.
+    return run;
+}
+
 } // namespace xmb
