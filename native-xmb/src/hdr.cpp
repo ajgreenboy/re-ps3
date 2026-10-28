@@ -1,16 +1,12 @@
 #include "hdr.h"
+#include "particles.h"      // sceneMaterials(): the shared run-time reader
+#include "rco_objects.h"
+#include <QElapsedTimer>
 #include <cmath>
 #include <QDebug>
 
 namespace xmb {
 namespace {
-// HDR.mnu: override/night and override/day (qgl/lines.qrc), blended by NightDayBlend like the other presets.
-struct Preset { float exposure,white,glareLevel,threshold,radius[3],sumPow; };
-constexpr Preset night{1.41f,.999878f,1.33f,.699812f,{1.1f,1.36f,1.5f},.5f};
-constexpr Preset day{1.05f,.899181f,1.10245f,.738857f,{1.23888f,1.43176f,1.55787f},.557478f};
-// override/coldboot1 (the boot's first preset; coldboot2 has day's values).
-constexpr Preset coldboot1{1.64f,1.f,1.74f,.2f,{1.23888f,1.43176f,1.55787f},.557478f};
-constexpr int texSize=8,texMaxMip=8; // TEX SIZE (glare source 2^8 wide), TEX MAX MIP
 const char* fullscreenVertex=R"(#version 330 core
 out vec4 v_col0, v_col1, v_fog;
 out vec4 v_tc[10];
@@ -47,6 +43,48 @@ void Hdr::setFc(Pass& pass,QVector<QVector4D>& fc,const char* name,const QVector
 bool Hdr::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     if(!load(assets,toneMap_,"ToneMap.fpo") || !load(assets,glareSource_,"GlareSourceNoTone.fpo") || !load(assets,gaussian_,"Gaussian.fpo","Gaussian.vpo") ||
        !load(assets,accGlare_,"AccGlare.fpo") || !load(assets,applyGlare_,"ApplyGlare.fpo"))return false;
+    // P1: the three presets are read from HDR.mnu at run time (override/night, override/day,
+    // override/coldboot1) through the scene's shared Materials reader. The struct initializers stay as
+    // the logged fallback for a firmware tree without lines.qrc.
+    {
+        Materials& materials=sceneMaterials(assets);
+        QElapsedTimer timer;timer.start();
+        int files=0;
+        const auto presetFrom=[&](const Materials::Mnu& mnu,Preset preset){
+            if(!mnu.ok)return preset;
+            const auto get=[&](const char* key,float& out){out=float(mnu.number(QString::fromLatin1(key),out));};
+            get("EXPOSURE",preset.exposure);
+            get("WHITE LEVEL",preset.white);
+            get("GLARE LEVEL",preset.glareLevel);
+            get("GLARE THRESH",preset.threshold);
+            get("GAUSSIAN RAD R",preset.radius[0]);
+            get("GAUSSIAN RAD G",preset.radius[1]);
+            get("GAUSSIAN RAD B",preset.radius[2]);
+            get("GLARE SUM POW",preset.sumPow);
+            return preset;
+        };
+        const Materials::Mnu& base=materials.hdr();
+        ++files;
+        if(base.ok) {
+            texSize_=int(base.integer(QStringLiteral("TEX SIZE"),texSize_));
+            texMaxMip_=int(base.integer(QStringLiteral("TEX MAX MIP"),texMaxMip_));
+        } else {
+            qWarning().noquote()<<"hdr: HDR.mnu unavailable ("<<base.source()<<base.error
+                               <<"); using the compiled fallbacks from HDR.mnu 4.93";
+        }
+        day_=presetFrom(materials.hdr(QStringLiteral("day")),day_);++files;
+        // override/night and override/coldboot1 differ from the base file; a missing override keeps
+        // the base (day) values, as a preset without an HDR.mnu inherits it in the firmware. These two
+        // blocks are fallback: HDR.mnu override/night and override/coldboot1, used only when the read fails.
+        Preset nightFallback=day_;nightFallback.exposure=1.41f;nightFallback.white=.999878f;
+        nightFallback.glareLevel=1.33f;nightFallback.threshold=.699812f;
+        nightFallback.radius[0]=1.1f;nightFallback.radius[1]=1.36f;nightFallback.radius[2]=1.5f;nightFallback.sumPow=.5f;
+        night_=presetFrom(materials.hdr(QStringLiteral("night")),nightFallback);++files;
+        Preset coldbootFallback=day_;coldbootFallback.exposure=1.64f;coldbootFallback.white=1.f;
+        coldbootFallback.glareLevel=1.74f;coldbootFallback.threshold=.2f;
+        coldboot1_=presetFrom(materials.hdr(QStringLiteral("coldboot1")),coldbootFallback);++files;
+        sceneNoteMaterials(files,timer.nsecsElapsed());
+    }
     gl.glGenVertexArrays(1,&emptyVao_);
     // Gaussian.vpo reads POSITION (location 0) and TEXCOORD0 (location 8): one fullscreen triangle.
     const float triangle[]={-1,-1,0,1, 0,0,0,0,  3,-1,0,1, 2,0,0,0,  -1,3,0,1, 0,2,0,0};
@@ -65,10 +103,10 @@ GLuint Hdr::begin(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) 
     if(!scene_ || width_!=pixelWidth || height_!=pixelHeight) {
         width_=pixelWidth;height_=pixelHeight;
         scene_=floatTarget(width_,height_);toned_=floatTarget(width_,height_);
-        const int sw=1<<texSize,sh=std::max(1,int(std::lround(double(sw)*height_/width_)));
+        const int sw=1<<texSize_,sh=std::max(1,int(std::lround(double(sw)*height_/width_)));
         source_=floatTarget(sw,sh,true);accumulated_=floatTarget(sw,sh);
         blurX_.clear();blurY_.clear();
-        for(int level=0;level<texMaxMip && (sw>>level)>=1 && (sh>>level)>=1;++level) {
+        for(int level=0;level<texMaxMip_ && (sw>>level)>=1 && (sh>>level)>=1;++level) {
             blurX_.push_back(floatTarget(sw>>level,sh>>level));blurY_.push_back(floatTarget(sw>>level,sh>>level));
         }
         for(auto* target:{source_.get(),accumulated_.get()}) {
@@ -93,11 +131,11 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
         const float boot=boot1+(d-boot1)*toColdboot2_;
         return boot+(n+(d-n)*nightDayBlend-boot)*toClock_;
     };
-    const float exposure=mix(coldboot1.exposure,night.exposure,day.exposure),white=mix(coldboot1.white,night.white,day.white);
-    const float glareLevel=mix(coldboot1.glareLevel,night.glareLevel,day.glareLevel),threshold=mix(coldboot1.threshold,night.threshold,day.threshold);
-    const float sumPow=mix(coldboot1.sumPow,night.sumPow,day.sumPow);
-    const float radius[3]={mix(coldboot1.radius[0],night.radius[0],day.radius[0]),mix(coldboot1.radius[1],night.radius[1],day.radius[1]),
-                           mix(coldboot1.radius[2],night.radius[2],day.radius[2])};
+    const float exposure=mix(coldboot1_.exposure,night_.exposure,day_.exposure),white=mix(coldboot1_.white,night_.white,day_.white);
+    const float glareLevel=mix(coldboot1_.glareLevel,night_.glareLevel,day_.glareLevel),threshold=mix(coldboot1_.threshold,night_.threshold,day_.threshold);
+    const float sumPow=mix(coldboot1_.sumPow,night_.sumPow,day_.sumPow);
+    const float radius[3]={mix(coldboot1_.radius[0],night_.radius[0],day_.radius[0]),mix(coldboot1_.radius[1],night_.radius[1],day_.radius[1]),
+                           mix(coldboot1_.radius[2],night_.radius[2],day_.radius[2])};
     gl.glDisable(GL_DEPTH_TEST);gl.glDisable(GL_SCISSOR_TEST);gl.glDisable(GL_BLEND);
     const auto fullscreen=[&](QOpenGLShaderProgram& program,const QVector<QVector4D>& fc) {
         program.setUniformValueArray("fc",fc.constData(),fc.size());
@@ -126,8 +164,9 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
         }
         bindTexture(0,source_->texture());gl.glGenerateMipmap(GL_TEXTURE_2D);
     }
-    // 3. Per level: 15-tap Gaussian across then down, each channel with its own radius (in texels of that level),
-    //    then AccGlare adds the level with weight SUM POW^level (normalised): narrow levels dominate, wide ones haze.
+    // 3. Per level: 15-tap Gaussian across then down (captured: k = -7..7, weights 0..7), each channel with its own
+    //    radius (in texels of that level), then AccGlare adds the level with weight SUM POW^level (normalised):
+    //    narrow levels dominate, wide ones haze.
     QVector<QVector4D> weights(8);
     for(int c=0;c<3;++c) {
         float sum=0;for(int k=-7;k<=7;++k)sum+=std::exp(-float(k*k)/(2*radius[c]*radius[c]));

@@ -80,3 +80,71 @@ by another session; use the current phase handoff for that status, rather than a
   `IconRenderer` with the opaque material (`src/view.cpp:949-952`); baked RCO, artwork and theme images still use
   QPainter. Their shader/asset bindings must be identified before passing them to the glass shader.
 - Native rasterizer/glow parity, RCO runtime layout and later phases remain open in HANDOFF-PHASES.md.
+
+## Runtime ICONS.mnu reads (P1) - 2026-10-27
+
+`src/icons.{h,cpp}` no longer parses MNU. The private `readMnu()` (the 12-line split(':') parser) and the four
+`QHash<QString,float>` preset tables are gone; `IconRenderer::init` now keeps four `const Materials::Mnu*` from the
+scene's shared reader:
+
+```cpp
+day_=&sceneMaterials(assets).icons("day");      // override/day/ICONS.mnu
+night_=&sceneMaterials(assets).icons("night");
+yoake_=&sceneMaterials(assets).icons("yoake");
+higure_=&sceneMaterials(assets).icons("higure");
+```
+
+so the app has one MNU parser, one cache and one fallback rule (`number(key, fallback)`); `value()` is unchanged
+in behaviour: night -> day -> the four-preset keyframe blend, `XMB_ICON_PRESET_LINEAR` still forces the old
+day/night cross-fade. If `override/night/ICONS.mnu` is unreadable the renderer stays unavailable (logged), exactly
+as before; if only yoake/higure are missing the day/night pair covers those keys.
+
+**The values are identical, measured.** With `XMB_ICON_LOG_MATERIAL=1` at the canonical pinned clock
+(`--background-clock 2026-10-25T10:00:00`), the pre-change and post-change builds log the same derived material:
+
+```
+icons: derived material "2026-10-25T10:00:00" ChangingColor QVector3D(0.904533, 0.852625, 0.646848)
+       TIME COLOR MIX 0.503418 GLASS 0.138197 luminance coefficients -0.376329 0.231954
+```
+
+`TIME COLOR MIX`, `GLASS` and the derived luminance coefficients all come from ICONS.mnu keys, so this is a
+byte-level check that `Materials::icons()` returns what the old parser returned, not just a lookalike. The
+category-icon layer moved +0.03 dB / +0.0024 SSIM in the canonical capture only because the frame behind the glass
+icons changed (the dust, `PARTICLES.md` 5), not because the material changed.
+
+### Constants that stay in `icons.cpp/h`
+
+`// captured:` (firmware bytes, not through an MNU key):
+
+| constant | value | source |
+|---|---|---|
+| `kDistance`, `kScaleX`, `kScaleY` | 2700, 2.8125, 5 | steady-state camera of the captures (the `_Eye` matrix) |
+| `kLuminanceX0/X1/X2`, `kLuminanceY0/Y1` | .20443, .544441, 1, -.736614, -.259981 | FUN_0003c584's three-point Lagrange control points |
+| `kEnvStartDegrees`, `kEnvTurnPerSecond` | -147, 30 | `_EnvRot` turn in the captures |
+| `vc[258]` z offset | 19.95 | the icon quad's firmware matrix |
+| `vc[466]` CookieCutterRatio | 15, 8.4375 | the 128x128 px window as a screen fraction |
+| `Icon::size/brightness/distance` defaults | 117.13 / .698 / 2700 | RPCS3 captures (focused 167.33, 1 / 2857.2 behind a page) |
+
+`// fit:` (no ICONS.mnu key):
+
+- the opaque material's ambient/diffuse/bevel (`0.58 + 0.26 * diffuse + bevel`, bevel `0.10`) and its
+  `mix(0.70, 1.0, brightness)` factor - the glass terms (refraction, env map, tone curve, EXPOSE, LIT2
+  specular) have no opaque counterpart, so the stand-in stays until every icon is drawn through the glass path;
+- `tintStrength` 0.12 in `setFixedTint` - the tint weight for that stand-in;
+- the `0.25` scale in the `XMB_ICON_DEBUG=4` diagnostic and the `128x128` cut are diagnostics/captures
+  respectively, not material values.
+
+`MATERIAL` note: `LIT1/LIT2 ANG Z/X`, `ATTN *`, `AMB *`, `REFR *`, `EXPOSE`, `GLASS`, `TIME COLOR MIX`, `PAR BIAS/
+SCL`, `SPEC1/2 POW` and every other key `value()` reads now come straight out of the four MNUs; none is typed in
+this file any more.
+
+### Reproduce
+
+```
+XMB_ICON_LOG_MATERIAL=1 XMB_LOG=<local log> re-ps3-native --dev-flash <dev_flash> \
+    --background-clock 2026-10-25T10:00:00 --render-clock 30 --script full,wait,quit
+```
+
+still logs the first derived material; `--background-clock` fixes both the preset blend and `amb.bmp`'s time.
+The only remaining hunk on this surface is View's: `icons_.setClock(backgroundOverride_.isValid() ? ... :
+QDateTime::currentDateTime())` already passes the right clock, so nothing else changes.

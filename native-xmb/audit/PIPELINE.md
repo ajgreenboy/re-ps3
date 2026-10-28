@@ -370,3 +370,123 @@ decompile) and binds the uniforms in FUN_000428b8…FUN_00042b2c (offsets: +0x00
 +0x90 Ambiant, +0xC0 ParallaxAndGlow, +0xF0 Eye, +0x120 EnvRot, +0x150 ShadowParams, +0x180 LuminanceParams,
 +0x1E0 RefractParams, +0x210 SuperSampling). The function that packs the MNU values into those uniforms still has to
 be traced, as was done for back_colours0. `--dump-cg` now also writes the icons programs.
+
+## Runtime reads in the background layers (P1) - 2026-10-27
+
+The ribbon, HDR and icon layers no longer carry private MNU parsers or duplicated preset numbers. All three (and
+particles) read through one process-wide reader pair, `RcoObjects` + `Materials`, built on first use:
+
+```cpp
+RcoObjects& sceneObjects(Assets&);     // declared in src/particles.h, defined in src/particles.cpp
+Materials&  sceneMaterials(Assets&);   // one cache, one missing-key rule
+```
+
+`RcoObjects` performs no I/O until a container is asked for; the scene path asks for none (its values live in the
+QGL `.mnu` files, not the RCO object trees), so `--rco-tree` remains the only RCO consumer. The measured startup
+line, emitted once by the last scene layer that reads materials (`Particles::init`):
+
+```
+scene reader: particles : 0 RCO containers, 0 B, 0.00 ms; 20 MNU files, 0.56-0.99 ms
+(lazy: no scene layer reads an RCO object tree; the scene path's values live in the QGL MNU files)
+```
+
+20 files = PARTICLES base + 4 theme overrides, LINE1 day/night/yoake/higure/coldboot1/coldboot2, BACKGROUND base,
+HDR base/day/night/coldboot1, ICONS day/night/yoake/higure. A missing archive logs each failed file and every
+layer keeps its compiled fallback, so the app still starts with a `dev_flash` that has no `vsh/resource/qgl`.
+
+### Ribbon (`src/ribbon.{h,cpp}`)
+
+- **BACKGROUND.mnu keys 3/4** (`3 RED/GREEN/BLUE`, `4 RED/GREEN/BLUE`) are read once in `init()` into
+  `colour3_`/`colour4_` and uploaded to `LinesController.fpo`'s `colour3`/`colour4` uniforms. The base file is
+  the running value: keys 3/4 are identical in every preset the plugin schedules for this layer (day, night,
+  yoake, higure, coldboot1, coldboot2); black/music_1/welcome change them and this build never schedules those as
+  a background.
+- **LINE1.mnu** presets are read with `Materials::line1("day"/"night"/"yoake"/"higure"/"coldboot1"/"coldboot2")`;
+  the private `readMnu`/`readPreset` pair is deleted. A missing override now inherits the day preset instead of
+  the second hardcoded `nightDefaults` table that used to sit here (its spacing/brightness/mipmap-bias/fresnel/
+  perturbation/angle/scale2/ffd-param values were LINE1 override/night's own numbers). The `Preset` initializers
+  remain as the day-file fallback and are labelled as such.
+- Values are identical, and the canonical capture shows it: the clock-text and info-bar layers are bit-identical
+  before and after, and the only changed pixels are dust (see `PARTICLES.md` 5). The MNU text is parsed by the
+  same `Materials` parser the icons and particles use, so a key present in one layer is spelled the same in all.
+
+Constants that stay in `ribbon.cpp`:
+
+- `thinness = 0` - `// fit:`; the presets say `THINNESS 1`, which the plugin remaps (not traced); 0 reproduces
+  the stripe period of the captures.
+- `cameraFovy 53, near .1, far 1000` - `// captured:` from the spline task's matrix (0x20401dc0, decomposed).
+  BACKGROUND.mnu's `FOVY 71.846` is the background shader's camera, not this one.
+- `stripeWidth 512` - `// fit:`; the plugin's width is a runtime global and 512 resolves the profile.
+- Captured, not MNU: the stripe profile (FUN_0004bad0: 1.01, 4x^2, 20(k/3)^3, k/6+0.5), the 128x1 UVW grid and
+  the 4096-entry `_Encode` ramp, the 128x128 spline sheet and its 16-column strip layout, the cloth step
+  (TIMESTEP x 1e-4, DAMPING x TIMESTEP, 0.02 pin push, sin(11t)/cos(15t) driver, 10x tension bending) and the
+  boot schedule (0.99-per-frame filter, 1.4e-5 n^2 to n=112 then a Hermite to n=168, 229/60 stage two).
+
+### HDR (`src/hdr.{h,cpp}`)
+
+- `HDR.mnu` is read in `init()`: base file for `TEX SIZE`/`TEX MAX MIP` (8/8), `override/day`, `override/night`
+  and `override/coldboot1` for `EXPOSURE`, `WHITE LEVEL`, `GLARE LEVEL`, `GLARE THRESH`, `GAUSSIAN RAD R/G/B`
+  and `GLARE SUM POW`. `finish()` blends the three by the boot weights as before.
+- Values are identical: the preset table in the old `hdr.cpp` was exactly override/night, override/day and
+  override/coldboot1 (checked value by value against the files). The compile-time `Preset` values remain as the
+  fallback for a tree without lines.qrc and are labelled `// fallback:`.
+- Captured, not MNU: the 15-tap Gaussian (`k = -7..7`, first 8 weights), the per-level `SUM POW^level`
+  normalisation, the empty/gaussian VAOs and the RGBA16F targets.
+
+### `view.h` / `view.cpp` hunks this task did not edit (other agents' fence)
+
+Three BACKGROUND.mnu values are still typed in View. None is a contradiction today (`RCO-OBJECT-MODEL.md` 9.5);
+each is a one-line read once View can ask the reader - `Ribbon` already calls `sceneMaterials(assets_)` in `init()`,
+so a two-line accessor on `Ribbon` (`double backgroundNumber(preset,key)`) is all it takes, e.g.
+`ribbon_.backgroundNumber("day", "NIGHT BLEND")`:
+
+| site | value | firmware read |
+|---|---:|---|
+| `view.h:194` `static constexpr double kNightBlend=.499947;` | 0.499947 | `BACKGROUND.mnu` `NIGHT BLEND` (day/night/yoake/higure/coldboot2) |
+| `view.cpp:493` `b.nightBrightness=.486059f;` | 0.486059 | `override/day/BACKGROUND.mnu` `NIGHT WHIT BIAS` |
+| `view.cpp:411` `constexpr float coldboot1NightBias=.513834f;` | 0.513834 | `override/coldboot1/BACKGROUND.mnu` `NIGHT WHIT BIAS` |
+
+The two smoothstep windows (`0/5.16611/24`, `18.498/20.3312/24`) in `backgroundTime()` are captures from the
+reference day-cycle video, not MNU keys, and stay.
+
+The fourth coupling is the particle clock: `View::renderBackground` computes `when` (the `--background-clock`
+override or the live clock) and passes only `when.time()` to `ribbon_.render(...)`. `Particles::render` takes no
+time of day, so `particles.cpp` re-reads the `--background-clock` argument itself. The hunk that removes the
+duplication is `particles_.setBackgroundClock(when)` next to `ribbon_.render(...)` in `view.cpp:416`.
+
+### Determinism and gate
+
+Every `--render-clock 30` capture of the final sources (mandated build, an annotation-only rebuild, a second
+out-of-repo build of the same sources, and runs with `XMB_PARTICLE_LOG=1`) hash the same:
+
+```
+sha256 F68732A7F9A135D55D097710EE4B45B2779594BD1AD886E3FF2BB084CC97BF18   (7 of 7 identical)
+```
+
+Canonical gate: PASS 6/6 (values in `PARTICLES.md` 5). All 122 RCO containers still parse with the shared
+reader's unchanged code: `--rco-tree "*@file"` -> `122 containers, 8070 objects, 165 animations, 20039542 bytes
+read, read+parse 47.69 ms` (exit 0, 8,358 dump lines), the same counts as the P1 audit.
+
+### Fallback run (no firmware QGL files) and named-state movement
+
+With a copy of `dev_flash` that has no `vsh/resource/qgl`, the app still starts and renders:
+`--script full,wait,wait,wait,grab=...,quit` exits 0, writes the frame, and logs one line per missing file
+(`mnu: lines PARTICLES.mnu Cannot open local QRC`, `particles: PARTICLES.mnu unavailable ... using the compiled
+fallbacks`, `icons: firmware programs/palette unavailable`), with the startup-cost line reporting
+`5 MNU files, 0.40 ms` (the attempted reads). The literal `--dev-flash` absent path is unchanged and is main.cpp's
+usage error (`exit 2`), outside this task's fence.
+
+Named states moved with the dust, as expected:
+
+| state | stored build (`native-phase3`) | current worktree before this change | this change |
+|---|---:|---:|---:|
+| steam-game-root | inf / 1.0000 PASS | 48.82 / 0.9996 FAIL | 42.23 / 0.9927 FAIL (item column 41.08 / 0.9897) |
+| xmb-notification | - | 48.82 / 0.9996 FAIL | 42.32 / 0.9929 FAIL |
+| xmb-volume-hud | - | 48.82 / 0.9996 FAIL | 42.31 / 0.9929 FAIL |
+
+The 55 dB self-baseline is hypersensitive by design (a native self-reference, not firmware fidelity), and the
+worktree was already 6.2 dB below it before this change because of other agents' view/shell edits; the particle
+change adds the dust deltas measured in `PARTICLES.md` 5 (6,000 pixels, 0.29% of the frame, all specks). The
+harness was not edited. `--states` cannot complete in this environment at all: discovery fails on
+`steam-not-installed: could not resolve path stage 1: no folder dump`, and the same failure reproduces with the
+stored `native-phase3` exe, so it is a fixture gap, not a regression.

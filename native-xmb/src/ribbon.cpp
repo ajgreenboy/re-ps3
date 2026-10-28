@@ -1,7 +1,10 @@
 #include "ribbon.h"
+#include "particles.h"      // sceneMaterials(): the shared run-time reader
+#include "rco_objects.h"
 #include <algorithm>
 #include <cmath>
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
 #include <QMatrix4x4>
@@ -10,33 +13,13 @@
 
 namespace xmb {
 namespace {
-constexpr float thinness=0.f;       // shader value; the presets say THINNESS 1, which the plugin remaps (not traced): 0 = full stripe period
-constexpr QVector3D colour3{.847347f,.846155f,.846448f},colour4{.92487f,.922603f,.922933f}; // BACKGROUND.mnu 3/4: line gradient
+constexpr float thinness=0.f;       // fit: the shader value; the presets say THINNESS 1, which the plugin
+                                    // remaps (not traced), and 0 = full stripe period matches the captures
 // Camera of the spline task's matrix (captured at 0x20401dc0 and decomposed): fovy 53, near .1, far 1000.
+// BACKGROUND.mnu's FOVY (71.846) is the background shader's camera, not this one.
 constexpr float cameraFovy=53.f,cameraNear=.1f,cameraFar=1000.f;
 constexpr float pi=3.14159265358979f;
 
-QHash<QString,float> readMnu(const QByteArray& text) {
-    QHash<QString,float> values;
-    for(const auto& raw:text.split('\n')) {
-        const auto parts=QString::fromLatin1(raw).trimmed().split(':');
-        if(parts.size()==3 && (parts[1]=="float" || parts[1]=="int"))values.insert(parts[0],parts[2].toFloat());
-    }
-    return values;
-}
-Ribbon::Preset readPreset(const QByteArray& text,Ribbon::Preset preset) {
-    const auto v=readMnu(text);
-    const auto get=[&](const char* name,float& out){if(v.contains(name))out=v.value(name);};
-    const auto get3=[&](const char* x,const char* y,const char* z,QVector3D& out){
-        if(v.contains(x) && v.contains(y) && v.contains(z))out=QVector3D(v.value(x),v.value(y),v.value(z));
-    };
-    get("DAMPING",preset.damping);get("LENGTH",preset.length);get("TENSION",preset.tension);get("TIMESTEP",preset.timestep);
-    get("PERTURBATION",preset.perturbation);get("END Y",preset.endY);get("END Z",preset.endZ);get("FFD PARAM 1",preset.ffdParam);
-    get3("FFD SCALE1 X","FFD SCALE1 Y","FFD SCALE1 Z",preset.scale1);get3("FFD SCALE2 X","FFD SCALE2 Y","FFD SCALE2 Z",preset.scale2);
-    get3("FFD OFFSET X","FFD OFFSET Y","FFD OFFSET Z",preset.offset);get3("POS X","POS Y","POS Z",preset.pos);get3("ANG X","ANG Y","ANG Z",preset.axis);
-    get("ANG ROT",preset.angle);get("SPACING",preset.spacing);get("BRIGHTNESS",preset.brightness);get("MIPMAP BIAS",preset.mipmapBias);get("FRESNEL",preset.fresnel);
-    return preset;
-}
 // Big-endian float table at a virtual address of a 64-bit PPU ELF (the decrypted plugin), or empty when out of range.
 std::vector<float> elfFloats(const QByteArray& elf,quint64 address,int count) {
     if(elf.size()<0x40 || !elf.startsWith("\x7f" "ELF"))return {};
@@ -181,17 +164,60 @@ void main(){
     if(!composite_.addShaderFromSourceCode(QOpenGLShader::Vertex,fullscreenVertex) || !composite_.addShaderFromSourceCode(QOpenGLShader::Fragment,composite) || !composite_.link()) {
         qWarning().noquote()<<"ribbon: composite failed:"<<composite_.log();return false;
     }
-    // Presets: LINE1.mnu of the overrides the plugin schedules (boot, then the clock keyframes). A missing file keeps
-    // the day values, or night's for night.
+    // Presets: LINE1.mnu of the overrides the plugin schedules (boot, then the clock keyframes), read at
+    // run time through the shared Materials reader. A missing file keeps the base values below, which
+    // are LINE1.mnu's own day preset (the Preset initializers are that fallback, never the source).
+    Materials& materials=sceneMaterials(assets);
+    QElapsedTimer presetTimer;presetTimer.start();
+    int presetFiles=0;
+    const auto presetFrom=[&](const Materials::Mnu& mnu,const Preset& fallback){
+        Preset preset=fallback;
+        if(!mnu.ok)return preset;
+        const auto get=[&](const char* name,float& out){out=float(mnu.number(QString::fromLatin1(name),out));};
+        const auto get3=[&](const char* x,const char* y,const char* z,QVector3D& out){
+            if(mnu.contains(QString::fromLatin1(x)) && mnu.contains(QString::fromLatin1(y)) && mnu.contains(QString::fromLatin1(z)))
+                out=QVector3D(float(mnu.number(QString::fromLatin1(x))),float(mnu.number(QString::fromLatin1(y))),
+                              float(mnu.number(QString::fromLatin1(z))));
+        };
+        get("DAMPING",preset.damping);get("LENGTH",preset.length);get("TENSION",preset.tension);get("TIMESTEP",preset.timestep);
+        get("PERTURBATION",preset.perturbation);get("END Y",preset.endY);get("END Z",preset.endZ);get("FFD PARAM 1",preset.ffdParam);
+        get3("FFD SCALE1 X","FFD SCALE1 Y","FFD SCALE1 Z",preset.scale1);get3("FFD SCALE2 X","FFD SCALE2 Y","FFD SCALE2 Z",preset.scale2);
+        get3("FFD OFFSET X","FFD OFFSET Y","FFD OFFSET Z",preset.offset);get3("POS X","POS Y","POS Z",preset.pos);
+        get3("ANG X","ANG Y","ANG Z",preset.axis);
+        get("ANG ROT",preset.angle);get("SPACING",preset.spacing);get("BRIGHTNESS",preset.brightness);
+        get("MIPMAP BIAS",preset.mipmapBias);get("FRESNEL",preset.fresnel);
+        return preset;
+    };
     const Preset defaults;
-    const auto preset=[&](const char* name,const Preset& fallback){return readPreset(assets.qglFile("lines",QString("override/%1/LINE1.mnu").arg(name)),fallback);};
-    day_=preset("day",defaults);
-    Preset nightDefaults=defaults;nightDefaults.spacing=408.298f;nightDefaults.brightness=.9f;nightDefaults.mipmapBias=1.75802f;
-    nightDefaults.fresnel=.52f;nightDefaults.perturbation=.1f;nightDefaults.angle=10;nightDefaults.scale2={3.2f,1.2f,3};nightDefaults.ffdParam=-1.83395f;
-    night_=preset("night",nightDefaults);
-    yoake_=preset("yoake",day_);higure_=preset("higure",night_);
-    coldboot1_=preset("coldboot1",day_);coldboot2_=preset("coldboot2",day_);
+    const Materials::Mnu& dayMnu=materials.line1(QStringLiteral("day"));++presetFiles;
+    day_=presetFrom(dayMnu,defaults);
+    // A missing override inherits the clock-day preset (as a preset without a LINE1.mnu inherits the
+    // base in the firmware), rather than a second hardcoded table.
+    night_=presetFrom(materials.line1(QStringLiteral("night")),day_);++presetFiles;
+    yoake_=presetFrom(materials.line1(QStringLiteral("yoake")),day_);++presetFiles;
+    higure_=presetFrom(materials.line1(QStringLiteral("higure")),day_);++presetFiles;
+    coldboot1_=presetFrom(materials.line1(QStringLiteral("coldboot1")),day_);++presetFiles;
+    coldboot2_=presetFrom(materials.line1(QStringLiteral("coldboot2")),day_);++presetFiles;
     current_=coldboot1_;
+    // BACKGROUND.mnu keys 3/4: the line gradient LinesController multiplies the summed lines by. The
+    // values are identical in the base file and every preset the plugin schedules for this layer
+    // (day/night/yoake/higure/coldboot1/coldboot2); black/music_1/welcome change them and this build
+    // never schedules those as a background, so the base read is the running value.
+    {
+        const Materials::Mnu& background=materials.background();++presetFiles;
+        if(background.ok) {
+            colour3_=QVector3D(float(background.number(QStringLiteral("3 RED"),colour3_.x())),
+                               float(background.number(QStringLiteral("3 GREEN"),colour3_.y())),
+                               float(background.number(QStringLiteral("3 BLUE"),colour3_.z())));
+            colour4_=QVector3D(float(background.number(QStringLiteral("4 RED"),colour4_.x())),
+                               float(background.number(QStringLiteral("4 GREEN"),colour4_.y())),
+                               float(background.number(QStringLiteral("4 BLUE"),colour4_.z())));
+        } else {
+            qWarning().noquote()<<"ribbon: BACKGROUND.mnu unavailable ("<<background.source()<<background.error
+                               <<"); using the compiled fallback line gradient";
+        }
+    }
+    sceneNoteMaterials(presetFiles,presetTimer.nsecsElapsed());
     // _UVW (FUN_000493c4): the 8x4x4 FFD node grid, (x/8, y/4, z/4, 0) at texel z*32 + y*8 + x; ffd_shader1 renders
     // it into a 128x1 float target that the plugin reads back.
     std::vector<float> uvw(128*4);
@@ -213,8 +239,8 @@ void main(){
     }
     cloth_.prev=cloth_.pos;
     if(!fromTables)for(int i=0;i<14400;++i)cloth_.step(day_); // the x extent crumples first, then recovers (cloth-sim.ts)
-    // _Stripes (FUN_0004bad0): row k of 4, x in [-.5,.5]: min(1, pow(1.01 - 4x^2, 20 (k/3)^3) * (k/6 + .5)).
-    constexpr int stripeWidth=512; // the plugin's width is a runtime global; 512 resolves the profile
+    // _Stripes (FUN_0004bad0, captured): row k of 4, x in [-.5,.5]: min(1, pow(1.01 - 4x^2, 20 (k/3)^3) * (k/6 + .5)).
+    constexpr int stripeWidth=512; // fit: the plugin's width is a runtime global; 512 resolves the profile
     std::vector<float> stripes(size_t(stripeWidth)*4*4);
     for(int k=0;k<4;++k)for(int i=0;i<stripeWidth;++i) {
         const float f=k/3.f,x=float(i)/(stripeWidth-1)-.5f;
@@ -360,9 +386,9 @@ Ribbon::Preset Ribbon::clockPreset(double dayFraction) const {
 // it (setBootTime).
 Ribbon::BootWeights Ribbon::bootWeights(double t,double stageTwo) {
     BootWeights w;
-    w.toColdboot2=float(1-std::pow(.99,std::min(t,stageTwo)*60));
+    w.toColdboot2=float(1-std::pow(.99,std::min(t,stageTwo)*60)); // captured: measured boot filter
     const double n=std::max(0.,t-stageTwo)*60;
-    constexpr double knee=112,a=1.4e-5,kneeValue=a*knee*knee,kneeSlope=2*a*knee,span=168-knee;
+    constexpr double knee=112,a=1.4e-5,kneeValue=a*knee*knee,kneeSlope=2*a*knee,span=168-knee; // captured: RPCS3 boot replay
     double p=a*n*n;
     if(n>=168)p=1;
     else if(n>knee) {
@@ -432,7 +458,7 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
     encode_->release(2);fresLut_->release(1);stripes_->release(0);lines_.release();
     // 5. Composite onto the target (LinesController: background + lines x gradient).
     gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.glViewport(0,0,pixelWidth,pixelHeight);
-    composite_.bind();composite_.setUniformValue("sum",0);composite_.setUniformValue("colour3",colour3);composite_.setUniformValue("colour4",colour4);
+    composite_.bind();composite_.setUniformValue("sum",0);composite_.setUniformValue("colour3",colour3_);composite_.setUniformValue("colour4",colour4_);
     gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,sum_->texture());
     gl.glBindVertexArray(emptyVao_);gl.glDrawArrays(GL_TRIANGLES,0,3);gl.glBindVertexArray(0);
     gl.glBindTexture(GL_TEXTURE_2D,0);composite_.release();

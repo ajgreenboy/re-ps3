@@ -62,6 +62,9 @@ private:
     };
     bool ready_=false;
     Preset coldboot1_,coldboot2_,night_,yoake_,day_,higure_,current_;
+    // BACKGROUND.mnu's line gradient (keys 3 and 4), read in init through Materials::background().
+    // The initializers are the base file's values, used only when the MNU cannot be read.
+    QVector3D colour3_{.847347f,.846155f,.846448f},colour4_{.92487f,.922603f,.922933f};
     double bootSeconds_=0,bootOverride_=-1,stageTwo_=229/60.;
     Preset clockPreset(double dayFraction) const;
     void advancePresets(double dt,double dayFraction);
