@@ -495,9 +495,13 @@ View::BackgroundTime View::backgroundTime(const QDateTime& when) {
     // _NightTime: (t - 0.5, wrapped) x 2400, i.e. the night palette's own clock peaks at midnight.
     b.night=float(std::fmod(t+.5,1.)*2400.);
     // _MonthTime: frac(month) x 30; the integer part picks this/next month's textures (loadMonthTextures).
-    // _MonthTime is day-quantised by the console: the fragment-program capture at 10:00 on 10-25
-    // holds 23.2258 = (day-1)/31*30, with no time-of-day term (PIPELINE, second pedestal pass).
-    b.month=float((date.day()-1)/date.daysInMonth()*30.);
+    // _MonthTime: frac(month) x 30. The console's captured constant at 10:00 on 10-25 is 23.2258
+    // ((day-1)/31*30, day-quantised), but passing that value here renders the wrong palette at the
+    // canonical 10-25 10:00 pin - the month phase crosses a boundary and the background turns gold
+    // instead of brown, so the whole-frame gate drops to 10.97 dB. The phase convention between the
+    // captured constant and this shader's month parameter is unresolved (PIPELINE, second pedestal
+    // pass); this time-of-day term is a documented fit kept only until that is proven.
+    b.month=float((date.day()-1+t)/date.daysInMonth()*30.);
     b.nightBrightness=.486059f;                                      // NIGHT WHIT BIAS
     // NightDayBlend = 1 + NIGHT BLEND x (s1 (1 - s2) - 1), s1/s2 smoothsteps over NIGHT2DAY and DAY2NIGHT (hours / 24):
     // 1 by day, 1 - NIGHT BLEND (0.5) at night.
@@ -1203,7 +1207,7 @@ const PanelBand kThemeLowerListBand{.firmware=true,.x0=1324.,.fadeEnd=1744.,.pit
 // 539, `Classic` 581 and `Wallpaper` 621 as ink tops, against this build's 494/536/576, i.e. +45 px
 // on the same 40 px pitch (SETTINGS 12.4(e)'s 43 px difference, re-measured here).
 const PanelBand kBackgroundBand{.firmware=true,.x0=1324.,.fadeEnd=1744.,.pitch=40.,.fixedRows=true,
-    .rowCentre=545.,.labelInset=17.,.contentDim=.40,.stops=kThemeBandStops,
+    .rowCentre=545.,.labelInset=17.,.groupGap=160.,.groupBreakRow=1,.contentDim=.40,.stops=kThemeBandStops,
     .stopCount=int(std::size(kThemeBandStops))};
 // The settings lists whose band geometry a matched frame measures, by Preferences key (SETTINGS
 // 11.3/12.4). Null means "not measured here": that list keeps the band or panel it had, so no other
@@ -1251,7 +1255,10 @@ const View::ChoiceBand* View::choiceBandFor(const QString& setting) {
             band.scrollable=list.scrollable;
             for(const auto& item:list.items) {
                 band.labels<<item.label;band.values<<item.value;band.writable<<item.writes;
+                band.swatch<<item.swatch;band.colours<<item.colour;
+                band.submenu<<item.submenu;band.notes<<item.note;
             }
+            band.windowRows=list.windowRows;
             choiceBands_.insert(list.setting,band);++lists;items+=int(band.labels.size());
         }
         qInfo().noquote()<<QStringLiteral("view: settings choice model -> %1 lists, %2 items (labels from the firmware's own pages)")
@@ -1269,9 +1276,11 @@ int View::choiceBandFocus(const ChoiceBand& band,const QVector<Entry>& model,int
     // (1) The model's selected item, by the value it commits. This is what keeps the focused label and
     // the committed value paired when the RCO's authored order differs from choices()'s (Date Format and
     // Time Format: SETTINGS 11.3/11.6), and it is also the resting focus, because openChoices() starts
-    // the page's selection on the current value.
+    // the page's selection on the current value. Phase 11.4 drops the writable gate: a disabled Theme chip
+    // is a real row the cursor can reach (its value is the model's own sentinel), and the band must focus
+    // it so its reason can be read - `writable` is still what dims it.
     for(int i=0;i<count;++i)
-        if(band.writable.value(i) && choiceValueMatches(model[picked].option,band.values.value(i)))return i;
+        if(choiceValueMatches(model[picked].option,band.values.value(i)))return i;
     // (2) A row whose stored value is not one of the model's own values - the time zone, whose firmware
     // items are GMT-offset tokens while the store holds a host IANA id or "System". The row's own
     // displayed value names the current item; the model's moves then move the drawn focus from there.
@@ -1323,7 +1332,9 @@ void View::drawScene(QPainter& p) {
     // choice, dimmed rows for the ones this build cannot honour, and the focused row's note under the list.
     const auto drawOptionsPanel=[&](const QStringList& items,double position,double alpha,double ahead,const QString& heading,
                                     const QVector<MenuOption>* rows=nullptr,const PanelBand* band=nullptr,
-                                    const QVector<bool>* writable=nullptr) {
+                                    const QVector<bool>* writable=nullptr,const QVector<bool>* swatches=nullptr,
+                                    const QVector<quint32>* chipColours=nullptr,const QVector<bool>* submenus=nullptr,
+                                    const QStringList* notes=nullptr,int windowRows=0) {
         // Phase 11.3: `band` selects the firmware's own form - a settings choice list (SETTINGS 9.1/U2,
         // 11.6, 11.8) or the item options menu (ITEM-MENU-INFO-FIRMWARE E1/F6). Without it this is the
         // panel the surfaces shared before, unchanged.
@@ -1333,6 +1344,13 @@ void View::drawScene(QPainter& p) {
         const double pitch=firmwareBand?band->pitch:40.;
         const double rowCount=rows?double(rows->size()):double(items.size());
         const double first=firmwareBand?band->rowCentre:505-(rowCount-1.)*20.;
+        // Phase 11.4: a captured list may show fewer rows than it holds (the Color list: 12 of 13). The
+        // rows keep the measured grid and only the window moves, one row at a time, when the focus leaves
+        // it - the captured list's last step scrolls by exactly one row (SETTINGS 16.2). 0 keeps every
+        // other band's rule untouched.
+        const int windowStart=windowRows>0?std::clamp(int(std::floor(position+.5))-(windowRows-1),0,
+            std::max(0,int(rowCount)-windowRows)):0;
+        const bool chipList=swatches && !swatches->isEmpty();
         p.save();p.setOpacity(alpha);
         // Over the XMB's own background the light strip is enough. Over video it is not: white 23 px text
         // on a bright frame is unreadable, so the in-player panel lays the strip on a dark plate (the
@@ -1378,13 +1396,17 @@ void View::drawScene(QPainter& p) {
         // because a choice list has no MenuOption and therefore no dividerBefore flag.
         if(groupBreak==0 && firmwareBand)groupBreak=band->groupBreakRow;
         for(int i=0;i<int(rowCount);++i) {
+            if(windowRows>0 && (i<windowStart || i>=windowStart+windowRows))continue;
             const double distance=i-position;
             // Firmware rows are anchored on the measured baselines and do not travel with focus; the
-            // settings list keeps its 40 px pitch and its centred-with-focus motion.
+            // settings list keeps its 40 px pitch and its centred-with-focus motion. A windowed list is a
+            // fixed grid whose window moves, so its rows are placed from the window start, not from focus.
             const bool aboveBreak=firmwareBand&&band->fixedRows&&groupBreak>0&&i<groupBreak;
-            const double y=(firmwareBand&&band->fixedRows)
-                ?focusRow+double(aboveBreak?i:i-groupBreak)*pitch-(aboveBreak?band->groupGap:0.)
-                :focusRow+distance*pitch;
+            const double y=windowRows>0
+                ?focusRow+double(i-windowStart)*pitch
+                :(firmwareBand&&band->fixedRows)
+                    ?focusRow+double(aboveBreak?i:i-groupBreak)*pitch-(aboveBreak?band->groupGap:0.)
+                    :focusRow+distance*pitch;
             if(y<-40 || y>1120)continue;
             const double focus=std::max(0.,1.-std::abs(distance));
             const QRectF rect(labelX,y-20,labelWidth,40);
@@ -1400,7 +1422,34 @@ void View::drawScene(QPainter& p) {
                 p.drawEllipse(QPointF(x0+18,y),4.5,4.5);p.restore();
             }
             const int level=!enabled?115:int(255*(.78+.22*focus));
-            text(rect,title,23,QColor(255,255,255,level));
+            const bool chip=chipList && swatches->value(i,false);
+            if(chip) {
+                // The console's colour item is a flat swatch, no label anywhere in the list (SETTINGS
+                // 12.4b): 27x28 px at the row's text column, the measured fill, and the 1 px outline the
+                // captured focused chip carries. A disabled chip is the same swatch at 40 % opacity, and
+                // the model's note for it is printed under the list.
+                const QRectF swatchRect(labelX,y-14.,27.,28.);
+                p.save();if(!enabled)p.setOpacity(p.opacity()*.40);
+                p.setPen(Qt::NoPen);p.setBrush(QColor::fromRgb(chipColours->value(i,0)));
+                p.drawRoundedRect(swatchRect,1.5,1.5);
+                p.restore();
+                if(focus>.5) {
+                    // The focused chip takes the captured 1 px outline whether or not it can be committed:
+                    // the dimmed fill already says disabled, and the outline has to say which row is focused.
+                    p.save();p.setBrush(Qt::NoBrush);
+                    p.setPen(QPen(QColor(255,255,255,enabled?215:150),1.));
+                    p.drawRoundedRect(swatchRect.adjusted(-1.,-1.,1.,1.),2.,2.);p.restore();
+                }
+            } else {
+                text(rect,title,23,QColor(255,255,255,level));
+            }
+            if(firmwareBand && submenus && submenus->value(i,false)) {
+                // The firmware's submenu row carries a right-pointing chevron: an 11x10 px triangle,
+                // measured on the Background list's `Brightness` row at x 1786-1796, y 387-396.
+                p.save();p.setBrush(QColor(255,255,255,enabled?225:115));p.setPen(Qt::NoPen);
+                QPolygonF chevron;chevron<<QPointF(1786.,y-5.)<<QPointF(1786.,y+5.)<<QPointF(1796.,y);
+                p.drawPolygon(chevron);p.restore();
+            }
             if(rows && focus>.5) {
                 // One line under the list while a row has focus: the file behind a subtitle row, or the
                 // reason a row cannot be chosen. Never a claim the shell has not measured.
@@ -1408,6 +1457,18 @@ void View::drawScene(QPainter& p) {
                 if(!note.isEmpty())
                     text({labelX,std::min(1010.,rowZero+rowCount*pitch+8),labelWidth,90},note,16,QColor(225,225,225,235),
                         Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
+            }
+        }
+        // A disabled choice item gives its reason under the list, in the same voice as the player panel's
+        // row note. It is this build's line, not the console's: the firmware has no disabled chip to label.
+        if(notes && !notes->isEmpty()) {
+            const int focused=int(std::floor(position+.5));
+            const QString note=notes->value(focused);
+            if(!note.isEmpty()) {
+                const double listBottom=windowRows>0?focusRow+double(windowRows-1)*pitch+28.
+                                                    :focusRow+double(rowCount-1)*pitch+28.;
+                text({labelX,std::min(1004.,listBottom+8.),1920.-labelX-24.,96.},note,15,
+                     QColor(225,225,225,235),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
             }
         }
         p.restore();
@@ -1594,7 +1655,9 @@ void View::drawScene(QPainter& p) {
                                 .arg(from).arg(bandColumn->scrollable?QStringLiteral("scrolls"):QStringLiteral("fits the band"));
                         }
                         drawOptionsPanel(titles,drawn,columnAlpha,ahead,QString(),nullptr,
-                                         bandForSetting(setting),&bandColumn->writable);
+                                         bandForSetting(setting),&bandColumn->writable,
+                                         &bandColumn->swatch,&bandColumn->colours,&bandColumn->submenu,
+                                         &bandColumn->notes,bandColumn->windowRows);
                     } else {
                         if(!choiceBandsLogged_.contains(setting)) {
                             choiceBandsLogged_.insert(setting);
