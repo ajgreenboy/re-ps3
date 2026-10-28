@@ -495,7 +495,9 @@ View::BackgroundTime View::backgroundTime(const QDateTime& when) {
     // _NightTime: (t - 0.5, wrapped) x 2400, i.e. the night palette's own clock peaks at midnight.
     b.night=float(std::fmod(t+.5,1.)*2400.);
     // _MonthTime: frac(month) x 30; the integer part picks this/next month's textures (loadMonthTextures).
-    b.month=float((date.day()-1+t)/date.daysInMonth()*30.);
+    // _MonthTime is day-quantised by the console: the fragment-program capture at 10:00 on 10-25
+    // holds 23.2258 = (day-1)/31*30, with no time-of-day term (PIPELINE, second pedestal pass).
+    b.month=float((date.day()-1)/date.daysInMonth()*30.);
     b.nightBrightness=.486059f;                                      // NIGHT WHIT BIAS
     // NightDayBlend = 1 + NIGHT BLEND x (s1 (1 - s2) - 1), s1/s2 smoothsteps over NIGHT2DAY and DAY2NIGHT (hours / 24):
     // 1 by day, 1 - NIGHT BLEND (0.5) at night.
