@@ -343,7 +343,7 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
-        { "name": "chip column", "crop": [1324, 470, 420, 520], "required": true, "contentDiffers": true, "contentDiffersReason": "reference draws 12 unlabelled colour chips; the native list draws six labelled colours in its own panel, so the chip content has no native counterpart" }
+        { "name": "chip column", "crop": [1324, 470, 420, 520], "required": true, "contentDiffers": true, "contentDiffersReason": "reference draws 12 unlabelled colour chips; the native list draws the same 12 chips (Original plus eleven months) but labels only the non-Original ones, so the chip fill is comparable while the label content has no console counterpart" }
       ]
     },
     {
@@ -577,7 +577,7 @@
       "trace": [{ "pattern": "continue watching: nothing to continue" }],
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "dialog", "crop": [240, 190, 1440, 700], "required": true }
+        { "name": "dialog", "crop": [240, 190, 1440, 700], "required": true, "contentDiffers": true, "contentDiffersReason": "the reference frame is the console delete-confirm box; this state deliberately captures the inline empty-state line, so the plate, answers and footer are absent by construction - dialog-box is the state that compares the box itself" }
       ]
     },
     {
@@ -769,7 +769,7 @@
       "route": { "column": "psn", "stages": [{ "catalogueId": "signin" }] },
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "dialog", "crop": [240, 190, 1440, 700], "required": true }
+        { "name": "dialog", "crop": [240, 190, 1440, 700], "required": true, "contentDiffers": true, "contentDiffersReason": "the reference frame is the console delete-confirm box; this state deliberately captures the inline empty-state line, so the plate, answers and footer are absent by construction - dialog-box is the state that compares the box itself" }
       ]
     },
     {
@@ -799,6 +799,26 @@
       },
       "captures": false,
       "regions": [{ "name": "frame", "crop": [0, 0, 1920, 1080] }]
+    },
+    {
+      "id": "dialog-box",
+      "title": "Message dialog (two-button confirm box measured against the console delete-confirm)",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "The box surface is measured from the captured console frame (audit/DIALOGS-FIRMWARE.md section 10); this state drives the only native route that raises it.",
+      "native": { "reachable": "yes", "how": "Video column, Continue Watching with a seeded resume record, ENTER, TRIANGLE, DOWN x2, ENTER (the Remove confirmation)" },
+      "dataSeed": "out/native-reference/phase5/resume-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini"],
+      "route": { "column": "video", "stages": [{ "catalogueId": "continue" }], "preGrab": ["TRIANGLE", "wait", "DOWN", "wait", "DOWN", "wait", "ENTER", "wait", "wait"] },
+      "expect": { "category": "video", "depth": 1, "pageKind": "continueWatching", "entryCount": 1 },
+      "trace": [{ "pattern": "continue watching: page opened with 1 row.*" }],
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "box plate", "crop": [482, 452, 319, 40], "required": true },
+        { "name": "box answers", "crop": [1150, 560, 420, 60], "required": true },
+        { "name": "box footer", "crop": [600, 872, 760, 55], "required": true }
+      ]
     }
   ]
 }
