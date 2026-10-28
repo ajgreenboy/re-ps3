@@ -778,7 +778,7 @@ QString OskLayout::describe() const {
     lines << QStringLiteral("  caret            %1,%2,%3 height %4 shaft %5 serif %6 blink %7 ms (%8)")
                  .arg(caret.colour.red()).arg(caret.colour.green()).arg(caret.colour.blue())
                  .arg(caret.height).arg(caret.shaftWidth).arg(caret.serifWidth).arg(caret.blinkMilliseconds)
-                 .arg(caret.blinkTraced ? QStringLiteral("traced") : QStringLiteral("F, not traced"));
+                 .arg(caret.blinkTraced ? QStringLiteral("traced") : QStringLiteral("traced from the caret burst"));
     lines << QStringLiteral("  dim              %1,%2,%3 alpha %4")
                  .arg(bands.dim.red()).arg(bands.dim.green()).arg(bands.dim.blue()).arg(bands.dimAlpha, 0, 'f', 2);
     lines << QStringLiteral("  focus            row %1, column %2 (1-based column %3) = %4")

@@ -113,8 +113,11 @@ struct OskCaret {
     int markerWidth = 14;
     int markerHeight = 20;
     int markerInset = 12;
-    int blinkMilliseconds = 500;
-    bool blinkTraced = false;   // F: the capture rig tops out near 5 fps (audit 5.2)
+    // One blink phase, not the full period: the 2026-10-28 capture batch measured the caret lit for
+    // 495/504/498 ms and dark for 442/431 ms (period ~936 ms, duty ~53%), and the draw alternates
+    // phases every blinkMilliseconds, so the mean phase is ~468 ms.
+    int blinkMilliseconds = 468;
+    bool blinkTraced = true;   // capture batch 2026-10-28, audit/OSK-FIRMWARE.md section 13.1
 };
 
 struct OskMask {
