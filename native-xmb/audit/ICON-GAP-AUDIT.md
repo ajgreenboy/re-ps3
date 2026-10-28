@@ -553,3 +553,112 @@ reference covers them, which is why the gate is unchanged.
 5. The audit inventory is this document's own B/C rows (abbreviations included), so the command can
    contradict the document - and it does, in 9.5 - instead of quietly using a corrected list.
 
+---
+
+## 10. First icon-art wave - what landed (2026-10-28, later pass)
+
+Scope: the six items of the first icon-art wave. Source writes: `native-xmb/src/view.cpp` only, plus this
+section. The Users asset name lives in `shell.cpp`, the page hint row in `dialogs.cpp`, and both are out of
+this pass's fence, which is why two of the six items could not land. Section 9 above is the parallel lookup
+pass's work; its pair-based resolution covers every ask here (all four new pairs resolve in their requested
+container and no override rule fires), and nothing in this wave changed a lookup.
+
+Every crop number is `work/ab-compare.ts` on 1920x1080 pairs captured with the canonical clocks
+(`--render-clock 30 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00`); the frames are
+kept in `out/iconwave/` (`before-*.png`, `after-*.png`) with the two signal pairs (`band-alpha-*.png`,
+`tri-mask-*.png`) and a three-panel crop sheet (`tri-sheet.png`) beside them. No firmware name in this wave
+failed to resolve.
+
+| # | Item | Firmware object | Outcome | Crop before -> after (PSNR dB / SSIM) |
+|---|---|---|---|---|
+| 1 | Options menu Square glyph | `system_plugin:tex_rectangle` 30x30 | **not landed** - no row to carry it | n/a, no draw site |
+| 2 | Indicator slots | `xmb_plugin_normal:tex_indi_message` / `_chat` / `_plus` + avatar | **gated, never lit**; avatar refused | 15.05 / 0.7667 -> 15.05 / 0.7667 (frames byte-identical) |
+| 3 | Users category icon | `qgl/icontex:1n` | **landed** | 14.48 / 0.6607 -> 22.77 / 0.9496 |
+| 4 | Options band fill | `system_plugin:tex_optionmenu_bg` 536x216 | **landed** | 40.05 / 0.9866 -> 41.62 / 0.9887 |
+| 5 | Page left triangle | candidate `system_plugin:tex_arrow_left`; actual `explore_plugin_full:tex_arrow_anim` cell 0 | **candidate refused, actual object landed** | 6.70 / 0.0254 -> 6.92 / 0.0911 (frame crop); glyph fit MSE 90.8 -> 2.44 |
+| 6 | `tex_triangle` in the page hint row | `system_plugin:tex_triangle` 30x30 | **not landed** - no frame shows it | n/a, no draw site |
+
+**1. `system_plugin:tex_rectangle` - refused.** The row it belongs to does not exist in this build.
+`options-open-01.png` shows the Square glyph as a 13x13 pink outline at x 1517-1529, y 346-358, inline 14 px
+after the "Group Content" label's ink (row ink 341-362, label ink 1336-1503). This build has no Group
+Content row: `shell.cpp:1786-1791` records the decision ("Group Content has no native store, so it stays out
+rather than being drawn inert (F3)"), and `msg_folder_class` survives only as the dump probe at
+`shell.cpp:1860`. The band draws labels and a hand-built submenu chevron; the only glyph+label hint geometry
+in the source is `View::drawHintRow` (`dialogs.cpp:466`), which is the message surfaces' footer, not the
+menu. A row means editing `shell.cpp`, outside this fence, so the glyph has no draw site. Note for whoever
+adds the row: the frame's glyph ink is 13 px, not the 30 px object rect, and the gap is 14 px.
+
+**2. The four indicator slots - gated, never lit; the avatar refused.** The row is now one drawing rule
+(offset from the clock ink's right edge 1760, the 32x32 slot at y 88, the RCO texture, and an `active`
+state), with the two existing offsets unchanged and the three missing ones added: -244 (x 1516), -274
+(1486), -376 (1384, avatar) and -410 (1350). No state in this build can light message, chat or plus: there
+is no unread-message store (the Friends column's Message Box row is the firmware's empty state), no in-XMB
+text-chat session, and no PlayStation Plus membership, so `active` is false for all three by construction
+and the row draws exactly what it drew before. The avatar slot is refused rather than drawn: the RCO object
+carries `image=null` (the firmware resolves the signed-in account's avatar at run time), no frame in the
+local corpus shows the slot lit, and no rect or mask for an avatar is evidenced - the 32 px slot is the
+row's, not the art's. Result: the info-bar crop (1329,75,591,58) scores 15.05 dB / 0.7667 on both sides,
+and every root capture in `out/iconwave/` - before the wave, after it, and after the last change - is
+byte-identical (SHA256 3823A9D4406567AF3E5A70614EBB180973F90E0B39C6563AE6DEB077261076AF), which is the
+strongest statement that nothing moved.
+
+**3. Users category icon - landed.** B1's shape claim was wrong while its verdict was right:
+`explore_plugin_full:user_tex_load` is not a "loading" glyph - it is the *same* house-with-a-face art, but
+exported as a flat white mask (RGB 255 on every covered pixel, alpha 226 max, 90x90), which this layer drew
+as a white sticker. The console draws that shape through the icon program, i.e. as brass glass, so the asset
+is `qgl/icontex:1n` (128x128 normal map, decodes, no other reference) - not "a faint blob". The layer now
+maps the row to `qgl/icontex:1n` at the one place the category row draws; the shell's asset name is out of
+this fence, and a theme icon still wins. Crop 490,210,160,110 against `c-user.png`: 14.48 dB / 0.6607
+before, 22.77 dB / 0.9496 after (+8.29 dB, +0.289 SSIM). The focused quad (565,280,167.33) and the category
+row are untouched; the canonical gate below proves the settled root frame did not move (the Users column is
+off that frame's visible bar, and the root PNGs are identical anyway).
+
+**4. Options band fill - landed.** The four-stop fit is replaced by `system_plugin:tex_optionmenu_bg` for the
+item menu only (`kOptionsBand`'s new `plate*` fields); every settings band keeps its own measured stop
+profile, because those are different planes (x 1260/1324, their own curves). Measured model: the texture is
+drawn 1:1 horizontally at x 1320 (536 px for 536 texels - a least-squares fit of the frame's y=100 profile
+gives exactly 1.000 px/texel and x0 1320, residual MSE 0.83 luma), its 216 rows are stretched over the full
+1080 height, and the object alpha is 0.33 (texture peak 207 * 0.33 = 68 against the frame's 68.3 where the
+plate sits on a 6.7 page; 46 at x 1320 * 0.33 = 15.2 against the measured 15.3). The band geometry (x0
+1320, rows on the 38 px pitch anchored at 552, label inset 14, page dim 0.545) is unchanged.
+Comparison: the console's band row sits on black, the native's on the day background, so both sides are
+reduced to the band's own alpha before scoring - the console's absolute crop (1300,140,560,140) against the
+native's (open - root) delta divided by (255 - root luma), with the console pair being `options-open-01.png`
+and its own band-less `options-state-before.png`. 40.05 dB / 0.9866 before, 41.62 dB / 0.9887 after; the
+profile MSE over the same crop is 5.5 -> 4.2 luma^2. The gain is modest because the curve it replaces was
+fitted to this very frame; what changed is that the curve is now the firmware's own plate, not a 22-stop
+sample of it.
+
+**5. The page's left triangle - the named candidate refused, the frame's actual object landed.** Both
+candidates were fitted to the frame's glyph by least squares over its 60x50 luma patch
+(`display-page-rest.png`, background 4.0, integer placements): `system_plugin:tex_arrow_left` (31x29, ink
+27x23) leaves MSE 90.76 (RMS 9.5 luma), because the frame's ink is 24x26 - the object is a visibly
+squatter triangle. `explore_plugin_full:tex_arrow_anim` is a 30x420 sheet of 14 left-arrow cells, and cell
+0 drawn 1:1 as a 30x30 quad at (430,490) leaves MSE 2.44 (RMS 1.6), reproducing the silhouette, the
+apex-bright/base-dim gradient and the position. The layer now draws cell 0 there at alpha 0.89 (the
+least-squares gain; 1.0 puts the peak at 248 against the frame's 238). The drawn glyph's ink in the native
+frame is x 432-454, y 493-515 against the frame's x 432-455, y 492-517. Crop 405,470,80,62 against
+`display-page-rest.png`: 6.70 dB / 0.0254 for the font U+2039 fallback, 6.92 dB / 0.0911 for the object
+(SSIM x3.6; the crop is background-dominated because the native frame carries the ribbon there and this
+console frame does not, so the glyph fit above is the meaningful number). C13's "candidate tex_arrow_left,
+identity F" is thereby resolved: the object is not `tex_arrow_left`.
+
+**6. `system_plugin:tex_triangle` in the page hint row - refused.** The row is `View::drawHintRow`
+(`dialogs.cpp:466`), outside this pass's fence, and its call sites pass Cross/Circle only
+(`dialogs.cpp:258,388-389,415,462`). No frame in the corpus shows a Triangle hint on a page or dialog
+footer: `information-page-01.png` reads "Circle Back", `k-create-dialog.png` reads "Cross Edit / Circle
+Back", and `options-open-01.png` has no bottom hint row at all (the band's rows are the whole menu). The
+item's own condition - the hint row omitting a Triangle the console shows - is therefore false, and drawing
+one would be this build's invented hint.
+
+**Verification.** Build `C:\dev\out\native-iconwave1`. Canonical gate `work/ab-layers.ts --capture --exe
+C:/dev/out/native-iconwave1/re-ps3-native.exe`: PASS 6/6 with the text-presence line (1668 bright pixels in
+the clock crop, minimum 900) and every layer delta +0.00 - frame 18.76/0.8360, top background 21.06/0.9434,
+category icon row 21.62/0.9062, item label row 11.99/0.3895, clock text 11.41/0.4528, info bar 15.05/0.7667.
+The rest frame did not move: captures of the same pinned state before the wave, after it and after the last
+change are byte-identical (SHA256 3823A9D4...). Determinism: two `--render-clock 20` captures are hash-equal
+for the root (37E2B590...) and for the options state (B79B699F...). No measured geometry or colour that an
+existing audit confirms was changed - the band rows, the info-bar plate rect, the indicator offsets, the
+category quad and the triangle's rect are the values those documents already carry.
+
+
