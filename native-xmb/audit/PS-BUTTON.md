@@ -171,3 +171,150 @@ so pad input still reaches the view. A real keyboard key in the same run is trac
   as `source=keyboard`.
 - The gate withholds PS from `PsWatcher`, so a physical PS press during a scripted run does nothing to the
   UI (it is logged). Use the `ps` / `pshold` tokens for scripted PS captures.
+
+## Measured pass, 2026-10-28: the entries region and the tap plate
+
+The corpus's first firmware frames for this surface (batch `rpcs3-gaps-2026-10-28`, section 16 of
+`PARITY-SCORECARD.md`) gave the two composites their first Tier B numbers and named the causes. This pass
+fixed them against the frames themselves, not against the scorecard's summary of them, and re-scored on
+`C:/dev/out/native-psmenu/re-ps3-native.exe` (sha256 `DE4378BB9EB746BC2723E2D3F38D0AAE054709EAE61836BFE544C3A5155F6953`).
+The references are `out/parity-references/ps-menu__original__day__1080p.png` (byte-identical to
+`frames/a21-ps-menu-1.png`) and `out/parity-references/info-indicator__original__day__1080p.png` (= `frames/a17-tap-1.png`).
+
+### 1. Two corrections to the record before anything was changed
+
+**The entries pitch is 40 px, not 43.** SCORECARD 16.5 read the threshold-88 band tops (511 and 554) as the
+pitch. Those tops are not the same feature: the focused row's bloom raises two rows above its cap, so its
+band starts at 511 while its glyphs start at 514. Cross-correlating the shared prefix "Turn Off the " over
+x 831-958 gives a maximum at a 40 px shift (cosine 0.971 at 40, 0.919 at 39, 0.807 at 43), and the cap tops
+of the two 'T' glyphs are 514 and 554 at threshold 230. The native's pitch was already 40; only its offset
+was wrong, which is why the block read 3-6 px high. Applying 43 would have moved the rows apart.
+
+**The entries are left-aligned, and the focused row is larger.** Both rows' ink starts at x 831/832, so the
+two rows are not centred on the same axis. The shared prefix "Turn Off the " measures 156 px on the focused
+row and 146 px on the unfocused one, and their caps are 18 px and 17 px: the selected entry is one size
+larger (~6.8%), not merely brighter. The unfocused row is white (255 core), not the 160 grey this build drew.
+
+### 2. The PS menu, measured (1920x1080, `a21-ps-menu-1.png`)
+
+| element | measured |
+|---|---|
+| clock | ink x 1613..1802, y 166..185 (the menu's own clock, not the info bar's y 94..115 position) |
+| header rule | 1 px at y 199, full width, luma 175 over black |
+| entries | left edge 831; focused ink 831..1072, cap 514..531, descender to 537; unfocused 831..1088, 554..571 (threshold 150) |
+| pitch | 40 px (see 1) |
+| focus bloom | 106 luma 3 px above the cap, 59 at 6 px, 27 at 9 px, 10 at 12 px -> Gaussian sigma ~5 px |
+| slot numbers | x 137-141 / 180-188 / 223-232 / 267-277, y 805-819 |
+| slots | 17x17 at x 132 / 176 / 221 / 265, y 828-844; active RGB (160,13,13), inactive (30,30,30) |
+| `Controller` | ink x 311..421, y 803..821; pad glyph x 448..478, y 804..825; `1` x 496..502, y 805..822 |
+| `Charge Level` | ink x 311..457, y 843..865 (descender); dash x 484..492, y 853..855 |
+| panel ink rect | x 132..502, y 803..865 |
+| footer rule | 1 px at y 880, full width, luma 175 |
+| legend | X x 726..743, `Enter` x 762..814, O x 1155..1174, `Back` x 1192..1240, all y 897..916 |
+
+The panel was at y 675-739 (slots 682-702, labels 675-739). It is now drawn at the console's rects above:
+labels at x 311 (size 24), numbers above the slots, the pad glyph between `Controller` and `1`, the charge
+dash centred on x 488, the slots at 17 px with the measured colours. The footer legend moved from x 856/1010,
+y 850-890 to the measured x 726/1155, y 897-916, and the two full-width rules were added.
+
+**The catalogue's `ps menu footer` crop does not contain the footer.** `[140,650,600,130]` is y 650-780;
+the console's panel is y 803-865 and its legend y 880-916. With the panel now where the console has it, both
+sides are black in that crop and the region scores Infinity / 1.0 - an honest result, not agreement. The
+exact rects (reported for a future catalogue change, which this pass's fence does not allow):
+panel `[120,790,400,90]` (ink x 132-502, y 803-865), legend `[700,875,560,50]` (ink x 726-1240, y 880-916).
+
+### 3. The tap indicator: the plate, and why it had never appeared
+
+**The plate.** The console frame's plate is a rounded box at **x 1191..1324 (134 wide), y 81..126 (46 tall)**,
+corner radius ~4 px, flat RGB **(53,49,41)** in the settled frame (samples (1195,95), (1255,95), (1310,105)
+all read the same). There is no separate border or drop shadow beyond one anti-aliased edge pixel. Its
+contents: pad glyph ink x 1200..1229, y 94..115; `1` x 1239..1245, y 95..112; `-` x 1294..1302, y 105..107.
+SCORECARD 16.5's "plate at x 1185-1310, y 90-125" is not the frame's edge (it is a dark-pixel subset
+measured at a lower threshold); the frame's own edges are the numbers above and are what the build draws.
+The plate is drawn opaque at the measured colour: the fill is flat to under a level across a background that
+varies by ~3 levels behind it, so any alpha left in the settled frame is below the frame's own quantisation,
+and the fade is the measured envelope below.
+
+**Why no plate had ever been seen.** The `ps` script token never reached the tap handler. `PsWatcher::poll()`
+gets no HID sample while the pad gate is on and deliberately does not treat a missing sample as a release
+("a controller dropout is not a release"), so the injected release was invisible and the watcher's 1 s rule
+fired instead. The probe (`C:/dev/out/psfix/tap-probe-ps.log`, 2026-10-28) records it exactly:
+
+    script: token ps (tap)
+    script: PS press injected
+    script: PS release injected
+    hold after 1001 ms
+    event: hold ...
+    event: system menu opened rows=2 ...
+
+The parity route grabs 300 ms after the token and quits at 600 ms, i.e. before the 1001 ms hold, which is
+why every previous capture measured an empty indicator and why the Tier C evidence never noticed: there was
+no tap line to miss. The token now drives the tap handler the watcher would call, at the press instant
+(`View::replayPsTap`, view.cpp; `ps_watcher.cpp` is outside this pass's write fence). A real pad's tap still
+goes through the watcher, and `pshold` still does.
+
+**Timing, measured.** The console burst (`burst/info-indicator-tap/`, MANIFEST 4) has PS pressed at 100 ms
+capture time: the plate starts 155 ms after the press, is at full opacity 66 ms later, stays at full luma
+from 321 ms to 2322 ms (2001 ms), and is back to the background 66 ms after that (2288 ms after the press;
+2.39 s in capture time). The build implements exactly that envelope (`View::psHudOpacity`: delay 155,
+fade 66, hold 2001, fade 66) and publishes it in the UI-layer signature so the cached layer cannot freeze
+the plate. The trace below is the implementation's own frame trace (`XMB_FRAME_TRACE`) on a run whose tap
+line reads `at=5041 ms`; the UI layer rebuilds only when the opacity changes, so the bursts are the
+envelope:
+
+| interval | rebuild frames | meaning |
+|---|---|---|
+| +3 ms | 1 | the tap frame, opacity 0 (no plate drawn yet) |
+| +157..+222 ms | 13 | fade in, 66 ms |
+| nothing | 0 | the 2001 ms hold (plate on screen, layer cached) |
+| +2221..+2286 ms | 14 | fade out, 66 ms |
+
+A grab at +2900 ms has **0 dark pixels** in the plate rect; the parity grab at +300 ms has the plate at
+RGB (53,49,41) and 5,535 dark pixels in it. Because the grab lands inside the 2 s full-opacity hold, the
+capture is deterministic: the plate is at opacity 1, not at a point on a fade.
+
+### 4. Scores, before and after (same catalogue crops, `work/ab-compare.ts` = `work/parity.ts` metrics)
+
+| state / region | before | after | budget | now |
+|---|---:|---:|---|---|
+| ps-menu / `ps menu entries` | 19.39 dB / 0.9396 | **30.89 dB / 0.9857** | 26.0 / 0.95 | PASS (+4.89 dB over budget) |
+| ps-menu / `ps menu footer` | 18.54 / 0.8914 | **Infinity / 1.0000** | 18.0 / 0.88 | PASS (both sides black; see 2) |
+| ps-menu / frame | 22.37 / 0.9583 | **28.82 / 0.9918** | 18.0 / 0.88 | PASS |
+| info-indicator / `controller indicator` | 16.83 / 0.7718 | **22.37 / 0.9277** | 18.0 / 0.88 | PASS |
+| info-indicator / frame | 17.97 / 0.8243 | 18.02 / 0.8257 | 18.0 / 0.88 | **FAIL** (SSIM 0.8257) |
+| info-indicator / `info bar` (not gating) | 14.48 / 0.7644 | 14.48 / 0.7644 | - | FAIL |
+
+Runs: before `out/parity/run-20261028-081050` (scorecard `scorecard-20261028-081124`), after
+`out/parity/run-20261028-082434` (scorecard `scorecard-20261028-082507`). Pins are the corpus defaults
+(`uiClock 2026-10-25T12:32:00`), so the clock strings differ from the references' `10/28 10:0x` plates by
+construction; neither gating region contains the clock.
+
+**What still differs in `ps menu entries`** (30.89 dB): 88.5% of the remaining squared error is in the
+focused row's band. The unfocused row is within 1 px on every edge (x 832..1087 vs 831..1088, y 554..571);
+the focused row's cap matches (513..537 at threshold 150) but its advances are ~1.5% short - its words start
+at 831/892/935/984 against the console's 831/895/939/987, so "System" ends 4 px left. Two smaller terms: the
+bloom's outer tail is ~2 px narrower (luma 16 vs 27 at 9 px above the cap), and the glyphs are FreeType
+coverage against the console's PAF rasterisation. The panel, clock, rules and legend are outside this crop.
+
+**What still differs in `controller indicator`** (22.37 dB): the plate itself matches (rect, colour, corner
+radius, and the three content boxes within 1 px); the region's mean luma is 80.8 native against 66.7
+console because the XMB background behind and beside the plate is this build's day-wave render, not the
+console's. The plate is ~5,800 px of a 20,400 px crop; the background is the rest. The pad glyph is 31x20
+against the console's 30x22 (`tex_controller`'s visible bounds have a 1.55 aspect, the console's glyph 1.36),
+one pixel each way, and the `1` sits 1 px right (1240..1246 vs 1239..1245).
+
+**info-indicator's frame gate** is still the whole-frame surface (background, band, clock), not this
+indicator: its before/after is 17.97 -> 18.02 dB, and the SSIM budget (0.88) is above what the canonical
+root frame reaches at all (0.8225). The plate cannot move a 2.07 Mpx frame by more than a few hundredths;
+the state passes its *region* gate, which is the claim this surface owns.
+
+### 5. Gate and fence
+
+`work/ab-layers.ts --capture --exe C:/dev/out/native-psmenu/re-ps3-native.exe`: **PASS 6/6** layers within
+budget, with the text-presence line `1677 bright pixels in the clock crop (minimum 900) PASS`; frame
+18.48 / 0.8327. No named state needed re-baselining: the only states that draw the PS menu or the tap plate
+are the two above, and both references are untouched.
+
+Files: `src/view.cpp`, `src/view.h` (this pass). No main.cpp, assets, dialogs, CMake, harness, parity tool,
+budget, reference or catalogue change. The scripted-tap root cause lives in `src/ps_watcher.cpp`, which is
+outside this pass's fence; the view-side fix is labelled as such above.

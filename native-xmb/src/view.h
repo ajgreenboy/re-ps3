@@ -92,7 +92,11 @@ private:
     // PS button: the global watcher (independent of window focus) and the short controller-indicator
     // window a tap opens.
     PsWatcher psWatcher_;
-    qint64 psHudUntil_=0;
+    // The tap indicator's window is the console's own, measured on the PS-tap burst (MANIFEST 4):
+    // 155 ms after the press it starts to fade in, full 66 ms later, held ~2.0 s, gone 66 ms after that
+    // (2288 ms after the press). psHudAt_ is the press instant, psHudUntil_ the hard end.
+    qint64 psHudAt_=0,psHudUntil_=0;
+    double psHudOpacity(qint64 now) const;
     bool psPressActionable_=false;
     bool titleRunning() const;
     bool xmbOwnsForeground() const;
