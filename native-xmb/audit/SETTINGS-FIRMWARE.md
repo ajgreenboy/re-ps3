@@ -642,3 +642,132 @@ row - plus the choice page class with its single travelling plate.
 
 No source was edited. No RPCS3 run was made; every frame cited already existed under `C:\dev\out` or
 `out/native-reference`.
+
+---
+
+## 9. Dated correction - 2026-10-27/28 capture batch: U1-U10
+
+Evidence added after section 8 was written: one RPCS3 session of the real 4.93 XMB at 1920x1080
+(`C:\dev\out\rpcs3-ref-2026-10-28\`, `MANIFEST.md`), with 15 page stills, 4 choice-list bursts and 38
+restore frames. Section 8.2 is kept exactly as written; this section gives its status. Nothing above is
+deleted. Frame paths are relative to the capture root, and every value is a screen pixel measured on the
+named frame (where the batch summary rounds a value, the frame value is used and the difference is
+stated).
+
+### 9.1 U1-U10 status
+
+| id | old question (8.2) | status | value and frame |
+|---|---|---|---|
+| U1 | 1080p row pitch and focused-row expansion | **CLOSED** | focused row centre y = 505 (label ink 490..519); rows below at 682/762/842/922/1002 -> **pitch 80 px**; the focused row expands to a title plus a 2-line help block (ink 528..564) and the next row sits 177 px below it, i.e. +97 px over the normal pitch; rows below keep 80. `settings/accessory-rest.png` (6 full rows + 7th cut), `display-page-rest.png`, `page-video-settings.png`, `page-system-settings.png`, `page-sound-settings.png`. MANIFEST section 6 says ~78; five pages scan at 80 and the item-row vertex constants (680/760/840) agree, so 80 is used |
+| U2 | choice-page plate, list origin, item pitch | **CLOSED** | the list opens as a full-height right-hand band over the dimmed parent page; left edge x ~1260 for this page (x ~1330 for the item-menu overlay), fading out by x ~1660; item text left x ~1278; 5 items `After 5 Minutes`, `After 10 Minutes`, `After 20 Minutes` (focused), `After 30 Minutes`, `Do Not Use`; ink tops 426/466/506/546/586 -> **item pitch 40 px**; first item ink top 426. `settings/screensaver-list-rest.png`, `screensaver-open-burst/` (118 frames, 2.179 s, 53.7 fps) |
+| U3 | choice open/commit animation and the cue | **PARTIAL** | video: `settings/screensaver-commit-burst/` (139 frames, 2.583 s, 53.4 fps; open at 500 ms, commit at 1800 ms), `screensaver-open-burst/` (118 frames, 2.179 s, 53.7 fps), `dateformat-open-burst/` (120 frames, 2.572 s, 46.3 fps), `timeformat-open-burst/` (103 frames, 2.379 s, 42.9 fps). The commit/close motion is in the frames; the **cue audio was not captured** (MANIFEST section 7 no. 6) |
+| U4 | check/dot on the current choice | **CLOSED** | none. The current item is focused (bold/white) but carries no check and no dot; `Down` moves only the focus. `settings/screensaver-list-rest.png`, `screensaver-down-1.png` ... `-5.png`, `display-after-screensaver-cancel.png`. This confirms the RCO negative evidence in 3.1 |
+| U5 | the cue for committing a value | **OPEN** | the audio channel was not recorded (MANIFEST section 7 no. 6). `INTERACTION-AUDIO.md` 277-285 stays the open item |
+| U6 | value always text, never a bar/dot | **CLOSED** | values are text at x 1301, left-aligned: `page-sound-settings.png` (`Audio Output Settings` has no value, `Audio Multi-Output` `Off`, `Key Tone` `On`), `page-music-settings.png` (`AAC 128 kbps`, `3 seconds`, `48 kHz`, `Type 1`, `Off`), `page-date-time-settings.png`, `page-game-settings.png` (value ink starts x 1301) |
+| U7 | row order of the pages with no frame | **CLOSED** for the visible top of every page | 15 stills, one per page (`settings/page-*-settings.png`); row sets in 9.2. Pages longer than the frame (Video, System) are captured at the top only |
+| U8 | System Update page source | **PARTIAL** | page: `settings/system-update-page.png`, `-2.png`, `column-system-update.png` (title, body `Select an update method.`, two methods, `X Enter` / `O Cancel`); the `software_update_plugin` RCO was not dumped (MANIFEST section 7 no. 8) |
+| U9 | Theme/Color/Background/Font option lists | **PARTIAL** | Theme is **not** empty: `Install`, `Original` (focused), `Classic`, `Air Paint` with a thumbnail (`theme-choice.png`). Color: `Original` + 11 colour chips + overflow arrow (`color-choice.png`). Background and Font are captured (`background-choice.png`, `font-choice.png`) but their contents were not transcribed in this batch |
+| U10 | whether the US build lists `Summer Time` | **CLOSED** | no `Summer Time` row; the row is `Daylight Saving`, value `Standard`. `settings/page-date-time-settings.png`, `date-time-page-fresh.png`. The RCO object keeps the internal name `page_date_time_config_summer_time` |
+
+### 9.2 Row sets now measured (top of each page)
+
+Exact labels and the values this session showed. These close the "order U" entries in 5.2, 5.3, 5.8,
+5.11, 5.13 and 5.14 (and 5.16 via U8) for the visible rows. ASCII transliteration as in section 0.
+
+| page | rows (top to bottom) | values in this session | frame |
+|---|---|---|---|
+| Video (`page_bdvd_config`) | `BD - Menu Language`; `BD - Audio Language`; `BD - Subtitle Language`; `BD - Internet Connection`; `DVD - Menu Language`; `DVD - Audio Language`; `DVD - Subtitle Language` (7th cut) | `English` x6, `Confirm` | `page-video-settings.png` |
+| Music (`page_music_config`) | `Audio CD Import`; `Crossfade Playback`; `Output Frequency`; `Bitmapping`; `Dynamic Normalizer` | `AAC 128 kbps`; `3 seconds`; `48 kHz`; `Type 1`; `Off` | `page-music-settings.png` |
+| Display (`page_display_config`) | `Video Output Settings`; `Screensaver`; `Cross Color Reduction Filter`; `RGB Full Range (HDMI)`; `Y Pb/Cb Pr/Cr Super-White (HDMI)`; `Deep Color Output (HDMI)` | help carries `Current Output Resolution: 1080p`; `After 20 Minutes`; `Off`; `Limited`; `Off`; `Automatic` | `page-display-settings.png`, `display-page-rest.png` |
+| Sound (`page_sound_config`) | `Audio Output Settings`; `Audio Multi-Output`; `Key Tone` | (none); `Off`; `On` | `page-sound-settings.png` |
+| Security (`page_security_config`) | `Change Password`; `BD - Parental Control`; `BD/DVD - Parental Control Region Code`; `DVD - Parental Control`; `Parental Control`; `Internet Browser Start Control` | (none); `Off`; `United States`; `Off`; `Level 9`; `Off` | `page-security-settings.png` |
+| Remote Play (`page_remote_config`) | `Register Device`; `Registered Device List`; `Custom Connection Settings`; `Remote Start`; `Audio Output Device` | (none); (none); (none); `Off`; `Remote Play Device` | `page-remote-play-settings.png` |
+| Printer (`page_print_config`) | `Printer Selection`; `Printer Manager` | (none); (none) | `page-printer-settings.png` |
+| Power Save (`page_console_auto_power_off_option`) | `System Auto-Off`; `Controller Auto-Off` | (none; opens the two-timer page); `Off` | `page-power-save-settings.png` |
+| Date and Time (`page_date_time_config`) | `Date and Time`; `Set Automatically`; `Date Format`; `Time Format`; `Time Zone`; `Daylight Saving` | `27/10/2026 21:43`; `On`; `DD/MM/YYYY`; `24-Hour Clock`; `GMT+13:00 Independent State of Samoa`; `Standard` | `date-time-page-fresh.png`, `page-date-time-settings.png` |
+| Accessory (`page_device_config`) | `Calibrate Motion Controller` (focused); `Reassign Controllers`; `Controller Vibration Function`; `Register BD Remote Control`; `Manage Bluetooth(R) Devices`; `Camera Device Settings`; `Audio Device Settings` (cut) | (none); all remaining have no value | `accessory-rest.png`, `accessory-page-fresh.png`, `accessory-register-bd-focused.png` |
+
+Notes that change earlier readings:
+
+- **Music shows 5 rows, not one row per sub-page in 5.3.** The page reads `Audio CD Import`,
+  `Crossfade Playback`, `Output Frequency`, `Bitmapping`, `Dynamic Normalizer`, with no sixth row before
+  the frame edge; the codec and bit rate are the `Audio CD Import` choice (`AAC 128 kbps` in the focused
+  row), so `.codec_select` / `.bitrate_select` / `.setting_save` do not each get a row.
+- **Security is 6 rows, not 5.** `Change Password` is a row above the five `page_security_config_*`
+  pages; it is a password flow, not a choice list.
+- **Remote Play is exactly 5 rows** (`Register Device`, `Registered Device List`, `Custom Connection
+  Settings`, `Remote Start`, `Audio Output Device`), with the first three opening their own pages and
+  three of them carrying no inline value.
+- **Video continues below the fold**: the 7th row (`DVD - Subtitle Language`) is cut at y 1080, so the
+  order of the remaining DVD/HDD/upscaler rows is still unmeasured.
+
+### 9.3 Conclusions that the frames correct
+
+**(a) A choice list is a right-hand band, not a bottom-anchored page.** Section 3.1 says a setting with
+choices "opens a new page, not an overlay"; section 3.2 draws the consequence, that the native's
+right-hand strip is "the Triangle item menu visual language, reused for settings choices" and that the
+native has no page-class-B renderer; section 3.4 goes further: the list is a `LowerMenu`, "so it is
+bottom-anchored, not a right-hand strip". The frames contradict the screen-position half of all three. On
+`settings/screensaver-list-rest.png` the list is a full-height band on the right (left edge x ~1260,
+fading out by x ~1660) over the dimmed parent page, its items at 40 px pitch with the focused row on the
+505 focus row - i.e. the same visual language the native draws from x 1330. What survives from section
+3.1 is the RCO object tree (`Plane{BG0, BG1, LowerMenu(MList)}`); what does not survive is the inference
+that `LowerMenu` names a bottom-anchored screen position.
+
+So D23 ("choices open as a right-hand strip at x 1330, 40 px pitch" is native-only) is **half wrong**:
+the kind and the 40 px pitch are the firmware's. The measured deltas are: left edge 1260 vs 1330 (70 px
+too far right in the native), the firmware band fades out by ~1660 instead of running to 1920, the native
+draws a 4.5 px dot (D22) and the firmware does not, and the firmware dims the parent page behind the band
+(the native's description in 3.2 records no dim).
+
+**(b) D24 (row pitch).** Firmware pitch is **80 px**, the native's 80 is exact; the only delta is the
+focused-row expansion, which the native does not draw (help text overlaps the next row).
+
+**(c) D22 (current value mark).** Resolved by U4: text only, no dot in the panel and no `U+25CF` in the
+row. Remove the dot path (`view.cpp:1165-1168`) and the `U+25CF` fallback (`settings_menu.cpp:177`).
+
+**(d) D12 (Date and Time).** Six rows, no Summer Time, and the `Date and Time` row carries the running
+clock as its value (`27/10/2026 21:43`) - it is not a bar. What pressing that row opens is still not
+captured; the RCO says a set page (`page_date_time_config_set_date_time`), not an info page.
+
+**(e) D26 (label field).** The value column is x 1301 and the help text wraps at ~1805
+(`page-display-settings.png`), so the label field ends at ~1290, as D26 says; no new number is needed.
+
+**(f) U9's "Theme is empty" premise is dead.** The RCO pages really are empty (section 3.3), but the
+runtime list is not: `Install`, `Original`, `Classic`, `Air Paint`. The lists are built by code, as 3.3
+suspected, and Theme is the one whose contents are now known.
+
+**(g) D29 (commit cue)** is still open: the commit burst is video only. Do not map `Cue::Accept` yet.
+
+### 9.4 Restore audit for this batch
+
+The session changed four settings on the way through and put them back:
+
+- Date Format -> `MM/DD/YYYY` and Time Format -> `12-Hour Clock` for the clock frame, then back to
+  `DD/MM/YYYY` and `24-Hour Clock`: `settings/restore/restore10-dst-committed.png` (clock `27/10 21:58`).
+- `Daylight Saving` -> `Daylight Saving` (a stray commit), then back to `Standard`:
+  `settings/restore/restore10-dst-committed.png`.
+- `Voice/Video Chat Start` -> `Send Avatar` (a stray commit), then back to `Send Video`:
+  `settings/verify-chat-page.png`.
+- `Screensaver` was opened and committed at its **current** value only, never changed:
+  `settings/display-after-screensaver-commit.png` (`After 20 Minutes`).
+- `Controller Vibration Function` was opened while probing, never changed:
+  `settings/restore/restore7-vibration-page.png` (`On`).
+
+One residual is stated plainly in `CAPTURE-BATCH-2026-10-28.md` section 7.1: committing those values
+made vsh rewrite `C:\dev\rpcs3\bin\dev_flash2\etc\xRegistry.sys` at 21:58:42. The on-screen values are
+restored and verified; the file's bytes are not guaranteed identical because no pre-session copy was
+taken.
+
+### 9.5 Still open after the batch
+
+- U5 (commit cue audio) and U3's audio half.
+- The tail rows of Video and System (below y 1080 in the stills).
+- The exact `BG1` focus-plate rectangle inside the band (not separable from the band's gradient in these
+  frames).
+- Background and Font list contents (captured, not transcribed).
+- `software_update_plugin` RCO for U8.
+- The exact open/commit duration of a choice list (the bursts are timestamped but the settle frame is not
+  published in the manifest).
+
+No source was edited for this section.
