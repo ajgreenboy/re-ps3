@@ -7,6 +7,14 @@
 namespace xmb {
 namespace {
 constexpr int kPollMs=20;
+// The hold threshold. The console's hold burst (PARITY-SCORECARD 16.3, 206.6 fps) shows the frame going
+// fully black 1052 ms after the press and the entries at 1279..1326 ms, but that is the *menu's*
+// appearance, not the firmware's tap/hold decision: the burst starts at the press and nothing local
+// shows a press that was released just before the menu began. The 1052 ms black onset is therefore an
+// upper bound on the threshold, and this 1000 ms rule is consistent with it - View holds the black frame
+// for the remaining 52 ms (psHoldBlackMs), which reproduces the measured onset exactly. No local artifact
+// gives a better threshold (out/transitions has the PS-hold only as a native-only endpoint), so the rule
+// stays. Do not "fix" this to 1052: that number is the envelope, not the trigger (BEHAVIOUR-GAP-AUDIT A43).
 constexpr qint64 kHoldMs=1000;
 constexpr qint64 kStaleMs=500;
 constexpr quint16 kPsButton=0x400;   // XInput wButtons layout, as pad.cpp reports the PS button

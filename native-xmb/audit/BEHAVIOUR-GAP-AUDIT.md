@@ -344,3 +344,374 @@ screensaver timing.
   (PS tap), `ps_watcher.cpp:10` (hold 1000 ms), `osk_layout.h:119` (caret 468), `view.h:345-348` (dialogs),
   `view.cpp:869` (screensaver dim), `media_controls.cpp` (3000 + 250 ms).
 - No source file, no harness, no reference, no other audit and no budget was touched by this pass.
+
+---
+
+## 10. Input/behaviour pass, 2026-10-28 (appended)
+
+Scope: rows **A11, A26, A32, D16, A43, D10**, plus the two GRAPHICS-INVENTORY findings named with
+them (item 13 end-of-list overscroll, item 29 two-group options). Build `C:\dev\out\native-shellbeh`
+from this tree. Files written: `src/shell.cpp`, `src/shell.h`, `src/ps_watcher.cpp` (comment only) and
+this section. `src/view.cpp`/`src/view.h` are another pass's fence, so the changes that need them
+are **returned as hunks in 10.6**; those hunks were applied to a scratch copy
+(`C:\dev\out\hunkcheck-src`, binary `C:\dev\out\hunkcheck\re-ps3-native.exe`) and compiled and run
+there, so the text below is build-tested, not a sketch. The scratch copy also carries a test-only
+`TRIGGERL2/R2` script token and a `replayTriggerForProof()` wrapper; neither is part of a returned hunk.
+
+### 10.1 A11 + A26 - L2/R2: no browsing volume, and the seek pair in video
+
+**Before.** `View::pollController()` read the pad's analog L2/R2 on every surface and called
+`View::pollVolumeRamp()`, which stepped the Windows master volume (5% per press, 120 ms held repeat,
+60 ms past 0.75 pressure) and raised the volume HUD. In video, seeking was Left/Right through
+`Shell::horizontal()` -> `Shell::seekMedia()` (shell.cpp, media branch of `horizontal`). The hint strip
+drew the firmware's `tex_cp_help_l2_left` / `_r2_right` with "Fast Reverse" / "Fast Forward" over
+bindings that did not exist, which the code's own comment recorded.
+
+**After.** With the returned hunk the volume HUD has exactly one input family: the Windows media keys
+(`View::volumeKeyAction`, the `WM_APPCOMMAND`/`VK_VOLUME_*` filter, `Qt::Key_Volume*`, and the
+`VOLUP/VOLDOWN/MUTE/VOLSET/VOLKEY` script forms). `Shell::seekMedia()` is the one seek method; it now
+traces its result (`media: seek <delta> ms from <x> to <y>`) under `XMB_MEDIA_TRACE=1`, and the
+returned view hunk makes L2/R2 call it. `pollVolumeRamp()` becomes `pollTriggerSeek()`: same two
+analog axes, same 0.35 press threshold, but the press does nothing on every browsing surface and, in
+the video player (`shell_.videoOpen()`), steps -10 s / +10 s **once per press** through
+`Shell::seekMedia()`. One step per press is a FIT: no local artifact times a held trigger, so no
+acceleration curve is invented. The hint strip now tells the truth without a string change.
+
+**Console evidence.** A11: the XMB binds no volume key, and the volume display is a player page
+(`MEDIA-PANELS-FIRMWARE` 5.1). A26: the video container's hint art lists `tex_cp_help_l2_left` and
+`_r2_right` for the seek pair (`MEDIA-PANELS-FIRMWARE` 3.4, 3.6, 11.5 item 9), with the strings
+`msg_fast_r_with_icon` / `msg_fast_f_with_icon` ("Fast Reverse" / "Fast Forward").
+
+**Scripted proof** (`C:\dev\out\shellbeh-proofs\trigger-proof\`, hunk-applied scratch binary):
+- in the video player, one R2 press: `media: seek 10000 ms from 512 to 10512`,
+  `volume: trace trigger seek R2 -> 10512 ms`; sidecar `mediaPosition` 213 -> 11157 of 20000;
+- at the XMB root, L2 / release / R2 with both `XMB_VOLUME_LOG` and `XMB_MEDIA_TRACE` on: the log
+  carries the three `script: trigger` lines and nothing else - no `trigger seek`, no `media: seek`, no
+  volume request - so the triggers neither seek nor change the volume while browsing
+  (`.../trigger-root/`).
+The shipped `native-shellbeh` binary still contains the old `view.cpp` trigger -> volume path until the
+hunk lands; the hunk's `Shell::seekMedia` call is the same path proven here. The media-key HUD path
+(`View::volumeKeyAction` -> `volumeStep`/`volumeToggleMute` -> `volumeApply` -> `drawVolumeHud`) is not
+touched by this pass or by the hunk.
+
+### 10.2 A32 - photo Up/Down pans, it does not rotate
+
+**Before.** `Shell::vertical()` rotated the open photo by +/-90 degrees on every press
+(`photoRotation_`), so Up/Down rotated while Left/Right stepped the list.
+
+**After.** `Shell::vertical()` in the photo viewer does nothing and logs why. The view still pans
+first when `photoViewport_.canPan()` (its unchanged branch), so an overflowing image pans on all four
+directions; an image that fits has nothing hidden, so Up/Down changes nothing. Rotation moved to
+`Shell::rotatePhoto()`, called from the returned Q/E key hunk and the pad Triangle hunk. The console
+rotates from its photo control panel, which this build does not draw.
+
+**Choice and why.** No RPCS3 frame shows the photo viewer: the local VFS has no photo, which
+`CAPTURE-BATCH-2026-10-28` 3.5 (MEDIA 9 OPEN) and GRAPHICS-INVENTORY section 4 record. The local
+artifacts are the container and the console's own photo control-panel page. `MEDIA-PANELS-FIRMWARE`
+6.2 gives Up/Down/Left/Right the four **cursor** buttons and gives Previous/Next and Rotate Left/Right
+their own buttons. The console's photo page ("Using the control panel") names each entry:
+"Up / Down / Left / Right - Move the image to display any hidden portions such as when Display Mode is
+set to Zoom"; "Previous / Next - View the previous or next image"; "Rotate Left / Rotate Right -
+Rotate the image 90 degrees to the left or to the right". So Up/Down is the pan pair, not
+next/previous and not rotate, and a fitting image has nothing to pan. That is the behaviour chosen.
+
+**Scripted proof** (`C:\dev\out\shellbeh-proofs\photo-run\`): photo open from a seeded Photo Library;
+`grab` before and after one DOWN are byte-identical (SHA-256 `45793BA3...6C518A`), and the log line is
+`photo: Up/Down are the viewer's pan cursor; nothing to pan (no rotation)`; sidecar `mediaOpen=true`,
+`entryTitle=Alpha.png`, `depth=1`. Rotation still exists on the native binding: with the returned Q/E
+hunk, `ROTATELEFT` logs `photo: rotated to 270 degrees` and the frame changes
+(`.../photo-rotate/before.png` vs `rotated.png`, `E6DEE358...705813`).
+
+### 10.3 D16 - the user row switches the session through the settings store
+
+**Before.** `case Action::SelectUser` called only `profiles_.select()`, which rewrites
+`profiles.json`'s `activeId`. `Preferences::setProfile` was never called, so every
+`profile/<id>/...` value and every `library/...` path kept resolving against the previous user, and
+nothing was re-applied.
+
+**After.** SelectUser calls `profiles_.select()` (the id must exist) and then
+`preferences_.setProfile()` - the store's documented atomic switch, preferences.h - rolling the user
+record back if the settings store refuses. On success the session is reset the way the console reloads
+a user's XMB: playback stops, pages/panels/messages close, `applyPreferences()` re-applies volume, key
+tones, theme, slideshow interval and repeat/shuffle, the user column is rebuilt and `refreshContent()`
+rebuilds the columns from the new profile. `Preferences::profileChanged` is connected to
+`applyPreferences()`, so any future `setProfile` call re-applies the settings. The switch logs the
+resolved values on both sides of the change.
+
+**Scripted proof** (`C:\dev\out\shellbeh-proofs\users-both\`): two seeded profiles with different
+settings and libraries - A volume 20, `library/video` = libA (1 row); B volume 80, libB (2 rows) -
+active A. One run:
+- open Video Library as A: sidecar `entryCount 1`, `entryTitle Alpha.mp4`;
+- back, Users column, Down to B, Cross: `shell: profile changed to <B>` and
+  `shell: user switched from <A> volume= 20 library/video= ...\libA to <B> volume= 80
+  library/video= ...\libB`; `preferences.json` now has `"active": "<B>"`;
+- open Video Library again: `entryCount 2`, `entryTitle Beta One.mp4`.
+So both the preference values and the library path really change with the user, not only `activeId`.
+
+### 10.4 A43 - the PS-hold threshold stays at 1000 ms, and here is why
+
+No local artifact gives the firmware's tap/hold **threshold**. The measured hold burst
+(PARITY-SCORECARD 16.3) starts at the press and shows the *menu*: fully black at press + 1052 ms, text
+at 1279..1326 ms, bloom to about 1840 ms. That makes 1052 ms an **upper bound** on when the firmware
+decided the press was a hold; no burst shows a press released just before the menu appears, which is
+what a threshold measurement needs. `out/transitions` carries the PS hold only as a native-only
+endpoint (no console burst), so it adds nothing. The 1000 ms watcher rule therefore stays, and the
+view's `psHoldBlackMs = 1052` envelope supplies the console's measured 52 ms. This reasoning is now
+written at `kHoldMs` in `src/ps_watcher.cpp`, so 1052 is not mistaken for the trigger.
+
+**Scripted proof** (`C:\dev\out\shellbeh-proofs\pshold-run\`, `pshold` token, `XMB_MOTION_LOG=1`):
+`pshold: 1008 ms ... black 0` (menu state open, frame still the XMB), `pshold: 1064 ms ... black 1`,
+text 0.000 at 1064, 0.298 at 1293, 1.000 at 1335, bloom rising - the measured 1052 / 1279..1326
+envelope with the watcher still firing at 1000 ms.
+
+### 10.5 D10 - Sort By: two pairs offered, four reported missing (not shipped inert)
+
+The firmware's table carries six date pairs (ITEM-MENU-INFO-FIRMWARE A3): `msg_created_date_time_f/_r`,
+`msg_updated_date_f/_r`, `msg_importeddate_f/_r`, `msg_sale_year_f/_r`, `msg_shootdate_f/_r`,
+`msg_trophy_earned_f/_r`. This build offers Creation and Update because a local page row is a file or
+folder and `QFileInfo` gives birthTime (falling back to lastModified) and lastModified. The other four
+have no per-row source, so they are not listed rather than shipped as labels that do nothing:
+- **Import Date** (`msg_importeddate_f/_r`): no import/first-seen record. `MediaEntry` carries
+  path/title/isDirectory/size/modified only and pages are rescanned from disk, so nothing knows when a
+  row entered the library.
+- **Release Year** (`msg_sale_year_f/_r`): no year field on `Entry`/`MediaEntry`, and no row source
+  supplies one. The player reads media tags only for the file it is currently playing.
+- **Film Date** (`msg_shootdate_f/_r`): no EXIF or container date parser anywhere in `src/`.
+- **Earned Date** (`msg_trophy_earned_f/_r`): no trophy data; PSN/trophy services are absent by
+  decision.
+
+The firmware labels are still checkable. The item-menu dump now resolves all twelve sort keys, and
+opening the sort level writes `<XMB_DUMP_ENTRIES>.sort.json` with the four offered rows and the four
+unsupported pairs with the reason above.
+
+**Scripted proof** (`C:\dev\out\shellbeh-proofs\sort-run\`):
+`shell: options sort menu opened rows= 4 ... unsupported=msg_importeddate_f/_r(no import record),
+msg_sale_year_f/_r(no per-row year), msg_shootdate_f/_r(no EXIF date), msg_trophy_earned_f/_r(no trophy
+data)`; `entries.json.options.json` resolves Import/Release/Film/Earned labels from the RCO;
+`entries.json.sort.json` lists the four rows plus the four reasons.
+
+**Two-group finding.** GRAPHICS-INVENTORY item 29 ("the menu is two groups at 40 px pitch with a
+199 px gap") stays honoured: the sort level is one group and the parent keeps the measured two groups -
+the run logs `groups= 2 break= Sort By -> Open`, and the view draws the item menu's measured 237 px
+group gap (ITEM-MENU-INFO-FIRMWARE G2). Adding sort rows would not have disturbed it; not adding them
+does not either.
+
+### 10.6 Returned hunks (view.cpp / view.h - another pass's fence)
+
+These are exact text replacements, anchored on function/comment text rather than line numbers because
+the file is being edited concurrently. They compile and run in `C:\dev\out\hunkcheck-src`
+(`native-xmb\build.ps1 -OutputDirectory C:\dev\out\hunkcheck`, "Built ...re-ps3-native.exe").
+
+**view.h, replace:**
+```cpp
+    int volumeRamp_=0;               // the held trigger: -1 L2, +1 R2, 0 released
+    qint64 volumeRampAt_=0;          // next held-trigger step deadline
+```
+**with:**
+```cpp
+    bool triggerHeld_=false;         // an L2/R2 press is down, for the one-step-per-press seek edge
+```
+
+**view.h, replace:**
+```cpp
+    void pollVolumeRamp(float down,float up,qint64 now);   // held L2/R2 repeat, called from pollController
+```
+**with:**
+```cpp
+    void pollTriggerSeek(float down,float up);             // L2/R2 seek in the video player, called from pollController
+```
+
+**view.h, replace:**
+```cpp
+    // The couch volume path, reachable from --script so a capture can pin an exact level. These are the
+    // same functions the pad's L2/R2, the media keys and the native WM_APPCOMMAND filter call.
+```
+**with:**
+```cpp
+    // The couch volume path, reachable from --script so a capture can pin an exact level. These are the
+    // same functions the media keys and the native WM_APPCOMMAND filter call; the pad's L2/R2 no longer
+    // reach them (BEHAVIOUR-GAP-AUDIT A11) and seek in the video player instead.
+```
+
+**view.cpp, replace** the "Couch volume" comment head:
+```cpp
+// ---- Couch volume ----------------------------------------------------------------------------------------
+// The PC's master volume, driven by the pad's analog triggers and by the Windows media keys, with one
+// transient HUD. Every change goes through host::setMasterVolume / host::setMasterMuted and then logs what
+// Windows reports afterwards, so the endpoint - not this process's cache - is the record of what happened.
+//
+// Input mapping, in one place:
+//   L2 held                    one 5% step down on the press, then a step every 120 ms (60 ms past 0.75)
+//   R2 held                    the same upwards
+//   volume up/down/mute keys   WM_APPCOMMAND and VK_VOLUME_* taken by the native filter, Qt::Key_Volume*
+```
+**with:**
+```cpp
+// ---- Couch volume ----------------------------------------------------------------------------------------
+// The PC's master volume, driven by the Windows media keys, with one transient HUD. Every change goes
+// through host::setMasterVolume / host::setMasterMuted and then logs what Windows reports afterwards, so the
+// endpoint - not this process's cache - is the record of what happened. The pad's L2/R2 are deliberately not
+// an input here: the console binds no XMB volume to them (BEHAVIOUR-GAP-AUDIT A11) and its volume display
+// belongs to the player page. In the video player the triggers are the container's seek pair (A26) and drive
+// pollTriggerSeek() below.
+//
+// Input mapping, in one place:
+//   volume up/down/mute keys   WM_APPCOMMAND and VK_VOLUME_* taken by the native filter, Qt::Key_Volume*
+```
+
+**view.cpp, replace the whole function:**
+```cpp
+void View::pollVolumeRamp(float down,float up,qint64 now) {
+    // The pad's triggers are analog axes, not D-pad bits: nothing here touches `buttons`, `repeatAt_` or the
+    // navigation paths, so a held trigger cannot move the XMB or consume a D-pad repeat.
+    constexpr float kPress=.35f;      // a resting DualShock 3/4 trigger reads 0.0; this is the press threshold
+    if(volumeInputBlocked()){volumeRamp_=0;return;}
+    const float pressure=std::max(down,up);
+    if(pressure<kPress) {
+        if(volumeRamp_ && volumeTrace())qInfo()<<"volume: trace ramp released";
+        volumeRamp_=0;
+        return;
+    }
+    const int direction=up>down?1:-1;
+    const qint64 interval=pressure>=.75f?60:120; // full squeeze ramps twice as fast
+    if(direction!=volumeRamp_) {                  // the press: one step now, then the held repeat
+        volumeRamp_=direction;volumeRampAt_=now+interval;
+        if(volumeTrace())qInfo().noquote()<<QString("volume: trace ramp start %1 pressure %2 interval %3 ms")
+            .arg(direction>0?"R2":"L2").arg(pressure,0,'f',2).arg(interval);
+        volumeStep(direction,direction>0?QStringLiteral("R2"):QStringLiteral("L2"));
+        return;
+    }
+    if(now<volumeRampAt_)return;
+    // Counted from the last deadline, not from this poll, so the 16 ms poll cannot stretch the interval.
+    volumeRampAt_=std::max(volumeRampAt_,now-interval)+interval;
+    volumeStep(direction,direction>0?QStringLiteral("R2"):QStringLiteral("L2"));
+}
+```
+**with:**
+```cpp
+void View::pollTriggerSeek(float down,float up) {
+    // L2/R2 are the video container's own seek pair: the hint art carries tex_cp_help_l2_left / _r2_right
+    // with msg_fast_r_with_icon / msg_fast_f_with_icon ("Fast Reverse" / "Fast Forward",
+    // audit/MEDIA-PANELS-FIRMWARE.md 3.4, 3.6). The console binds no volume to them (BEHAVIOUR-GAP-AUDIT
+    // A11), so in the video player this is the only thing they do. One 10 s step per press - the same step
+    // Left/Right uses through Shell::seekMedia - because no local artifact times a held trigger and an
+    // acceleration curve must not be invented.
+    // The triggers are analog axes, not D-pad bits: nothing here touches `buttons`, `repeatAt_` or the
+    // navigation paths, so a trigger cannot move the XMB or consume a D-pad repeat.
+    constexpr float kPress=.35f;      // a resting DualShock 3/4 trigger reads 0.0; this is the press threshold
+    const bool pressed=std::max(down,up)>=kPress;
+    if(pressed==triggerHeld_)return;  // only the threshold crossing is a press: no repeat while held
+    triggerHeld_=pressed;
+    if(!pressed || volumeInputBlocked() || !shell_.videoOpen())return;
+    const int direction=up>down?1:-1;
+    shell_.seekMedia(qint64(direction)*10000);
+    if(volumeTrace())qInfo().noquote()<<QString("volume: trace trigger seek %1 -> %2 ms")
+        .arg(direction>0?"R2":"L2").arg(shell_.mediaPosition());
+}
+```
+
+**view.cpp, replace** (pollController's early return):
+```cpp
+    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;volumeRamp_=0;return;}
+```
+**with:**
+```cpp
+    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;triggerHeld_=false;return;}
+```
+
+**view.cpp, replace** (pollController's trigger read):
+```cpp
+    // L2/R2 are analog triggers rather than D-pad bits: they are read here and never merged into `buttons`,
+    // so a held trigger cannot move the XMB, cannot press Cross, and cannot disturb repeatAt_. Both the pad's
+    // own report (pad.cpp l2/r2) and an XInput pad's triggers feed the same ramp; whichever is pressed harder
+    // wins when both controllers are attached.
+    const float triggerDown=std::max(xinput?state.Gamepad.bLeftTrigger/255.f:0.f,playstation?hid.l2:0.f);
+    const float triggerUp=std::max(xinput?state.Gamepad.bRightTrigger/255.f:0.f,playstation?hid.r2:0.f);
+    pollVolumeRamp(triggerDown,triggerUp,clock_.elapsed());
+```
+**with:**
+```cpp
+    // L2/R2 are analog triggers rather than D-pad bits: they are read here and never merged into `buttons`,
+    // so a trigger cannot move the XMB, cannot press Cross, and cannot disturb repeatAt_. In the video player
+    // they are the container's seek pair (audit A26); on every browsing surface they do nothing, because the
+    // console binds no XMB volume to them (A11). Both the pad's own report (pad.cpp l2/r2) and an XInput pad's
+    // triggers feed the same edge detector; whichever is pressed harder wins when both controllers are attached.
+    const float triggerDown=std::max(xinput?state.Gamepad.bLeftTrigger/255.f:0.f,playstation?hid.l2:0.f);
+    const float triggerUp=std::max(xinput?state.Gamepad.bRightTrigger/255.f:0.f,playstation?hid.r2:0.f);
+    pollTriggerSeek(triggerDown,triggerUp);
+```
+
+**view.cpp, replace** (the photo viewer's keyboard rotate pair):
+```cpp
+        case Qt::Key_Q:shell_.vertical(-1);e->accept();return;
+        case Qt::Key_E:shell_.vertical(1);e->accept();return;
+```
+**with:**
+```cpp
+        case Qt::Key_Q:shell_.rotatePhoto(-1);e->accept();return;
+        case Qt::Key_E:shell_.rotatePhoto(1);e->accept();return;
+```
+
+**view.cpp, replace** (the pad's Triangle in the photo viewer):
+```cpp
+        if(edge&XINPUT_GAMEPAD_X)resetPhotoView();if(edge&XINPUT_GAMEPAD_Y)shell_.vertical(1);
+```
+**with:**
+```cpp
+        if(edge&XINPUT_GAMEPAD_X)resetPhotoView();if(edge&XINPUT_GAMEPAD_Y)shell_.rotatePhoto(1);
+```
+
+**view.cpp, replace** (the hint-strip comment above `drawVideoHelpStrip`):
+```cpp
+// one row. The native keys and the firmware's key icons do not all coincide: this build seeks with
+// Left/Right where the firmware's fast reverse/forward are L2/R2, and the video container carries no d-pad
+// hint art (3.4 lists circle, cross, l1, l2_left, r1, r2_right, select, start), so the L2/R2 icons carry the
+// seek bindings. Circle's label is msg_quit_playback: this container has no Back/Cancel string, and Circle
+```
+**with:**
+```cpp
+// one row. The native keys and the firmware's key icons do not all coincide: Left/Right also seek (the
+// keyboard binding), the firmware's fast reverse/forward are L2/R2 and now drive the same Shell::seekMedia,
+// and the video container carries no d-pad hint art (3.4 lists circle, cross, l1, l2_left, r1, r2_right,
+// select, start), so the L2/R2 icons carry the seek bindings. Circle's label is msg_quit_playback: this
+// container has no Back/Cancel string, and Circle
+```
+
+Because the Q/E hunk is the only path to the native rotate binding, the shipped binary (without it) has
+no rotate key until the hunk lands; the console has no d-pad rotate either (its rotate is on the absent
+photo panel), so the interim state is not console-wrong, only less capable.
+
+### 10.7 GRAPHICS-INVENTORY 13 (overscroll) and A2
+
+Item 13 records a measured console behaviour this build still lacks: DOWN on the last row does not move
+the focus, but the whole column sinks 40 px per press and stays sunk. That frame also settles row A2's
+"row end unprovable": the console does not clamp silently. This pass does **not** implement the sink -
+it is a view projection change, outside the five items and outside this fence. What the next pass
+needs: the shell must accept a vertical move past the end (today `Shell::vertical` clamps at
+`shell.cpp`'s `std::clamp(selection()+delta, ...)`) and expose the overscroll count, and the view must
+offset the column projection by it. Recorded here so the frame is not stranded in a graphics document.
+
+### 10.8 Gate and determinism
+
+- `bun work/ab-layers.ts --capture --exe C:/dev/out/native-shellbeh/re-ps3-native.exe`:
+  **PASS 6/6** layers within budget, text presence `1668 bright pixels in the clock crop (minimum 900)
+  PASS`; every layer delta `+0.00` dB / `+0.0000` SSIM, so the rest frame is unchanged. Log:
+  `C:\dev\out\shellbeh-gate2.log`.
+- Determinism: two `--render-clock 20` captures of the canonical recipe with isolated data directories
+  are byte-identical, SHA-256 `37E2B590C42EF0E3F3601CA492221147C9874D2E3B1785E6237B616F2C0BBC14`
+  (`C:\dev\out\shellbeh-proofs\det3`, `det4`; the earlier `det1`/`det2` pair has the same hash, and the
+  `--render-clock 30` gate capture is `3823A9D4...076AF`).
+- Scripted proofs and their logs/sidecars/dumps are under `C:\dev\out\shellbeh-proofs\`:
+  `photo-run/`, `photo-rotate/`, `users-both/`, `sort-run/`, `pshold-run/`, `media-seek2/`,
+  `trigger-proof/`, `trigger-root/`, `det1..det4/`.
+
+### 10.9 Files
+
+- `native-xmb/src/shell.cpp`: SelectUser through `Preferences::setProfile` + session reset + switch
+  log; `profileChanged` -> `applyPreferences()`; photo `vertical` pan-only and `rotatePhoto()`;
+  `seekMedia()` trace; sort-level log + labels probes + `.sort.json`.
+- `native-xmb/src/shell.h`: `rotatePhoto()` declaration and its note.
+- `native-xmb/src/ps_watcher.cpp`: the `kHoldMs` rationale comment (no behaviour change; the 1000 ms
+  rule is unchanged).
+- `native-xmb/audit/BEHAVIOUR-GAP-AUDIT.md`: this section.
+- Returned, not written: `native-xmb/src/view.cpp`, `native-xmb/src/view.h` (10.6).

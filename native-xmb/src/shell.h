@@ -218,6 +218,11 @@ public:
     void toggleMediaShuffle();
     void horizontal(int delta);
     void vertical(int delta);
+    // The photo viewer's rotate pair. The console puts Rotate Left/Right on the viewer's own control
+    // panel (audit/MEDIA-PANELS-FIRMWARE.md 6.2, the same panel's Up/Down/Left/Right are the cursor
+    // buttons), and this build does not draw that panel; the native keyboard keeps the function on Q/E
+    // and the script's ROTATELEFT/ROTATERIGHT tokens. Up/Down no longer rotate (BEHAVIOUR-GAP-AUDIT A32).
+    void rotatePhoto(int delta);
     void activate();
     void back();
     void chooseLibrary(const QString& folder);
