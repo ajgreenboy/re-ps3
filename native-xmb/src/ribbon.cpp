@@ -128,6 +128,45 @@ void Ribbon::Cloth::swell(const Preset& p) {
     }
 }
 
+// The fallback start the plugin uses when it has no preset-1 tables (FUN_0004ec90): columns LENGTH apart from the
+// pinned edge at x = 0, rows round the tables' y/z loop. Shared by init's flat path and the prefetch, so the two
+// cannot drift apart.
+QVector4D Ribbon::flatPoint(int i,float length) {
+    return QVector4D(float(side_-1-i%side_)*length,
+                     .35f+.55f*std::sin(2*pi*float(i/side_)/(side_-1)),
+                     .55f+.55f*std::cos(2*pi*float(i/side_)/(side_-1)),1);
+}
+
+// The cloth warm-up the no-plugin path always ran: 14,400 fixed steps from the flat start (the x extent crumples
+// first, then recovers; work/cloth-sim.ts). A pure function of the preset - no GL, no member state - which is what
+// lets it run on a worker thread. The timer is the measurement quoted in audit/VERIFICATION-HARNESS.md 5.6.
+Ribbon::Settle Ribbon::settledFlat(const Preset& p) {
+    Settle out;
+    for(int i=0;i<points_;++i)out.cloth.pos[size_t(i)]=flatPoint(i,p.length);
+    out.cloth.prev=out.cloth.pos;
+    QElapsedTimer timer;timer.start();
+    for(int i=0;i<14400;++i)out.cloth.step(p);
+    out.micros=timer.nsecsElapsed()/1000;
+    return out;
+}
+
+// The fields Cloth::step and flatPoint read. Exact comparison: a prefetched state may only replace the synchronous
+// one when every input that shaped it is bit-identical, or the first frame would move.
+bool Ribbon::sameClothPreset(const Preset& a,const Preset& b) {
+    return a.damping==b.damping && a.length==b.length && a.tension==b.tension && a.timestep==b.timestep
+        && a.perturbation==b.perturbation && a.endY==b.endY && a.endZ==b.endZ;
+}
+
+// Start the warm-up with the view. The first native window costs ~450 ms on this machine (VERIFICATION-HARNESS.md
+// 5.4a), so the 14,400-step settle (~220 ms) finishes long before initializeGL asks for it. The thread touches only
+// its own copy; the preset-1 table path (a --vsh-modules run) never consumes it, and the future's destructor joins
+// the thread at shutdown. XMB_RIBBON_SETTLE_SYNC=1 keeps the pre-change synchronous path for the A/B.
+Ribbon::Ribbon() {
+    if(qEnvironmentVariableIsSet("XMB_RIBBON_SETTLE_SYNC"))return;
+    try { settleFuture_=std::async(std::launch::async,[]{return settledFlat(Preset{});}); }
+    catch(const std::exception& e) { qWarning().noquote()<<"ribbon: cloth warm-up thread unavailable:"<<e.what(); }
+}
+
 bool Ribbon::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     const auto load=[&](const char* name,CgProgram& program) {
         QString error;
@@ -234,11 +273,31 @@ void main(){
     const bool fromTables=rest.size()==size_t(points_*3) && restVelocity.size()==size_t(points_*3);
     for(int i=0;i<points_;++i) {
         const size_t k=size_t(i)*3;
-        cloth_.pos[size_t(i)]=fromTables?QVector4D(rest[k],rest[k+1],rest[k+2],1):QVector4D(float(side_-1-i%side_)*day_.length,.35f+.55f*std::sin(2*pi*float(i/side_)/(side_-1)),.55f+.55f*std::cos(2*pi*float(i/side_)/(side_-1)),1);
+        cloth_.pos[size_t(i)]=fromTables?QVector4D(rest[k],rest[k+1],rest[k+2],1):flatPoint(i,day_.length);
         cloth_.vel[size_t(i)]=fromTables?QVector4D(restVelocity[k],restVelocity[k+1],restVelocity[k+2],0):QVector4D();
     }
     cloth_.prev=cloth_.pos;
-    if(!fromTables)for(int i=0;i<14400;++i)cloth_.step(day_); // the x extent crumples first, then recovers (cloth-sim.ts)
+    if(!fromTables) {
+        // The warm-up is a pure function of the day preset and the flat grid, so the state the constructor's worker
+        // computed is usable when LINE1.mnu's day preset is bit-identical to the compiled fallback. Any other
+        // dev_flash (or XMB_RIBBON_SETTLE_SYNC=1) discards it and settles synchronously, exactly as before.
+        const bool matches=sameClothPreset(day_,Preset{});
+        if(matches && settleFuture_.valid()) {
+            QElapsedTimer join;join.start();
+            Settle prefetched=settleFuture_.get();
+            const double joinMs=join.nsecsElapsed()/1e6;
+            cloth_=prefetched.cloth;
+            qInfo().noquote()<<"ribbon: cloth warm-up"<<QString::number(prefetched.micros/1000.,'f',1)
+                <<"ms on a prefetch thread started by the constructor (joined in initializeGL after"<<QString::number(joinMs,'f',1)
+                <<"ms); LINE1 day preset matches the compiled fallback, state reused";
+        } else {
+            if(settleFuture_.valid())settleFuture_.wait();
+            QElapsedTimer settle;settle.start();
+            for(int i=0;i<14400;++i)cloth_.step(day_); // the x extent crumples first, then recovers (cloth-sim.ts)
+            qInfo().noquote()<<"ribbon: cloth warm-up"<<QString::number(settle.nsecsElapsed()/1e6,'f',1)<<"ms synchronous"
+                <<(matches?"; prefetch unavailable":"; LINE1 day preset differs from the compiled fallback");
+        }
+    }
     // _Stripes (FUN_0004bad0, captured): row k of 4, x in [-.5,.5]: min(1, pow(1.01 - 4x^2, 20 (k/3)^3) * (k/6 + .5)).
     constexpr int stripeWidth=512; // fit: the plugin's width is a runtime global; 512 resolves the profile
     std::vector<float> stripes(size_t(stripeWidth)*4*4);

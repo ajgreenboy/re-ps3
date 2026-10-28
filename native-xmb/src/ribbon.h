@@ -2,6 +2,7 @@
 #include "assets.h"
 #include "rsx_program.h"
 #include <array>
+#include <future>
 #include <memory>
 #include <vector>
 #include <QVector3D>
@@ -24,6 +25,10 @@ namespace xmb {
 // All coefficients come from LINE1.mnu (override/day and override/night). Derivation: audit/PIPELINE.md.
 class Ribbon {
 public:
+    // Starts the fallback-cloth warm-up on a worker thread: it depends only on the compiled day preset and needs
+    // no GL context, so it runs while the first native window is created instead of inside initializeGL. init()
+    // uses the result only when LINE1.mnu's day preset is bit-identical to the compiled fallback.
+    Ribbon();
     // Requires a current GL context. Returns false (and logs why) when the firmware programs are unavailable.
     bool init(QOpenGLFunctions_3_3_Core& gl,Assets& assets);
     bool ready() const { return ready_; }
@@ -60,6 +65,16 @@ private:
         float random();
         void spring(int i,int j,float rest,float k);
     };
+    // One flat-grid warm-up: the settled cloth and the wall time the steps took.
+    struct Settle { Cloth cloth; qint64 micros=0; };
+    // The fallback start (FUN_0004ec90): columns LENGTH apart, rows round the tables' y/z loop.
+    static QVector4D flatPoint(int i,float length);
+    // 14,400 fixed steps from the flat start, as the no-plugin path always did.
+    static Settle settledFlat(const Preset& p);
+    // True when two presets give the cloth identical inputs (the fields step() and flatPoint() read). Exact float
+    // comparison is deliberate: a prefetched state is reused only when it is bit-identical to the synchronous one.
+    static bool sameClothPreset(const Preset& a,const Preset& b);
+    std::future<Settle> settleFuture_;
     bool ready_=false;
     Preset coldboot1_,coldboot2_,night_,yoake_,day_,higure_,current_;
     // BACKGROUND.mnu's line gradient (keys 3 and 4), read in init through Materials::background().

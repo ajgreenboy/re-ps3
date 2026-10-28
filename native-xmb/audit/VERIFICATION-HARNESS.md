@@ -659,5 +659,128 @@ paint loop is hot (a build-side question, outside this phase's write fence); (2)
 10-30 minutes on a machine where no other session reaps the executable; (3) only then read the memory
 trend as a leak signal. The pacing quantiles in 5.3 move between runs for the same environmental reason.
 
+### 5.6 Ribbon cloth warm-up moved off the initializeGL critical path (2026-10-28)
+
+5.4a measured the ribbon's 14,400-step fallback cloth settle at 221-230 ms inside `initializeGL`
+(`ribbon.cpp:241` in the pre-change file). It is now computed on a worker thread started by `Ribbon`'s
+constructor, i.e. while the first native window is being created (~449 ms), and `init()` only joins it.
+The first frame is byte-identical: 0 differing pixels at `--render-clock 20` and `30`.
+
+**The settle is exact, not approximate.** The no-plugin path starts the cloth from the flat grid
+(FUN_0004ec90) and runs 14,400 fixed steps of `Cloth::step`. That is a pure function of seven LINE1.mnu
+values (DAMPING, LENGTH, TENSION, TIMESTEP, PERTURBATION, END Y, END Z), the flat grid, and the integer
+noise seed, with no GL state and no member state, so the same code can run before the context exists. The
+worker computes the whole `Cloth` (pos, prev, vel, target, phase, seed, acc) and `init` copies it. The
+worker's preset is the compiled fallback (`Preset{}`); `init` compares its seven cloth inputs against the
+LINE1.mnu day preset bit for bit and only reuses the state when they are identical. On this install they
+are (logged), so the path is taken; another `dev_flash` would make `sameClothPreset` false, discard the
+worker's state and settle synchronously exactly as before. `XMB_RIBBON_SETTLE_SYNC=1` starts no worker
+and keeps the pre-change path, which is the A/B used below.
+
+At a pinned `--render-clock` the cloth does not step after the first frame: `Ribbon::render` computes
+`dt` from the *pinned* seconds (`lastSeconds_<0 ? 1/60 : clamp(seconds-lastSeconds_,0,.25)`), so every
+later frame has `dt = 0`, `acc` stays 1 and `swell` draws `pos` unchanged. The canonical frame is
+therefore a function of the settled state alone, which is what makes a whole-frame SHA the proof, not a
+proxy.
+
+**Why not settle less (measured, rejected).** The cloth is driven, not damped to a fixed point: its last
+column is pinned to `sin(11t)/cos(15t)` of the advancing wave clock and every row's first point is pushed
++dx every step, and DAMPING x TIMESTEP = 0.9998 per step (a 5,000-step velocity time constant). A
+checkpoint study (14,400 steps, `pos` saved at 14 marks, max |component delta| and RMS against the final
+state) shows the state is still moving at the end:
+
+| step | max abs delta | RMS delta |
+|---:|---:|---:|
+| 300 | 2.16 | 0.673 |
+| 1,800 | 3.30 | 0.895 |
+| 3,600 | 3.93 | 1.125 |
+| 7,200 | 1.37 | 0.393 |
+| 10,800 | 1.71 | 0.505 |
+| 13,800 | 0.750 | 0.182 |
+
+(The non-monotonic series is the driven oscillation, not a slow transient.) Cutting steps also cuts the
+wave clock and phase, so the experiment fast-forwards `target`, `phase` and `seed` through the skipped
+steps and compares only the physical state; even then, every rendered vertex moves. First-frame sheet
+vertices (16384, clip space -> 1920x1080 pixels) against the 14,400-step sheet:
+
+| settle steps | max vertex pixel delta | vertices moved > 0.5 px | vertices moved > 1 px | frame SHA |
+|---:|---:|---:|---:|---|
+| 13,800 | 408.0 | 16,384 | 16,383 | 5E17D0B5... |
+| 12,600 | 703.5 | 16,384 | 16,384 | BB9D96F0... |
+| 10,800 | 1,217.3 | 16,384 | 16,384 | DE83F273... |
+| 7,200 | 817.8 | 16,384 | 16,384 | 67DE49FE... |
+| 3,600 | 2,058.5 | 16,384 | 16,384 | E80BBACD... |
+| 1,800 | 2,083.9 | 16,384 | 16,383 | 9C148D0C... |
+| 14,400 | 0 | 0 | 0 | ACA24736... |
+
+The earliest step count within one 8-bit level is 14,400 - at 13,800 all 16,384 rendered vertices have
+moved more than half a pixel and all but one more than a pixel, and the frame hash changes at every cut.
+Direction 1 is closed by measurement, not assumption. Direction 2 (a cheaper inner loop) was not
+attempted once direction 3 cleared the bar: any rewrite would have to be bit-identical to the existing
+float sequence, and the prefetch already removes the latency rather than shrinking it.
+
+**Timing inside the code, logged once per init.** `settledFlat` times its 14,400 steps, and `init` logs
+one line either way, for example (final build, clock 20):
+
+```
+ribbon: cloth warm-up 221.7 ms on a prefetch thread started by the constructor (joined in initializeGL after 0.0 ms); LINE1 day preset matches the compiled fallback, state reused
+ribbon: cloth warm-up 213.0 ms synchronous ; prefetch unavailable          <- XMB_RIBBON_SETTLE_SYNC=1
+```
+
+Measured settle cost on the final build: 213.5-254.0 ms off-thread (three runs: 213.5, 221.7, 254.0)
+against 213.0 ms synchronous; the join is 0.0 ms in every run because the constructor starts the worker
+~450 ms before `initializeGL` reaches the cloth. The worker still burns its ~220 ms, but on a thread the
+first frame no longer waits for; the logged join is the tripwire if a loaded machine ever fails to finish
+in time.
+
+**First-frame effect** (`bun work/perf-harden.ts startup --runs 4 --exe C:/dev/out/native-ribbon/re-ps3-native.exe`,
+two interleaved batches per arm, same binary, 8 runs each; raw first frames in `out/ribbon-final/startup-*.json`):
+
+| milestone | sync median (min-max) | prefetch median (min-max) | delta |
+|---|---:|---:|---:|
+| text atlas (cumulative timestamp, end of TextRenderer::init) | 546 (515-623) | 547 (512-647) | +1 |
+| native renderer (end of initializeGL) | 780 (739-856) | 562 (529-662) | **-218** |
+| **first frame** | **1064.5 (1037-1146)** | **870.5 (842-922)** | **-194 (-18.2%)** |
+
+`initializeGL` loses the settle almost exactly; the first frame keeps 194 ms of it (the difference is the
+other milestones in that window, within this machine's run-to-run spread). The arm was the env switch
+only, so both arms are the same binary and the same tree.
+
+**Frame proof.** Baseline = `C:\dev\out\native-ribbon` built from the tree before this change
+(`re-ps3-native-base.exe` kept at `C:\dev\out\ribbon-base\`). Capture recipe: `--dev-flash
+C:/dev/rpcs3/bin/dev_flash`, fresh `--data-dir`, empty `XMB_STEAM_ROOT`, `--background-clock
+2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00 --focus-time 2000 --script full,wait,wait,wait,grab=...,quit`,
+`--render-clock` 20 or 30:
+
+| capture | SHA-256 |
+|---|---|
+| baseline, clock 20 (and a repeat) | ACA24736A1F74AF8369B552F361E71716AF6ED2A8AB9DEBDF65B6D302004E5A4 |
+| final, clock 20 | ACA24736A1F74AF8369B552F361E71716AF6ED2A8AB9DEBDF65B6D302004E5A4 |
+| final, clock 20, `XMB_RIBBON_SETTLE_SYNC=1` | ACA24736A1F74AF8369B552F361E71716AF6ED2A8AB9DEBDF65B6D302004E5A4 |
+| baseline, clock 30 | 155086517F63C0748DFEFA07C487368940641831725A11A2594529CB84765025 |
+| final, clock 30 | 155086517F63C0748DFEFA07C487368940641831725A11A2594529CB84765025 |
+
+Decoded RGB comparison: 0 differing pixels of 2,073,600 at both clocks, max channel delta 0; the
+synchronous A/B arm is also 0, which proves the worker's bytes equal the bytes the main thread used to
+compute. `bun work/ab-layers.ts --capture --exe C:/dev/out/native-ribbon/re-ps3-native.exe` on the final
+build: **PASS 6/6**, text presence 1677 bright pixels in the clock crop (minimum 900) PASS, frame 18.31 dB
+/ 0.8356 SSIM (+0.02 / +0.0014 against its stored capture baseline), top background 20.25/0.9363, icon
+row 21.20/0.9029, item label row 11.95/0.3924, clock text 11.39/0.4500, info bar 14.98/0.7639. Its capture
+image hashes to 155086517F63C... too, i.e. the gate's own recipe and the c30 capture above are the same
+frame.
+
+`native-bands2` is still present but is a **stale tree**, not a reference for this change: its exe was
+built at 01:07:45, while `src/view.cpp` was last written at 06:23:35 (and the pre-change baseline here was
+built after that). Its captures differ from both the baseline and the final build by 30,759 px (clock 20)
+and 30,756 px (clock 30), max channel delta 209, bbox 536..1127 x 342..1016 - identical counts against
+baseline and against the final build, so this change adds exactly zero difference there as well; the
+band-vs-bands2 difference is view.cpp's UI change, not the ribbon.
+
+Reproduce: build `C:\dev\out\native-ribbon`; capture with the recipe above at 20 and 30 and hash; run the
+gate; run the startup A/B by setting `XMB_RIBBON_SETTLE_SYNC=1` for the sync arm. Files touched by this
+change: `src/ribbon.cpp`, `src/ribbon.h`, this section. Everything else in the tree is byte-identical
+before/after (src fingerprint comparison in `out/ribbon-final/src-sha-after.txt`).
+
+
 
 
