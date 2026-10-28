@@ -1,4 +1,5 @@
 #include "text_renderer.h"
+#include <QDir>
 #include <QGlyphRun>
 #include <QTextLayout>
 #include <QTextOption>
@@ -72,6 +73,131 @@ bool anyOverlap(const QVector<QRectF>& boxes) {
 // stays per glyph (the existing atlas green channel); only ink and shadow read the union mask.
 }
 
+// --- The firmware text material (P3) --------------------------------------------------------------
+const Materials::TextMaterial& TextRenderer::defaultMaterial() {
+    static const Materials::TextMaterial material=[] {
+        Materials::TextMaterial value;
+        // 4.93's Text objects carry one shadow block almost everywhere: 1304 of 1305 templates are
+        // shadowX=4/shadowY=-5, 1197 are RGB .25 (107 are .9, one disables the shadow), and all are
+        // alpha 1 with perspective 0 (audit/TEXT-RENDERER.md "RCO Text attributes for Phase 3",
+        // audit/RCO-OBJECT-MODEL.md 9.4). Where a call site has no attributable object - the item
+        // labels are paf text built from XMBML at run time, and no RCO in the local 4.93 tree holds a
+        // label Text object - this block is the only firmware authority, so it is the default rather
+        // than a constant of this renderer's own. `firmware/text-template` in the XMB_TEXT_MATERIAL
+        // trace names that provenance, not a container read.
+        value.present=true;
+        value.container=QStringLiteral("firmware");
+        value.object=QStringLiteral("text-template");
+        value.size=0;                    // 0: the plugin supplies the size (paf), as the objects store it
+        value.top=QColor::fromRgbF(1,1,1,1);
+        value.bottom=value.top;
+        value.spacingHorizontal=0;
+        value.spacingVertical=0;
+        value.shadow=QColor::fromRgbF(.25,.25,.25,1.);
+        value.shadowX=4;
+        value.shadowY=-5;
+        value.shadowPerspective=0;
+        return value;
+    }();
+    return material;
+}
+
+TextRenderer::ShadowStyle TextRenderer::shadowStyle(const Materials::TextMaterial& material) {
+    ShadowStyle style;
+    if(!material.present) return style;
+    const QColor colour=material.shadow.isValid()?material.shadow:QColor::fromRgbF(0,0,0,0);
+    if(colour.alphaF()<=0) return style;             // the one Text object that disables the shadow
+    style.on=true;
+    style.colour=colour;
+    // Frame sign: PAF object space is y-up (the notification's three-label set steps +0.5, -0.375,
+    // -0.5 from the top line down), so shadowY -5 is 5 px DOWN on screen. Neither field is scaled by
+    // the object's size: the reference clock, drawn at the labels' 27 px, measures its shadow 5 px
+    // right and 4-5 px down (audit/TEXT-RENDERER.md), which is the firmware 4/-5 at 1 scene px per
+    // unit. Scaling by size/10 would put it at 10.8/13.5 px and does not match the frame.
+    style.dx=material.shadowX;
+    style.dy=-material.shadowY;
+    return style;
+}
+
+void TextRenderer::noteMaterial(const Materials::TextMaterial& material,const char* labelClass,int drawnSize,
+                                bool shadow,bool ink) {
+    // One line per surface, the first time it draws: the material's provenance plus every field, so a
+    // later pass can diff this against Materials::textMaterial for the same object and prove the draw
+    // used the firmware values rather than agreeing with them by coincidence.
+    if(!materialTrace_) return;
+    const QString name=labelClass && *labelClass?QString::fromLatin1(labelClass):QStringLiteral("unattributed");
+    const auto style=shadowStyle(material);
+    // One line per (surface, drawn size, shadow applied or not): the focused label's glow pass draws
+    // the same 27 px class with shadow=false, so the key must keep the two draws apart or the trace
+    // would describe the glow pass and hide the shadow the ink pass actually applies.
+    const bool withShadow=shadow && style.on;
+    const QString key=name+QChar(0x1f)+QString::number(drawnSize)+QChar(0x1f)+(withShadow?QChar('s'):QChar('n'));
+    const auto found=materialUses_.constFind(key);
+    if(found!=materialUses_.cend()) { ++materialUses_[key]; return; }
+    materialUses_.insert(key,1);
+    const QString source=material.present && !material.container.isEmpty()
+        ?material.container+'/'+material.object:QStringLiteral("<absent>");
+    const QString shadowColour=material.shadow.isValid()
+        ?QStringLiteral("%1,%2,%3").arg(material.shadow.redF(),0,'f',3).arg(material.shadow.greenF(),0,'f',3)
+            .arg(material.shadow.blueF(),0,'f',3):QStringLiteral("<invalid>");
+    const QString applied=!style.on?QStringLiteral("off")
+        :(!shadow?QStringLiteral("off (shadow=false)"):ink?QStringLiteral("shadow"):QStringLiteral("shadow (ink=false)"));
+    qInfo().noquote()<<QString("text material: class=%1 drawn=%2px source=%3 size=%4 spacing=(%5,%6) "
+        "font=%7 shadow=(%8,%9) screen=(%10,%11) scene px colour=(%12) alpha=%13 applied=%14")
+        .arg(name).arg(drawnSize).arg(source).arg(material.size,0,'g',6)
+        .arg(material.spacingHorizontal,0,'g',6).arg(material.spacingVertical,0,'g',6)
+        .arg(material.fontReference.isEmpty()?QStringLiteral("<null>"):material.fontReference)
+        .arg(material.shadowX,0,'g',6).arg(material.shadowY,0,'g',6)
+        .arg(style.dx,0,'f',2).arg(style.dy,0,'f',2).arg(shadowColour)
+        .arg(style.colour.alphaF(),0,'f',2).arg(applied);
+    // Assertion, per surface: the material exists and lies in the domain the two draw paths can
+    // express. A material with no shadow block is not an error (one object disables it), so the
+    // assertion is about consistency, not about the shadow being on.
+    const bool ok=material.present && std::isfinite(material.shadowX) && std::isfinite(material.shadowY)
+        && (!material.shadow.isValid() || (material.shadow.alphaF()>=0 && material.shadow.alphaF()<=1));
+    const qreal pad=std::ceil(haloRadius*std::max(1.,rasterScale_))+2.;
+    const bool fits=!style.on || (std::abs(style.dx)*rasterScale_<=pad && std::abs(style.dy)*rasterScale_<=pad);
+    qInfo().noquote()<<QString("text material: %1 class=%2 shadowX=%3 shadowY=%4 shadowAlpha=%5 "
+        "offset-within-tile-pad=%6")
+        .arg(ok?QStringLiteral("PASS"):QStringLiteral("FAIL"),name)
+        .arg(material.shadowX,0,'g',6).arg(material.shadowY,0,'g',6)
+        .arg(material.shadow.isValid()?material.shadow.alphaF():-1.,0,'f',2)
+        .arg(!style.on?QStringLiteral("n/a"):fits?QStringLiteral("yes"):QStringLiteral("no (mask path or clipped)"));
+}
+
+void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
+                        const QString& text,const QFont& requested,const QColor& colour,int flags,
+                        qreal glow,bool shadow,bool ink,const char* labelClass) {
+    drawImpl(gl,painter,rect,text,requested,colour,flags,defaultMaterial(),labelClass,glow,shadow,ink);
+}
+
+void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
+                        const QString& text,const QFont& requested,const QColor& colour,int flags,
+                        const Materials::TextMaterial& material,const char* labelClass,
+                        qreal glow,bool shadow,bool ink) {
+    drawImpl(gl,painter,rect,text,requested,colour,flags,material,labelClass,glow,shadow,ink);
+}
+
+void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
+                        const QString& text,const QFont& requested,const QColor& colour,int flags,
+                        Materials& materials,const QString& container,const QString& object,const char* labelClass,
+                        qreal glow,bool shadow,bool ink) {
+    // The label path's entry point: the object is known here, so the material is read from the RCO
+    // tree (Materials::textMaterial) and cached. An object that does not resolve leaves present false
+    // and the draw falls back to defaultMaterial(), which the trace reports as absent.
+    const QString key=container+QChar(0x1f)+object;
+    auto found=materialCache_.constFind(key);
+    if(found==materialCache_.cend()) found=materialCache_.insert(key,materials.textMaterial(container,object));
+    // An object that does not resolve must not pass silently: the draw still happens with the firmware
+    // default, so the trace says which object was asked for and that it was absent, once per object.
+    if(!found->present && materialTrace_ && !materialUses_.contains(QStringLiteral("absent:")+key)) {
+        materialUses_.insert(QStringLiteral("absent:")+key,1);
+        qWarning().noquote()<<QString("text material: %1/%2 did not resolve (container or object absent); "
+            "the draw uses the firmware Text template default").arg(container,object);
+    }
+    drawImpl(gl,painter,rect,text,requested,colour,flags,*found,labelClass,glow,shadow,ink);
+}
+
 bool TextRenderer::init(QOpenGLFunctions_3_3_Core& gl,const QString& fontDirectory) {
     useFreeType_=raster_.configure(fontDirectory) && !qEnvironmentVariableIntValue("XMB_TEXT_QT");
     // Per-phase coverage tiles are on by default: two phases per layer pixel on each axis, i.e. four
@@ -84,6 +210,66 @@ bool TextRenderer::init(QOpenGLFunctions_3_3_Core& gl,const QString& fontDirecto
     // ink/shadow string so the path can be A/B-ed and timed. The firmware rule itself is not optional
     // evidence: it is the compare-and-keep-larger copy at FUN_004057a0 (audit/TEXT-RASTER.md 1.4-1.5).
     maskMode_=qEnvironmentVariableIsSet("XMB_TEXT_MASK")?qEnvironmentVariableIntValue("XMB_TEXT_MASK"):-1;
+    materialTrace_=qEnvironmentVariableIntValue("XMB_TEXT_MATERIAL")!=0;
+    // Shadow composite. The shipped mapping is the multiplicative one: the material's shadow colour
+    // darkens the layer (in linear light shadowRGB is the factor; the layer is display-referred, so
+    // pow(rgb, 1/2.2) is what gets multiplied). That is the composite the reference frame measures -
+    // see "Text shadow from the firmware material" in audit/TEXT-RENDERER.md. XMB_TEXT_SHADOW=premultiplied
+    // restores the literal premultiplied colour/alpha reading for the A/B; diagnostic only, the capture
+    // harness leaves it unset.
+    shadowAttenuate_=qEnvironmentVariable("XMB_TEXT_SHADOW").trimmed()
+        .compare(QStringLiteral("premultiplied"),Qt::CaseInsensitive)!=0;
+    if(materialTrace_) {
+        const auto& material=defaultMaterial();
+        const auto style=shadowStyle(material);
+        qInfo().noquote()<<QString("text material: trace on; shadow from the firmware material, "
+            "mapping offset=(shadowX,-shadowY) scene px, colour=shadowRGB multiplies the layer as "
+            "pow(rgb,1/2.2), coverage scaled by shadowAlpha*textAlpha (the composite is a fit; the firmware "
+            "shadow blend state is unrecovered)");
+        qInfo().noquote()<<QString("text material: default = firmware Text template (4.93: 1304/1305 objects "
+            "shadowX=%1 shadowY=%2 RGB=%3 alpha=%4) -> screen (+%5,+%6) scene px; no RCO Text object holds an "
+            "item label (paf draws XMBML text at run time)")
+            .arg(material.shadowX).arg(material.shadowY)
+            .arg(QStringLiteral("%1,%2,%3").arg(material.shadow.redF(),0,'f',2)
+                     .arg(material.shadow.greenF(),0,'f',2).arg(material.shadow.blueF(),0,'f',2))
+            .arg(style.colour.alphaF(),0,'f',2).arg(style.dx,0,'f',2).arg(style.dy,0,'f',2);
+        // Prove the read path the call sites use, from inside the renderer: the font directory is
+        // <assets root>/data/font, so the firmware root is two levels up. xmb_plugin_normal is the
+        // XMB's own container and its `clock` Text object is the one text surface in the frame that
+        // has both an object and a name the renderer's callers already use. The read goes through the
+        // same Materials::textMaterial the label hunks call, so a match here is authority for the
+        // default, not agreement. Diagnostic only: this reader instance exists under
+        // XMB_TEXT_MATERIAL=1, never on the shipped path.
+        const QString flashRoot=QDir::cleanPath(QDir(fontDirectory).absoluteFilePath(QStringLiteral("../..")));
+        Assets firmware(flashRoot);
+        RcoObjects objects(firmware);
+        Materials materials(firmware,objects);
+        const auto clock=materials.textMaterial(QStringLiteral("xmb_plugin_normal"),QStringLiteral("clock"));
+        const auto& fallback=defaultMaterial();
+        qInfo().noquote()<<QString("text material: RCO read %1/%2 present=%3 size=%4 shadow=(%5,%6) "
+            "RGB=(%7,%8,%9) alpha=%10 spacing=(%11,%12) font=%13 container=%14")
+            .arg(clock.container,clock.object).arg(clock.present).arg(clock.size,0,'g',6)
+            .arg(clock.shadowX,0,'g',6).arg(clock.shadowY,0,'g',6)
+            .arg(clock.shadow.redF(),0,'f',3).arg(clock.shadow.greenF(),0,'f',3).arg(clock.shadow.blueF(),0,'f',3)
+            .arg(clock.shadow.alphaF(),0,'f',2)
+            .arg(clock.spacingHorizontal,0,'g',6).arg(clock.spacingVertical,0,'g',6)
+            .arg(clock.fontReference.isEmpty()?QStringLiteral("<null>"):clock.fontReference)
+            .arg(objects.container(clock.container).ok?QStringLiteral("read"):QStringLiteral("absent"));
+        const bool same=clock.present && clock.shadowX==fallback.shadowX && clock.shadowY==fallback.shadowY
+            && std::abs(clock.shadow.redF()-fallback.shadow.redF())<1e-3
+            && std::abs(clock.shadow.alphaF()-fallback.shadow.alphaF())<1e-3;
+        qInfo().noquote()<<QString("text material: %1 default == xmb_plugin_normal/clock shadow block "
+            "(shadow %2/%3 vs %4/%5; colour %6 vs %7; alpha %8 vs %9)")
+            .arg(same?QStringLiteral("PASS"):QStringLiteral("FAIL"))
+            .arg(clock.shadowX,0,'g',3).arg(clock.shadowY,0,'g',3)
+            .arg(fallback.shadowX,0,'g',3).arg(fallback.shadowY,0,'g',3)
+            .arg(clock.shadow.isValid()?QStringLiteral("%1,%2,%3").arg(clock.shadow.redF(),0,'f',3)
+                     .arg(clock.shadow.greenF(),0,'f',3).arg(clock.shadow.blueF(),0,'f',3):QStringLiteral("<absent>"))
+            .arg(QStringLiteral("%1,%2,%3").arg(fallback.shadow.redF(),0,'f',3)
+                     .arg(fallback.shadow.greenF(),0,'f',3).arg(fallback.shadow.blueF(),0,'f',3))
+            .arg(clock.shadow.isValid()?clock.shadow.alphaF():-1.,0,'f',2)
+            .arg(fallback.shadow.alphaF(),0,'f',2);
+    }
     const char* vertex=R"(#version 330 core
 layout(location=0) in vec2 position;layout(location=1) in vec2 texcoord;layout(location=2) in vec4 bounds;
 uniform vec2 viewport;out vec2 uv;flat out vec4 tileBounds;
@@ -92,12 +278,19 @@ void main(){uv=texcoord;tileBounds=bounds;gl_Position=vec4(position.x*2./viewpor
     const char* fragment=R"(#version 330 core
 in vec2 uv;flat in vec4 tileBounds;out vec4 result;uniform sampler2D atlas;uniform vec4 tint;
 uniform vec2 shadowOffset;uniform float glowStrength,shadowAlpha;uniform bool ink,shadowPass;uniform vec3 shadowColor;
+uniform bool shadowAttenuate;
 void main(){
     vec2 coverage=texture(atlas,uv).rg;
     vec2 shadowUv=uv-shadowOffset;
     float inside=step(tileBounds.x,shadowUv.x)*step(tileBounds.y,shadowUv.y)*step(shadowUv.x,tileBounds.z)*step(shadowUv.y,tileBounds.w);
     float shadow=texture(atlas,shadowUv).r*inside*shadowAlpha*tint.a;
-    if(shadowPass){result=vec4(shadowColor*shadow,shadow);return;}
+    // Two shadow composites, one switch: premultiplied (the material's colour at the material's alpha,
+    // normal alpha-over) or attenuate (multiply the destination by shadowRGB's linear-light value; the
+    // layer is display-space, so pow(rgb,1/2.2) is the factor). See audit/TEXT-RENDERER.md.
+    if(shadowPass){
+        if(shadowAttenuate){result=vec4(mix(vec3(1.),pow(shadowColor,vec3(1./2.2)),clamp(shadow,0.,1.)),1.);return;}
+        result=vec4(shadowColor*shadow,shadow);return;
+    }
     float halo=clamp(coverage.g*glowStrength,0.,1.)*tint.a;
     vec3 rgb=vec3(.922,.961,1.)*halo;
     float fill=ink?coverage.r*tint.a:0.;
@@ -118,10 +311,14 @@ void main(){result=vec4(texture(atlas,uv).r,0.,0.,1.);}
     // not a per-tile copy, and ink is tint * coverage, both premultiplied like the fast path.
     const char* compositeFragment=R"(#version 330 core
 in vec2 uv;out vec4 result;uniform sampler2D mask;uniform vec4 tint;uniform vec3 shadowColor;
-uniform float shadowAlpha;uniform bool ink,shadowPass;uniform vec2 shadowOffset;
+uniform float shadowAlpha;uniform bool ink,shadowPass;uniform vec2 shadowOffset;uniform bool shadowAttenuate;
 void main(){
     float coverage=texture(mask,uv-(shadowPass?shadowOffset:vec2(0.))).r;
-    if(shadowPass){float shadow=coverage*shadowAlpha*tint.a;result=vec4(shadowColor*shadow,shadow);return;}
+    if(shadowPass){
+        float shadow=coverage*shadowAlpha*tint.a;
+        if(shadowAttenuate){result=vec4(mix(vec3(1.),pow(shadowColor,vec3(1./2.2)),clamp(shadow,0.,1.)),1.);return;}
+        result=vec4(shadowColor*shadow,shadow);return;
+    }
     float fill=ink?coverage*tint.a:0.;
     result=vec4(tint.rgb*fill,fill);
 }
@@ -145,12 +342,17 @@ void main(){
            <<(phases_?"per-phase tiles (XMB_TEXT_PHASE)":"whole-output-pixel glyph origins")
            <<"coverage union:"<<(maskAvailable_
                ?(maskMode_>0?QString("forced (XMB_TEXT_MASK=1)"):maskMode_<0?QString("auto on overlapping ink"):QString("off (XMB_TEXT_MASK=0)"))
-               :QString("unavailable"));
+               :QString("unavailable"))
+           <<"shadow:"<<(shadowAttenuate_?QString("attenuate, fitted (default)")
+                                          :QString("premultiplied colour/alpha (XMB_TEXT_SHADOW=premultiplied)"));
     return true;
 }
 void TextRenderer::release(QOpenGLFunctions_3_3_Core& gl) {
     for(const auto& page:pages_)gl.glDeleteTextures(1,&page.texture);
     pages_.clear();faces_.clear();layouts_.clear();
+    // A new context re-reads the material objects through the caller's Materials, so the cached copies
+    // and the "already traced" set do not outlive this renderer.
+    materialCache_.clear();materialUses_.clear();
     if(maskFbo_)gl.glDeleteFramebuffers(1,&maskFbo_);
     if(maskTexture_)gl.glDeleteTextures(1,&maskTexture_);
     maskFbo_=maskTexture_=0;maskSize_=QSize();maskAvailable_=false;
@@ -282,10 +484,19 @@ TextRenderer::Layout& TextRenderer::layout(const QString& text,const QFont& font
     }
     return layouts_.insert(key,std::move(value)).value();
 }
-void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
-                        const QString& text,const QFont& requested,const QColor& colour,int flags,
-                        qreal glow,bool shadow,bool ink) {
+void TextRenderer::drawImpl(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
+                            const QString& text,const QFont& requested,const QColor& colour,int flags,
+                            const Materials::TextMaterial& material,const char* labelClass,
+                            qreal glow,bool shadow,bool ink) {
     if(!ready_ || text.isEmpty() || colour.alpha()==0 || painter.opacity()<=0)return;
+    // The material this string actually draws with, and the shadow it reduces to. The material is
+    // traced once per surface before any GL state changes, so the log's first line is a complete
+    // description of the shadow the following draw applies.
+    const Materials::TextMaterial& applied=material.present?material:defaultMaterial();
+    const ShadowStyle style=shadowStyle(applied);
+    noteMaterial(applied,labelClass,requested.pixelSize(),shadow,ink);
+    // A material whose shadow is disabled skips the pass even when the call site asked for one.
+    const bool withShadow=shadow && style.on;
     QFont font=requested;
     if(font.styleName().isEmpty() && font.weight()==QFont::Normal && !font.italic())font.setStyleName("Regular");
     font.setPixelSize(std::max(1,int(std::lround(requested.pixelSize()*rasterScale_))));
@@ -357,9 +568,13 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
         }
     }
     const int glyphVertexCount=int(vertexBuffer_.size());
+    // The shadow's displacement in layer pixels: the material stores it in 1920x1080 scene pixels,
+    // while the atlas tiles, the union mask and the layer are in layer pixels (rasterScale_ of them
+    // per scene pixel).
+    const qreal shadowDx=style.dx*rasterScale_,shadowDy=style.dy*rasterScale_;
     // Mask mode only when the string can actually need the union: two glyph inks must intersect.
     // XMB_TEXT_MASK=0 forces the fast path, XMB_TEXT_MASK=1 forces the mask for the A/B and timing run.
-    const bool unionNeeded=(shadow||ink) && maskAvailable_ && maskMode_!=0
+    const bool unionNeeded=(withShadow||ink) && maskAvailable_ && maskMode_!=0
         && (maskMode_>0 || anyOverlap(boxBuffer_));
     QRect clearBox,quadBox;
     bool masked=false;
@@ -367,13 +582,15 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
         QRect content;
         for(const auto& box:boxBuffer_)content=content.united(box.toAlignedRect());
         if(!content.isEmpty() && ensureMask(gl)) {
-            // The shadow samples the same mask `reach` layer pixels up/left, so the cleared region is
-            // the ink box grown by reach on every side and the composite quad only needs the grown
-            // right/bottom. Both are clamped to the layer; a cleared edge texel is still zero.
-            const int reach=std::max(1,int(std::lround(rasterScale_)));
+            // The shadow samples the same mask displaced by (shadowDx, shadowDy) layer px, so the
+            // cleared region is the ink box grown by that displacement on every side (a cleared edge
+            // texel is still zero) and the composite quad is the ink box plus the displaced copy.
+            // Both are clamped to the layer.
+            const int left=std::max(0,-int(std::floor(shadowDx))),top=std::max(0,-int(std::floor(shadowDy)));
+            const int right=std::max(0,int(std::ceil(shadowDx))),bottom=std::max(0,int(std::ceil(shadowDy)));
             const QRect targetRect(QPoint(0,0),target_);
-            clearBox=content.adjusted(-reach,-reach,reach,reach).intersected(targetRect);
-            quadBox=content.adjusted(0,0,reach,reach).intersected(targetRect);
+            clearBox=content.adjusted(-left-1,-top-1,right+1,bottom+1).intersected(targetRect);
+            quadBox=content.adjusted(-left,-top,right,bottom).intersected(targetRect);
             masked=!clearBox.isEmpty() && !quadBox.isEmpty();
             if(masked) {
                 // One quad over the composite box, appended after the glyph range. Its uv is a direct
@@ -413,21 +630,28 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
         // maskPass leaves the vertex array unbound; the halo pass and both composite draws read the
         // vertex buffer that was uploaded before the mask pass.
         gl.glBindVertexArray(vao_);gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);
-        const int reach=std::max(1,int(std::lround(rasterScale_)));
         compositeProgram_.bind();
         compositeProgram_.setUniformValue("viewport",QVector2D(target_.width(),target_.height()));
         compositeProgram_.setUniformValue("mask",0);
         compositeProgram_.setUniformValue("tint",QVector4D(colour.redF(),colour.greenF(),colour.blueF(),opacity));
-        compositeProgram_.setUniformValue("shadowColor",QVector3D(0,0,0));
-        compositeProgram_.setUniformValue("shadowAlpha",.2f);
-        compositeProgram_.setUniformValue("shadowOffset",QVector2D(float(reach)/float(target_.width()),
-                                                                  -float(reach)/float(target_.height())));
+        compositeProgram_.setUniformValue("shadowColor",QVector3D(float(style.colour.redF()),float(style.colour.greenF()),
+                                                                  float(style.colour.blueF())));
+        compositeProgram_.setUniformValue("shadowAlpha",float(style.colour.alphaF()));
+        // Screen +y is down and the mask's v is flipped with the layer, so a down-right displacement is
+        // (+dx, -dy) in layer-normalised uv: the composite samples the mask at p - offset, which paints
+        // the shadow at p + offset.
+        compositeProgram_.setUniformValue("shadowOffset",QVector2D(float(shadowDx)/float(target_.width()),
+                                                                  -float(shadowDy)/float(target_.height())));
+        compositeProgram_.setUniformValue("shadowAttenuate",shadowAttenuate_);
         gl.glActiveTexture(GL_TEXTURE0);gl.glBindSampler(0,0);gl.glBindTexture(GL_TEXTURE_2D,maskTexture_);
         // Shadow first, then the per-tile halo, then the unioned ink: the same layering as the fast path.
-        if(shadow) {
+        if(withShadow) {
             compositeProgram_.setUniformValue("shadowPass",true);
             compositeProgram_.setUniformValue("ink",false);
+            // The attenuate composite multiplies the layer; every other pass is alpha-over.
+            if(shadowAttenuate_)gl.glBlendFunc(GL_DST_COLOR,GL_ZERO);
             gl.glDrawArrays(GL_TRIANGLES,glyphVertexCount,6);
+            if(shadowAttenuate_)gl.glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
         }
         if(glow>0) {
             compositeProgram_.release();
@@ -436,8 +660,9 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
             program_.setUniformValue("atlas",0);
             program_.setUniformValue("tint",QVector4D(colour.redF(),colour.greenF(),colour.blueF(),opacity));
             program_.setUniformValue("glowStrength",float(std::clamp(glow,0.,1.)*1.5));
-            program_.setUniformValue("shadowAlpha",.2f);
-            program_.setUniformValue("shadowColor",QVector3D(0,0,0));
+            program_.setUniformValue("shadowAlpha",float(style.colour.alphaF()));
+            program_.setUniformValue("shadowColor",QVector3D(float(style.colour.redF()),float(style.colour.greenF()),
+                                                             float(style.colour.blueF())));
             program_.setUniformValue("shadowOffset",QVector2D(0,0));
             program_.setUniformValue("ink",false);
             program_.setUniformValue("shadowPass",false);
@@ -458,19 +683,35 @@ void TextRenderer::draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QR
         program_.setUniformValue("viewport",QVector2D(target_.width(),target_.height()));program_.setUniformValue("atlas",0);
         program_.setUniformValue("tint",QVector4D(colour.redF(),colour.greenF(),colour.blueF(),opacity));
         program_.setUniformValue("glowStrength",float(std::clamp(glow,0.,1.)*1.5));
-        // RCO template offsets (4,-5) are not measured screen pixels. Applying them directly made a dark duplicate
-        // behind every label. Keep a restrained one-scene-pixel shadow pending recovery of the runtime conversion.
-        program_.setUniformValue("shadowAlpha",.2f);
-        program_.setUniformValue("shadowColor",QVector3D(0,0,0));
+        // The per-tile path paints the shadow from the same atlas tile, displaced by the material in
+        // atlas texels (the quad maps one atlas texel to one layer pixel), so the tile's halo padding
+        // must be at least the displacement or the shadow is clipped at the glyph's edge. The firmware
+        // 4/-5 is 8x10 layer px against the 14 px pad of a 2x layer: it fits, and selfCheck asserts
+        // that ('shadow-tile-pad'). A larger material offset takes the mask path instead.
+        const qreal shadowPad=std::ceil(haloRadius*std::max(1.,rasterScale_))+2.;
+        if(withShadow && (std::abs(shadowDx)>shadowPad || std::abs(shadowDy)>shadowPad) && !shadowPadWarned_) {
+            shadowPadWarned_=true;
+            qWarning().noquote()<<QString("text shadow: material offset (%1,%2) layer px exceeds the glyph tile "
+                "padding (%3 px); the per-tile shadow is clipped (the mask path is not)")
+                .arg(shadowDx,0,'f',1).arg(shadowDy,0,'f',1).arg(shadowPad,0,'f',1);
+        }
+        program_.setUniformValue("shadowAlpha",float(style.colour.alphaF()));
+        program_.setUniformValue("shadowColor",QVector3D(float(style.colour.redF()),float(style.colour.greenF()),
+                                                        float(style.colour.blueF())));
         program_.setUniformValue("ink",ink);
-        program_.setUniformValue("shadowOffset",QVector2D(float(rasterScale_/atlasSize),float(rasterScale_/atlasSize)));
+        program_.setUniformValue("shadowOffset",QVector2D(float(shadowDx/atlasSize),float(shadowDy/atlasSize)));
+        program_.setUniformValue("shadowAttenuate",shadowAttenuate_);
         const auto drawPass=[&](bool isShadow){
             program_.setUniformValue("shadowPass",isShadow);
             drawGlyphPass();
         };
         // Draw the whole string's shadow first, including across atlas pages. A later glyph's shadow must never
         // cover an earlier glyph's foreground (especially with kerning, ligatures and combining marks).
-        if(shadow)drawPass(true);
+        if(withShadow) {
+            if(shadowAttenuate_)gl.glBlendFunc(GL_DST_COLOR,GL_ZERO);
+            drawPass(true);
+            if(shadowAttenuate_)gl.glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+        }
         drawPass(false);
         program_.release();
     }
@@ -611,6 +852,23 @@ void TextRenderer::selfCheck(QOpenGLFunctions_3_3_Core& gl) {
     const auto report=[&](const char* name,bool ok,const QString& detail) {
         pass&=ok;qInfo().noquote()<<QString("text check: %1 %2 %3").arg(ok?"PASS":"FAIL",name,detail);
     };
+    // The firmware text material's shadow mapping (P3). The default is the block 1304 of the 1305 Text
+    // objects in 4.93 carry; the screen offset is (shadowX, -shadowY) scene px and must stay inside the
+    // per-tile path's halo padding at this layer scale, or that path would clip the shadow silently.
+    {
+        const auto& material=defaultMaterial();
+        const auto style=shadowStyle(material);
+        report("shadow-material",style.on && material.shadowX==4. && material.shadowY==-5.
+                   && std::abs(style.dx-4.)<1e-6 && std::abs(style.dy-5.)<1e-6
+                   && std::abs(style.colour.redF()-.25)<1e-3 && std::abs(style.colour.alphaF()-1.)<1e-3,
+               QString("firmware default shadow (4,-5) .25 grey alpha 1 -> screen (%1,%2) scene px, colour alpha %3")
+                   .arg(style.dx,0,'f',2).arg(style.dy,0,'f',2).arg(style.colour.alphaF(),0,'f',2));
+        const qreal pad=std::ceil(haloRadius*std::max(1.,rasterScale_))+2.;
+        const qreal dx=std::abs(style.dx)*std::max(1.,rasterScale_),dy=std::abs(style.dy)*std::max(1.,rasterScale_);
+        report("shadow-tile-pad",dx<=pad && dy<=pad,
+               QString("offset %1x%2 layer px <= %3 px glyph-tile padding").arg(dx,0,'f',1).arg(dy,0,'f',1)
+                   .arg(pad,0,'f',1));
+    }
     // Elision must leave a fitting string untouched and, when it does elide, leave the prefix plus
     // the reserved ellipsis inside the limit.
     const QString longText=QStringLiteral("Corrupted Data");

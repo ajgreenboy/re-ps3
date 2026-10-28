@@ -11,6 +11,7 @@
 #include <memory>
 #include <vector>
 #include "font_raster.h"
+#include "rco_objects.h"   // Materials::TextMaterial: the firmware Text object's own material
 
 namespace xmb {
 // Shaping stays with QTextLayout (including fallback faces and bidi); glyph coverage is
@@ -36,8 +37,49 @@ public:
     // output pixel (2 for the supersampled UI layer), the grid glyph origins snap to so stems stay on whole pixels.
     void beginFrame(QOpenGLFunctions_3_3_Core& gl,const QSize& target,qreal rasterScale,int pixelGrid=1);
     bool ready() const { return ready_; }
+    // --- The firmware text material (P3) ---------------------------------------------------------
+    // A Text object in the RCO tree carries the material the owning plugin draws it with: size, the
+    // top/bottom gradient, the two spacing values, the font reference and the shadow (offset, RGB,
+    // alpha). Materials::textMaterial reads that object. This renderer applies the shadow and reports
+    // the rest; it does not change geometry, so size/gradient/spacing stay the call site's decision.
+    //
+    // Shadow mapping (see audit/TEXT-RENDERER.md, "Text shadow from the firmware material"):
+    // - offset: shadowX/shadowY are PAF object-space units with y up, so the screen offset is
+    //   (shadowX, -shadowY). One template unit is one 1920x1080 scene pixel: the reference clock
+    //   (drawn at the same 27 px as the labels) measures a 4-5 px right / 4-5 px down shadow for the
+    //   firmware's 4/-5, which is the 1:1 reading, not a scale by the object's size field.
+    // - colour: shadowRed/Green/Blue multiply the destination (a shadow darkens what is under it); the
+    //   material's shadowAlpha scales the coverage, and the text colour's own alpha scales it again, so
+    //   a shadow can never be stronger than the glyph that casts it.
+    // - composite (a fit, labelled as one): the layer is display-referred while PAF composites in
+    //   linear light, so the factor applied to the layer is pow(shadowRGB, 1/2.2) - 0.53 for the
+    //   firmware's 0.25 - mixed in by coverage*shadowAlpha*textAlpha. The reference frame measures that
+    //   shadow as a ~0.45-0.55 display multiply over the info bar band, which is this factor within the
+    //   frame's compression spread; the literal premultiplied reading (a flat 0.25 grey at alpha 1)
+    //   measures 30-40 display levels too light and scores worse (XMB_TEXT_SHADOW=premultiplied keeps
+    //   that reading for the A/B). The firmware's shadow blend state is still not recovered.
+    // defaultMaterial(): the block 1304 of the 1305 Text objects in 4.93 carry (4/-5, 0.25 grey,
+    // alpha 1). It is used when a call site has no attributable object (the item labels are paf text
+    // created from XMBML at run time, so no RCO Text object holds them) and replaces the invented
+    // 0-offset black 20% shadow this renderer drew before. `firmware/text-template` in the
+    // XMB_TEXT_MATERIAL trace names that block, not a container read.
+    static const Materials::TextMaterial& defaultMaterial();
+    // labelClass names the surface for the XMB_TEXT_MATERIAL trace ("item-label", "clock", ...).
     void draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
               const QString& text,const QFont& font,const QColor& colour,int flags,
+              qreal glow=0,bool shadow=true,bool ink=true,const char* labelClass=nullptr);
+    // The same draw with the material a call site resolved itself (Materials::textMaterial) or read
+    // from a Text object it owns.
+    void draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
+              const QString& text,const QFont& font,const QColor& colour,int flags,
+              const Materials::TextMaterial& material,const char* labelClass,
+              qreal glow=0,bool shadow=true,bool ink=true);
+    // Resolve container/object through Materials and draw in one call: the label path's entry point
+    // where the RCO gives an object (e.g. "xmb_plugin_normal", "clock"). The read is cached per
+    // (container, object); a missing container/object traces as absent and draws the default.
+    void draw(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
+              const QString& text,const QFont& font,const QColor& colour,int flags,
+              Materials& materials,const QString& container,const QString& object,const char* labelClass,
               qreal glow=0,bool shadow=true,bool ink=true);
     // Pure metric helpers: no GL state, no atlas page, no cache. They use the same unhinted
     // FreeType advances that place glyphs, so a caller that adopts them keeps one metric authority.
@@ -49,6 +91,18 @@ public:
     // so it compares the shipped union path with the pure helper rather than re-testing the helper.
     void selfCheck(QOpenGLFunctions_3_3_Core& gl);
 private:
+    // The firmware shadow reduced to what the two draw paths apply: colour with its alpha, and the
+    // offset in 1920x1080 scene pixels with +y down (screen), already sign-corrected.
+    struct ShadowStyle { bool on=false; QColor colour; qreal dx=0,dy=0; };
+    static ShadowStyle shadowStyle(const Materials::TextMaterial& material);
+    void drawImpl(QOpenGLFunctions_3_3_Core& gl,QPainter& painter,const QRectF& rect,
+                  const QString& text,const QFont& font,const QColor& colour,int flags,
+                  const Materials::TextMaterial& material,const char* labelClass,
+                  qreal glow,bool shadow,bool ink);
+    // XMB_TEXT_MATERIAL=1: one line per (label class, drawn size), the first time that surface draws,
+    // with the material's provenance and fields. Diagnostic only; unset by the capture harness.
+    void noteMaterial(const Materials::TextMaterial& material,const char* labelClass,int drawnSize,
+                      bool shadow,bool ink);
     struct Glyph { int page=-1; QRect atlas; QPoint bearing; int phaseX=0,phaseY=0; QRect ink; };
     struct Face { QRawFont font; QHash<quint64,Glyph> glyphs; };
     struct Page { GLuint texture=0; int x=0,y=0,rowHeight=0; };
@@ -92,6 +146,17 @@ private:
     QVector<Vertex> vertexBuffer_;
     QVector<Batch> batchBuffer_;
     QVector<QRectF> boxBuffer_;
+    // The firmware material per (container, object) the label path asked for, and the classes the
+    // XMB_TEXT_MATERIAL trace already reported (key = class + drawn size), so a surface logs once.
+    QHash<QString,Materials::TextMaterial> materialCache_;
+    QHash<QString,int> materialUses_;
+    bool materialTrace_=false;
+    // Once-only warning when a material's shadow offset is larger than the glyph tile padding, i.e.
+    // the per-tile path would clip it (the firmware 4/-5 does not).
+    bool shadowPadWarned_=false;
+    // XMB_TEXT_SHADOW=premultiplied: the literal premultiplied colour/alpha shadow instead of the
+    // shipped multiplicative one. Diagnostic; the default is the shipped path.
+    bool shadowAttenuate_=true;
     // Sub-pixel pen phases are per-phase coverage tiles: the pen's fraction of a layer pixel on each
     // axis selects a tile rasterised at that phase. On by default when FreeType coverage is in use;
     // XMB_TEXT_PHASE=0 restores whole-output-pixel snapping to the 26.6 blit origin
