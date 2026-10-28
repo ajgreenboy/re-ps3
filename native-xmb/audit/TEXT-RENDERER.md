@@ -1005,3 +1005,247 @@ $env:XMB_TEXT_MATERIAL="1"   # per-surface material trace + the RCO-read compari
 $env:XMB_TEXT_CHECK="1"      # assertions, including shadow-material and shadow-tile-pad
 $env:XMB_TEXT_SHADOW="premultiplied"  # A/B: the literal colour/alpha shadow instead of the shipped multiply
 ```
+
+## The text-metric residual measured: label em, unfocused ink level, depth-1 pen (2026-10-28)
+
+This pass measured the residual `GEOMETRY-ROOT 12.6.2` recorded ("the native label 'System Name' inks 202 px
+against the console's 218 px; the unfocused row ink peaks at 202-207 luma against 148-175"). Measured first,
+then changed: the two defects live at the **call site**, not in the renderer, so `src/view.cpp` was read and
+never edited and the fixes are returned as hunks in section 5. They were verified in out-of-tree copies of
+the tree (`C:\dev\out\text2\hunk`, `hunk-pen`), built and captured against the same references; the repo's
+own renderer sources and this file are the only things this pass touched. Build artifacts stay in
+`C:\dev\out\text2`.
+
+Build and measure, exactly:
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-text2
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\parity.ts --capture --score --state root,page-settings-system,page-settings-theme,theme-list --exe C:/dev/out/native-text2/re-ps3-native.exe --out C:/dev/out/text2/parity-before
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --capture --exe C:/dev/out/native-text2/re-ps3-native.exe
+```
+
+### 1. Method
+
+Every number below is read off the matched pair: the reference
+`out/parity-references/<state>__original__day__1080p.png` against the native frame captured for the same
+state with the harness pins (`--render-clock 30`, background clock 2026-10-25T10:00, UI clock
+2026-10-25T12:32, focus age 2000 ms). Ink thresholds are stated per measurement; where two frames have
+different ink peaks the threshold is **50 % of that frame's own peak**, which is what makes a width
+comparison fair across a compressed reference and an uncompressed native frame. Tools: the repo's
+`work/ab-compare.ts` for region and crop scores, `C:\dev\work\m.py` (`inkcol`, `bbox`, `mean`, `crop`) for
+extents, and three small read-only helpers written for this pass (`C:\dev\out\text2\measure.py`, `rowstat.py`,
+`shadowstat.py`). Luma is Rec.709 throughout.
+
+The label measured is `page-settings-system` row 0, "System Name" - the one item-label string the two frames
+share, which is why this row is the pass's primary instrument. "White fraction" is
+`(p99.5 ink - median background) / (255 - median background)`: the fraction of the way from the local
+background to the display's white point that the glyph core reaches.
+
+### 2. Width: the label em is 27 px against the console's 32 px (diagnosis b, glyph scale)
+
+| quantity | console (matched ref) | native, 27 px | native, 32 px + pen |
+|---|---|---|---|
+| ink width, "System Name" | **214 px** (x 627-840) | **180-182 px** (x 624-803) | **214 px** (x 627-840) |
+| `S` cap height | **26 px** (y 667-692) | **22-23 px** (y 669-690) | **26 px** (y 667-692) |
+| glyph starts, 10 ink bands | 627 648 666 683 695 715 755 778 798 825 | 624 645 663 680 692 712 752 775 795 822 | 627 648 666 683 695 715 755 778 798 825 |
+| per-glyph ink width (`S`..`e`) | 18 16 15 10 16 23 19 17 23 16 | 16 14 13 9 14 21 16 15 21 15 | 17 15 14 9 16 23 18 16 23 16 |
+
+The 27 px column is 16 % narrow in ink and 4 px short in cap; the 32 px column is the console's own extents
+within 1 px on every glyph. What the four candidate causes are, in turn:
+
+- **(a) tracking / advance authority: not the cause.** Glyph-start pitch first-to-last is 167 px native
+  against 198 px console, a ratio of 1.186 - and 198/167 is the same ratio as the ink widths and the cap
+  heights. So the shortfall scales *every* metric by 1.186; there is no per-glyph tracking term to fix, and the
+  renderer's own advance authority already agrees with PAF to 0.03-0.16 px at every size
+  (`metric-size-*`, section "Phase 2.4/2.5"). The metrics are right; the size they are applied at is not.
+- **(b) glyph scale: the cause.** 27 px x 1.186 = 32.0 px, and PIL/FreeType on the firmware's
+  `SCE-PS3-RD-R-LATIN.TTF` gives cap 23 px and "System Name" ink 184 px at 27 px, cap 26-27 px and ink
+  211-218 px at 31-32 px. The console's measured 26 px cap / 214 px ink sits at 31.5-32 px; 32 is the value
+  used for the hunks below, and it reproduces all ten glyph starts exactly once the pen is corrected.
+- **(c) hinting / rasterisation: not the cause.** The renderer draws FreeType unhinted coverage (flags 10),
+  which is the firmware's own load path; and the *category title* proves the path is faithful when the size
+  is right: the root title "Game" at 21 px inks 58 px with an 18 px cap in the console and 58 px with an 18 px
+  cap in the native frame - identical. The clock at 27 px also matches (digit ink height 22 px console, 23 px
+  native). So this is not a global scale error and not a rasteriser error: 21 px and 27 px are both right for
+  their surfaces, and the item label alone is 5 px too small.
+- **(d) wrong face: ruled out.** At 27 px every Latin face in `data/font` has cap 22-23 px
+  (`RD-R`, `RD-B`, `RD-I`, `RD-L`, `MT-*` 22, `SR-R` 23, `VR-R` 18, `DH-R` 22, `NR-R-JPN` 23); none has 26.
+  A face change cannot move the cap by 4 px, only a size change can. The face is also visibly the same
+  typeface in both frames (same `S`, `y`, `m` shapes and the same 1.186 pitch ratio).
+
+Where the 27 came from: `GEOMETRY-ROOT 4.2 #35` recorded "label ink height 492..519 (27 px row band)", i.e.
+a *row band*, not a cap. `11.2` later measured the cap itself at 26 px and `12.2` recorded the native ink as
+"495-515" (21 px) while calling it "same 26-27 px cap" - the two numbers were never compared directly. They
+are here: 26 against 21-23. The em that produces a 26 px Rodin cap is 32 px.
+
+### 3. Brightness: the unfocused ink level is 0.446 of white on the console, 0.72 in the code (diagnosis: the brightness factor)
+
+Unfocused item rows, white fraction per row band (pitch 80, x 620-1150; the focused row is excluded where a
+state has one):
+
+| state | console | native (27 px, `.72+.28*focus`) |
+|---|---|---|
+| page-settings-system, rows 0-4 | 0.447 0.446 0.446 0.447 0.448 | 0.716 0.718 0.717 0.720 0.721 |
+| page-settings-theme, rows 1-2 | 0.446 0.442 | 0.718 0.713 |
+| column-settings, rows 0-4 | 0.447 0.446 0.445 0.447 0.449 | 0.716 0.718 0.717 0.716 0.721 |
+
+The native value is exactly the code's `.72`; the console's is 0.442-0.449 across 12 rows in three states
+(mean 0.446, spread 0.007). At the *focused* end both frames saturate at 255 (root's focused label, and
+`page-settings-theme` row 0), so `focus = 1` -> 1.0 is right and only the unfocused base is wrong.
+
+The other three candidates, checked and excluded:
+
+- **Shadow: not the cause** (it also draws nothing - section 4). If a 0.53 multiply shadow were present it
+  would darken the band, not brighten the glyph core, and the measured deficit is *inside* the glyph.
+- **Antialiasing gamma / coverage accumulation: not the cause.** The renderer applies no gamma curve and the
+  ink core is fully covered in both frames (2-3 px stems at these sizes, p99.5 sampled inside the stroke), so
+  the coverage path cannot move a core from 0.72 to 0.45. A 0.72 -> 0.446 change is a factor change, not an
+  edge change.
+- **The background exposure is a *separate* error, and must not be folded into this one.** The console's page
+  background reads 50-64 where the native's reads 68-82 in the same rows (`GEOMETRY-ROOT 12.6.1`), so the
+  absolute peaks differ for two reasons at once. The white-fraction measure removes the background term, and
+  the console's white point is 255 in the same frames (root title "Game" peak 255 in both), so the residual is
+  the label's own alpha, not a global exposure difference. Correcting the exposure would move these peaks
+  again; it is a background problem with its own owner.
+
+### 4. The material shadow: the shipped multiply is inert (corrects section "Text shadow from the firmware material" 6)
+
+Measured, and it changes what the P3 A/B meant:
+
+- In the item-label band of `page-settings-system` (x 620-850, y 660-706) **no pixel is more than 1.2 levels
+  below its own row's background** (per-row background from a text-free strip; min delta -1.2 over 250 x 55
+  px). The console's band is the same (0 px below bg-4). On the root pair the console's clock band has pixels
+  down to 30.9 against a 66.4 background - that is its shadow - while the native's clock band bottoms out at
+  83.6 against 85.6, i.e. none.
+- Replacing the multiply's blend state (`GL_DST_COLOR, GL_ZERO`) with the arithmetically identical
+  `GL_ZERO, GL_SRC_COLOR` form produced a **byte-identical frame** (SHA-256
+  `73AF46A7848F06A8C7F4E3880968C41F7D560A4BE87081A125780F3EDAF7DED6`, `page-settings-system`, render clock
+  30, two runs). So the attenuate branch contributes no pixels at all, in either the per-tile or the union-mask
+  path (the two paths render identical canonical frames, section 6 above).
+- The branch that *does* change pixels is the premultiplied one: `XMB_TEXT_SHADOW=premultiplied` on the same
+  state shifts the frame by up to 190 levels (`|d| > 2` on 15901 px), which is what the P3 A/B measured. Its
+  +0.0023 SSIM on the clock layer was therefore the *removal of the old 1 px black 20 % shadow* plus the
+  premultiplied alternative, not the shipped multiply landing where the reference's shadow is.
+- What the references want is per surface, not global: the console's clock carries a 0.47 multiply shadow, and
+  its item labels carry **none** (five unfocused rows in three states, plus a focused row - `page-settings-theme`
+  row 0, min 48.1 against a 49.4 background). A correct fix therefore has to be scoped, and the item-label
+  surface has no attributable RCO Text object, so the call site must pass the clock's material (the P3 section
+  10 hunk C) before the renderer can tell the two apart. Left as it is in this pass: the multiply is a no-op, so
+  nothing regressed, and making it draw would add a shadow to the labels that the reference does not have.
+
+### 5. The hunks (`src/view.cpp`, returned not applied)
+
+All three are inside the item-label loop (`View::paintGL`, the row loop around line 1706). Line numbers are
+the tree's at the time of writing.
+
+```cpp
+// A. label em 27 -> 32 (section 2). The same labelFont feeds elideToWidth, so the ellipsis pen moves with it.
+QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(32);           // was 27
+    if(focus>.5)glow(labelRect,label,32,(focus-.5)*2*breath*(entry.disabled?.45:1.));   // was 27
+    text(labelRect,label,32,QColor(255,255,255,int(255*alpha)));                        // was 27
+        QString(QChar(0x2026)),32,QColor(255,255,255,int(255*alpha)));                  // was 27
+
+// B. unfocused ink level .72 -> .455 (section 3). The console's measured mean is 0.446; .455 is the value the
+// verified build used and leaves the ink ~1.5 luma high, so .446+.554 is the closer pair if it is being tuned.
+const double alpha=(.455+.545*focus)*(entry.disabled?.55:1.);              // was (.72+.28*focus)
+
+// C. depth-1 label pen 57 -> 60 (section 2): at the corrected em the console's ten glyph starts are the native
+// starts + 3 px, a constant, so it is the level>0 constant and not the advances. Level 0 keeps 113.
+const double labelX=kColumnX+(level==0?(tile?173:113):60)+ahead*250+offset; // was (level==0?...:57)
+```
+
+Hunk C's evidence is the constant offset: at 32 px with the old 57 every one of the ten ink-band starts was
+3 px left of the console's (624 645 663 680 692 712 752 775 795 822 against 627 648 666 683 695 715 755 778
+798 825); with 60 they are identical. Nothing else in the row moves: the vertical centre is unchanged (the
+cap lands on y 667-692 in both), because the label rect is vertically centred and the ink centre is the same.
+Scope note: the constant is shared with the faint parent-column labels that a page draws behind itself, so
+those move 3 px too. The page-row regions that contain them gained with the hunk (+0.34 dB on
+`page-settings-system`, +0.26 dB on `page-settings-theme`), so the net is measured, but a settled frame with a
+readable parent column would be the cleaner test of that sub-surface.
+
+### 6. Numbers
+
+Matched-string crop, `page-settings-system` row 0 (`620,655,250,55` - the one row both frames spell the same
+way), and the five-row band (`615,650,545,370`):
+
+| build | "System Name" ink | ink level | row crop PSNR / SSIM | 5-row band PSNR / SSIM |
+|---|---|---|---|---|
+| shipped (27 px, .72) | 180-182 px | 0.716 | 14.85 / 0.4813 | 17.85 / 0.7840 |
+| + A, B | 214 px | 0.454 | 16.64 / 0.5226 | 19.01 / 0.7779 |
+| + A, B, C | 214 px | 0.454 | **22.81 / 0.9457** | **19.51 / 0.8090** |
+
+Matched regions (`work/parity.ts --capture --score`, against `out/parity-references`). "before" is
+`C:\dev\out\native-text2` (the current tree); the two after columns are the out-of-tree builds.
+
+| state / region | before | + A, B | + A, B, C |
+|---|---|---|---|
+| root frame | 17.86 / 0.8226 | 17.97 / 0.8225 | 17.97 / 0.8225 |
+| root item label row | 11.03 / 0.3957 | 11.08 / 0.4003 | 11.08 / 0.4003 |
+| root clock text | 11.57 / 0.5376 | 11.57 / 0.5376 | 11.57 / 0.5376 |
+| root info bar | 14.54 / 0.7669 | 14.54 / 0.7669 | 14.54 / 0.7669 |
+| page-settings-system frame | 18.50 / 0.8533 | 18.64 / 0.8531 | 18.69 / 0.8560 |
+| page-settings-system page rows | 16.26 / 0.7397 | 16.51 / 0.7392 | 16.60 / 0.7494 |
+| page-settings-theme frame | 17.88 / 0.8356 | 17.96 / 0.8352 | 18.04 / 0.8400 |
+| page-settings-theme page rows | 15.27 / 0.7071 | 15.39 / 0.7039 | 15.53 / 0.7212 |
+| theme-list frame | 18.98 / 0.8602 | 18.97 / 0.8603 | 18.98 / 0.8611 |
+| theme-list band rows | 16.97 / 0.7413 | 16.97 / 0.7413 | 16.96 / 0.7410 |
+
+Reading the table: the frame and page-row regions gain where the labels are, `theme-list` does not move
+because its rows are drawn by `PanelBand`, whose text measures right at its own size (focused "Original" inks
+91 px with a 25 px cap on the console against 88 px with a 24 px cap native; "Air Paint" 97 against 98), and
+the root item label row can only move ~0.05 dB because its reference label is a different string.
+
+The `+A,B` SSIM dip on the two page-row regions (-0.0005, -0.0032) and its recovery under `+A,B,C` is the
+attribution for hunk C: a correct em with a 3 px pen offset overlaps the console's glyphs worse than the small
+em did, and the offset is what has to go with it. On the one row whose string matches, `+A,B` alone already
+gained +1.79 dB, so the em is not the regression; the pen was.
+
+Canonical gate on the `+A,B,C` build (`work/ab-layers.ts --capture`): **PASS 6/6** with
+`text presence: 1677 bright pixels in the clock crop (minimum 900) PASS`; frame 18.48 (base 18.29, +0.19) /
+0.8327, top background 20.25 / 0.9363, category icon row 21.20 / 0.9029, item label row 11.92 (-0.03) /
+0.3891 (-0.0034), clock text 11.39 / 0.4500, info bar 14.98 / 0.7639. The item label row is the one layer that
+pays, and it is inside the 0.5 dB / 0.004 budget: the canonical reference's focused label is "Corrupted Data"
+against the native's "Steam Store", so a correctly sized native label covers more of the reference's glyph
+pixels than a small one did. The 12 named-state self-baselines need the usual deliberate
+`bun work/ab-layers.ts --states --save-reference` refresh after the hunks land.
+
+Determinism: two `--render-clock 20` captures of the current tree's build (`native-text2`, built 06:47 from
+the source at that time) are byte-identical, SHA-256
+`A2A68EC3ECD1BDA1A014FD140C3BCFD553DF17B1944A3CA78FDB1C05D542EB9E`. Two runs of the `+A,B` build on the
+settings state are also byte-identical (`73AF46A7...ED6`, the hash quoted in section 4), and the `+A,B,C` build
+reused the same capture path, so a pen constant cannot introduce nondeterminism. Note for a rebuild: another
+pass wrote `src/ribbon.cpp` and `src/settings_menu.cpp` at 06:59-07:07 during this one, after that build, so a
+fresh binary will differ in the ribbon; every "before" number here belongs to the 06:47 build.
+
+### 7. Remaining differences, and who owns them
+
+1. **The background exposure is worth more than the text.** In the page rows the console reads 50-64 where the
+   native reads 68-82; the fitted per-channel gains of `12.6.1` (0.76-0.79) are the same statement. In the
+   gated regions (1000 x 620 for `page rows`, 800 x 100 for `item label row`) that offset is most of the PSNR
+   budget, which is why a text fix that gains 7.96 dB on the matched string moves the region by 0.34 dB.
+   Owner: the background/ribbon pass, not the text stack.
+2. **Region scores are mostly content.** `page-settings-system` shares one row string out of five
+   ("System Name"), `root`'s focused label is a different string entirely, and `theme-list`'s rows match.
+   Any future claim about text parity should quote the string-matched crop as well as the region, or it will
+   understate a correct fix by an order of magnitude.
+3. **The clock's shadow is still missing.** The console's clock band has shadow pixels at 0.47 of its
+   background; the native's has none. The multiply branch is inert (section 4) and the label surface must stay
+   shadowless, so the fix is (i) make the multiply work, (ii) pass `xmb_plugin_normal/clock`'s material at the
+   clock call site (P3 section 10 hunk C) so the shadow is attributable, and (iii) leave the unattributed
+   default without one - which is a view.cpp + renderer pair, outside this pass.
+4. **The focused label's glow is unmeasured here.** The console's focused label carries a visible white bloom
+   (`root`: the label sits inside a halo several pixels wide); the native's comes from the view's breathing
+   curve times the renderer's Gaussian. The item-label-row region contains the focused row, so part of its
+   residual is glow shape, not glyph shape.
+5. **The level-0 pen is bounded, not settled.** The two frames' focused labels are different strings, so the
+   console's first glyph is `P` (ink left 684) and the native's is `S` (680); a 1-2 px level-0 residual cannot
+   be excluded from these frames. `12.1` row 1's 678 stands unrefuted.
+6. **The subtitle (17 px) and help line (18 px) sizes are unmeasured.** Every captured state has different
+   strings on those lines ("*User" against "Browse and install"), so the cap-height comparison that settled the
+   label needs a state that shares them; a later pass with such a pair should check them the same way.
+7. **The last per-glyph difference is 1 px of ink width** on several glyphs (18 against 17, 19 against 18) at
+   identical starts and cap. That is the reference's video compression plus its own rasteriser, not a metric
+   this renderer can reach.
+
+No source file in the write fence changed in this pass; this section and the out-of-tree builds are the
+deliverable, and the three `view.cpp` hunks in section 5 are the change to apply.
