@@ -498,27 +498,33 @@ QVariant firmwareChoiceValue(ChoiceValues kind,int index,const QString& label,co
     return index;
 }
 // The firmware's time zones are offset zones: every label states "GMT+HH:MM" (SETTINGS 5.7), and
-// clock/timeZone stores the zone's item token rather than an IANA id. This turns a token back into the
-// offset its own label states, read through the same English table the list was drawn from.
-int firmwareZoneOffsetSeconds(Assets& assets,const QString& token,bool& known) {
-    known=false;
-    static const QString prefix=QStringLiteral("date_time_config_timezone_");
-    if(!token.startsWith(prefix))return 0;
-    static QHash<QString,int> offsets;
-    static QHash<QString,bool> knownTokens;
-    if(knownTokens.contains(token)){known=knownTokens.value(token);return offsets.value(token);}
-    const auto label=assets.text(QStringLiteral("sysconf_plugin"),
-        QStringLiteral("msg_timezone_")+token.mid(prefix.size()));
-    static const QRegularExpression pattern(QStringLiteral("GMT([+-])(\\d{1,2}):(\\d{2})"));
-    const auto match=pattern.match(label);
-    const bool ok=match.hasMatch();
-    int seconds=0;
-    if(ok) {
-        const int sign=match.captured(1)==QLatin1String("-")?-1:1;
-        seconds=sign*(match.captured(2).toInt()*3600+match.captured(3).toInt()*60);
+// clock/timeZone stores the zone's item token rather than an IANA id (11.3). This resolves a token back to
+// the RCO's own label and the offset that label states, through the same English table the band's items
+// are drawn from. `known` is false for anything that is not a token this firmware ships - a stale token, or
+// a well-formed name in the namespace with no msg_timezone_* entry - so callers say so instead of
+// inventing a zone (SETTINGS 14).
+struct FirmwareZone {
+    QString label;          // the item's own text, e.g. "GMT-08:00 Pacific Time (US, Canada)"
+    int offsetSeconds=0;
+    bool known=false;       // the token resolved to an RCO label that states a GMT offset
+};
+FirmwareZone firmwareZoneFor(Assets& assets,const QString& token) {
+    static QHash<QString,FirmwareZone> cache;
+    if(const auto found=cache.constFind(token);found!=cache.cend())return *found;
+    FirmwareZone zone;
+    if(Preferences::isFirmwareZoneToken(token)) {
+        zone.label=assets.text(QStringLiteral("sysconf_plugin"),
+            QStringLiteral("msg_timezone_")+token.mid(Preferences::firmwareZoneTokenPrefix().size()));
+        static const QRegularExpression pattern(QStringLiteral("GMT([+-])(\\d{1,2}):(\\d{2})"));
+        const auto match=pattern.match(zone.label);
+        if(match.hasMatch()) {
+            const int sign=match.captured(1)==QLatin1String("-")?-1:1;
+            zone.offsetSeconds=sign*(match.captured(2).toInt()*3600+match.captured(3).toInt()*60);
+            zone.known=true;
+        }
     }
-    offsets.insert(token,seconds);knownTokens.insert(token,ok);known=ok;
-    return seconds;
+    cache.insert(token,zone);
+    return zone;
 }
 // The MItem's own label: its `text` reference resolved through the container's English table, then
 // `altText` as the second choice. Empty when the entry has neither (never happens in sysconf_plugin).
@@ -616,6 +622,34 @@ ChoiceList nativeChoiceList(const QString& pageId,const Entry& row,Assets& asset
     }
     return list;
 }
+// The list's current row, and the one log line that says which case a time zone is in. `currentRow` is the
+// item the persisted value selects - the row the band focuses - or -1 when nothing in the list is current.
+// The time zone is the case this exists for (SETTINGS 13.6a): a stored firmware token is one of the 110
+// items, an IANA id is none of them, and a value that matches no item must not be guessed into a row, so
+// the model reports -1 and says so. `current` is invalid on the draw path that builds the catalogue
+// without a store value (View::choiceBandFor), which is not a "no current row" verdict and is not logged.
+void markCurrentRow(ChoiceList& list,const QVariant& current) {
+    list.currentRow=-1;
+    for(const auto& item:list.items)if(item.writes && item.isCurrent){list.currentRow=item.rcoIndex;break;}
+    if(list.setting!=QLatin1String("clock/timeZone") || list.items.isEmpty() || !current.isValid())return;
+    static QSet<QString> logged;
+    const auto text=current.toString();
+    if(logged.contains(text))return;
+    logged.insert(text);
+    if(list.currentRow>=0) {
+        QString label;
+        for(const auto& item:list.items)if(item.rcoIndex==list.currentRow)label=item.label;
+        qInfo().noquote()<<QStringLiteral("settings: clock/timeZone %1 is firmware zone item %2 of %3 (%4)")
+            .arg(text).arg(list.currentRow).arg(list.items.size()).arg(label);
+        return;
+    }
+    if(Preferences::isFirmwareZoneToken(text))
+        qWarning().noquote()<<QStringLiteral("settings: clock/timeZone %1 is a firmware zone token this "
+            "firmware does not ship; no current row (the clock follows the host and the band marks none)").arg(text);
+    else
+        qInfo().noquote()<<QStringLiteral("settings: clock/timeZone %1 is not one of the firmware's %2 zone "
+            "items; no current row (the band marks no item as current)").arg(text).arg(list.items.size());
+}
 // One row's list. `entry` is the page's own row (id, title, setting, action), so a row's write path and
 // its list cannot disagree.
 ChoiceList buildChoiceList(const QString& pageId,const Entry& entry,Assets& assets,const QVariant& current) {
@@ -626,8 +660,10 @@ ChoiceList buildChoiceList(const QString& pageId,const Entry& entry,Assets& asse
         // A row with no firmware counterpart that this build still makes a choice: the three media
         // settings and Photo Settings. Its list is choices()'s, marked native.
         if(entry.action!=Action::SettingChoices || entry.setting.isEmpty())return list;
-        return nativeChoiceList(pageId,entry,assets,current,QStringLiteral("native"),
+        auto native=nativeChoiceList(pageId,entry,assets,current,QStringLiteral("native"),
             QStringLiteral("this build's own setting: the sysconf inventory has no page for it"));
+        markCurrentRow(native,current);
+        return native;
     }
     list.rcoPage=QString::fromLatin1(binding->rcoPage?binding->rcoPage:"");
     if(binding->rcoPage)list.container=QStringLiteral("sysconf_plugin");
@@ -648,6 +684,7 @@ ChoiceList buildChoiceList(const QString& pageId,const Entry& entry,Assets& asse
     if(pageId==QLatin1String("theme") && entry.id==QLatin1String("theme")) {
         auto captured=themeCaptureChoices(current);
         captured.rcoPageOffset=page.page?page.page->offset:0;
+        markCurrentRow(captured,current);
         return captured;
     }
     list.rcoPageOffset=page.page?page.page->offset:0;
@@ -667,6 +704,7 @@ ChoiceList buildChoiceList(const QString& pageId,const Entry& entry,Assets& asse
         // fallback is both facts - which page was empty, and where the fallback came from.
         fallback.rcoPage=list.rcoPage;fallback.rcoPageOffset=list.rcoPageOffset;
         fallback.container=QStringLiteral("sysconf_plugin");fallback.scrollObject=list.scrollObject;
+        markCurrentRow(fallback,current);
         return fallback;
     }
     list.source=QStringLiteral("rco");
@@ -687,6 +725,7 @@ ChoiceList buildChoiceList(const QString& pageId,const Entry& entry,Assets& asse
     }
     list.scrollable=!list.scrollObject.isEmpty() || list.items.size()>kBandRows;
     for(auto& item:list.items)item.scrollable=list.scrollable;
+    markCurrentRow(list,current);
     if(verbose)qInfo().noquote()<<"settings: choice list"<<pageId+"/"+entry.id<<"rco="+list.rcoPage
         <<"items="<<list.items.size()<<"source="<<list.source;
     return list;
@@ -731,7 +770,7 @@ QJsonObject choiceListJson(const ChoiceList& list) {
         {"rcoPage",list.rcoPage},{"rcoPageOffset",qint64(list.rcoPageOffset)},
         {"container",list.container},{"source",list.source},{"note",list.note},
         {"scrollable",list.scrollable},{"scrollObject",list.scrollObject},
-        {"count",list.count()},{"items",items}};
+        {"currentRow",list.currentRow},{"count",list.count()},{"items",items}};
 }
 // The Settings-column page order (SETTINGS 1.1/10.2), for the aggregate catalogue.
 const QStringList& choicePageOrder() {
@@ -811,6 +850,152 @@ void dumpSettingsPage(const PageRows& data,Assets& assets,
     QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".settings-"+data.id+".json");
     if(file.open(QIODevice::WriteOnly))file.write(QJsonDocument(object).toJson());
     else qWarning().noquote()<<"settings: cannot write the"<<data.id<<"page dump";
+}
+// --- The time zone diagnostic (SETTINGS-FIRMWARE.md 14) -------------------------------------------
+// The bug this proves fixed: a stored firmware zone token used to be rejected by Preferences::validBare,
+// so it could never survive a save/load and the 110-item band could never mark its current row (13.6a).
+// Run with XMB_TZ_SELFCHECK=<directory>; any settings page open triggers it once. It is deliberately not
+// a second implementation of the rules: it stores through Preferences, reloads through a second
+// Preferences on the same file, resolves the band's list through settingsChoiceLists(), reads the row's
+// text through Shell::valueText() (passed in) and applies the band's own focus rule (the item whose label
+// the row's displayed value names, SETTINGS 13.4). What it reports is what the app does, not what it
+// should do. The shell's own store is put back the way it was before the function returns.
+QJsonObject runTimeZoneSelfCheck(Assets& assets,Preferences& store,
+    const std::function<QString(const Entry&)>& valueText,const std::function<QString()>& clockText,
+    const QString& root) {
+    const QString token=QStringLiteral("date_time_config_timezone_pacific_us_canada");
+    const QString iana=QStringLiteral("America/Los_Angeles");
+    QJsonObject report{{"selfCheck",QStringLiteral("clock/timeZone firmware zone token")},
+        {"token",token},{"iana",iana}};
+    QDir().mkpath(root);
+    const auto writeJson=[&](const QString& path,const QJsonObject& object) {
+        QFile file(path);
+        return file.open(QIODevice::WriteOnly) && file.write(QJsonDocument(object).toJson())>0;
+    };
+    const auto readJson=[&](const QString& path) {
+        QFile file(path);
+        if(!file.open(QIODevice::ReadOnly))return QJsonObject{};
+        return QJsonDocument::fromJson(file.readAll()).object();
+    };
+    // (a) store -> new process-equivalent load. A second Preferences on the same directory is the same
+    // read path a restart takes: the file is parsed and every value is validated before it is kept.
+    const auto loadDir=root+QStringLiteral("/load");
+    QDir().mkpath(loadDir);
+    QFile::remove(loadDir+QStringLiteral("/preferences.json"));
+    bool stored=false;
+    {Preferences writer(loadDir);stored=writer.setValue("clock/timeZone",token);}
+    QString reloaded;QJsonObject loadedFile;
+    {Preferences reader(loadDir);
+     reloaded=reader.value("clock/timeZone").toString();loadedFile=readJson(reader.path());}
+    const auto loadedValues=loadedFile.value("values").toObject();
+    report["load"]=QJsonObject{{"accepted",stored},{"reloaded",reloaded},{"kept",reloaded==token},
+        {"fileVersion",loadedFile.value("version").toInt(-1)},
+        {"storedUnderSharedKey",loadedValues.contains("clock/timeZone")},
+        {"value",loadedValues.value("clock/timeZone").toString()}};
+    // (a) the version-1 file a pre-profile install wrote: the shared time zone stays bare and the per-user
+    // key moves under the reserved profile, both still validated by the same rule that now accepts a token.
+    const auto migrateDir=root+QStringLiteral("/migrate");
+    QDir().mkpath(migrateDir);
+    QFile::remove(migrateDir+QStringLiteral("/preferences.json"));
+    const QJsonObject legacy{{"version",1},{"values",QJsonObject{{"clock/timeZone",token},
+        {"audio/volume",30},{"system/name",QStringLiteral("TEST")}}}};
+    writeJson(migrateDir+QStringLiteral("/preferences.json"),legacy);
+    QString migratedZone;QJsonObject migratedFile;int migratedVolume=-1;bool migratedProfileKey=false;bool legacyKeyGone=false;
+    {Preferences migrated(migrateDir);
+     migratedZone=migrated.value("clock/timeZone").toString();
+     migratedVolume=migrated.value("audio/volume").toInt();
+     migratedFile=readJson(migrated.path());}
+    {const auto values=migratedFile.value("values").toObject();
+     migratedProfileKey=values.contains("profile/local/audio/volume");
+     legacyKeyGone=!values.contains("audio/volume");}
+    report["migration"]=QJsonObject{{"from","version 1"},{"reloaded",migratedZone},
+        {"kept",migratedZone==token},{"fileVersion",migratedFile.value("version").toInt(-1)},
+        {"volume",migratedVolume},{"volumeUnderProfile",migratedProfileKey},
+        {"bareVolumeGone",legacyKeyGone},
+        {"sharedKeyStayedBare",migratedFile.value("values").toObject().contains("clock/timeZone")}};
+    // (1) bounded: values that are not one of the three accepted forms are refused, and a refusal leaves
+    // the stored value alone (the same contract setValues() has).
+    const QStringList refused{
+        QStringLiteral("date_time_config_timezone_"),                 // empty zone name
+        QStringLiteral("date_time_config_timezone_9lives"),           // name does not start with a letter
+        QStringLiteral("date_time_config_timezone_pacific_us_canada_"),// trailing underscore
+        QStringLiteral("date_time_config_timezone_Pacific_US_Canada"),// upper case
+        QStringLiteral("date_time_config_timezone_pacific us canada"),// a space
+        QStringLiteral("Pacific Time (US, Canada)"),                  // the label, not the token
+        QStringLiteral("Europe/Nowhere"),                             // not an IANA id
+        QStringLiteral("system"),                                     // not "System"
+        token+QStringLiteral("x").repeated(48)};                      // longer than the bound
+    QJsonArray refusedReport;
+    int refusedCount=0;
+    {Preferences bounded(loadDir);
+     for(const auto& value:refused) {
+         const bool accepted=bounded.setValue("clock/timeZone",value);
+         if(!accepted)++refusedCount;
+         refusedReport.push_back(QJsonObject{{"value",value},{"accepted",accepted}});
+     }}
+    report["refused"]=QJsonObject{{"count",refusedCount},{"of",int(refused.size())},{"values",refusedReport}};
+    // (b)/(c): the band's current row and the row's own text, for a token and for an IANA id, through the
+    // shell's store and the shell's valueText.
+    const Entry row=option(QStringLiteral("timezone"),assets.text(QStringLiteral("sysconf_plugin"),
+        QStringLiteral("msg_timezone"),QStringLiteral("Time Zone")),{},QStringLiteral("clock/timeZone"));
+    const auto listFor=[&](const QVariant& current) {
+        const auto lists=settingsChoiceLists(QStringLiteral("date"),assets,
+            [&current](const QString& key){return key==QLatin1String("clock/timeZone")?current:QVariant{};});
+        for(const auto& list:lists)if(list.setting==QLatin1String("clock/timeZone"))return list;
+        return ChoiceList{};
+    };
+    // The band's own focus rule (SETTINGS 13.4, rule 2): the drawn row whose label the row's displayed value
+    // names. -1 means the displayed value names no firmware item, so no row is current.
+    const auto bandFocus=[&](const ChoiceList& list,const QString& text) {
+        if(text.isEmpty())return -1;
+        for(const auto& item:list.items)if(item.label==text)return item.rcoIndex;
+        return -1;
+    };
+    const QVariant original=store.value("clock/timeZone");
+    QJsonObject tokenCase,ianaCase;
+    const auto caseFor=[&](const QString& value,const char* name) {
+        const bool accepted=store.setValue("clock/timeZone",value);
+        const auto stored=store.value("clock/timeZone").toString();
+        const auto list=listFor(stored);
+        const auto text=valueText(row);
+        const int focus=bandFocus(list,text);
+        QJsonObject result{{"stored",stored},{"accepted",accepted},{"currentRow",list.currentRow},
+            {"items",list.count()},{"valueText",text},{"bandFocus",focus},
+            {"focusNamesTheCurrentRow",focus>=0 && focus==list.currentRow},
+            {"clock",clockText?clockText():QString{}}};
+        if(focus>=0)for(const auto& item:list.items)if(item.rcoIndex==focus)result["bandFocusLabel"]=item.label;
+        // Every token the firmware's list produces must pass the store's rule, or a band item could not be
+        // written back after a Cross: count them from the same list the band draws.
+        if(name==QLatin1String("token")) {
+            int acceptedItems=0;
+            for(const auto& item:list.items)if(Preferences::isFirmwareZoneToken(item.value.toString()))++acceptedItems;
+            result["tokenItemsAcceptedByStore"]=acceptedItems;
+        }
+        return result;
+    };
+    tokenCase=caseFor(token,"token");
+    ianaCase=caseFor(iana,"iana");
+    store.setValue("clock/timeZone",original);
+    report["tokenCase"]=tokenCase;
+    report["ianaCase"]=ianaCase;
+    report["storeRestored"]=store.value("clock/timeZone")==original;
+    const auto path=QDir(root).filePath(QStringLiteral("tz-selfcheck.json"));
+    report["path"]=path;
+    report["written"]=writeJson(path,report);
+    // The log is the same eight facts in one place, so a run can be read without opening the JSON.
+    qInfo().noquote()<<QStringLiteral("clock selfcheck: token %1 stores=%2 reloads=%3 migrates=%4 "
+        "(v1->v2, %5) -> band current row %6 of %7, valueText \"%8\", clock \"%9\"")
+        .arg(token).arg(stored?1:0).arg(reloaded==token?1:0).arg(migratedZone==token?1:0)
+        .arg(migratedFile.value("version").toInt(-1))
+        .arg(tokenCase.value("currentRow").toInt(-1)).arg(tokenCase.value("items").toInt())
+        .arg(tokenCase.value("valueText").toString(),tokenCase.value("clock").toString());
+    qInfo().noquote()<<QStringLiteral("clock selfcheck: iana %1 stores=1, no firmware zone item -> current "
+        "row %2 (band focus %3), valueText \"%4\", clock \"%5\"")
+        .arg(iana).arg(ianaCase.value("currentRow").toInt(-1)).arg(ianaCase.value("bandFocus").toInt(-1))
+        .arg(ianaCase.value("valueText").toString(),ianaCase.value("clock").toString());
+    qInfo().noquote()<<QStringLiteral("clock selfcheck: refused %1 of %2 non-zone values (bounded form); "
+        "wrote %3").arg(refusedCount).arg(int(refused.size())).arg(path);
+    return report;
 }
 } // namespace
 
@@ -952,6 +1137,18 @@ void Shell::openSettings(const QString& id) {
         return preferences_.value(key);
     };
     Page page;
+    // The time zone diagnostic (SETTINGS 14): XMB_TZ_SELFCHECK=<dir> runs it once, on the first settings
+    // page any scripted or manual run opens, and writes <dir>/tz-selfcheck.json. It stores a firmware zone
+    // token through this shell's own Preferences, reloads the file, and reports the band's current row and
+    // the row's value text for that token and for an IANA id; the store is restored before it returns.
+    if(qEnvironmentVariableIsSet("XMB_TZ_SELFCHECK")) {
+        static bool ran=false;
+        if(!ran) {
+            ran=true;
+            runTimeZoneSelfCheck(assets_,preferences_,[this](const Entry& entry){return valueText(entry);},
+                [this]{return clockText();},qEnvironmentVariable("XMB_TZ_SELFCHECK"));
+        }
+    }
     if(id=="update") { // System Update (software_update_plugin). Not in sysconf_plugin.rco: SETTINGS 5.16/U8.
         const auto su=[&](const QString& key,const QString& fallback){return assets_.text("software_update_plugin",key,fallback);};
         page.title=tr("msg_update","System Update");
@@ -982,6 +1179,14 @@ void Shell::openSettings(const QString& id) {
         };
         auto data=pageRows(id,assets_,dateTimeInfo());
         if(data.entries.isEmpty())return; // an id with no page: the caller's row opens nothing
+        // Opening the Date and Time page reports the time zone row's current row once per stored value
+        // (markCurrentRow): a stored firmware token is one of the band's 110 items, an IANA id is none of
+        // them and is not guessed into a row. The band reads the same list, so this is the same verdict,
+        // made visible in the log of a run that never writes a dump (SETTINGS 13.6a/14).
+        if(id=="date") {
+            const auto lists=settingsChoiceLists(QStringLiteral("date"),assets_,currentFor);
+            if(lists.isEmpty())qWarning().noquote()<<"settings: the Date and Time choice rows did not resolve";
+        }
         page.title=data.title;
         // Dump before the rows move into the page, so the file is what the page will show. The aggregate
         // catalogue is written once per process: it is the whole choice model, so opening any page records
@@ -1018,30 +1223,50 @@ QString Shell::valueText(const Entry& entry) const {
     if(entry.action==Action::SetSetting)return value==entry.option?QString(QChar(0x25cf)):QString{};
     if(entry.setting=="system/name")return value.toString();
     if(entry.setting=="appearance/theme" && !theme_.path.isEmpty())return theme_.name.isEmpty()?QFileInfo(theme_.path).completeBaseName():theme_.name;
+    // Phase 11.3: a time zone stored as a firmware zone token is not in choices()'s host-IANA list, and its
+    // label is the RCO's own - the same string the band's MItem draws - so the row shows exactly the text
+    // its list drew and the band's focus rule finds that item by it (SETTINGS 13.4). A token this firmware
+    // does not ship has no label and shows nothing; anything else falls through to the host list below and
+    // displays the IANA id it already displayed.
+    if(entry.setting=="clock/timeZone" && Preferences::isFirmwareZoneToken(value.toString())) {
+        const auto firmware=firmwareZoneFor(assets_,value.toString());
+        if(firmware.known)return firmware.label;
+        static QSet<QString> logged;
+        if(!logged.contains(value.toString())) {
+            logged.insert(value.toString());
+            qWarning().noquote()<<QStringLiteral("clock: time zone %1 is not a zone this firmware ships; "
+                "the row shows no value").arg(value.toString());
+        }
+        return {};
+    }
     for(const auto& choice:choices(entry.setting,assets_))if(choice.value==value)return choice.title;
-    // A time zone stored as a firmware zone token (Phase 11.3) is not in choices()'s host-IANA list; its
-    // label is the RCO's own, so the row shows exactly the text its choice list drew.
-    if(entry.setting=="clock/timeZone")
-        for(const auto& choice:settingsChoices(QStringLiteral("date"),QStringLiteral("timezone"),assets_,value))
-            if(choice.isCurrent)return choice.label;
     return {};
 }
 QString Shell::fontFamily()const{return assets_.fontFamily(preferences_.value("appearance/font").toInt());}
 QDateTime Shell::clockDateTime()const {
     const auto zone=preferences_.value("clock/timeZone").toString();
     auto now=clockOverride_.isValid()?clockOverride_:QDateTime::currentDateTime();
-    if(zone!="System") {
+    // The three stored forms (preferences.h): "System" (the default) and the empty value leave the host
+    // clock alone; an IANA id resolves through QTimeZone exactly as it always has, which is why no stored
+    // value was migrated; a firmware zone token resolves through the item's own "GMT+HH:MM" label, because
+    // the firmware's 110 zones are offset zones with a city label, not IANA identities. A token this
+    // firmware does not ship resolves to no zone at all - the clock follows the host and says so once -
+    // rather than to a guessed offset.
+    if(!zone.isEmpty() && zone!=QLatin1String("System")) {
         const QTimeZone named(zone.toUtf8());
         if(named.isValid())now=now.toTimeZone(named);
         else {
-            // A firmware zone token (Phase 11.3): the firmware's 110 zones are GMT-offset zones with a city
-            // label, not IANA identities, so the offset comes from the item's own label. IANA ids already in
-            // the store keep working through the branch above, which is why no stored value was migrated.
-            bool known=false;
-            const int seconds=firmwareZoneOffsetSeconds(assets_,zone,known);
-            if(known) {
-                const auto fixed=QTimeZone::fromSecondsAheadOfUtc(seconds);
+            const auto firmware=firmwareZoneFor(assets_,zone);
+            if(firmware.known) {
+                const auto fixed=QTimeZone::fromSecondsAheadOfUtc(firmware.offsetSeconds);
                 if(fixed.isValid())now=now.toTimeZone(fixed);
+            } else {
+                static QSet<QString> logged;
+                if(!logged.contains(zone)) {
+                    logged.insert(zone);
+                    qWarning().noquote()<<QStringLiteral("clock: time zone %1 is neither an IANA id nor a "
+                        "firmware zone this build ships; the clock follows the host").arg(zone);
+                }
             }
         }
     }

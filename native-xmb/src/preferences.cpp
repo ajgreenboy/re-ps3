@@ -33,6 +33,28 @@ QStringList Preferences::sharedKeys() {
 bool Preferences::isSharedKey(const QString& key) {
     return sharedKeys().contains(key);
 }
+QString Preferences::firmwareZoneTokenPrefix() {
+    // The RCO calls the page's items item_date_time_config_timezone_<name>; the choice model stores the
+    // name part only (settings_menu.cpp firmwareChoiceValue, ChoiceValues::Zone), so the token carries
+    // this one namespace and a lower-case place name.
+    return QStringLiteral("date_time_config_timezone_");
+}
+bool Preferences::isFirmwareZoneToken(const QString& token) {
+    // Bounded shape, not a free-form string: the exact namespace, then 1..48 characters of [a-z0-9_]
+    // starting with a letter and not ending with an underscore. That is the form every one of the 110
+    // MItem names takes; nothing else reaches clockDateTime as a token.
+    const auto prefix=firmwareZoneTokenPrefix();
+    if(!token.startsWith(prefix))return false;
+    const auto name=token.mid(prefix.size());
+    if(name.isEmpty() || name.size()>48)return false;
+    if(name.at(0)<QLatin1Char('a') || name.at(0)>QLatin1Char('z'))return false;
+    for(const QChar c:name) {
+        const bool lower=c>=QLatin1Char('a') && c<=QLatin1Char('z');
+        const bool digit=c>=QLatin1Char('0') && c<=QLatin1Char('9');
+        if(!lower && !digit && c!=QLatin1Char('_'))return false;
+    }
+    return !name.endsWith(QLatin1Char('_'));
+}
 bool Preferences::validProfileId(const QString& id) {
     // 1..40 ASCII characters of [a-z0-9-], at least one digit or letter, no leading/trailing dash.
     // A UUID without braces is 36 characters, which is the shape Profiles writes.
@@ -92,7 +114,14 @@ bool Preferences::validBare(const QString& key,const QVariant& value) {
     const auto text=value.toString();
     if(text.contains(QChar(0)))return false;
     if(key=="system/name")return !text.trimmed().isEmpty() && text.size()<=64 && !text.contains('\n') && !text.contains('\r');
-    if(key=="clock/timeZone")return text=="System" || QTimeZone::isTimeZoneIdAvailable(text.toUtf8());
+    if(key=="clock/timeZone") {
+        // Three accepted forms, all bounded (preferences.h): "System", an IANA id this Qt build knows, the
+        // empty value, or one of the firmware's zone tokens. The token is what makes the stored value one
+        // of the 110 items the Date and Time row's band draws (SETTINGS-FIRMWARE.md 11.3/13.6a); without
+        // it a token was dropped on load and the band could never mark its current row.
+        return text.isEmpty() || text==QLatin1String("System") ||
+            QTimeZone::isTimeZoneIdAvailable(text.toUtf8()) || isFirmwareZoneToken(text);
+    }
     if(key=="appearance/wallpaper" || key=="appearance/theme" || key=="library/photo" || key=="library/music" || key=="library/video")return text.size()<=32768;
     // Playback resume points: one JSON object keyed by the truncated SHA-1 of the file path. Two shapes
     // are accepted, because the second one is what this build writes and the first one is what an earlier
