@@ -472,3 +472,116 @@ powershell -File work/page-move-constants.ps1 -Module vsh 0x68f018:0x50
 The scans read `fw493/vsh_module/vsh.elf` directly (PT_LOAD 0: file offset 0, vaddr 0x10000, size
 0x6ABEA8) and write nothing. Firmware-derived numbers stay in these audit notes; no dump, module or capture
 is committed.
+
+---
+
+# PAGE-MOVE phase 4c - 2026-10-27: timestamped page open/close burst
+
+Second evidence pass on the 200 ms mode-5 vs 300 ms mode-4 question. Same fence: this file only, no source
+edit, no git command. The new evidence is one 139.7 fps timestamped CopyFromScreen burst covering one page
+open and one page close on the real 4.93 XMB. Short version: **18 rendered frames (about 300 ms) in both
+directions; the screen-space per-frame remaining fraction is 0.762 (0.776 after the documented -0.014 tracker
+bias), matching mode 4 at 300 ms; mode 5 at 200 ms (12 frames) is excluded by the frame count.**
+
+## 1. Capture
+
+- Same run and safety procedure as LAYOUT-TRACE phase 4c: `C:\dev\rpcs3-cap\rpcs3.exe`, scratch config,
+  exclusive fullscreen disabled, 1920x1080, Keyboard pad (Cross PgDown, Circle PgUp). The global input config
+  was backed up before the run and restored after it; `C:\dev\rpcs3-cap\config\input_configs\global\Default.yml`
+  had SHA-256 `E624DA0D66A8E971173C39A69A1DC2C89FFE146D57BF2A03C2C8CFACB459CEEE` before and after.
+- Parked on Settings -> Game Settings (the row that opens the PS-Upscaler page), root state.
+- Burst: **642 frames in 4,588.7 ms = 139.7 fps**, band 1920x180 at screen y 200..380, full 1080p window,
+  BitBlt into a 32bpp DIB with a Stopwatch timestamp per frame, written raw and converted to `f_<ms>.png`.
+  Key 1 (PgDown, open) at 701.266 ms; key 2 (PgUp, close) at 2702.865 ms.
+- Files under `C:\dev\out\rpcs3-xmb-cap\` (never committed): `burst-open-close.raw` (846 MB),
+  `burst-png\` (642 PNGs), `template.csv` (sub-pixel template track), `track.txt` / `track-narrow.txt`
+  (`motion-track.ts`), `luma.txt` (`region-luma.ts`).
+- A second burst was discarded: its frames showed the native XMB window in front of RPCS3, so the desktop
+  capture was occluded. Every number below comes from the one valid burst.
+
+## 2. The tracked quantity and the two transitions
+
+The clean channel is a normalized correlation of the focused toolbox (template from the root frame: x 500..631,
+y 240..321, 1 px search step, parabolic sub-pixel). Root is 0 and the settled open page is -261.9 px.
+
+Open (press at 701.3 ms):
+- first visible motion at 1410 ms, i.e. **709 ms after the press** (page/content load; the earlier record was
+  about 530 ms);
+- the first visible frame is already at -100.1 px (38% of the move), then the remaining distance falls
+  123.4, 94.0, 71.5, 54.5, 41.6, 31.7, 24.1, 18.4, 14.0, 10.7, 8.1, 6.2, 4.8, 3.7, 2.8, 2.1, 1.7 px;
+- per-frame remaining fraction, frames 2..16: **0.7623 +/- 0.0043**;
+- within 1% of the target after 16-17 rendered frames and within 0.5% after 18; the last 1-2 px take another
+  100-200 ms (sub-pixel tail).
+
+Close (press at 2702.9 ms):
+- first motion at 2760 ms, i.e. **57 ms after the press**;
+- remaining 199.7, 151.9, 115.8, 88.2, 63.0, 45.2, 32.7, 23.9, 17.3, 12.6, 9.6, 7.25, 5.58, 4.19, 3.18, 2.43,
+  1.90, 1.38 px;
+- the first four fractions are 0.7623, 0.7608, 0.7624, 0.7616 (**0.7618 +/- 0.0007**); later frames read
+  0.715-0.730 and then 0.75-0.78;
+- within 1% after 16 frames and within 0.5% after 18.
+
+Cross-checks with the project tools:
+- `bun work/motion-track.ts burst-png horizontal 0.0 1.0 0.0 1.0 150 40` tracks a 0 -> 200.14 px compromise
+  for the open and 200.14 -> -21.57 for the close, because the profile mixes the focused toolbox, the fading
+  neighbouring icons and the moving "Settings" label. The narrow region (x 0.12..0.40) gives 0 -> 201.35 and
+  203.26 -> -19.45. Both versions put the first motion at 1410/2760, confirming the start frames, but neither
+  tracks the full 262 px, so the absolute distances and retentions above use the template track.
+- `bun work/region-luma.ts burst-png 0.34 0.99 0.0 0.70` confirms the same windows on the brightness channel:
+  open falls from 55.26 to 48.82 (first drop at 1410, about 90% by 1557), close rises from 47.58 to 53.96
+  (first rise at 2760, about 90% by 2977), with a slow tail after that.
+
+## 3. Which ease the numbers match
+
+| Model | frames | retention/frame | measured against it |
+|---|---:|---:|---|
+| mode 4, 300 ms | 18 | 0.7741 | screen 0.762; +0.014 bias = 0.776; 18 frames |
+| mode 5, 200 ms | 12 | 0.7794 | 12 frames would end at 200 ms; at 200 ms both transitions are still 6-7 px (2.4-2.8%) out and keep moving |
+| mode 5, 300 ms | 18 | 0.8469 | retention far too slow |
+
+- The 0.7% retention gap between the two candidates is below this measurement's resolution: the screen x also
+  contains the slower distance/brightness channel recorded in phase 4b 1.3 (retention 0.902, about 29 frames),
+  which explains the varying screen retention (0.762 early, 0.72 mid-tail, 0.75-0.78 late) and makes the
+  "pure" icon-x retention uncertain by about 1%.
+- The **frame count** is the discriminator: at 200 ms after first motion the open icon is at -255.7 (6.2 px
+  out) and the close at -7.25 (7.25 px out); neither has snapped. A 12-frame mode-5 ease would be at the
+  target. At 300 ms the open is at -260.8 (1.1 px out) and the close at about -1.5 (1.5 px out).
+- So the page move is 18 rendered frames at 60 Hz = 300 ms, and the retention is within bias of mode 4 at
+  300 ms (0.7741). The older pixel-tracker result (0.760, 17-18 frames) is independently confirmed by this
+  timestamped burst.
+
+## 4. Honest limits
+
+- One valid burst only. The second attempt was occluded and discarded; there is no second independent frame
+  count.
+- Screen x is a projection of the eye-space animation, not the animation value itself. The distance/brightness
+  channel (phase 4b 1.3) adds a slower component: it speeds up the close mid-tail and slows the open tail, so
+  the per-frame fraction is not a clean constant and the mode-4/mode-5 retention difference cannot be settled
+  from the curve alone.
+- The first open frame is 38% of the move rather than the 22.6% a mode-4 first frame gives; the close has no
+  such first-step jump. This is either a layout snap when the page opens or 1-2 frames hidden by the page load.
+  It is unresolved and excluded from the retention fit. It does not change the 18-frame end point.
+- The 709 ms open delay is page-load dependent; it is not part of the 300 ms animation. The close delay (57 ms)
+  is consistent with the previously recorded 34 ms plus capture granularity.
+- The settle threshold is arbitrary: "within 0.5%" is 1.3 px on a 262 px move, which is at the template
+  tracker's noise floor. The conclusion rests on the 200 ms point being 6-7 px out, not on the exact final
+  pixel.
+
+## 5. Answer
+
+The page open and page close are **18 rendered frames, about 300 ms at 60 Hz**. The screen-space per-frame
+remaining fraction is 0.762 (0.7618 over the clean first four close frames), which becomes about 0.776 after
+the documented -0.014 tracker bias and is within measurement error of mode 4 at 300 ms (0.7741). Mode 5 at
+200 ms (12 frames, 0.7794) is excluded by the frame count: at 200 ms both transitions are still 6-7 px from
+the target. The earlier 300 ms / mode 4 fit stands; this burst is a direct frame-count confirmation, not a
+trace of the animate call. The call-site trace in vsh.elf paf `PhXmBar` remains the open item.
+
+## 6. Reproduction
+
+```
+# raw burst: C:\dev\out\rpcs3-xmb-cap\burst.ps1 (BitBlt into a 32bpp DIB, timestamp per frame, band 1920x180)
+# convert: raw2png.ps1; track: template-track.ps1 / analyze.ps1; pitch: pitch.ps1 / diffpitch.ps1
+# project tools: bun work/motion-track.ts ... and bun work/region-luma.ts ... over burst-png
+```
+
+Firmware-derived numbers stay in these audit notes; no dump, module or capture is committed.
