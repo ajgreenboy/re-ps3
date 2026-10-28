@@ -73,22 +73,37 @@ struct Entry {
     bool played=false;
 };
 struct Category { QString id,title,container,texture; QVector<Entry> entries; QString themeIcon; };
-// Item-level Triangle options menu: the PS3 shows a right-hand panel, not a level. Each row is a command
-// this build really performs; the list is built from the selected entry so other surfaces inherit it.
+// Item-level Triangle options menu: the firmware builds it per item from explore_plugin_full's English text
+// table, with Information always the last row and the other rows appearing only under their own conditions
+// (audit/ITEM-MENU-INFO-FIRMWARE.md A3-A4). There is no Close row: Circle/Escape close the list.
 // The same panel carries the in-player rows (subtitles, audio tracks, repeat, shuffle), which is where the
 // firmware's video control panel keeps its subtitle and audio-change buttons.
-enum class OptionCommand { Activate, Information, SortByNameAscending, SortByNameDescending, SortMenu, Close,
+enum class OptionCommand { Activate, Information,
+    // The firmware's date-pair sort rows (msg_*_date_f/_r); the sort itself is this build's, over the
+    // timestamps the listed files and folders actually carry.
+    SortCreatedAscending, SortCreatedDescending, SortUpdatedAscending, SortUpdatedDescending, SortMenu,
+    // The firmware's per-item file commands. Listed (not selectable) only for local content, because this
+    // build has no copy or delete backend yet; the row's note says so.
+    Copy, Delete,
     SubtitlesOff, SubtitleTrack, AudioTrack, RepeatMode, ToggleShuffle,
     // The Continue Watching page's own command: forget the remembered position for this row. Only the
-    // page that lists resume points offers it (buildOptions gates on the row id).
-    RemoveResume, JellyfinRestart };
+    // page that lists resume points offers it (buildOptions gates on the row id). This command has no
+    // firmware row, so its label is the one native wording the item menu keeps.
+    RemoveResume,
+    // msg_play_begin: restart from the top when a resume record exists (a Jellyfin item or a local file).
+    PlayFromBeginning };
+// A label read from the RCO text table: the key plus the English string it should resolve to. The fallback
+// is used only when the local flash image has no table; whenever the RCO is present, its value is the label.
+struct OptionLabel { const char* key=nullptr; QString fallback; };
 struct MenuOption {
     QString title;
-    OptionCommand command=OptionCommand::Close;
+    OptionCommand command=OptionCommand::Activate;
     int index=-1;          // the row's payload: a subtitle track index or an audio track index
     bool enabled=true;     // false: listed but not selectable, and `note` says why (no pretending)
     bool active=false;     // the current choice, marked in the player panel
     QString note;          // one line under the list while this row has focus (a reason, a file name)
+    QString labelKey;      // the explore_plugin_full key the title was read from; empty when none exists
+    QString condition;     // why the row is in this particular list (the panel log and the options dump)
 };
 // One audio track QMediaPlayer reports for the loaded media. `switchable` turns false the moment this
 // build asked for it and the player's own activeAudioTrack() did not follow, and then `reason` says so.
@@ -395,17 +410,28 @@ private:
     QVector<MenuOption> options_,optionsParent_;
     QString optionsTitle_;
     void buildOptions();
+    // Item-menu rows and labels. Every title comes from explore_plugin_full's English table (A3); the row's
+    // labelKey and condition travel with it so the panel log and the options dump can show what was built
+    // and why (the same evidence path XMB_DUMP_ENTRIES already writes for the catalogue and folder pages).
+    OptionLabel activateLabel(const Entry& entry) const;
+    QString optionLabel(const OptionLabel& label);
+    void addOption(const OptionLabel& label,OptionCommand command,const char* condition,bool enabled=true,
+                   const QString& note={},int index=-1);
+    qint64 optionResumePoint(const Entry& entry) const;   // 0 = no resume record for this row
+    bool optionIsLocalContent(const Entry& entry) const;
+    bool optionPageSortable() const;
+    void logOptions(const Entry& entry);
     // The in-player variant of the same panel: Subtitles Off / one row per sidecar file, the audio
     // tracks the player reports, then Repeat and Shuffle (which used to hold the face buttons).
     bool playerPanel_=false;
+    bool playFromBeginning_=false;   // one-shot: start the next local file at 0 instead of its stored position
     void buildPlayerOptions();
     void refreshPlayerOptions();
     void dismissOptions();
     void resetOptions();
-    QString activateLabel(const Entry& entry) const;
     QString entryKind(const Entry& entry) const;
     void showEntryInformation(const Entry& entry);
-    void sortPageByName(bool ascending);
+    void sortPageByDate(bool ascending,bool created);
     // Subtitle and audio-track state. Discovery and parsing live in subtitles.cpp; this class owns the
     // choice, the cue lookup against the player's position and the session memory of that choice.
     bool subtitleLog_=false;
