@@ -48,6 +48,41 @@ constexpr double kInlineX=628.,kInlineCentreY=504.;
 constexpr int kInlineSize=26;
 // D4 keeps the analog clock face while the info bar's plate and date are hidden: centre ~(1776,93).
 constexpr double kClockX=1776.,kClockY=93.;
+// ---- The depth-2 read-only table page (SETTINGS-FIRMWARE.md 12.2) ---------------------------------
+// Reference: out/parity-references/page-network-status-list__original__day__1080p.png, re-measured for
+// this pass (same method as the audit: Rec.709 luma, ink runs, a 1 px rule read as a full-width row
+// profile). The page is the D4/D5 family's second shape - a title above a rule, a two-column table, a
+// lower rule, one Back hint - with one measured difference: it keeps no analog clock (the info bar is
+// absent: luma 0 at x 1300/1340/1700/1900 on y 100, and the frame's top-right corner is empty).
+// Rules: full width, 1 px, flat (mean luma 140.0 over 75.6 at y 199 and 134.6 over 64.7 at y 879 on
+// that frame = white at 0.36). No other D4/D5 frame shows this value - the message page's 193 over 53
+// on the same boot is a different page class - so the table page carries its own measured alpha.
+constexpr double kTableRuleTop=199.,kTableRuleBottom=879.;
+constexpr int kTableRuleAlpha=92;
+// Header: icon ink x 109..149, y 154..189 (41 x 36); title ink from x 164, ink rows 167..190. The
+// rects are the boxes that the native path's alpha-bounds fit and 23 px VCenter draw produce there
+// (the 41 px square puts the globe's 41 x 35 alpha bounds at 109..149 / 154..188, one pixel short of the
+// frame's 154..189; rect top 155 puts the title's cap ink at 167).
+constexpr double kTableIconX=109.,kTableIconY=151.,kTableIconSize=41.;
+constexpr double kTableTitleX=163.,kTableTitleTop=155.;
+constexpr int kTableTitleSize=23;
+// Table: 13 rows at ink tops 291 -> 771 on an exact 40 px pitch; label ink right-aligned at 939
+// (938..940 across all 13), value ink left-aligned at 978..980. The rects sit 3 px right / 1 px left of
+// those ink edges because the 22 px face's side bearings land there (measured on the native D5 page:
+// a rect's right-aligned text ends 3 px short of the rect, a left-aligned one starts 1 px inside it).
+constexpr double kTableLabelRight=942.,kTableValueLeft=978.;
+constexpr double kTableFirstInkTop=291.,kTablePitch=40.;
+constexpr int kTableRowSize=22;
+// At 22 px in a 40 px AlignVCenter rect the cap ink starts 11 px below the rect top (the D5 page's own
+// rows: rect top 353 -> ink 364). The first row's rect top is therefore 291 - 11 = 280.
+constexpr double kTableRowInkOffset=11.;
+// 291 + 14 * 40 = 851 with an 18 px cap ends at 868, inside the 879 rule; a 16th row would cross it.
+// The console's table is a fixed 13 rows and the page does not scroll, so a longer host report (two
+// adapters) stops at the last row that fits rather than overdrawing the rule.
+constexpr int kTableMaxRows=15;
+// Back hint: this page's own frame puts the ink at y 897..916 (the D4 page's is 889..909, the
+// information page's 897..916); x 1155 and the glyph+label pair are the family's.
+constexpr double kTableHintInkTop=897.;
 // ---- The confirm box: measured on the 2026-10-28 firmware frame -----------------------------------
 // Reference: out/parity-references/dialog__original__day__1080p.png (RPCS3 4.93, 1920x1080, one day pin;
 // the console's delete confirmation, body "The installed game will be deleted. / Are you sure you want to
@@ -105,6 +140,38 @@ QString takeHeading(QString& text) {
     }
     return {};
 }
+// The icon a message page shows: the focused row's own, or its parent when the row is the settings pages'
+// empty-state marker ("23n"). The page the message belongs to shows its item's icon, as D4's "Search for
+// Media Servers" shows the network search icon; the depth-2 status list shows the Network Settings icon
+// because the row it belongs to is a settings bullet (measured on its frame: the globe + wrench).
+const Entry* pageIconSource(const Shell& shell) {
+    const int depth=shell.depth();
+    const auto& rows=shell.entriesAt(depth);
+    const Entry* source=nullptr;
+    const int selection=shell.selectionAt(depth);
+    if(selection>=0 && selection<rows.size())source=&rows[selection];
+    if(source && source->texture=="23n" && depth>0) {
+        const auto& parents=shell.entriesAt(depth-1);
+        const int parent=shell.selectionAt(depth-1);
+        if(parent>=0 && parent<parents.size())source=&parents[parent];
+    }
+    return source;
+}
+// The depth-2 table is the Info family's second shape, and the row that raised the message says which
+// one: the three host reports are Action::Information rows whose payload (Entry::value) is host:network,
+// host:display or host:audio (Shell::activate builds them in shell.cpp). The message text is the report,
+// so the class is the row's own payload, not an inference from the string. Every other Information
+// message - System Information, a download's info page, Continue Watching's - keeps the D5 page.
+bool hostReportTable(const Shell& shell) {
+    const int depth=shell.depth();
+    if(depth<=0)return false;
+    const auto& rows=shell.entriesAt(depth);
+    const int selection=shell.selectionAt(depth);
+    if(selection<0 || selection>=rows.size())return false;
+    const auto& entry=rows[selection];
+    return entry.action==Action::Information &&
+        (entry.value=="host:network" || entry.value=="host:display" || entry.value=="host:audio");
+}
 } // namespace
 
 // ---- D4 chrome: icon + left title, the two flat rules, the analog clock ---------------------------
@@ -113,17 +180,8 @@ void View::drawPageChrome(QPainter& p,const QString& title) {
     // the message belongs to shows its item's icon, as D4's "Search for Media Servers" shows the network
     // search icon. A message with no heading draws no header at all.
     if(!title.isEmpty()) {
-        const int depth=shell_.depth();
-        const auto& rows=shell_.entriesAt(depth);
-        const Entry* source=nullptr;
-        const int selection=shell_.selectionAt(depth);
-        if(selection>=0 && selection<rows.size())source=&rows[selection];
-        if(source && source->texture=="23n" && depth>0) {
-            const auto& parents=shell_.entriesAt(depth-1);
-            const int parent=shell_.selectionAt(depth-1);
-            if(parent>=0 && parent<parents.size())source=&parents[parent];
-        }
-        if(source)drawImage(p,source->container,source->texture,{kChromeIconX,kChromeIconY,kChromeIconSize,kChromeIconSize});
+        if(const Entry* source=pageIconSource(shell_))
+            drawImage(p,source->container,source->texture,{kChromeIconX,kChromeIconY,kChromeIconSize,kChromeIconSize});
         drawMessageText(p,{kChromeTitleX,kChromeTitleTop,1200,44},title,kTitleSize,Qt::white);
     }
     // The rules are flat alpha rectangles, not tex_msgdialog_bar: the measured references show one
@@ -357,6 +415,53 @@ void View::drawMessageInfoPage(QPainter& p) {
     drawHintRow(p,{{"tex_circle",assets_.text("system_plugin","msg_back","Back")}},kHintInkTop,dialogHintEase_.value);
 }
 
+// ---- Depth-2 read-only table page (SETTINGS-FIRMWARE.md 12.2) --------------------------------------
+void View::drawMessageTablePage(QPainter& p) {
+    // The class: title over the measured rule pair, a label/value table on a fixed 40 px grid, one Back
+    // hint, no focusable row, no info bar and no dim. The body is the host report the row produced, one
+    // row per line; the values differ from the console's by construction and the parity state already
+    // annotates that (contentDiffers on the status-rows region). The title is the report's own heading -
+    // for the status list that is the firmware's msg_netlist_current, resolved in host::networkStatus.
+    QString text=messageShown_.text;
+    auto lines=text.split('\n');
+    const QString title=lines.isEmpty()?QString{}:lines.takeFirst();
+    if(!lines.isEmpty() && lines.first().isEmpty())lines.removeFirst();
+    // Header. Same icon source and type as the family; this page's measured anchors and no clock.
+    if(!title.isEmpty()) {
+        if(const Entry* source=pageIconSource(shell_))
+            drawImage(p,source->container,source->texture,{kTableIconX,kTableIconY,kTableIconSize,kTableIconSize});
+        drawMessageText(p,{kTableTitleX,kTableTitleTop,1200,44},title,kTableTitleSize,Qt::white);
+    }
+    p.save();p.setPen(Qt::NoPen);p.setBrush(QColor(255,255,255,kTableRuleAlpha));
+    p.drawRect(QRectF(0,kTableRuleTop,1920,1));
+    p.drawRect(QRectF(0,kTableRuleBottom,1920,1));
+    p.restore();
+    // Rows: a fixed grid from the one measured origin, not a centred block. The frames measure one
+    // 13-row table; the host report's row count is its own (nine lines for one adapter here), so the
+    // grid starts where the measured one does and ends where the report ends. A blank line separates
+    // adapters in the report and is not a table row, so it is skipped and the grid stays unbroken.
+    int row=0;
+    for(const auto& line:lines) {
+        if(line.isEmpty())continue;
+        if(row>=kTableMaxRows)break;
+        const double top=kTableFirstInkTop-kTableRowInkOffset+row*kTablePitch;
+        const int split=line.indexOf(": ");
+        if(split<0) {
+            // A line with no label - the adapter's own name, the audio endpoint's - starts in the value
+            // column, where a value starts; the label column carries labels only.
+            drawMessageText(p,{kTableValueLeft,top,1920.-kTableValueLeft,qreal(kTablePitch)},line,
+                kTableRowSize,QColor(235,235,235));
+        } else {
+            drawMessageText(p,{140.,top,kTableLabelRight-140.,qreal(kTablePitch)},line.left(split),
+                kTableRowSize,QColor(235,235,235),Qt::AlignRight|Qt::AlignVCenter);
+            drawMessageText(p,{kTableValueLeft,top,1900.-kTableValueLeft,qreal(kTablePitch)},line.mid(split+2),
+                kTableRowSize,QColor(235,235,235));
+        }
+        ++row;
+    }
+    drawHintRow(p,{{"tex_circle",assets_.text("system_plugin","msg_back","Back")}},kTableHintInkTop,dialogHintEase_.value);
+}
+
 // ---- The button-hint row --------------------------------------------------------------------------
 void View::drawHintRow(QPainter& p,const QVector<Hint>& hints,double inkTop,double opacity) {
     if(opacity<=.002 || hints.isEmpty())return;
@@ -380,7 +485,12 @@ void View::drawMessageSurface(QPainter& p) {
     case MessageKind::Page:drawMessagePage(p);break;
     case MessageKind::Box:drawMessageBox(p);break;
     case MessageKind::ErrorCode:drawErrorMessagePage(p);break;
-    case MessageKind::Info:drawMessageInfoPage(p);break;
+    case MessageKind::Info:
+        // The Info family has two measured shapes: the D5 information page (its own columns) and the
+        // depth-2 read-only table (SETTINGS 12.2). The host-report rows are the table; every other
+        // Information message keeps the D5 page byte for byte.
+        if(hostReportTable(shell_))drawMessageTablePage(p);else drawMessageInfoPage(p);
+        break;
     case MessageKind::None:break;
     }
 }
