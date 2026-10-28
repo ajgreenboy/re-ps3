@@ -1209,6 +1209,28 @@ async function runLayerGate(thresholds: Thresholds, opts: ReturnType<typeof pars
   if (ref.w !== native.w || ref.h !== native.h)
     fail(`dimension mismatch: reference ${ref.w}x${ref.h} vs native ${native.w}x${native.h}`);
 
+  // A textless build can score BETTER than a text-bearing one: a blank clock region is closer to
+  // the reference than rendered glyphs in the wrong font. That happened on 2026-10-28 and silently
+  // moved the baselines, so a capture must prove it drew text before its numbers count. The clock
+  // crop is the cheapest oracle (the app always renders the clock there).
+  if (captureMode) {
+    const crop = [1570, 80, 260, 50] as const;
+    let bright = 0;
+    for (let y = crop[1]; y < crop[1] + crop[3]; y++) {
+      for (let x = crop[0]; x < crop[0] + crop[2]; x++) {
+        const i = (y * native.w + x) * 4;
+        const luma = 0.2126 * native.rgba[i] + 0.7152 * native.rgba[i + 1] + 0.0722 * native.rgba[i + 2];
+        if (luma > 140) bright++;
+      }
+    }
+    const minimum = 900; // a text-bearing build measures ~1,677; a textless one ~302
+    if (bright < minimum) {
+      fail(`captured frame renders no clock text (${bright} bright pixels in the clock crop, minimum ${minimum}) - ` +
+        'the text renderer is broken, so this gate would score a blank clock as an improvement');
+    }
+    console.log(`  text presence: ${bright} bright pixels in the clock crop (minimum ${minimum}) PASS`);
+  }
+
   const rows = thresholds.layers.map(layer => {
     checkCropInImage(layer, ref);
     return scoreLayer(layer, ref, native, captureMode);
