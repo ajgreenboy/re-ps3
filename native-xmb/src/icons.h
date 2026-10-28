@@ -1,5 +1,6 @@
 #pragma once
 #include "assets.h"
+#include "rco_objects.h"
 #include "rsx_program.h"
 #include <memory>
 #include <QHash>
@@ -31,14 +32,15 @@ public:
     struct Icon {
         QString normalMap;   // icontex name, e.g. "6n"
         QPointF centre;      // 1920x1080 reference pixels
-        double size=117.13;  // firmware units (= reference pixels at d 2700): 117.13 unfocused, 167.33 focused
-        double brightness=.698; // _Ambiant.w (1 focused/open column, 0.698 unfocused, 0.247 behind a page); also selects the glass vs opaque material
+        double size=117.13;  // captured: firmware units (= reference px at d 2700): 117.13 unfocused, 167.33 focused
+        double brightness=.698; // captured: _Ambiant.w (1 focused/open column, 0.698 unfocused, 0.247 behind a page)
         double opacity=1;
-        double distance=2700; // camera distance: 2700, or 2857.2 for a parent column behind an open page
+        double distance=2700; // captured: camera distance 2700, or 2857.2 for a parent column behind an open page
     };
     bool init(QOpenGLFunctions_3_3_Core& gl,Assets& assets);
     bool ready() const { return ready_; }
     void setClock(const QDateTime& when) { clock_=when; }
+    // The 0.12 tint strength is a fit: the opaque material's tint weight has no ICONS.mnu key.
     void setFixedTint(const QVector3D& tint,float strength=.12f) { fixedTint_=tint;tintStrength_=strength; }
     // Draws the icons onto targetFbo, cutting each one's background from that same framebuffer first.
     // light: 0 night .. 1 day (the background's NightDayBlend preset blend).
@@ -54,7 +56,12 @@ private:
     float tintStrength_=.12f;
     GLuint vao_=0,vbo_=0,diffuse_=0,environment_=0,cut_=0,cutFbo_=0;
     QHash<QString,GLuint> normalMaps_;
-    QHash<QString,float> day_,night_,yoake_,higure_;
+    // ICONS.mnu, read at run time through the shared Materials reader (one parser for the whole app).
+    // nullptr until init(); the MNU objects stay owned by that reader.
+    const Materials::Mnu* day_=nullptr;
+    const Materials::Mnu* night_=nullptr;
+    const Materials::Mnu* yoake_=nullptr;
+    const Materials::Mnu* higure_=nullptr;
     QImage ambientPalette_;
     QDateTime clock_;
     QVector3D changingColour(const QDateTime& when) const;

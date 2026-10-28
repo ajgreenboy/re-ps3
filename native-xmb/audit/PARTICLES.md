@@ -786,3 +786,216 @@ to the fidelity.
   from (previous call was a scene draw) + (same `seconds`) + (different draw framebuffer). Calling
   `renderGlare()` from `view.cpp:456` removes the inference, and is the change to make if that line is ever
   edited for another reason.
+## Applied 2026-10-27: runtime-read adoption (P1) - every particle constant now comes from PARTICLES.mnu
+
+Closes the three contradictions `RCO-OBJECT-MODEL.md` 9.1-9.3 recorded for this file and replaces the duplicate
+constant block that the "Applied 2026-10-27: real second pass" section above describes. `src/particles.{h,cpp}`
+only; `view.cpp` is untouched. Every number below is a local measurement on this worktree (21:30-22:00).
+
+### 1. What is read now
+
+`Particles::loadMaterials(Assets&)` reads through the scene's shared `Materials` reader (declared in
+`particles.h`, defined in `particles.cpp`; it also serves the ribbon, HDR and icons layers):
+
+| source | keys | used as |
+|---|---|---|
+| `PARTICLES.mnu` (base) | delta time, emit per frame, emit prob, emit vel min/mul/var/zscale, emit cone angle, emit neg prob, aging speed/variance, friction, gravity, brownian scale, spin time scale | `Particles::Physics` (simulation) |
+| `PARTICLES.mnu` (base) | size middle/far, near/far focus, glare, glare scale, glare p1/p2, specular power/coeff, lambert coeff, exposure, fresnel, iridescent exp | `Particles::Look` base |
+| `override/{night,yoake,day,higure}/PARTICLES.mnu` | the same look keys | the four theme looks |
+| `PARTICLES.mnu` (base) | spot pos x/y/z | `uSpotDir` |
+
+**Physics** comes from the base file because the four clock presets carry a byte-identical physics block (section
+3.4), so the schedule cannot change it. **Look** is the blend of the four theme overrides on the plugin's own
+keyframe table (FUN_00011600, the same table `Ribbon::clockPreset` and `IconRenderer::value` use). At the
+canonical `--background-clock 2026-10-25T10:00:00` that is 25% yoake + 75% day, which is where the values in the
+table below come from.
+
+`Particles` does not receive the background clock: `view.cpp` passes only `seconds` to `render()`. The layer
+therefore re-reads the `--background-clock` argument, exactly as the no-Assets entry point re-reads `--dev-flash`.
+That is the one coupling this task could not remove without editing `view.cpp`; the one-line hunk
+(`particles_.setBackgroundClock(when)` from `View::renderBackground`) is listed in `PIPELINE.md`.
+
+An absent key keeps the caller's fallback, so "the firmware does not set this" is distinguishable from "the
+firmware sets it to N"; `Particles::materialsLoaded()` reports which path the run took.
+
+### 2. Contradiction 9.1 - the spot direction is read, not fitted
+
+| | before | now |
+|---|---|---|
+| code | `lightDir=normalize(vec3(0.55,0.42,0.72))`, comment "PARTICLES.mnu SPOT POS" | `uniform vec3 uSpotDir` = `normalize(spot pos)` |
+| source | - | base `PARTICLES.mnu`: `spot pos x:4.16`, `spot pos y:2.63`, `spot pos z:-7.6` |
+| value | (0.5500, 0.4200, 0.7200) | (0.459444, 0.290466, -0.839369) |
+
+The z sign flips: the firmware's spot sits at z -7.6, inside the dust band (particles live at z -3..-13.5). What
+the vpo does with the spot is still not decoded (a fixed direction vs `normalize(spot - particle)` per vertex,
+`RCO-OBJECT-MODEL.md` 9.1); this applies the normalised position, which is what the reader provides. The same
+uniform feeds both programs (`particles_quads` and `particles_second`).
+
+Measured in isolation (only this line reverted to the old vector, everything else final; same worktree, same
+capture recipe):
+
+| layer | old spot | final | delta |
+|---|---:|---:|---:|
+| whole frame | 18.28 / 0.8293 | 18.30 / 0.8323 | +0.02 dB / +0.0030 |
+| top background | 20.23 / 0.9338 | 20.25 / 0.9363 | +0.02 dB / +0.0025 |
+| category icon row | 20.89 / 0.8970 | 20.92 / 0.8990 | +0.03 dB / +0.0020 |
+| item label row | 11.94 / 0.3912 | 11.95 / 0.3927 | +0.01 dB / +0.0015 |
+| clock text / info bar | 11.39/0.4105, 14.78/0.6117 | same | 0 |
+
+Particle crop (480x360 at 40,640) against the RPCS3 reference (`out/native-reference/ab-rpcs3-root.png`):
+
+| | crop PSNR | MAE | local specks | peak delta over the 5 px ring |
+|---|---:|---:|---:|---:|
+| RPCS3 reference | - | - | 13 | 48.6 |
+| old spot | 24.972 dB | 14.173 | 34 | 127.3 |
+| final | 25.088 dB | 14.072 | 7 | 48.3 |
+
+The old vector put the specular half-vector close to the view axis, so a handful of particles hit near-saturated
+specular cores the reference does not have; the firmware direction removes them. This is the only one of the three
+changes that improves the layer metrics on its own.
+
+### 3. Contradiction 9.2 - the preset the running state uses; when SPE and UI apply
+
+Before: the layer read no MNU at all and used the base file's look values. Now it reads the base physics and the
+clock-scheduled look. At the canonical clock:
+
+| key | base file | running state (25% yoake + 75% day) |
+|---|---:|---:|
+| size middle | 0.0536233 | 0.0482637 |
+| far focus | 12.8327 | 12.1522 |
+| glare | 0.159705 | 0.196159 |
+
+Isolated A/B (only the theme override reverted, i.e. base look, everything else final): frame 18.30/0.8321 vs
+18.30/0.8323, icon row 20.92/0.8987 vs 20.92/0.8990, item label 11.95/0.3926 vs 11.95/0.3927, top background
+equal, crop PSNR 25.088 both (MAE 14.070 vs 14.072). **Neutral**, and kept: the firmware schedules PARTICLES with
+the same clock keyframes as LINE1/HDR, so a run whose dust ignores the theme is the wrong state, not a cheaper one.
+
+`PARTICLES_SPE.mnu` (5 keys: delta time 0.00346295, glare 0.0832176, specular power -29.3657, size middle
+0.0218883, global alpha -0.555603) is the playback/music variant. It applies when the plugin's background preset
+is `music_1`, i.e. while background music plays; this build never schedules `music_1` (no music-while-browsing
+model at all: `FIRMWARE-PARITY-GAPS.md` B3, `PIPELINE.md` "Ribbon presets and boot transition"), so no code path
+can reach it. It is read by `Materials::particlesSpe()` when that flow is built; the negative specular power and
+negative global alpha show it is a different regime, not a drop-in constant.
+
+`PARTICLES_UI.mnu` (brownian 0.60, icon wind 11.3877, dpad scale x 1, dshake/rsnake coefficients) is the
+interaction-gust input to the same pool. This build has no wind consumer (no gust from icon/DPad/rumble reaches
+the sim), so it is documented here and not applied; when one is added it reads `materials.particlesUi()`.
+
+### 4. Contradiction 9.3 - the DoF band is read, the gains stay fits
+
+| | before | now |
+|---|---|---|
+| code | `defocus=clamp(abs(depth-6.12)/7.4,0,1)` | `defocus=clamp(abs(depth-uNearFocus)/max(uFarFocus-uNearFocus,1e-4),0,1)` |
+| near | 6.12 (truncated 6.12435) | `NEAR FOCUS` 6.12435 |
+| far | unused (12.8327) | `FAR FOCUS` from the theme preset: 12.8327 base, 12.1522 at the canonical clock |
+| span | 7.4 (fit) | 6.70835 base / 6.02783 blended |
+
+The two multipliers that have no MNU key stay and are annotated `// fit:` in the shader: the `0.12` gain on
+`defocus^2` (how far toward SIZE FAR the focus reaches) and the `1.15` size gain (the fpo's SIZE -> corner
+mapping, 6-B3). The `depthFade` term (`(depth-3)/10.5`, floor 0.10) is still the 6-B3 stand-in and is annotated
+too.
+
+Isolated A/B (only the DoF span reverted to `6.12`/`7.4`): frame 18.30/0.8322 vs 18.30/0.8323, icon row
+20.92/0.8989 vs 20.92/0.8990, top background equal, crop PSNR 25.090 vs 25.088 (-0.002 dB, 0.4% MSE), speck
+count 16 vs 7. **Neutral at the noise floor** (0.5 dB budget), kept because the truncated span and the unused FAR
+FOCUS were the contradiction; a self-baseline cannot buy back a wrong focus plane.
+
+### 5. Measured result, canonical capture
+
+`bun work/ab-layers.ts --capture --exe C:/dev/out/native-scene-read/re-ps3-native.exe`, before = the same worktree
+with `particles/hdr/ribbon/icons` reverted to HEAD (the previous build), after = this change:
+
+| layer | before | after | delta |
+|---|---:|---:|---:|
+| whole frame | 18.28 / 0.8288 | 18.30 / 0.8323 | +0.02 dB / +0.0035 |
+| top background | 20.22 / 0.9336 | 20.25 / 0.9363 | +0.03 dB / +0.0027 |
+| category icon row | 20.89 / 0.8966 | 20.92 / 0.8990 | +0.03 dB / +0.0024 |
+| item label row | 11.94 / 0.3909 | 11.95 / 0.3927 | +0.01 dB / +0.0018 |
+| clock text | 11.39 / 0.4105 | 11.39 / 0.4105 | 0 |
+| info bar | 14.78 / 0.6117 | 14.78 / 0.6117 | 0 |
+
+All six gates PASS against the unchanged thresholds. Clock text and info bar are bit-identical, which also proves
+nothing outside the particle layer (and the background's HDR/ribbon reads) moved. The frame change is 5,847
+pixels (0.28%) with a mean channel delta of 19 over them; every changed pixel is a dust speck.
+
+### 6. Determinism
+
+Every `--render-clock 30` capture of the final sources hashed the same: two runs of the mandated build, one
+rebuild with annotation-only edits, one second out-of-repo build of the same sources, and three runs with
+`XMB_PARTICLE_LOG=1`:
+
+```
+sha256 F68732A7F9A135D55D097710EE4B45B2779594BD1AD886E3FF2BB084CC97BF18   (7 of 7 identical)
+```
+
+`XMB_PARTICLE_LOG=1` at the same clock, both passes:
+
+```
+particles: quads  step 3375 live 1529 nonfinite 0 checksum 96ed0c48 target 1920 x 1080 lut tga
+particles: second step 3375 live 1529 nonfinite 0 checksum 96ed0c48 target 256 x 144 lut tga
+```
+
+That is the pre-change checksum (`96ed0c48`), which is the point: the physics reads return the same values the
+constants held, so the simulation is bit-identical and only the shading changed. The look blend reads the
+background clock but never touches `step()`/`spawnParticle()`, so the checksum does not depend on the theme.
+
+### 7. Fallback path and the startup cost line
+
+`init(gl, assets)` is the only path view.cpp uses. When `lines.qrc` or `PARTICLES.mnu` cannot be read,
+`Materials::mnu` returns `ok == false`, the reader logs `mnu: lines PARTICLES.mnu <error>`, and the layer logs:
+
+```
+particles: PARTICLES.mnu unavailable ( lines:PARTICLES.mnu ... ); using the compiled fallbacks from PARTICLES.mnu 4.93
+particles: theme looks also unavailable; the base fallbacks drive the dust
+```
+
+then runs on the `Physics`/`Look` structs' initializers. Those initializers are the firmware's own 4.93 values
+(labelled `// fallback:` in `particles.h`), never the source when the file is present. The no-Assets overload
+`init(gl)` cannot read any MNU and says so.
+
+One startup line, from the last scene layer that reads materials:
+
+```
+scene reader: particles : 0 RCO containers, 0 B, 0.00 ms; 20 MNU files, 0.56-0.99 ms
+(lazy: no scene layer reads an RCO object tree; the scene path's values live in the QGL MNU files)
+```
+
+The reader pair is constructed on first use and performs no I/O until an accessor is called; `RcoObjects::cost()`
+inside that line is the measured RCO cost (0 containers, 0 bytes here). The 20 MNU files are the base
+PARTICLES (1), its four theme overrides (4), LINE1 day/night/yoake/higure/coldboot1/coldboot2 (6),
+BACKGROUND (1), HDR base/day/night/coldboot1 (4) and ICONS day/night/yoake/higure (4).
+
+### 8. Constants that remain in particles.cpp/h
+
+`// fit:` (no RCO/MNU key; all were there before this change):
+
+- `kBrownianStep` 0.05 - per-step Brownian velocity kick amplitude (6-A3).
+- `kSeed` 0x5053 - fixed Park-Miller seed so captures reproduce; the firmware's own seed is not traced.
+- `kScreenHeight` 22 - world units per viewport height; sets the SIZE MIDDLE -> pixel scale.
+- `kEmitYCentre` -3, `kEmitYSpread` 5.5, `kEmitZNear` -3, `kEmitZFar` -13.5, `kEmitXMargin` 1.25 - emission
+  volume (6-A2, still a uniform box).
+- `kColorGammaGain` 1.84 - the one photometric fit (`_Color * _Gamma`, 6-B2), derived from the fresnel mean.
+- Shader fits: DoF span gain 0.12, size gain 1.15, `depthFade` (3.0/10.5, floor 0.10), disc edge `mix(2.2,0.6)`,
+  defocus dim 0.85, chroma clamp 0.55..1.45 and weight `0.10 + 0.50 * specular`.
+
+`// captured:` (firmware bytes, not through an MNU key):
+
+- `kLifeFull` 0.94, `kLifeFade` 0.06, `kLifeIn` 0.02 - the kernel's life envelope (2.5).
+- `kReferenceFrameRate` 60 - the per-frame emission budget (3.3/3.5).
+- `kCornerU/V` and the 48-byte vertex stride - the `particles_quads` contract (2.2).
+- Rec.709 luma weights in the iridescent term - the fpo's own luma.
+
+`// derived:` `kMaxCatchUpSteps` 4096 (the 36 s catch-up bound), `kHalfHeight` (half of `kScreenHeight`), the
+degree->radian factor and 2*pi.
+
+### 9. Still open
+
+- **6-A2 emission origin**: still a uniform box, so the crop still counts more specks than the reference (7 vs 13
+  at this phase, but a different spatial spread).
+- **6-B1 qgl material mode 3**: still additive.
+- **6-B2 `_Color`/`_Gamma`**: still one fitted gain.
+- **6-B3 DoF packing**: the focus *plane* is now read; the curve between the planes (`defocus^2 * 0.12`) and the
+  depth fade are still fits.
+- **The vpo's use of SPOT POS**: a fixed direction now; `normalize(spot - particle)` per vertex is not excluded.
+- **`COLOR CONTROL` (1)**: read by no one and applied nowhere; its role in the fpo is untraced.
+- **SPE / UI presets**: readers exist, no consumer (section 3).

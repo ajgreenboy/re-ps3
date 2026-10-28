@@ -1,5 +1,7 @@
 #include "icons.h"
+#include "particles.h"      // sceneMaterials(): the shared run-time reader
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QtEndian>
 #include <QVector4D>
@@ -9,15 +11,13 @@
 
 namespace xmb {
 namespace {
-QHash<QString,float> readMnu(const QByteArray& text) {
-    QHash<QString,float> values;
-    for(const auto& raw:text.split('\n')) {
-        const auto parts=QString::fromLatin1(raw).trimmed().split(':');
-        if(parts.size()==3 && (parts[1]=="float" || parts[1]=="int"))values.insert(parts[0],parts[2].toFloat());
-    }
-    return values;
-}
-constexpr double kDistance=2700,kScaleX=2.8125,kScaleY=5; // steady-state camera of the capture
+constexpr double kDistance=2700,kScaleX=2.8125,kScaleY=5; // captured: steady-state camera of the capture
+// The firmware program's three Lagrange control points (FUN_0003c584, audit/ICON-MATERIAL-CLOCK.md);
+// GLASS and the 1/GLASS weights are ICONS.mnu keys, the control points themselves are captures.
+constexpr float kLuminanceX0=.20443f,kLuminanceX1=.544441f,kLuminanceX2=1.f;
+constexpr float kLuminanceY0=-.736614f,kLuminanceY1=-.259981f;
+constexpr double kEnvTurnPerSecond=30.; // captured: _EnvRot turns ~30 deg/s, starting at -147 deg
+constexpr double kEnvStartDegrees=-147.;
 }
 
 GLuint IconRenderer::texture(QOpenGLFunctions_3_3_Core& gl,const QImage& image,bool mipmaps) {
@@ -49,16 +49,18 @@ float IconRenderer::value(const QString& key,float light) const {
     // The plugin registers one ICONS.mnu override per preset and blends between them along the clock
     // keyframes (FUN_00011600, the same table LINE1 uses): night held to 01:00, to yoake by 05:00, held to
     // 07:00, to day by 11:00, held to 13:00, to higure by 17:00, held to 19:00, back to night by 23:00.
-    // dev_flash carries override/{night,yoake,day,higure}/ICONS.mnu; only LITn ANG X, TIME COLOR MIX and
-    // GLASS differ between them. `light` is the background's night/day blend and is only a fallback for a
-    // render with no clock set, where the keyframes cannot be evaluated.
-    const float nightValue=night_.value(key,day_.value(key,0.f));
-    const float dayValue=day_.value(key,nightValue);
+    // Every value is read from the firmware's ICONS.mnu through Materials::icons() (P1); only LITn ANG X,
+    // TIME COLOR MIX and GLASS differ between the four presets. `light` is the background's night/day
+    // blend and is only a fallback for a render with no clock set, where the keyframes cannot be evaluated.
+    if(!night_ || !day_)return 0.f;
+    const float nightValue=float(night_->number(key,day_->number(key,0.0)));
+    const float dayValue=float(day_->number(key,nightValue));
     // A/B switch for the keyframe schedule: XMB_ICON_PRESET_LINEAR=1 restores the earlier single day/night
     // cross-fade over the background's blend, so the four-preset schedule can be measured against it.
     if(!clock_.isValid() || qEnvironmentVariableIsSet("XMB_ICON_PRESET_LINEAR"))
         return nightValue+(dayValue-nightValue)*light;
-    const float yoakeValue=yoake_.value(key,dayValue),higureValue=higure_.value(key,dayValue);
+    const float yoakeValue=float(yoake_?yoake_->number(key,dayValue):dayValue);
+    const float higureValue=float(higure_?higure_->number(key,dayValue):dayValue);
     const QTime time=clock_.time();
     const double t=(time.hour()*3600+time.minute()*60+time.second())/86400.;
     const struct { double at; float value; } keys[]={{0,nightValue},{1/24.,nightValue},{5/24.,yoakeValue},
@@ -94,15 +96,20 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     try {
         vertexCg_=CgProgram::load(assets.qglFile("icons","lib/icons/quad.vpo"),&error);
         if(vertexCg_.valid())fragmentCg_=CgProgram::load(assets.qglFile("icons","lib/icons/icons_no_ss_no_shad.fpo"),&error);
-        day_=readMnu(assets.qglFile("icons","override/day/ICONS.mnu"));
-        night_=readMnu(assets.qglFile("icons","override/night/ICONS.mnu"));
+        // P1: ICONS.mnu comes from the shared Materials reader; the four presets the clock schedule blends.
+        // The private parser this file used to carry is gone - one parser, one cache, one fallback rule.
+        Materials& materials=sceneMaterials(assets);
+        QElapsedTimer presetTimer;presetTimer.start();
+        day_=&materials.icons(QStringLiteral("day"));
+        night_=&materials.icons(QStringLiteral("night"));
         // The dawn and dusk presets the same clock schedule blends through; a build without them keeps the
         // day/night pair (value() falls back per key).
-        try { yoake_=readMnu(assets.qglFile("icons","override/yoake/ICONS.mnu")); } catch(const std::exception&) {}
-        try { higure_=readMnu(assets.qglFile("icons","override/higure/ICONS.mnu")); } catch(const std::exception&) {}
+        yoake_=&materials.icons(QStringLiteral("yoake"));
+        higure_=&materials.icons(QStringLiteral("higure"));
+        sceneNoteMaterials(4,presetTimer.nsecsElapsed());
         ambientPalette_=QImage::fromData(assets.qglFile("icons","widgets/other/amb.bmp"),"BMP");
     } catch(const std::exception& e) { error=e.what(); }
-    if(!vertexCg_.valid() || !fragmentCg_.valid() || night_.isEmpty() || ambientPalette_.size()!=QSize(16,12)){qWarning().noquote()<<"icons: firmware programs/palette unavailable:"<<error;return false;}
+    if(!vertexCg_.valid() || !fragmentCg_.valid() || !night_ || !night_->ok || ambientPalette_.size()!=QSize(16,12)){qWarning().noquote()<<"icons: firmware programs/palette unavailable:"<<error;return false;}
     // The program's alpha (envmap alpha x _Ambiant.w: 0.698 for unfocused icons) blends the icon over the frame; the
     // layout's fade (page depth, dialogs) scales it.
     QString fragment=fragmentCg_.glsl;
@@ -143,8 +150,8 @@ void main(){
     vec2 xy=material.rg*2.-1.;
     vec3 normal=normalize(vec3(xy,sqrt(max(0.,1.-dot(xy,xy)))));
     float diffuse=max(0.,dot(normal,light1));
-    float bevel=pow(1.-max(normal.z,0.),2.)*.10;
-    float light=(.58+.26*diffuse+bevel)*mix(.70,1.,clamp(brightness,0.,1.));
+    float bevel=pow(1.-max(normal.z,0.),2.)*.10;              // fit: edge bevel weight
+    float light=(.58+.26*diffuse+bevel)*mix(.70,1.,clamp(brightness,0.,1.)); // fit: ambient/diffuse stand-in
     // Tint the surface, not its opacity; only shape coverage and page transitions fade.
     // Measured 2026-10-26: moving focus brightness to the alpha (the firmware's _Ambiant.w semantics) costs
     // 0.85 dB on the category-icon layer while this opaque material has no glass refraction, so the RGB
@@ -209,7 +216,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
     // _Ambiant rgb of the captured program is the MNU AMB triple verbatim (1.05025 1.05025 1.05025 at night, both
     // for category icons and for the focused item icon in fpdump7/fp_0199); its w is the per-draw state brightness.
     const QVector3D ambientColour(value("AMB R",light),value("AMB G",light),value("AMB B",light));
-    const double envAngle=qDegreesToRadians(-147.+30.*seconds);
+    const double envAngle=qDegreesToRadians(kEnvStartDegrees+kEnvTurnPerSecond*seconds);
     QVector<QVector4D> fc=fragmentCg_.constants;
     const auto set=[&](const char* name,const QVector4D& v){for(int slot:fragmentCg_.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=v;};
     // Diagnosis: XMB_ICON_UCODE=<RSX capture of this program> uses the firmware's own constants for everything except
@@ -237,10 +244,10 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
     // custom_render_plugin FUN_0003c584 packs a three-point Lagrange curve.
     // GLASS scales its y values; the independent animated factor R+0x320 defaults
     // to one. This reproduces the night capture and derives day from ICONS.mnu.
-    constexpr float x0=.20443f,x1=.544441f,x2=1.f;
+    constexpr float x0=kLuminanceX0,x1=kLuminanceX1,x2=kLuminanceX2;
     const float glass=value("GLASS",light);
-    set("_LuminanceParams[0]",{x1,x2,-.736614f*glass/((x0-x1)*(x0-x2)),0});
-    set("_LuminanceParams[1]",{x0,x2,-.259981f*glass/((x1-x0)*(x1-x2)),0});
+    set("_LuminanceParams[0]",{x1,x2,kLuminanceY0*glass/((x0-x1)*(x0-x2)),0});
+    set("_LuminanceParams[1]",{x0,x2,kLuminanceY1*glass/((x1-x0)*(x1-x2)),0});
     set("_LuminanceParams[2]",{x0,x1,0,0});
     if(qEnvironmentVariableIsSet("XMB_ICON_LOG_MATERIAL")) {
         static bool reported=false;
@@ -248,14 +255,14 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
             reported=true;
             qInfo()<<"icons: derived material"<<clock_.toString(Qt::ISODate)<<"ChangingColor"<<ambient
                    <<"TIME COLOR MIX"<<value("TIME COLOR MIX",light)<<"GLASS"<<glass
-                   <<"luminance coefficients"<<-.736614f*glass/((x0-x1)*(x0-x2))<<-.259981f*glass/((x1-x0)*(x1-x2));
+                   <<"luminance coefficients"<<kLuminanceY0*glass/((x0-x1)*(x0-x2))<<kLuminanceY1*glass/((x1-x0)*(x1-x2));
         }
     }
     if(useCaptured)fc=captured;
     std::vector<QVector4D> vc(468);
     for(const auto& p:vertexCg_.parameters)if(p.resourceIndex>=0 && p.resourceIndex<468 && !p.defaults.isEmpty())
         vc[p.resourceIndex]=QVector4D(p.defaults.value(0),p.defaults.value(1),p.defaults.value(2),p.defaults.value(3));
-    vc[466]=QVector4D(15,8.4375f,0,0); // CookieCutterRatio: the 128x128 px window as a fraction of the screen
+    vc[466]=QVector4D(15,8.4375f,0,0); // captured: CookieCutterRatio, the 128x128 px window as a fraction of the screen
     gl.glDisable(GL_DEPTH_TEST);
     for(const auto& icon:icons) {
         const GLuint normals=normalMap(gl,icon.normalMap);
@@ -279,7 +286,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         gl.glViewport(GLint(offsetX),0,GLsizei(1920*scale),pixelHeight);
         vc[256]=QVector4D(float(kScaleX*icon.size),0,0,float(kScaleX*worldX));
         vc[257]=QVector4D(0,float(kScaleY*icon.size),0,float(kScaleY*worldY));
-        vc[258]=QVector4D(0,0,-1,float(distance-19.95));
+        vc[258]=QVector4D(0,0,-1,float(distance-19.95)); // captured: the icon quad's z offset in the firmware matrix
         vc[259]=QVector4D(0,0,-1,float(distance));
         vc[467]=QVector4D(float(ndcX),float(ndcY),0,0);
         if(!glass) {
