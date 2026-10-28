@@ -523,3 +523,64 @@ blocks scripted fetches):
   https://raw.githubusercontent.com/Callum-Bell/DeckyXMB/main/py_modules/raf.py
 - MaXMB `src-tauri/src/p3t.rs` (MIT), the native reader's direct port source:
   https://github.com/MaxiBono/MaXMB
+
+## 8. Theme pictures now use the shared GIM decoder (2026-10-27)
+
+Sections 1-7 measured the theme reader as it was. One decoder finding remained: `P3t::gim` was a second,
+weaker GIM parser. It returned a null image whenever an indexed picture (format 0x4/0x5/0x6) had no palette
+block, which is exactly the palette-less coverage-mask form the RCO decoder reads for the 4.93 OSK masks
+(`audit/TEXTURE-COVERAGE.md` 1.3). A user theme whose icon, pointer or notification is such a mask therefore
+rendered nothing, even though the same bytes in an RCO decoded.
+
+### 8.1 Change - M
+
+`P3t::gim` now delegates to `Assets::decodeGimImage`, so there is one GIM reader in the process. The private
+parser and its two helpers (`unswizzle`, `expand`) were removed. The shared decoder covers what the theme
+reader did (RGBA8888, INDEX4/8/16 with a palette) and adds the palette-less indexed mask form plus DXT1/3/5.
+A payload that is not a readable GIM returns a null image with `assets: GIM picture skipped - <reason>` rather
+than failing silently; empty attributes (a theme without a preview, say) still return null without a warning.
+
+The one behaviour the private reader had and the shared decoder does not is little-endian PSP GIM ("MIG.");
+PS3 themes and RCOs are big-endian `.GIM1.00`. No local theme carries a little-endian picture, so this is a
+documented removal rather than a measured regression.
+
+### 8.2 Air Paint and a mask fixture - M/R
+
+`vsh/resource/theme/01.p3t` is still the only retail theme local. It carries 65 GIM pictures, all format 0x3:
+
+```
+$env:XMB_P3T_TRACE='1'
+re-ps3-native.exe --p3t-dump "C:\dev\rpcs3\bin\dev_flash\vsh\resource\theme\01.p3t@<dir>"
+```
+
+| Picture slots | Before | After |
+|---|---:|---:|
+| 63 icons + `info/icon` 64x64 + `info/preview` 480x270 | 65 / 65 | 65 / 65 |
+| 2 backgrounds (PNG/JPEG through `QImage::fromData`) | 2 / 2 | 2 / 2 |
+
+The 65 exported PNGs of the before and after dumps are pixel-identical; delegating does not move real theme
+pixels. The theme cannot exercise the bug (0 indexed pictures), so a local fixture built from real firmware
+data does: `out/make-theme-mask-fixture.ts` packs the extracted `LABEL_UP`, `KEYTOP_COPY`,
+`MODE_GUIDE_ALPHABET`, `LIST_WINDOW_FOCUS` and `EN_LABEL_SPACE` format-0x5 masks (all palette-less) plus one
+genuine Air Paint format-0x3 icon into a P3TF theme.
+
+| Mask fixture picture slots | Before | After |
+|---|---:|---:|
+| 4 icons + `info/icon` + `info/authoricon` + pointer + notification | **1 / 8** | **8 / 8** |
+
+The after trace reads `themeIcon 72x54 authorIcon 42x42`, `pointer_arrow@7,9(140x44)` and
+`notification 29x30`; the decoded `icon_mask_label_up.png` is white with 15 alpha levels and is
+pixel-identical to the same firmware mask exported through the RCO path. Counts and raw log lines are in
+`audit/TEXTURE-COVERAGE.md` 7.2.
+
+### 8.3 What is still open
+
+* No real theme with a palette-less indexed picture is local; the fix is proven on real firmware pictures in a
+  synthetic P3TF container.
+* A palette-bearing indexed theme picture (a type-0x05 palette block beside the image) has no local example
+  either; the shared decoder's palette path is proven only by the synthetic fixture in `audit/GIM-FORMATS.md`.
+* Little-endian PSP GIMs no longer decode (8.1). No local theme uses that form.
+* The theme's decoded pictures still reach only the surfaces section 3 lists: background, icons, preview and,
+  through the dump, the notification/pointer pictures. This change fixes what is decodable, not which surface
+  draws it.
+

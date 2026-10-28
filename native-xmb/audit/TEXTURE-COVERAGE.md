@@ -394,3 +394,172 @@ No rendering source was changed. No decoder fix was applied.
 * The OSK reference frame is a video extraction (`out/osk-fw/s1/f0060-0257.png`) at 1920x1080; the
   native frame compared against it was grabbed at 960x540 because the stored window geometry is 960x540,
   so the comparison crops were scaled 2x. The comparison is shape and colour, not a pixel score.
+
+## 7. Decoder policy fixes (2026-10-27, after the sweep)
+
+The sweep measured coverage; two policies still served the wrong picture. `bestImage` replaced
+`explore_plugin_full:tex_music` with `explore_category_sysconf:tex_music` (section 2.1, item 4), and the theme
+reader was a second GIM parser that returned no picture for palette-less indexed art (section 3). Both are now
+fixed in the decoder files. No draw site changed. Evidence classes as above: **M** measured, **R** recorded
+run, **F** fit.
+
+### 7.1 `bestImage`: a same-name copy is an upgrade only when it is the same picture - M/R
+
+The rule lives in `src/assets.cpp` (`sameArtNames`, `artSignature`, `compareArtwork`, `bestImage`). A source
+smaller than 96 px is replaced only when two independent gates both pass:
+
+1. **Name gate (intent).** Only `tex_psn`, `tex_video` and `tex_photo` may be upgraded across containers. An
+   explicit list is required because intent is not a pixel property: `tex_music`'s glass copy in
+   `xmb_ingame` passes the pixel gate (its silhouette correlates 0.94 with the flat note) yet it is a different
+   icon set's art. A name enters this list only after the exported pictures were compared by eye.
+2. **Pixel gate (evidence).** For an allow-listed name the candidate must match the source after both
+   pictures are cropped to their own alpha bounds (alpha > 8) and resampled to 32x32 premultiplied:
+   alpha correlation >= 0.80, alpha-silhouette IoU >= 0.75, premultiplied-colour correlation >= 0.80, and
+   alpha-bbox aspect ratios within 12%. The candidate must also be strictly larger in area.
+
+A rejected copy never replaces the source. Every decision is logged at `qInfo`; `XMB_BESTIMAGE_TRACE` adds
+each candidate and its numbers (7.3). The measured pairs, from the exported PNGs through the same signature
+the C++ uses:
+
+| Source -> candidate | alpha corr | coverage IoU | colour corr | aspect | decision |
+|---|---:|---:|---:|---:|---|
+| `explore_plugin_full:tex_music` 46 -> `explore_category_sysconf:tex_music` 128 | -0.06 | 21% | -0.06 | 1.38 | reject: different artwork (wrench overlay) |
+| `explore_plugin_full:tex_music` 46 -> `xmb_ingame:tex_music` 128 | 0.94 | 93% | 0.94 | 1.00 | reject: name gate (glass icon set, not the column's flat note) |
+| `explore_plugin_full:tex_video` 46 -> `xmb_ingame:tex_video` 128 | 0.87 | 85% | 0.87 | 0.95 | accept |
+| `explore_plugin_full:tex_photo` 46 -> `xmb_ingame:tex_photo` 128 | 0.96 | 94% | 0.96 | 0.98 | accept |
+
+The decision lines for the reported bug, from a scripted Music-column run (`out/bestimg/tour-music-*.log`,
+`src/assets.cpp` at 22:52; the "before" binary was built from the tree before the fix):
+
+```
+before: assets: explore_plugin_full/tex_music QSize(46, 46) -> using explore_category_sysconf QSize(128, 128)
+
+after:  assets: bestImage: source explore_plugin_full/tex_music 46x46, same-art allow-list no
+        assets: bestImage: candidate explore_category_sysconf/tex_music 128x128 reject
+        assets: bestImage: candidate metrics explore_category_sysconf/tex_music alpha corr -0.06, coverage IoU 21%, colour corr -0.06, aspect 1.38
+        assets: bestImage: candidate xmb_ingame/tex_music 128x128 reject
+        assets: bestImage: candidate metrics xmb_ingame/tex_music alpha corr 0.94, coverage IoU 93%, colour corr 0.94, aspect 1.00
+        assets: bestImage: explore_plugin_full/tex_music 46x46 keeping source (name not in the same-art allow-list; 2 larger same-name copies rejected: ...)
+```
+
+The frame agrees: in `out/bestimg/tour-music-before.png` the Music Settings row draws the note with the
+settings wrench; in `out/bestimg/tour-music-after.png` it draws the plain note. Both frames are the same
+column, clock and state; the row crops are side by side in `out/bestimg/evidence-music-row.png`. The two
+verified upgrades are unchanged in the same run:
+
+```
+assets: bestImage: explore_plugin_full/tex_video 46x46 -> using xmb_ingame 128x128, same artwork confirmed (alpha corr 0.87, coverage IoU 85%, colour corr 0.87, aspect 0.95)
+assets: bestImage: explore_plugin_full/tex_photo 46x46 -> using xmb_ingame 128x128, same artwork confirmed (alpha corr 0.96, coverage IoU 94%, colour corr 0.96, aspect 0.98)
+```
+
+A tour of all ten columns with `XMB_BESTIMAGE_TRACE=1` reports six decisions in total: the two accepted
+upgrades, the rejected `tex_music`, and three images with no larger same-name copy (`user_tex_load`,
+`user_tex_login`, `explore_category_friend:item_tex_Profile_Onlines`). No other artwork changes.
+
+### 7.2 Theme pictures decode through the shared GIM reader - M/R
+
+`P3t::gim` (`src/p3t.cpp`) no longer parses GIM itself; it calls `Assets::decodeGimImage`, the same decoder the
+RCO path uses. The old reader returned a null image whenever an indexed picture (format 0x4/0x5/0x6) had no
+palette block, so a theme icon, pointer or notification in the palette-less coverage-mask form rendered
+nothing even though `Assets::decodeGim` already read that form for the OSK (section 1.3). The shared decoder
+also adds the DXT formats the theme reader never supported.
+
+`vsh/resource/theme/01.p3t` (Air Paint, the only retail theme local): 92 elements, 2 bgimages, 63 `icon`
+pictures, `info/icon` and `info/preview`. All 65 GIM pictures are format 0x3 and all 65 decode both before and
+after; the 2 backgrounds are PNG/JPEG through `QImage::fromData` and are unaffected. 65 of 65 exported PNGs
+are pixel-identical between the two dumps, so delegating changed no theme pixels for real content.
+
+This theme carries no indexed picture, so it cannot exercise the fix (`out/theme-gim-scan.ts`: `formats=[0x3]`
+for all 65). A local fixture therefore carries real firmware pictures: `out/make-theme-mask-fixture.ts` packs
+the extracted `LABEL_UP`, `KEYTOP_COPY`, `MODE_GUIDE_ALPHABET`, `LIST_WINDOW_FOCUS` and `EN_LABEL_SPACE`
+format-0x5 masks (all with no palette block) plus one genuine format-0x3 icon from Air Paint into a valid P3TF
+theme (`out/mask-fixture/mask-theme.p3t`). Picture-slot decode counts:
+
+| Theme | Before | After |
+|---|---|---|
+| `01.p3t` GIM pictures (63 icons + theme icon + preview) | 65 / 65 | 65 / 65 |
+| `01.p3t` backgrounds (PNG/JPEG) | 2 / 2 | 2 / 2 |
+| mask fixture (4 icons + theme icon + author icon + pointer + notification) | **1 / 8** | **8 / 8** |
+
+The fixture's `--p3t-dump` traces, same command:
+
+```
+before: p3t-trace: info ... themeIcon 0x0 authorIcon 0x0 preview 0x0
+        p3t-trace: ... pointers [pointer_arrow@7,9(0x0)] notification 0x0
+        p3t: Mask Fixture ... 1 icons, 0 sounds
+
+after:  p3t-trace: info ... themeIcon 72x54 authorIcon 42x42 preview 0x0
+        p3t-trace: ... pointers [pointer_arrow@7,9(140x44)] notification 29x30
+        p3t: Mask Fixture ... 4 icons, 0 sounds
+```
+
+The decoded `icon_mask_label_up.png` is 72x54, white with 15 alpha levels, and is pixel-identical to the same
+mask exported from its RCO (`out/tex/png/oskfullkeypanel_plugin/LABEL_UP.png`): the theme path and the RCO
+path now run the same code.
+
+### 7.3 Diagnostics and verification - R
+
+`bestImage` decision trace, for one named image or for every call. The shell starts in the Game column
+(index 6), so three LEFTs reach Music:
+
+```powershell
+$env:XMB_BESTIMAGE_TRACE='tex_music'   # or '1' / 'all' for every call, or a comma-separated name list
+re-ps3-native.exe --dev-flash C:\dev\rpcs3\bin\dev_flash --data-dir <tmp> --no-intro `
+  --background-clock 2026-10-25T10:00:00 --render-clock 20 `
+  --script "full,wait,wait,LEFT,pause=800,LEFT,pause=800,LEFT,pause=2500,grab=<png>,quit"
+```
+
+`XMB_GIM_TRACE=1` is unchanged for RCO pictures; theme pictures are decoded by the same function, so the same
+trace prints their headers and results. A theme payload that is not a readable GIM warns
+`assets: GIM picture skipped - <reason>` instead of failing silently.
+
+Per-layer gate (`work/ab-layers.ts --capture --exe C:/dev/out/native-decode/re-ps3-native.exe`):
+
+| Layer | Before | After |
+|---|---|---|
+| frame | 18.28 dB / 0.8322 | 18.29 dB / 0.8342 |
+| top background | 20.25 / 0.9363 | 20.25 / 0.9363 |
+| **category icon row** | **20.93 / 0.8990** | **20.93 / 0.8990** |
+| item label row | 11.95 / 0.3925 | 11.95 / 0.3925 |
+| clock text | 11.39 / 0.4128 | 11.39 / 0.4500 |
+| info bar | 14.77 / 0.6113 | 14.98 / 0.7639 |
+| result | PASS 6/6 | PASS 6/6 |
+
+The icon row and the item label row are bit-identical before and after. The only pixels that moved are inside
+the info-bar crop (which also holds the clock text), and they are not attributable to these files: a concurrent
+session was editing the text/rendering sources while the two binaries were built (`src/text_renderer.cpp`
+22:45:03, `src/view.cpp` 22:53:37), and only those two layers moved. The canonical capture is the Game column,
+where every item icon is >=96 px and `bestImage` returns before reaching the new policy, and the theme reader
+is not on the draw path. A rebuild after the concurrent edits reproduced the after numbers exactly.
+
+Two captures with `--render-clock 20` and pinned clocks are byte-identical:
+`E8AE6E6FE2C58FE2D84B191D6C25392ADC4C598A56ECC276ACAE829275179AAD` for both runs.
+
+### 7.4 Files and limits
+
+| File | Change |
+|---|---|
+| `native-xmb/src/assets.cpp` | same-art name list, alpha-bounds signature, artwork comparison; decision/reason logging; `XMB_BESTIMAGE_TRACE`; `decodeGimImage` |
+| `native-xmb/src/assets.h` | `bestImage` policy contract, `decodeGimImage` declaration |
+| `native-xmb/src/p3t.cpp` | `P3t::gim` delegates to the shared decoder; removed the private GIM reader |
+| `native-xmb/src/p3t.h` | `gim` contract note |
+| `native-xmb/audit/TEXTURE-COVERAGE.md` | this section |
+| `native-xmb/audit/THEMES.md` | section 8: the theme decoder finding |
+
+Remaining holes, all measured rather than assumed:
+
+* **No real theme with an indexed picture exists locally.** The only retail theme (`01.p3t`) is 100%
+  format 0x3, so the fix is proven on a local fixture carrying real firmware masks, not on a user theme. A
+  user theme whose icons are palette-less masks is the same code path; it is still an unobserved real file.
+* **A palette-bearing GIM in a theme** (format 0x4/0x5/0x6 with a type-0x05 palette block) has no local
+  example in either an RCO or a theme; the shared decoder's palette path is proven only by the synthetic
+  fixture in `audit/GIM-FORMATS.md`.
+* **Little-endian GIM ("MIG.") payloads no longer decode.** The private theme reader accepted the PSP byte
+  order; the shared PS3 decoder rejects it. No local theme or RCO carries one, and PS3 content is big-endian,
+  but this is a behaviour removal, not a no-op by construction.
+* **The allow-list is a judgement, not a measurement.** `tex_video` and `tex_photo` are accepted on the
+  audit's same-art verdict plus a matching silhouette; their 128 px copies are a glossier finish of the same
+  subject. A strict pixel rule could call them different artwork too. They are kept explicitly because the
+  audit verified them as harmless, and the signature confirms the shape; `tex_music` is excluded because its
+  wrench variant is unambiguously a different picture.
+

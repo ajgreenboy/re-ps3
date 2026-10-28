@@ -9,6 +9,8 @@
 #include <limits>
 #include <array>
 #include <vector>
+#include <algorithm>
+#include <cmath>
 #include <QVector>
 #include <QStringDecoder>
 #include <QTransform>
@@ -169,6 +171,127 @@ QImage decodeBlocks(const QByteArray& bytes,quint64 pixels,quint64 end,int width
     }
     return result;
 }
+// ---- Same-artwork gate for the same-name upgrade (bestImage) ---------------------------------------
+// "A larger picture with the same name" is not evidence of "the same artwork". explore_plugin_full:tex_music
+// (46x46, the flat music note the Music column draws) shares its name with explore_category_sysconf:tex_music
+// (128x128, the same note carrying the settings wrench) and xmb_ingame:tex_music (128x128, a glass note from
+// the in-game icon set). The old policy took the largest same-aspect copy and therefore drew the settings art
+// in the Music column.
+//
+// The policy is two gates of different kinds:
+//   1. Intent: only names in sameArtNames() may be upgraded across containers. A name enters that list only
+//      after a human compared the exported pictures; the signature below cannot see art direction (the glass
+//      note's silhouette correlates 0.94 with the flat note, as high as some genuinely shared pictures).
+//   2. Pixels: even for an allow-listed name, the two pictures must match after each is cropped to its own
+//      alpha bounds and resampled to a small grid: the alpha silhouettes must correlate, overlap and keep
+//      their bounding-box aspect, and the premultiplied colours must correlate. A future container that
+//      reuses an allow-listed name for different art is therefore rejected with a logged reason.
+// Both gates are scale-free, so a candidate can be any resolution above the source's.
+constexpr int kArtGrid=32;
+constexpr int kArtAlphaFloor=8;      // alpha at or below this is transparent padding, not artwork
+constexpr double kArtAlphaCorrelation=0.80;
+constexpr double kArtCoverage=0.75;   // IoU of the alpha silhouettes
+constexpr double kArtColourCorrelation=0.80;
+constexpr double kArtAspectTolerance=0.12;
+const QStringList& sameArtNames() {
+    // audit/TEXTURE-COVERAGE.md 2.1, re-checked against the exported pixels: the 46 px set in
+    // explore_plugin_full and the 128 px set in xmb_ingame carry one filmstrip (tex_video), one camera
+    // (tex_photo) and the PSN globe (tex_psn); xmb_plugin_normal:tex_psn is the same globe at 128 px.
+    // tex_music is deliberately absent: its three containers hold three different pictures of the same
+    // subject, and the Music column's own artwork is the flat note in explore_plugin_full.
+    static const QStringList names{QStringLiteral("tex_psn"),QStringLiteral("tex_video"),QStringLiteral("tex_photo")};
+    return names;
+}
+struct ArtSignature {
+    bool valid=false;
+    int width=0,height=0;
+    double aspect=0;
+    QVector<float> alpha,colour; // kArtGrid*kArtGrid, and 3*kArtGrid*kArtGrid premultiplied
+};
+// Alpha bounds + a fixed-size premultiplied sample of the visible picture. The bounds are the picture's own
+// framing, so transparent padding and the source resolution do not affect the comparison.
+ArtSignature artSignature(const QImage& image) {
+    ArtSignature signature;
+    if(image.isNull())return signature;
+    const QImage source=image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    int left=source.width(),top=source.height(),right=-1,bottom=-1;
+    for(int y=0;y<source.height();++y) {
+        const auto* row=reinterpret_cast<const QRgb*>(source.constScanLine(y));
+        for(int x=0;x<source.width();++x) {
+            if(qAlpha(row[x])<=kArtAlphaFloor)continue;
+            left=std::min(left,x);right=std::max(right,x+1);
+            top=std::min(top,y);bottom=std::max(bottom,y+1);
+        }
+    }
+    if(right<=left || bottom<=top)return signature;
+    signature.width=right-left;signature.height=bottom-top;
+    signature.aspect=double(signature.width)/signature.height;
+    const QImage tile=source.copy(QRect(left,top,signature.width,signature.height))
+        .scaled(kArtGrid,kArtGrid,Qt::IgnoreAspectRatio,Qt::SmoothTransformation)
+        .convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    signature.alpha.reserve(kArtGrid*kArtGrid);
+    signature.colour.reserve(3*kArtGrid*kArtGrid);
+    for(int y=0;y<kArtGrid;++y) {
+        const auto* row=reinterpret_cast<const QRgb*>(tile.constScanLine(y));
+        for(int x=0;x<kArtGrid;++x) {
+            const auto pixel=row[x];
+            signature.alpha.push_back(float(qAlpha(pixel))/255.f);
+            signature.colour.push_back(float(qRed(pixel))/255.f);
+            signature.colour.push_back(float(qGreen(pixel))/255.f);
+            signature.colour.push_back(float(qBlue(pixel))/255.f);
+        }
+    }
+    signature.valid=signature.alpha.size()==kArtGrid*kArtGrid;
+    return signature;
+}
+double correlation(const QVector<float>& a,const QVector<float>& b) {
+    if(a.isEmpty() || a.size()!=b.size())return 0;
+    double meanA=0,meanB=0;
+    for(qsizetype i=0;i<a.size();++i){meanA+=a[i];meanB+=b[i];}
+    meanA/=a.size();meanB/=b.size();
+    double covariance=0,varianceA=0,varianceB=0;
+    for(qsizetype i=0;i<a.size();++i) {
+        const double da=a[i]-meanA,db=b[i]-meanB;
+        covariance+=da*db;varianceA+=da*da;varianceB+=db*db;
+    }
+    // A flat picture (one colour, no variation) is equivalent to another flat picture of the same value.
+    if(varianceA<1e-9 || varianceB<1e-9)return std::abs(meanA-meanB)<1e-6?1.0:0.0;
+    return covariance/std::sqrt(varianceA*varianceB);
+}
+struct ArtMatch {
+    bool equivalent=false;
+    double alphaCorrelation=0,coverage=0,colourCorrelation=0,aspect=1;
+    QString reason;
+};
+ArtMatch compareArtwork(const ArtSignature& base,const ArtSignature& other) {
+    ArtMatch match;
+    if(!base.valid || !other.valid) {match.reason=QStringLiteral("no visible alpha silhouette");return match;}
+    match.aspect=base.aspect>0?other.aspect/base.aspect:0;
+    match.alphaCorrelation=correlation(base.alpha,other.alpha);
+    match.colourCorrelation=correlation(base.colour,other.colour);
+    int intersection=0,joined=0;
+    for(qsizetype i=0;i<base.alpha.size();++i) {
+        const bool a=base.alpha[i]>0.1f,b=other.alpha[i]>0.1f;
+        if(a && b)++intersection;
+        if(a || b)++joined;
+    }
+    match.coverage=joined?double(intersection)/joined:0;
+    if(std::abs(match.aspect-1.)>kArtAspectTolerance)
+        match.reason=QStringLiteral("silhouette aspect ratio %1 vs %2").arg(match.aspect,0,'f',2).arg(1.0,0,'f',2);
+    else if(match.alphaCorrelation<kArtAlphaCorrelation)
+        match.reason=QStringLiteral("alpha correlation %1 < %2").arg(match.alphaCorrelation,0,'f',2).arg(kArtAlphaCorrelation,0,'f',2);
+    else if(match.coverage<kArtCoverage)
+        match.reason=QStringLiteral("silhouette overlap %1% < %2%").arg(match.coverage*100,0,'f',0).arg(kArtCoverage*100,0,'f',0);
+    else if(match.colourCorrelation<kArtColourCorrelation)
+        match.reason=QStringLiteral("colour correlation %1 < %2").arg(match.colourCorrelation,0,'f',2).arg(kArtColourCorrelation,0,'f',2);
+    else match.equivalent=true;
+    return match;
+}
+QString artMetrics(const ArtMatch& match) {
+    return QStringLiteral("alpha corr %1, coverage IoU %2%, colour corr %3, aspect %4")
+        .arg(match.alphaCorrelation,0,'f',2).arg(match.coverage*100,0,'f',0)
+        .arg(match.colourCorrelation,0,'f',2).arg(match.aspect,0,'f',2);
+}
 }
 Assets::Assets(QString flashRoot):root_(std::move(flashRoot)),font_("Segoe UI") {
     // Register every firmware font (all weights and coverage sets), keyed by file stem, e.g. "RD-B-LATIN".
@@ -315,6 +438,13 @@ QImage Assets::decodeGim(const QByteArray& b,const QString& name) {
     }
     throw std::runtime_error("GIM image block not found");
 }
+QImage Assets::decodeGimImage(const QByteArray& bytes) {
+    try { return decodeGim(bytes); }
+    catch(const std::exception& e) {
+        qWarning().noquote()<<"assets: GIM picture skipped -"<<e.what();
+        return {};
+    }
+}
 const QImage& Assets::image(const QString& container,const QString& name) {
     const QString key=container+"/"+name;
     if(const auto it=images_.find(key);it!=images_.end())return it->second;
@@ -368,18 +498,70 @@ const QImage& Assets::bestImage(const QString& container,const QString& name) {
             catch(const std::exception&) {}
         }
     }
-    QString best=container;qint64 bestArea=base.isNull()?0:qint64(base.width())*base.height();
-    const double aspect=base.isNull()?0:double(base.width())/base.height();
+    const QString traceSetting=qEnvironmentVariable("XMB_BESTIMAGE_TRACE");
+    bool traceThis=false;
+    if(!traceSetting.isEmpty()) {
+        traceThis=traceSetting==QStringLiteral("1") || traceSetting.compare(QStringLiteral("all"),Qt::CaseInsensitive)==0;
+        for(const auto& wanted:traceSetting.split(',')) {
+            const QString item=wanted.trimmed();
+            if(item==name || item==key)traceThis=true;
+        }
+    }
+    const auto sizeText=[](const QImage& image){
+        return image.isNull()?QStringLiteral("undecoded"):QStringLiteral("%1x%2").arg(image.width()).arg(image.height());
+    };
+    const bool allowListed=sameArtNames().contains(name);
+    if(traceThis)
+        qInfo().noquote()<<QStringLiteral("assets: bestImage: source %1 %2, same-art allow-list %3")
+            .arg(key).arg(sizeText(base)).arg(allowListed?QStringLiteral("yes"):QStringLiteral("no"));
+    QString best=container;
+    qint64 bestArea=base.isNull()?0:qint64(base.width())*base.height();
+    ArtMatch bestMatch;
+    QStringList rejected;
+    int largerCopies=0;
     for(const auto& candidate:nameIndex_.value(name)) {
         if(candidate==container)continue;
         const QImage& other=image(candidate,name);
         if(other.isNull())continue;
-        const double otherAspect=double(other.width())/other.height();
-        if(aspect>0 && std::abs(otherAspect/aspect-1.)>.1)continue; // same artwork keeps its shape
-        if(qint64(other.width())*other.height()>bestArea){bestArea=qint64(other.width())*other.height();best=candidate;}
+        const qint64 otherArea=qint64(other.width())*other.height();
+        if(otherArea<=bestArea)continue; // only a higher resolution can replace the source
+        ++largerCopies;
+        // A source that did not decode has no artwork to compare: the old fallback to the largest copy stays,
+        // because there is nothing to misrepresent. A decoded source is compared picture to picture.
+        ArtMatch match;
+        if(!base.isNull())match=compareArtwork(artSignature(base),artSignature(other));
+        const bool takeCopy=base.isNull() || (allowListed && match.equivalent);
+        QString reason;
+        if(base.isNull())reason=QStringLiteral("source undecoded, largest same-name copy");
+        else if(!allowListed)reason=QStringLiteral("name not in the same-art allow-list; ")+artMetrics(match);
+        else if(!match.equivalent)reason=QStringLiteral("different artwork: ")+match.reason;
+        if(traceThis) {
+            qInfo().noquote()<<QStringLiteral("assets: bestImage: candidate %1/%2 %3 %4")
+                .arg(candidate).arg(name).arg(sizeText(other))
+                .arg(takeCopy?QStringLiteral("accept"):QStringLiteral("reject"));
+            if(!base.isNull())
+                qInfo().noquote()<<QStringLiteral("assets: bestImage: candidate metrics %1/%2 %3")
+                    .arg(candidate).arg(name).arg(artMetrics(match));
+        }
+        if(!takeCopy) { rejected<<QStringLiteral("%1 %2 (%3)").arg(candidate).arg(sizeText(other)).arg(reason);continue; }
+        best=candidate;bestArea=otherArea;bestMatch=match;
     }
-    if(best!=container)qInfo().noquote()<<"assets:"<<key<<base.size()<<"-> using"<<best<<image(best,name).size();
     bestContainer_.insert(key,best);
+    if(best!=container) {
+        const QString reason=base.isNull()?QStringLiteral("source undecoded, largest same-name copy")
+            :QStringLiteral("same artwork confirmed (%1)").arg(artMetrics(bestMatch));
+        qInfo().noquote()<<QStringLiteral("assets: bestImage: %1 %2 -> using %3 %4, %5")
+            .arg(key).arg(sizeText(base)).arg(best).arg(sizeText(image(best,name))).arg(reason);
+    } else if(largerCopies>0 && !base.isNull()) {
+        const QString reason=allowListed?QStringLiteral("no equivalent candidate")
+            :QStringLiteral("name not in the same-art allow-list");
+        qInfo().noquote()<<QStringLiteral("assets: bestImage: %1 %2 keeping source (%3; %4 larger same-name copies rejected: %5)")
+            .arg(key).arg(sizeText(base)).arg(reason).arg(largerCopies).arg(rejected.value(0));
+    } else if(traceThis) {
+        qInfo().noquote()<<QStringLiteral("assets: bestImage: %1 %2 keeping source (%3)")
+            .arg(key).arg(sizeText(base))
+            .arg(largerCopies?QStringLiteral("no equivalent copy"):QStringLiteral("no larger same-name copy"));
+    }
     return image(best,name);
 }
 QByteArray Assets::qglFile(const QString& archive,const QString& name) {
