@@ -128,9 +128,13 @@ void Ribbon::Cloth::swell(const Preset& p) {
     }
 }
 
-// The fallback start the plugin uses when it has no preset-1 tables (FUN_0004ec90): columns LENGTH apart from the
-// pinned edge at x = 0, rows round the tables' y/z loop. Shared by init's flat path and the prefetch, so the two
-// cannot drift apart.
+// The cloth's fallback start, used only when the plugin's preset-1 tables are unavailable (no --vsh-modules).
+// fit (measured 2026-10-28): columns LENGTH apart from the pinned edge at x = 0, rows round a y/z loop of the
+// tables' own extent. It is NOT FUN_0004ec90: that function is the plugin's *other* fallback and builds a flat
+// plane, x = (u - .5) x 4, y = (v - .5) x 4, z = -3 (its constants 4.0 / .5 / -3 / 1 at .data 0x92dc8, 0x92dc4,
+// 0x92dcc, 0x92dd0). Settling from that traced plane draws the sheet 1031 px short at the right edge (x max 1368
+// against the console's 2399, audit/PIPELINE.md "Ribbon extent"), so the loop below stays a fit.
+// Shared by init's flat path and the prefetch, so the two cannot drift apart.
 QVector4D Ribbon::flatPoint(int i,float length) {
     return QVector4D(float(side_-1-i%side_)*length,
                      .35f+.55f*std::sin(2*pi*float(i/side_)/(side_-1)),
@@ -140,6 +144,10 @@ QVector4D Ribbon::flatPoint(int i,float length) {
 // The cloth warm-up the no-plugin path always ran: 14,400 fixed steps from the flat start (the x extent crumples
 // first, then recovers; work/cloth-sim.ts). A pure function of the preset - no GL, no member state - which is what
 // lets it run on a worker thread. The timer is the measurement quoted in audit/VERIFICATION-HARNESS.md 5.6.
+// measured 2026-10-28: the settle is a warm-up, not a rest state. Its end state is one phase of the swell, and the
+// sheet it draws sits up to 95 px above and 204 px short of the console's; the console's own state is the plugin's
+// preset-1 table, which reproduces it to 4 px (audit/PIPELINE.md "Ribbon extent"). Do not tune the step count, the
+// start or the camera to a reference still: every value in that chain is traced and verified.
 Ribbon::Settle Ribbon::settledFlat(const Preset& p) {
     Settle out;
     for(int i=0;i<points_;++i)out.cloth.pos[size_t(i)]=flatPoint(i,p.length);

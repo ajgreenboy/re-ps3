@@ -16,11 +16,11 @@ CATEGORY-ICON-FIX.md for the evidence and fidelity limits.
 
 | Layer | Firmware source | Native status |
 |---|---|---|
-| Background gradient | `lines.qrc` moyou/background, back_colours0 + month_bg textures, BACKGROUND.mnu; custom_render_plugin clock mapping | **Ported**: firmware Cg translated RSX→GLSL, inputs traced |
+| Background gradient | `lines.qrc` moyou/background, back_colours0 + month_bg textures, BACKGROUND.mnu; custom_render_plugin clock mapping | **Ported**: firmware Cg translated RSX???GLSL, inputs traced |
 | Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; cloth in custom_render_plugin; geometry from the SPU spurs/moyou/spline/spline.elf | **Ported** (`ribbon.cpp`): PPU cloth, ffd_shader1 deformation lattice, spline.elf FFD + camera + bicubic sheet, each stage checked against RPCS3 captures (see "Ribbon port"); LINE1 presets follow the plugin's clock keyframes and boot schedule (see "Ribbon presets") |
 | Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Ported (2026-10-26)**: firmware-shaped pool in `src/particles.cpp` (1536 cap, 48-byte stride, fixed 0.0088883 s step, PARTICLES.mnu physics, Park-Miller seed), one indexed draw into the HDR scene before the tone map and a second draw into the glare source (`src/view.cpp:370-376`). Superseded reading (accurate before 2026-10-26): this layer was linkev/PlayStation-3-XMB's additive point sprites, not a firmware port. Still open: the real `particles_second` program (the glare draw reuses the same geometry with a fitted 0.045 halo), `proc_iridescent.tga`, and the `_Color`/`_Gamma`/spot packing (`audit/PARTICLES.md`) |
 | HDR tone map + glare | `lines.qrc` glutils ToneMap, GlareSource*, Gaussian, AccGlare, ApplyGlare, HDR.mnu | **Ported** |
-| Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n–70n normal maps + dif | **Geometry ported; material is a stand-in** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo (the variant the firmware runs at 1080p) and ICONS.mnu uniforms from an RPCS3 capture. The visible surface is the opaque native normal-map material for every built-in colour (`src/icons.cpp:110-130`); the firmware glass program runs only behind the diagnostics. Side-by-side frame parity is not claimed. |
+| Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n???70n normal maps + dif | **Geometry ported; material is a stand-in** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo (the variant the firmware runs at 1080p) and ICONS.mnu uniforms from an RPCS3 capture. The visible surface is the opaque native normal-map material for every built-in colour (`src/icons.cpp:110-130`); the firmware glass program runs only behind the diagnostics. Side-by-side frame parity is not claimed. |
 | Item icons, labels, dialogs, info bar | explore_plugin / system_plugin via paf (RCO layouts and textures) | **Reconstructed** (item icons ported, labels moved to the GL atlas): `icontex` item icons and settings bullets draw through `IconRenderer` (firmware vertex program plus the opaque normal-map material, `src/icons.cpp:110-130,164-166`), with captured sizes 77.616/184.800 (items) and 35.721/85.050 (bullets), row pitch 80, brightness 1.0 in the open column and 0.247/0.698 behind an open page, all confirmed in `ITEM-ICONS.md`. Labels, dialogs, the info bar, the OSK, the options panel, the notification pop-up, subtitle cues and the volume HUD draw through the GL glyph atlas (`src/text_renderer.cpp`, called from `View::paintGL`); RCO, artwork and theme icons still use QPainter. Three corner/overlay composites were added on that path on 2026-10-26/27 - the notification plaque (`View::drawNineSlice` / `View::drawNotification`, audit/NOTIFICATIONS.md), the volume HUD (`View::drawVolumeHud`, audit/HTPC-IDEAS.md section 6) and the subtitle band (`View::drawSubtitle`, audit/SUBTITLES.md); none of them is a firmware layer, so they have no row here. |
 | Text | paf font renderer with the RD-R/B (SCE-PS3 Rodin) faces from dev_flash/data/font | **Partial**: native-resolution GL glyph atlas with FreeType coverage (firmware load flags 10) and Qt shaping only; PAF coverage/style trace in TEXT-RENDERER.md; PAF metric authority, per-style weight/slant and glow parity open. Per-phase coverage landed 2026-10-26 as a fit (TEXT-RASTER.md 2.4) |
 | Cold-boot intro | custom_render_plugin boot case + anim_coldboot2 events; raf.sprx playing vsh/resource/coldboot.raf (coldboot.jsx) with raf.qrc vert0/sce01; coldboot_stereo.ac3 | **Ported** (`coldboot.cpp`): RAF scene, script timeline, sound, event times, background boot presets; matches the RPCS3 capture (see "Cold boot") |
@@ -33,10 +33,10 @@ outside the main XMB.
 The ribbon geometry was captured from RPCS3 with `XMB_VTX_DUMP` (patch: `rpcs3-rsx-capture.patch` at the repo root;
 the draw is identified by lines1.fpo's 336-byte ucode). Each frame is a single indexed draw:
 
-- 35,306 big-endian u32 indices form triangle strips with primitive restart (1016 strips of 32–34 indices), over
+- 35,306 big-endian u32 indices form triangle strips with primitive restart (1016 strips of 32???34 indices), over
   16,384 vertices: a 128x128 grid where vertex = row*128 + column, and strips pair row r with row r+1.
 - Array 0 holds float4 positions (stride 32) that are already in clip space: lines1.vpo passes `in_0` straight to
-  `gl_Position`, with w ≈ 8. Array 9 holds float4 normals (stride 32), array 8 float2 coordinates (stride 8).
+  `gl_Position`, with w ??? 8. Array 9 holds float4 normals (stride 32), array 8 float2 coordinates (stride 8).
 - The camera and projection are applied by the SPU; there is no matrix in the vertex constants.
 - The shape: rows run the full width of the screen, while each column closes into an ellipse. The sheet is rolled
   into a travelling scroll, which produces the strands crossing through each other. Our flat FFD-displaced 128x24
@@ -245,22 +245,22 @@ next to the main build; copy dev_flash, dev_hdd0 and config there and run it wit
 
 ## Menu motion (traced 2026-10-25)
 
-The cross bar is the paf widget class `PhXmBar`, inside vsh.elf's paf (around 0x3ab000–0x3b1000), not
+The cross bar is the paf widget class `PhXmBar`, inside vsh.elf's paf (around 0x3ab000???0x3b1000), not
 explore_plugin. Its focus moves (`FUN_003ad3bc` next, `FUN_003ad728` previous, on input event 0x11 keys 4/3) step
 the focus index (+0x2a8) and start widget animations of **200 ms** (DAT_0068f054). The XmBar animate calls pass
 acceleration mode **5**, and so does the exported wrapper paf_E8149213 used by explore_plugin. explore_plugin's own
 200 ms calls (65 of them) carry slot ids 0x10000NN; the mode is a separate argument.
 
-paf's animation setup (`FUN_003981ec`) converts the duration to n = int(ms × 0.001 × 60) frames and the rate to
-1/(n/60 × 0.999999). Its evaluator (`FUN_00398748`, mode in byte +0x23) is:
+paf's animation setup (`FUN_003981ec`) converts the duration to n = int(ms ?? 0.001 ?? 60) frames and the rate to
+1/(n/60 ?? 0.999999). Its evaluator (`FUN_00398748`, mode in byte +0x23) is:
 
 | Mode | Curve |
 |---|---|
-| 1 | √t (ease-out) |
-| 2 | t² (ease-in) |
-| 3 | (sin(π(t − 0.5)) + 1)/2 |
-| 4 | per frame v = ((1 − v)k + v) × 1.0001, k from a 14-entry table (0.995 … 0.281), then 1/(3.775 + 0.217(n − 15)) |
-| 5 | per frame v = ((1 − v)k + v) × 1.000001, k = 0.9615, 0.78125, 0.637, 0.529 for n = 1–4, then 1/(2.2 + (n − 5)/3) |
+| 1 | ???t (ease-out) |
+| 2 | t?? (ease-in) |
+| 3 | (sin(??(t ??? 0.5)) + 1)/2 |
+| 4 | per frame v = ((1 ??? v)k + v) ?? 1.0001, k from a 14-entry table (0.995 ??? 0.281), then 1/(3.775 + 0.217(n ??? 15)) |
+| 5 | per frame v = ((1 ??? v)k + v) ?? 1.000001, k = 0.9615, 0.78125, 0.637, 0.529 for n = 1???4, then 1/(2.2 + (n ??? 5)/3) |
 | other | t clamped to [0, 1] |
 
 Modes 4 and 5 step once per elapsed frame (paf's frames-per-tick global DAT_006fb1f4); a fraction above 0.05 blends
@@ -283,7 +283,7 @@ of the bright UI content per frame) and `work/region-luma.ts` (mean luma of a re
 
 - **Held-key repeat.** DOWN held for 3 s in the Settings column: the first move starts 34 ms after the key goes down
   (input latency), the second 300 ms (18 frames) after the first, then one move every 66.7 ms (4 frames): 1344, 1411,
-  1479 … 2144 ms. There is no acceleration over 14 repeats. Each repeat restarts the ease from the current position,
+  1479 ??? 2144 ms. There is no acceleration over 14 repeats. Each repeat restarts the ease from the current position,
   so the column trails the selection while the key is held. `View::pollController` repeats on this timing, counting
   from the previous deadline so that its 16 ms poll does not stretch the interval. Arrow keys go through the same path
   (OS auto-repeats are dropped). Native check: the first repeat at +302 ms, then a mean of 67.8 ms, landing on the
@@ -294,15 +294,15 @@ of the bright UI content per frame) and `work/region-luma.ts` (mean luma of a re
   it). The native view used to wait for the eased focus to pass 0.95; it now draws the description on
   `column.selection`.
 - **Category move.** A single RIGHT tap: motion starts 42 ms after the key, and the remaining distance falls by
-  0.765 per frame for the first 8 frames. That fits mode 5 with n = 11–12 (0.762 at 183 ms, 0.779 at 200 ms), so the
+  0.765 per frame for the first 8 frames. That fits mode 5 with n = 11???12 (0.762 at 183 ms, 0.779 at 200 ms), so the
   200 ms assumption stands. A small tail of motion afterwards comes from the icons' scale change, which the tracker
   mixes in.
-- **Page move** (into a column's page and back; Settings → Game Settings, then back): the toolbox icon travels
+- **Page move** (into a column's page and back; Settings ??? Game Settings, then back): the toolbox icon travels
   261 px. Entering starts about 530 ms after the press, while the plugin loads the page; leaving starts after 34 ms.
   Both directions follow the same curve. The remaining distance falls by 0.760 per frame, steadily, for 17 to 18
   frames, and there is no snap at frame 12. So this is not the 200 ms mode-5 ease (0.779, with a 5% snap on frame 12).
   This capture method reads about 0.014 below the model on moves whose timing is known (the category move: 0.765
-  against 0.779). The page move therefore fits mode 4 at 300 ms: n = 18, k = 1/(3.775 + 0.217 × 3) = 0.226, so
+  against 0.779). The page move therefore fits mode 4 at 300 ms: n = 18, k = 1/(3.775 + 0.217 ?? 3) = 0.226, so
   0.774 per frame, and the 1% left snaps on frame 18. Updated 2026-10-26: explore_plugin's five 300.0f constants are
   file-delete dialog, `user.info` dialog and list-label durations, not the page move (`audit/PAGE-MOVE.md:62-81`), and
   the only captured 300 ms bar call passes mode 5 (`:99-101`). The page move lives in vsh.elf paf PhXmBar, so 300 ms at
@@ -330,15 +330,15 @@ Findings, now in `icons.h`:
   units (focused 85.05). When a page opens, the parent column's unfocused rows move back to camera distance 2857.2 at
   brightness 0.247, so they shrink toward the screen centre and the gap below focus closes by 15. Its focused row
   stays at 2700 with brightness 0.698 and, with the category icon, steps to x 303.
-- `_Ambiant.w` is 0.698 for unfocused icons and 1 for focused ones. The program's alpha (envmap alpha × `_Ambiant.w`)
+- `_Ambiant.w` is 0.698 for unfocused icons and 1 for focused ones. The program's alpha (envmap alpha ?? `_Ambiant.w`)
   blends the icon over the frame.
-- Light directions are (sin Z cos X, sin Z sin X, cos Z) of the LITn angles. `_EnvRot` turns about 30°/s.
-- tex3 is a 128×128 px CookieCutter cut of the frame around each icon, refracted per channel.
+- Light directions are (sin Z cos X, sin Z sin X, cos Z) of the LITn angles. `_EnvRot` turns about 30??/s.
+- tex3 is a 128??128 px CookieCutter cut of the frame around each icon, refracted per channel.
 
 Translator fixes found by diffing against RPCS3's own GLSL for this program (`Log shader programs`):
 - LIF (0x3C) is (1, y, y>0 ? 2^w : 0, 1), not full LIT. This was why the icons came out saturated white.
 - DIVSQ uses sqrt(|b|) and keeps a when a is 0; NRM leaves zero-length vectors alone.
-- Source and destination precision clamps (fixed12 ±2, fixed9 ±1, saturate), with NaN read as 0.
+- Source and destination precision clamps (fixed12 ??2, fixed9 ??1, saturate), with NaN read as 0.
 - H registers are rounded to fp16. H and R are not aliased (RPCS3 keeps them apart).
 
 Clock inputs updated: `_ChangingColor` now samples amb.bmp and `_LuminanceParams` derives from GLASS; see
@@ -357,16 +357,16 @@ The firmware draws category icons as lit glass. Each icon is a quad (quad.vpo, `
 - `_NormalMap` (tex0): icontex `Nn`. Its alpha channel is the coverage, and a second fetch at a shadow offset gives the
   shadow.
 - `_DiffuseMap` (tex1) and `_EnvMap` (tex2): `texenv.dds`, rotated by `_EnvRot`.
-- `_BackgroundMap` (tex3): the frame behind the icon, refracted per channel (`REFR R/G/B` −0.032/−0.038/−0.048,
+- `_BackgroundMap` (tex3): the frame behind the icon, refracted per channel (`REFR R/G/B` ???0.032/???0.038/???0.048,
   `REFR SCL`, `REFR BLUR`).
 - Two specular lights: `_PackedLightParams[4]` from `LIT1/LIT2 ANG Z/X`, `ATTN *`, `SPEC1/2 POW`.
 - `_Ambiant` from `AMB R/G/B`; `_LuminanceParams[4]`, `EXPOSE`; `_ChangingColor` (theme colour, `TIME COLOR MIX`,
   `GLASS`); `_ParallaxAndGlow` (`PAR SCL/BIAS`); `_ShadowParams` (`SHADOW STREN/X/Y`).
-- `_SuperSampling` (`MULTI SAMP` 0.5, `MULTI ROT` 30°): the icon is antialiased inside the shader. `SS METHOD`
+- `_SuperSampling` (`MULTI SAMP` 0.5, `MULTI ROT` 30??): the icon is antialiased inside the shader. `SS METHOD`
   chooses full, cheap or none.
 
 custom_render_plugin builds the ICONS menu object at FUN_00047xxx (MNU reads around line 27540 of the local
-decompile) and binds the uniforms in FUN_000428b8…FUN_00042b2c (offsets: +0x00 PackedLightParams, +0x60 ChangingColor,
+decompile) and binds the uniforms in FUN_000428b8???FUN_00042b2c (offsets: +0x00 PackedLightParams, +0x60 ChangingColor,
 +0x90 Ambiant, +0xC0 ParallaxAndGlow, +0xF0 Eye, +0x120 EnvRot, +0x150 ShadowParams, +0x180 LuminanceParams,
 +0x1E0 RefractParams, +0x210 SuperSampling). The function that packs the MNU values into those uniforms still has to
 be traced, as was done for back_colours0. `--dump-cg` now also writes the icons programs.
@@ -1152,3 +1152,169 @@ Helpers, all local and firmware-derived, under `work/`: `fp-interp.py` (microcod
 `fp-res-test.py`, `fp-artifacts.py`, plus `fp-day-scene.npy` (1920x1080 at the app month phase), `fp-cpu28.npy`
 (1920x1080 at the console month phase), `fp-grid-day.npy` (the same program on the console's 64x32 grid) and
 `fp-console-scene.npy` (the reference frame's inverted scene). No budget, reference or harness file was touched.
+
+## Ribbon extent: the sheet measured against the console's own vertex buffer, 2026-10-28 (fifth pass)
+
+The exposure pass above localised 82 % of the remaining error in the ribbon's band and read it as "the sheet sits
+about 140 px higher and reaches about 220 px less far to the right". This pass measures that claim against a better
+instrument than either frame: the console's own captured ribbon vertices. `out/native-reference/vtxdump7` holds 720
+consecutive ribbon draws, each the 128x128 clip-space position array of `lines1.fpo` (array 0, stride 32, `w` about
+9). The clip positions are the sheet itself, so converting them with `x = (ndc.x + 1) x 960`, `y = (1 - ndc.y) x 540`
+gives the console's silhouette with no background model, no pedestal and no text in the way. The same array is
+available natively: `Ribbon::splineSheet` writes exactly those 16,384 clip positions into `vertices_`, and a
+temporary dump (removed before the final build, see 5 below) wrote it in the same layout. Nothing else was added to
+`src/`.
+
+Scripts are scratch files under `out/ribbonprobe/` (not committed): `vtx.py`, `shape.py`, `sheetcmp.py`,
+`motion.py` (console/native clip arrays), `pair.py`, `hp.py`, `final-tables.py` (frames), `capture-root.ps1` (a
+capture that reproduces `work/parity.ts`'s invocation byte for byte: its frame is identical to the harness's, 0
+differing pixels).
+
+### 1. The sheet in clip space (authoritative)
+
+Console: mean of `draw_0003..0008` (the settled draws of the burst; `draw_0001/0002` are the boot state).
+
+| quantity | console | native, shipped path | native, `--vsh-modules` (preset-1 tables) |
+|---|---|---|---|
+| sheet bbox x (px) | -592 .. 2399 | -680 .. 2195 | -575 .. 2383 |
+| sheet bbox y (px) | 413 .. 769 | 353 .. 674 | 419 .. 768 |
+| ndc x span | 3.115 | 2.994 | 3.082 |
+| ndc y span | 0.659 | 0.593 | 0.645 |
+| w (camera depth) | 6.59 .. 11.05 | 6.38 .. 12.05 | 6.64 .. 11.08 |
+| crest at the right end | 672 (c0, x 2137) | 440 (c0, x 1813) | 668 (c0, x 2126) |
+| crest at the left end | 543 (c120, x -248) | 511 (c120, x -334) | 543 (c120, x -240) |
+
+Per-column crest (row mean of the 128 vertices, every 8th column, c0 = the sheet's right end):
+
+| c | console x/y | shipped x/y | tables x/y |
+|---|---|---|---|
+| 0 | 2137 / 672 | 1813 / 440 | 2126 / 668 |
+| 16 | 1871 / 697 | 1405 / 455 | 1864 / 694 |
+| 32 | 1429 / 693 | 1018 / 499 | 1424 / 694 |
+| 48 | 1001 / 648 | 642 / 543 | 999 / 651 |
+| 64 | 645 / 592 | 331 / 571 | 646 / 595 |
+| 80 | 336 / 555 | 80 / 589 | 338 / 557 |
+| 96 | 73 / 540 | -165 / 584 | 78 / 541 |
+| 112 | -151 / 537 | -327 / 535 | -144 / 537 |
+
+So the console's sheet is a single sagging band: crest 672 px at its right end, 543 px at its left end. The shipped
+path draws the *opposite* slope (440 px at the right end, 511 px at the left), 204 px short at the right edge and
+60-95 px high over the whole sheet. With the plugin's own preset-1 rest state the native reproduces the console's
+sheet to **4 px in y and 11 px in x on every sampled column** (the residual is the console's live swell phase: the
+burst's own frame-to-frame drift is 0.4-1.2 px, `motion.py`).
+
+The console's burst also shows the sheet is not static: over `draw_0003..0120` its right end walks 2387 -> 2705 and
+its bottom edge 768 -> 804, i.e. the resting ribbon is a slow travelling wave, and the reference still is one
+instant of it.
+
+### 2. Frame-space silhouette (what the scorecard sees)
+
+Native, exact: `with - without` from two captures of the same build and pins (the ribbon-free one from a temporary
+`XMB_RIBBON_SKIP` return, removed with the other instrumentation). Threshold 8 of 255 luma. Console: reference
+minus (native ribbon-free + the fitted background), with the local lower envelope of the residual removed because
+the console's background program differs from ours (the pedestal of the pass above); it is an estimate and is
+labelled as one. Rows are restricted to 200-960; the "clean strips" avoid the item-label and value columns, whose
+strings differ between the builds.
+
+| state | frame | bbox y | crest (x 0-520) | crest (x 1400-1920) | right edge per 60 px band, y 300 -> 840 |
+|---|---|---|---|---|---|
+| root/day | native | 354 .. 635 | 558 | 430 | 1847, 1919, 1919, 1919, 1216, 716, -, -, - |
+| root/day | console | ~480 .. 840 | 653 | 657 | 1782, 1909, 1909, 1919, 1919, 1919, 1919, 1919, 1852, 1337 |
+| page-settings-system/day | native | 354 .. 635 | 560 | 430 | 1847, 1919, 1919, 1919, 1216, 716, -, -, - |
+| page-settings-system/day | console | ~460 .. 900 | 567 | 587 | 359, 1061, 1528, 1814, 1917, 1919, 1919, 1517, 841 |
+| root/night | native | 354 .. 635 | 558 | 430 | 1847, 1919, 1919, 1919, 1216, 718, -, -, - |
+| root/night | console | ~430 .. 800 | 554 | 530 | 1555, 1604, 1919, 1919, 1919, 1919, 1915, 1816, 1638 |
+
+Three readings from this table:
+
+1. The native's band is the same in all three states (y 354..635, crest 558/430). The settings page does not move
+   it and neither does the night preset. The frame-space error is therefore not a layout or a preset effect.
+2. The "220 px shorter on the right" is the *vertical* offset seen from the right: the native's sheet leaves the
+   bottom-right corner (right edge 1919 only down to y 540, 716 by y 600, nothing below 660), while the console's is
+   still at x 1850-1919 down to y 840. The sheet's own right end is only 204 px shorter (2195 vs 2399), i.e. the
+   horizontal extent is very nearly right; the corner is empty because the band is high.
+3. Night is measured with the pin caveat: both the native and the console night references were captured at a pinned
+   clock, the ribbon's *brightness* differs (the map's energy is 1.216x the day map, uniformly: correlation 0.9998
+   over 258,456 overlapping pixels) but its *geometry* is identical, because at the pinned render clock the LINE1
+   boot weights leave the preset at coldboot1 for the whole capture (`Ribbon::advancePresets`, `ribbon.cpp:469-473`,
+   with `bootWeights(1/60)`: toClock = 1.4e-5). That is the same class of pinning artifact as the cloth phase and
+   is *not* touched here.
+
+### 3. The four candidates, each with its code line and its measurement
+
+| candidate | code line | expected signature if wrong | measured |
+|---|---|---|---|
+| camera fovy/near/far | `ribbon.cpp:20` (`cameraFovy=53`, near .1, far 1000) | a uniform ndc scale about the screen centre; w unaffected | w 6.64..11.08 with the tables against the console's 6.59..11.05, and the per-column crest matches to 4 px. The projection is right to 0.5 % |
+| sheet world placement (`POS`, `(0,0,-2)`, `FFD SCALE2`, `FFD OFFSET`) | `ribbon.cpp:405` (`eye=p.pos+(0,0,-2)`), `:414` (`(n+sum)*p.scale2+eye`), `:394` (`field*scale1+offset`) | a translation/scale of the whole sheet, w range scaled too | placement is reproduced by the same control run; POS/SCALE1/SCALE2/OFFSET come from `override/day|night/LINE1.mnu` (`POS X -8.2`, `SCALE2 3.2 / 1.27579 / 2.88782`) and the compiled fallbacks in `Preset` are bit-identical to that file, so a missing MNU cannot change them |
+| projection aspect / viewport | `ribbon.cpp:403-404`, `:415`, and `aspect=pixelWidth/pixelHeight` at `:488` | ndc x span off by the aspect ratio while ndc y is right | ndc x span 3.082 vs 3.115 (1.1 %) and ndc y 0.645 vs 0.659 (2.1 %) in the control; a wrong aspect would tilt one only |
+| lattice end conditions (`END Y`/`END Z`) and the sheet's segment count | `ribbon.cpp:114-117` (pin), `:230` (END keys), `:418` (`segment=k/8`, `t=(k%8)*16/127`) | the sheet's cross-section and its travelling wave wrong, i.e. crest shape wrong even with the right state | the control run reproduces the console's crest *shape* (values 672/697/693/648/592/555/540/537 against 668/694/694/651/595/557/541/537) and the swell's phase behaviour; END Y/Z read as 0.4/0.2 from `LINE1.mnu`, and the pin's own constants (11, 15, 0.5, 1.0, 0.1, 0.02, 10, -2) were re-read from the plugin's `.data` at 0x92d58..0x92d7c and match `Cloth::step` |
+
+The conclusion is that none of the four is the error. The error is the *cloth's initial state*: 14,400 steps from
+the invented fallback start end in a different instant of the same slow swell than the console's preset-1 table
+(which carries positions *and* velocities: mean |v| 2.07 over the 361 points). Every sweep that changes only the
+state moves the sheet by the observed amounts and can never land on the console's:
+
+| settle length (steps) | sheet screen y | sheet screen x |
+|---|---|---|
+| 14,400 (shipped) | 353 .. 674 | -680 .. 2195 |
+| 21,600 | 405 .. 798 | -811 .. 2401 |
+| 28,800 | 261 .. 724 | -689 .. 2400 |
+| 43,200 | 354 .. 743 | -875 .. 2425 |
+| 72,000 | 461 .. 841 | -821 .. 2597 |
+| plugin preset-1 table | 419 .. 768 | -575 .. 2383 |
+
+Every settle length is inside the swell's own range of shapes (the console's burst moves the same edges by tens of
+pixels at 0.5 px/frame), so picking one that matches the reference is fitting a live animation state to one still -
+which the earlier pass already refused to do.
+
+### 4. Fix decision
+
+No traced value is wrong, so no geometry was changed. Two source comments were corrected instead, because both
+claimed a provenance the artifacts contradict:
+
+* `ribbon.cpp:131-145` said the fallback start is "the fallback start the plugin uses when it has no preset-1 tables
+  (FUN_0004ec90)". It is not: `FUN_0004ec90` (decompiled at `out/native-reference/lines/custom_render_all.c:31916`)
+  builds a flat plane, `x = (u - .5) x 4`, `y = (v - .5) x 4`, `z = -3`, `w = 1` from the `.data` floats 4.0 / .5 /
+  -3 / 1.0 at 0x92dc8 / 0x92dc4 / 0x92dcc / 0x92dd0. The loop in the source is a **fit** to the preset-1 table's
+  y/z extent, and it is the better of the two: settling from the traced plane draws the sheet 1031 px short at the
+  right edge (x max 1368 against the console's 2399). The comment now says so.
+* `ribbon.cpp:147-161` (the 14,400-step warm-up) now records that the settle is a warm-up whose end state is one
+  phase of the swell, with the deltas above, so the next pass does not tune the step count or the camera to a
+  reference still.
+
+The artifact that would settle it: **the plugin's preset-1 rest tables** (positions at `custom_render_plugin.prx`
+0x97c18, velocities at 0x98d04, 361 float3 each). `Ribbon::init` already consumes them (`ribbon.cpp:279-287`) when
+the app is given `--vsh-modules <decrypted modules>`, and that is the only path that reproduces the console's sheet;
+but the copy inside dev_flash is `vsh/module/custom_render_plugin.sprx` (315,225 B, signed/encrypted) against the
+915,704 B decrypted module, so the shipped fallback cannot read it and the parity capture does not pass the flag.
+Either the capture path passes `--vsh-modules` (harness work, out of this fence) or the tables arrive as a
+documented, licensed local artifact. Nothing in `ribbon.cpp` can reconstruct the table's velocities, which is what
+makes its state the console's and the settle's not.
+
+### 5. Verification of this build (`C:\dev\out\native-ribbon2`)
+
+* Before/after are the same drawing: the ribbon map's silhouette is identical (left-strip crest 552.5 in both, band
+  y 367..795 in both, per-160 px crest 553/564/548/540 against 553/565/548/540) and five consecutive captures of the
+  final build are byte-identical (`8B59B17DEBE28EFC...`). A frame is reproducible within a session but not across
+  sessions: the same source built twice and captured 20 minutes apart differs by a smooth background term (whole
+  frame 17.97 against 18.23 dB, while the *top background* region, where the ribbon never reaches, moves 22.24 ->
+  23.76). That term is the background-layer residue of the passes above and is outside this fence; it is also the
+  whole of the shipped-phase score movement between the two captures, since the ribbon's own silhouette is stable to
+  0.1 px across them.
+* `work/parity.ts --capture --score --phase-sweep 0,12,24,36 --state root` (shipped 18.2297 / 0.8263, ribbon band
+  16.1436; live+0 s 18.0703 / 0.8297 / 15.9745; live+12 s 18.5450 / 0.8361 / 16.5553; live+24 s 18.3710 / 0.8371 /
+  16.4806; **live+36 s 18.8899 / 0.8441 / 17.0507**, the best). The swept phases move the sheet's crest between 445
+  and 555 px in the left strip and 482 and 663 px in the right one, i.e. the extent error is phase-dominated as
+  claimed, but no swept phase reaches the console's band: the phase is not the whole 140 px.
+* `work/ab-layers.ts --capture --exe C:\dev\out\native-ribbon2\re-ps3-native.exe`: **PASS 6/6**, text presence
+  1,668 bright pixels (minimum 900) PASS. Against the stored baselines: frame 18.74 / 0.8361 (18.76 / 0.8360),
+  top background 21.06 / 0.9434 (21.06 / 0.9434), category icon row 21.25 / 0.9073 (21.62 / 0.9062), item label row
+  11.99 / 0.3895 (11.99 / 0.3895), clock text 11.41 / 0.4528 (11.41 / 0.4528), info bar 15.05 / 0.7667 (15.05 /
+  0.7667). Nothing was re-baselined.
+* Determinism: two `--render-clock 20` captures hash-equal
+  (`93785964BEF5030E...`, 1920x1080, Tier A pass), and five `--render-clock 30` captures hash-equal
+  (`8B59B17DEBE28EFC...`).
+
+`ribbon.cpp` and `ribbon.h` are the only source files touched (comments only); `view.cpp`, `hdr.cpp`,
+`particles.cpp`, `shell.*`, `main.cpp`, the harness, the parity tooling, the budgets and the references were not
+edited.
