@@ -698,6 +698,15 @@ void View::paintGL() {
     } else optionsOpenEase_.retarget(0,moveMilliseconds);
     optionsOpenEase_.advance(dt);optionsPanelEase_.advance(dt);
     optionsWasOpen_=shell_.optionsOpen();
+    // Surface B2, the music control panel (audit/MEDIA-PANELS-FIRMWARE.md 4.3): the traced presentation is
+    // a 150-unit fade with 0 delay (explore_plugin.prx 0x270a00 / 0x270a04) and a 150/100 move/size
+    // animation on the panel base, which drawMusicPanel expresses as the 1.0 -> 1.3 scale (0x270a54). The
+    // close has no traced time (the container carries no animations), so it uses the same 150.
+    if(!mediaAudioOnly())musicPanelOpen_=false;
+    musicPanelEase_.retarget(musicPanelOpen_?1.:0.,musicPanelFadeMs);
+    musicPanelEase_.advance(dt);
+    if(static const bool panelLog=qEnvironmentVariableIsSet("XMB_MEDIA_TRACE");panelLog && musicPanelEase_.running())
+        qInfo().noquote()<<"media: music panel fade"<<QString::number(musicPanelEase_.value,'f',3);
     // The notification pop-up: Shell decides when one exists (queue + 4 s lifetime); here it slides and fades
     // in and out on the same 200 ms mode-5 curve the rest of the XMB uses. The content is latched so the last
     // frame of the exit still draws the text after Shell has already expired the entry.
@@ -1364,17 +1373,42 @@ void View::drawScene(QPainter& p) {
             const auto cue=shell_.subtitleCueText();
             if(!cue.isEmpty())drawSubtitle(p,cue);
         }
-        p.save();p.setOpacity(shell_.videoOpen()?mediaControls_.state(now).opacity:1.);
-        text({110,970,1500,50},shell_.mediaTitle(),27,Qt::white);
-        text({110,1020,1700,35},shell_.photoOpen()?QString("Circle Back   Cross ")+(shell_.slideshowActive()?"Pause":"Slideshow")+"   L1/R1 or +/- Zoom   Square/0 Reset   Triangle/Q/E Rotate   Arrows Pan when zoomed   [/] Photo":"Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle   R Repeat   Triangle Options",21,QColor(230,230,230));
+        // Surface B2 owns the bottom band while it is up: the audio player's own chrome (queue line,
+        // title, hint sentence, bar, time) fades out with the panel's 150 ms ease, so the panel is not
+        // read through a bar that belongs to another surface. Video and photo are untouched (panelDim 1).
+        const double panelDim=(shell_.videoOpen()||shell_.photoOpen())?1.:1.-musicPanelEase_.value;
+        p.save();p.setOpacity((shell_.videoOpen()?mediaControls_.state(now).opacity:1.)*panelDim);
+        // Vertical order of the chrome, bottom band (surface A, audit 3.5): the time bar (941..961), its
+        // 16x16 digit cells (963..979), the title (984..1022) and the direct-key hint strip (1026..1056).
+        // The ASCII sentence survives only where this build has no firmware icon set to draw: the photo
+        // viewer (surface D, out of this change) and the audio player, whose hints live in its Triangle
+        // control panel.
+        // The title sits above the hint row. Only the video player needs 984: its 16x16 digit row ends at
+        // 979. The photo viewer and the audio player have no such row and keep the 970 this build had, so
+        // surface D and the audio chrome are unchanged down to the pixel of their text layout.
+        text({110,shell_.videoOpen()?984.:970.,1500,38},shell_.mediaTitle(),27,Qt::white);
+        if(shell_.photoOpen())
+            text({110,1020,1700,35},QString("Circle Back   Cross ")+(shell_.slideshowActive()?"Pause":"Slideshow")+"   L1/R1 or +/- Zoom   Square/0 Reset   Triangle/Q/E Rotate   Arrows Pan when zoomed   [/] Photo",21,QColor(230,230,230));
+        else if(!shell_.videoOpen())
+            text({110,1020,1700,35},"Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle   R Repeat   Triangle Control Panel",21,QColor(230,230,230));
         if(shell_.busy())text({110,910,1000,45},"Loading…",26,Qt::white);
         else if(!shell_.photoOpen())text({110,895,1700,36},shell_.mediaQueueSummary(),21,QColor(230,230,230));
         else if(photoViewport_.valid())text({110,895,1700,36},QString("Zoom %1%").arg(photoViewport_.zoomPercent(),0,'f',0),21,QColor(230,230,230));
-        if(!shell_.photoOpen() && shell_.mediaDuration()>0) {
+        if(shell_.videoOpen() && !shell_.photoOpen()) {
+            // Surface A is the video player's own surface: the firmware's time page and its hint strip.
+            if(shell_.mediaDuration()>0)
+                drawVideoTimeBar(p,shell_.mediaPosition(),shell_.mediaDuration());
+            drawVideoHelpStrip(p);
+        } else if(!shell_.photoOpen() && shell_.mediaDuration()>0) {
+            // The audio player's own progress page (audioplayer_plugin.rco play_progress_page, audit 4.1) is
+            // a different object set that this change does not rebuild, so the bar and the time string this
+            // build already had stay exactly as they were until that surface is done.
             const double ratio=std::clamp(double(shell_.mediaPosition())/shell_.mediaDuration(),0.,1.);
-            p.fillRect(QRectF(110,941,1700,4),QColor(255,255,255,60));p.fillRect(QRectF(110,941,1700*ratio,4),Qt::white);
-            const auto time=[](qint64 ms){return MediaControls::formatTime(ms);};
-            text({1450,963,360,45},time(shell_.mediaPosition())+" / "+time(shell_.mediaDuration()),23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+            p.fillRect(QRectF(110,941,1700,4),QColor(255,255,255,60));
+            p.fillRect(QRectF(110,941,1700*ratio,4),Qt::white);
+            mediaPanelText(p,QRectF(1450,963,360,45),
+                MediaControls::formatTime(shell_.mediaPosition())+" / "+MediaControls::formatTime(shell_.mediaDuration()),
+                23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
         }
         p.restore();
         // The in-player panel (Triangle): the same right-hand options panel, over the video and over the
@@ -1384,6 +1418,10 @@ void View::drawScene(QPainter& p) {
             drawOptionsPanel(QStringList{},optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,
                 shell_.optionsTitle(),&shell_.options());
         }
+        // Surface B2: the XMB music control panel (Triangle). It draws over the audio player's own chrome,
+        // the way the firmware's panel sits over the XMB, and only while a local audio item is what plays.
+        if(mediaAudioOnly() && (musicPanelOpen_ || musicPanelEase_.value>.002))
+            drawMusicPanel(p,musicPanelEase_.value);
     } else {
         previousMediaOpen_=false;
         const auto& categories=shell_.categories();
@@ -1769,7 +1807,15 @@ void View::drawScene(QPainter& p) {
                 .arg(clock_.elapsed()-volumeHudAt_);
         }
         const bool room=!shell_.psMenuOpen() && shell_.message().isEmpty() && !shell_.optionsOpen() && !osk_.open;
-        if(room && hud.visible && hud.opacity>.002) drawVolumeHud(p,hud.opacity);
+        // The appearing edge is the firmware's own fade: 150 with 0 delay, read from explore_plugin.prx at
+        // 0x270a00 / 0x270a04 (audit/MEDIA-PANELS-FIRMWARE.md 4.3, 5.4). MediaControls still owns the
+        // visible window under it, so a held change keeps the window it always had; only the 250 ms
+        // invented fade-in is gone.
+        const double fadeIn=std::clamp(double(clock_.elapsed()-volumeHudAt_)/volumeMeterFadeMs,0.,1.);
+        if(volumeTrace() && hud.visible && fadeIn<1.)
+            qInfo().noquote()<<QString("volume: trace HUD fade-in %1 at %2 ms (150 ms, delay 0)")
+                .arg(fadeIn,0,'f',3).arg(clock_.elapsed()-volumeHudAt_);
+        if(room && hud.visible && hud.opacity>.002) drawVolumeHud(p,hud.opacity*fadeIn);
     }
     // The console's notification pop-up, drawn last so it sits above the XMB, and never while the PS menu is
     // up: that menu blacks the frame and owns the screen. It takes no input (nothing here reads keys), so it
@@ -1928,56 +1974,345 @@ void View::pollVolumeRamp(float down,float up,qint64 now) {
     volumeRampAt_=std::max(volumeRampAt_,now-interval)+interval;
     volumeStep(direction,direction>0?QStringLiteral("R2"):QStringLiteral("L2"));
 }
-// The native volume HUD. Its shape comes from the firmware: the console's volume display is one page holding
-// a single horizontal level meter (videoplayer_plugin.rco videoplayer_volume_page /
-// videoplayer_volume_level_meter, and the same pair in audioplayer_plugin.rco and explore_plugin_full.rco
-// volume_page / volume_level_meter). That page's projection lives in the plugin's own paf code and is not
-// recovered, so the rect here is fitted rather than traced - and it is fitted to the one band no other
-// composite uses: immediately left of the information panel (x 1329..1920, y 75..133), above the
-// notification plaque (y 145), left of the options panel (x 1330) and clear of the OSK (y 290) and the PS
-// menu (which blacks the frame). The backing is the information panel's own material,
-// xmb_plugin_normal:tex_indi_bg (the same 24x24 nine-slice tile the info bar uses), so the HUD reads as part
-// of the XMB rather than as an application overlay; its rect stays a FIT, not a traced projection.
+// The firmware's volume display (audit/MEDIA-PANELS-FIRMWARE.md section 5): one page holding a single paf
+// PhLevelMeter and nothing else that draws. The segment art is the console's default level-meter set in
+// system_plugin.rco - tex_default_lvmeter_on / _off / _focus, 20x40 each - over the 48x48
+// tex_default_lvmeter_bg backing, with no caption, no percentage, no plate of its own and no border (5.3).
+// The widget's screen rect and its segment count are in no container (5.4, spec-only), so both are FITS
+// here: ten 20 px segments (200x40) centred on x 960 in the frame's bottom band, which keeps the meter clear
+// of the information panel (y 75..133), the notification plaque (y 145..229) and the media chrome above it.
+// The fade is the traced 150 ms with 0 delay (explore_plugin.prx 0x270a00 / 0x270a04); the caller applies it,
+// so the appearing edge is the firmware's while the visible window stays MediaControls'.
 void View::drawVolumeHud(QPainter& p,double opacity) {
     const double alpha=std::clamp(opacity,0.,1.);
     if(alpha<=.002)return;
-    const QRectF panel(1000,75,222,58);
+    const auto& lit=assets_.image("system_plugin","tex_default_lvmeter_on");
+    const auto& dim=assets_.image("system_plugin","tex_default_lvmeter_off");
+    const auto& focus=assets_.image("system_plugin","tex_default_lvmeter_focus");
+    const auto& backing=assets_.image("system_plugin","tex_default_lvmeter_bg");
+    if(lit.isNull()||dim.isNull()||focus.isNull()||backing.isNull()) {
+        // The decoder reads these (audit/TEXTURE-COVERAGE.md: 3174/3174); if a future flash cannot, the
+        // pre-meter HUD is drawn exactly as this build shipped it, and says so once.
+        static bool meterWarned=false;
+        if(!meterWarned) {
+            meterWarned=true;
+            qWarning().noquote()<<"view: volume meter art system_plugin/tex_default_lvmeter_* did not decode;"
+                " drawing the 222x58 information-bar HUD";
+        }
+        const QRectF panel(1000,75,222,58);
+        p.save();p.setOpacity(alpha);
+        const QImage& plate=assets_.image("xmb_plugin_normal","tex_indi_bg");
+        if(plate.isNull()) {
+            p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,20));p.drawRoundedRect(panel,4,4);
+            p.setOpacity(.12*alpha);p.drawImage(panel,assets_.image("system_plugin","tex_infobar"));
+            p.setOpacity(alpha);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));
+            p.drawRoundedRect(panel.adjusted(.5,.5,-.5,-.5),4,4);
+        } else drawNineSlice(p,"xmb_plugin_normal","tex_indi_bg",panel,8.,alpha);
+        mediaPanelText(p,QRectF(panel.left()+12,panel.top()+7,150,18),
+            assets_.text("videoplayer_plugin","msg_volume_control","Volume Control"),15,QColor(220,220,220),
+            Qt::AlignLeft|Qt::AlignVCenter);
+        const int level=std::clamp(volumeLevel_,0,100);
+        mediaPanelText(p,QRectF(panel.right()-122,panel.top()+5,110,24),
+            volumeMuted_?QStringLiteral("Mute"):QStringLiteral("%1%").arg(level),19,
+            volumeMuted_?QColor(200,200,200):Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        const QRectF track(panel.left()+12,panel.top()+37,panel.width()-24,6);
+        p.setPen(Qt::NoPen);p.setBrush(QColor(255,255,255,55));p.drawRect(track);
+        if(level>0)p.fillRect(QRectF(track.left(),track.top(),track.width()*level/100.,track.height()),
+            volumeMuted_?QColor(150,150,150):QColor(255,255,255));
+        p.restore();
+        return;
+    }
+    // Level 0 lights no segment, 100 lights all ten. A muted endpoint keeps the level Windows reports but
+    // shows it unlit: the firmware's volume page carries no mute state of its own (5.3), so silence is drawn
+    // as silence rather than by inventing a second material.
+    const int level=std::clamp(volumeLevel_,0,100);
+    const int litCount=volumeMuted_?0:(level*volumeMeterSegments+50)/100;
+    constexpr qreal segmentWidth=20.,segmentHeight=40.;   // tex_default_lvmeter_* are 20x40 (FC)
+    const qreal meterWidth=segmentWidth*volumeMeterSegments;
+    const QRectF meter(960.-meterWidth/2.,1008.,meterWidth,segmentHeight);   // FIT (audit 5.4)
     p.save();
     p.setOpacity(alpha);
-    const QImage& plate=assets_.image("xmb_plugin_normal","tex_indi_bg");
-    if(plate.isNull()) {
-        // Keep the pre-nine-slice drawing if the tile cannot be read (audit/TEXTURE-COVERAGE.md: it does).
-        static bool hudFallbackWarned=false;
-        if(!hudFallbackWarned){hudFallbackWarned=true;qWarning().noquote()<<"view: volume HUD plate xmb_plugin_normal/tex_indi_bg did not decode; drawing the tex_infobar fallback";}
-        p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,20));p.drawRoundedRect(panel,4,4);
-        p.setOpacity(.12*alpha);p.drawImage(panel,assets_.image("system_plugin","tex_infobar"));
-        p.setOpacity(alpha);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));
-        p.drawRoundedRect(panel.adjusted(.5,.5,-.5,-.5),4,4);
-    } else drawNineSlice(p,"xmb_plugin_normal","tex_indi_bg",panel,8.,alpha);
-    const auto label=[&](const QRectF& rect,const QString& value,int size,QColor colour,int flags) {
-        if(textRenderer_.ready()) {
-            QFont font(shell_.fontFamily());font.setPixelSize(size);
-            textRenderer_.draw(*this,p,rect,value,font,colour,flags);return;
-        }
-        QFont font(shell_.fontFamily());font.setPixelSize(size);font.setStyleStrategy(QFont::PreferAntialias);
-        font.setHintingPreference(QFont::PreferNoHinting);p.setFont(font);
-        p.setPen(QColor(0,0,0,38));p.drawText(rect.translated(1,1),flags,value);
-        p.setPen(colour);p.drawText(rect,flags,value);
-    };
-    // The firmware's own label for this display (msg_volume_control, "Volume Control" in the player plugins).
-    label(QRectF(panel.left()+12,panel.top()+7,150,18),
-        assets_.text("videoplayer_plugin","msg_volume_control","Volume Control"),15,QColor(220,220,220),Qt::AlignLeft|Qt::AlignVCenter);
-    const int level=std::clamp(volumeLevel_,0,100);
-    // Muted: the level is still what it is, but nothing is audible, so the number gives way to "Mute" and the
-    // meter greys. Nothing here writes the mute state except the mute key itself.
-    label(QRectF(panel.right()-122,panel.top()+5,110,24),
-        volumeMuted_?QStringLiteral("Mute"):QStringLiteral("%1%").arg(level),19,
-        volumeMuted_?QColor(200,200,200):Qt::white,Qt::AlignRight|Qt::AlignVCenter);
-    const QRectF track(panel.left()+12,panel.top()+37,panel.width()-24,6);
-    p.setPen(Qt::NoPen);p.setBrush(QColor(255,255,255,55));p.drawRect(track);
-    if(level>0)p.fillRect(QRectF(track.left(),track.top(),track.width()*level/100.,track.height()),
-        volumeMuted_?QColor(150,150,150):QColor(255,255,255));
+    // The widget's own backing (48x48): nine-sliced, so its corners keep their pixels at the meter's width.
+    drawNineSlice(p,"system_plugin","tex_default_lvmeter_bg",meter.adjusted(-8,-8,8,8),16.,1.);
+    for(int i=0;i<volumeMeterSegments;++i) {
+        // Which segment paf draws with _focus is not traced (5.4); the boundary segment - the one at the
+        // level - is the only state this surface has that could be called focused, so that is the one.
+        const QImage& art=i<litCount?lit:(i==litCount-1?focus:dim);
+        if(art.isNull())continue;
+        p.drawImage(QRectF(meter.left()+i*segmentWidth,meter.top(),segmentWidth,segmentHeight),art);
+    }
     p.restore();
+}
+// The shared label path for the three media panels. The GL glyph atlas is the XMB's own text pipeline, so
+// the panels' labels keep the firmware's shadow (4/-5 at 0.25) through the renderer's default material.
+void View::mediaPanelText(QPainter& p,const QRectF& rect,const QString& value,int size,const QColor& colour,int flags) {
+    if(textRenderer_.ready()) {
+        QFont font(shell_.fontFamily());font.setPixelSize(size);
+        textRenderer_.draw(*this,p,rect,value,font,colour,flags);return;
+    }
+    QFont font(shell_.fontFamily());font.setPixelSize(size);font.setStyleStrategy(QFont::PreferAntialias);
+    font.setHintingPreference(QFont::PreferNoHinting);p.setFont(font);
+    p.setPen(QColor(0,0,0,38));p.drawText(rect.translated(1,1),flags,value);
+    p.setPen(colour);p.drawText(rect,flags,value);
+}
+// Surface A, the time bar (audit/MEDIA-PANELS-FIRMWARE.md 3.5): the firmware's time page is a Progress stack
+// (base / playable_time / playing) plus a Scroll and a jump-marker Plane, and the container carries the
+// progression art - tex_progress_bar 30x20 with the tex_progress_bar_in fill, and tex_progress_bar_jump_indi
+// 20x12 on videoplayer_display_time_jump_time_bar_marker. None of the three Progress objects declares a rect
+// or an image of its own (their template fields are zero/unset; the plugin publishes them at run time), so
+// the screen rect here is a FIT: it keeps this build's bottom band (x 110, 1700 wide) at the texture's own
+// 20 px height. The readout keeps the firmware's per-glyph unit - 16x16 cells, one glyph per cell - with the
+// digits from MediaControls::formatTime.
+void View::drawVideoTimeBar(QPainter& p,qint64 position,qint64 duration) {
+    const QImage& base=assets_.image("videoplayer_plugin","tex_progress_bar");
+    const QImage& fill=assets_.image("videoplayer_plugin","tex_progress_bar_in");
+    const QRectF bar(110,941,1700,20);                                  // FIT
+    const double ratio=duration>0?std::clamp(double(position)/double(duration),0.,1.):0.;
+    if(base.isNull()||fill.isNull()) {
+        // One line, once: the flat 4 px bar and the single MM:SS / MM:SS string this build shipped.
+        static bool barWarned=false;
+        if(!barWarned) {
+            barWarned=true;
+            qWarning().noquote()<<"view: videoplayer_plugin/tex_progress_bar(_in) did not decode; drawing the"
+                " flat 4 px bar and the single time string";
+        }
+        p.fillRect(QRectF(110,941,1700,4),QColor(255,255,255,60));
+        p.fillRect(QRectF(110,941,1700*ratio,4),Qt::white);
+        mediaPanelText(p,QRectF(1450,963,360,45),MediaControls::formatTime(position)+" / "+MediaControls::formatTime(duration),
+            23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        return;
+    }
+    // The track: the 30x20 progression tile nine-sliced (8 px caps keep the end caps at their own width).
+    drawNineSlice(p,"videoplayer_plugin","tex_progress_bar",bar,8.,1.);
+    if(ratio>0.) {
+        const QRectF played(bar.left(),bar.top(),bar.width()*ratio,bar.height());
+        if(played.width()>=16.)drawNineSlice(p,"videoplayer_plugin","tex_progress_bar_in",played,8.,1.);
+        else p.drawImage(played,fill);
+    }
+    // The jump indicator marks a position on the bar (its own 20x12 art). This build seeks
+    // instantaneously and has no scrub state, so there is no pending jump target to mark: it marks the
+    // played position - the one position the bar's jump indicator can denote here.
+    const QImage& marker=assets_.image("videoplayer_plugin","tex_progress_bar_jump_indi");
+    if(!marker.isNull()) {
+        const double x=std::clamp(bar.left()+bar.width()*ratio-marker.width()/2.,
+            bar.left(),bar.right()-marker.width());
+        p.drawImage(QRectF(x,bar.top()+(bar.height()-marker.height())/2.,marker.width(),marker.height()),marker);
+    }
+    // Two 8-cell groups, as the firmware lays them out (videoplayer_display_playing_time_h1..c2 and
+    // play_time_h1..c2, all 16x16): the playing time on the left, the duration on the right.
+    drawTimeCells(p,MediaControls::formatTime(position),bar.left(),bar.bottom()+2.,false);
+    drawTimeCells(p,MediaControls::formatTime(duration),bar.right(),bar.bottom()+2.,true);
+}
+void View::drawTimeCells(QPainter& p,const QString& value,qreal edge,qreal top,bool rightAligned) {
+    constexpr qreal cell=16.;                 // FC: every time digit cell is 16x16
+    constexpr int cellSize=19;                // FIT: RCO size=10 has no px equivalent (audit 9.5); 19 px
+                                              // puts the digit cap (about 0.82 x the size) inside 16 px
+    const int count=int(value.size());
+    if(count<=0)return;
+    const qreal left=rightAligned?edge-count*cell:edge;
+    for(int i=0;i<count;++i)
+        mediaPanelText(p,QRectF(left+i*cell,top,cell,cell),value.mid(i,1),cellSize,Qt::white,Qt::AlignCenter);
+}
+// Surface A, the direct-key hint strip. The firmware's panel hint is one 86x30 tex_cp_help_* key icon plus
+// the focused control's own name from videoplayer_plugin's text table (videoplayer_cp_help and
+// videoplayer_cp_button_name, audit 3.2/3.4/3.6); this build has six bindings, so six pairs are drawn in
+// one row. The native keys and the firmware's key icons do not all coincide: this build seeks with
+// Left/Right where the firmware's fast reverse/forward are L2/R2, and the video container carries no d-pad
+// hint art (3.4 lists circle, cross, l1, l2_left, r1, r2_right, select, start), so the L2/R2 icons carry the
+// seek bindings. Circle's label is msg_quit_playback: this container has no Back/Cancel string, and Circle
+// here leaves playback, which is what that string says.
+void View::drawVideoHelpStrip(QPainter& p) {
+    struct Help { const char* icon; QString label; };
+    const bool paused=shell_.mediaPaused()||shell_.busy();
+    const auto text=[&](const char* key,const char* fallback) {
+        // The firmware's *_with_icon strings end with the control's own gaiji after a space
+        // (msg_play_with_icon = "Play " U+F88F, msg_fast_r_with_icon = "Fast Reverse " U+F893, ...): the
+        // trailing glyph IS the icon the name refers to. This strip draws that icon itself as the 86x30
+        // key texture, so the private-use glyph is dropped instead of drawing as a missing-glyph box.
+        QString value=assets_.text("videoplayer_plugin",key,fallback);
+        while(!value.isEmpty() && value.back().unicode()>=0xE000 && value.back().unicode()<=0xF8FF)
+            value.chop(1);
+        return value.trimmed();
+    };
+    const QVector<Help> help{
+        {"tex_cp_help_circle",text("msg_quit_playback","Quit Playback")},
+        {"tex_cp_help_cross",paused?text("msg_play_with_icon","Play"):text("msg_pause_with_icon","Pause")},
+        {"tex_cp_help_l2_left",text("msg_fast_r_with_icon","Fast Reverse")},
+        {"tex_cp_help_r2_right",text("msg_fast_f_with_icon","Fast Forward")},
+        {"tex_cp_help_l1",text("msg_prev_with_icon","Previous")},
+        {"tex_cp_help_r1",text("msg_next_with_icon","Next")}};
+    if(assets_.image("videoplayer_plugin","tex_cp_help_circle").isNull()) {
+        static bool helpWarned=false;
+        if(!helpWarned) {
+            helpWarned=true;
+            qWarning().noquote()<<"view: videoplayer_plugin/tex_cp_help_* did not decode; drawing the ASCII"
+                " advice sentence";
+        }
+        mediaPanelText(p,QRectF(110,1020,1700,35),
+            "Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle"
+            "   R Repeat   Triangle Options",21,QColor(230,230,230),Qt::AlignLeft|Qt::AlignVCenter);
+        return;
+    }
+    // FIT: six equal 283 px slots across the same 110..1810 band the bar uses; the icon keeps its 86x30
+    // size and the label takes the rest of its slot at 19 px (the size-10 fit above).
+    constexpr qreal stripLeft=110.,stripWidth=1700.,iconWidth=86.,iconHeight=30.;
+    const qreal slot=stripWidth/double(help.size());
+    for(int i=0;i<help.size();++i) {
+        const qreal x=stripLeft+i*slot;
+        drawImage(p,"videoplayer_plugin",help[i].icon,QRectF(x,1026.,iconWidth,iconHeight));
+        mediaPanelText(p,QRectF(x+iconWidth+6.,1026.,slot-iconWidth-10.,iconHeight),help[i].label,19,
+            QColor(238,238,238),Qt::AlignLeft|Qt::AlignVCenter);
+    }
+}
+// Surface B2, the XMB music control panel (audit/MEDIA-PANELS-FIRMWARE.md 4.2-4.3): explore_plugin_full's
+// control_panel_page - a 72x72 tex_cp_panel plate scaled 1.3 (0x270a54), ten status planes, a 200x6
+// progress_bar_playing_time with label_playing_time, and seven 90x60 buttons sharing tex_cp_focus. The page,
+// the plate and the button group all carry zero geometry (4.1); the anchor and the internal layout are FITS,
+// while every object size, cell and texture name is the container's own. The panel opens on Triangle, where
+// this build used to cycle Repeat (7.2); R keeps the Repeat binding.
+void View::drawMusicPanel(QPainter& p,double opacity) {
+    const double alpha=std::clamp(opacity,0.,1.);
+    if(alpha<=.002)return;
+    static const char* const icons[musicPanelButtons]={
+        "tex_cp_prev","tex_cp_next","tex_cp_pause","tex_cp_stop","tex_cp_repeat","tex_cp_shuffle","tex_cp_volume"};
+    const QImage& plate=assets_.image("explore_plugin_full","tex_cp_panel");
+    QString missing=plate.isNull()?QStringLiteral("tex_cp_panel"):QString{};
+    for(int i=0;i<musicPanelButtons && missing.isEmpty();++i)
+        if(assets_.image("explore_plugin_full",QString::fromLatin1(icons[i])).isNull())
+            missing=QString::fromLatin1(icons[i]);
+    if(!missing.isEmpty()) {
+        // One line, once: the panel this change adds is the only surface lost, so the player keeps the
+        // chrome it had and no half-drawn plate appears.
+        static bool panelWarned=false;
+        if(!panelWarned) {
+            panelWarned=true;
+            qWarning().noquote()<<"view: explore_plugin_full/"<<missing
+                <<"did not decode; the music control panel is not drawn";
+        }
+        return;
+    }
+    // The firmware's own object sizes (FC): 7 buttons of 90x60, status planes of 74x74 (98x74 for
+    // repeat/shuffle, 72x36 for the "1" badge), progress_bar_playing_time 200x6, label_playing_time size 10.
+    // The 12 px padding around the content is a FIT.
+    constexpr qreal buttonWidth=90.,buttonHeight=60.,statusHeight=74.,padding=12.;
+    constexpr qreal barWidth=200.,barHeight=6.;
+    const qreal contentWidth=buttonWidth*musicPanelButtons;
+    const qreal contentHeight=statusHeight+16.+buttonHeight;
+    const qreal plateWidth=(contentWidth+2.*padding)*musicPanelScale;
+    const qreal plateHeight=(contentHeight+2.*padding)*musicPanelScale;
+    // FIT (audit 9.2): the panel's screen anchor is a runtime projection. Centred on x 960 with its bottom
+    // edge at y 1000 - the frame's bottom band, above the volume meter and clear of the info bar.
+    const QRectF resting((1920.-plateWidth)/2.,1000.-plateHeight,plateWidth,plateHeight);
+    p.save();
+    p.setOpacity(alpha);
+    // The traced 150/100 move/size animation on the base (0x270a58 / 0x270a5c, alpha 1 at 0x270a50) is the
+    // plate growing from its own size to 1.3 x that size, upward from its resting bottom edge. The 100-unit
+    // delay is dropped: PafEase has no delay parameter and the unit is unproven (audit 9.4).
+    const double grow=1./musicPanelScale+(1.-1./musicPanelScale)*alpha;
+    const QRectF drawn(resting.center().x()-plateWidth*grow/2.,resting.bottom()-plateHeight*grow,
+        plateWidth*grow,plateHeight*grow);
+    // tex_cp_panel is a 72x72 stretchable plate: nine-sliced at a 20 px inset so the corners keep their pixels.
+    drawNineSlice(p,"explore_plugin_full","tex_cp_panel",drawn,20.,1.);
+    const qreal contentLeft=drawn.center().x()-contentWidth/2.;
+    // FIT: the content is centred in the scaled plate, which is what leaves the 1.3 scaling its even margin.
+    const qreal contentTop=drawn.center().y()-contentHeight/2.;
+    // control_play_status_group: one plane per state. This build reports playing and paused, plus the
+    // repeat and shuffle modes; the transport planes the shell has no state for (prev/next/searchb/searchf/
+    // stop) stay undrawn rather than fabricated.
+    const bool paused=shell_.mediaPaused()||shell_.busy();
+    const QImage& status=assets_.image("explore_plugin_full",
+        paused?QStringLiteral("tex_pause_status"):QStringLiteral("tex_play_status"));
+    qreal cursor=contentLeft;
+    if(!status.isNull()) {
+        p.drawImage(QRectF(cursor,contentTop,status.width(),status.height()),status);
+        cursor+=status.width()+8.;
+    }
+    QStringList badges;
+    const int repeat=shell_.mediaRepeatMode();
+    if(repeat==1)badges<<"tex_1repeat_status";
+    else if(repeat==2)badges<<"tex_repeat_status";
+    // Shell names the repeat mode directly; the shuffle flag has no accessor inside this change's write
+    // fence, so the shell's own queue-summary line is the authority for it.
+    if(shell_.mediaQueueSummary().contains(QLatin1String("Shuffle")))badges<<"tex_shuffle_status";
+    for(const auto& name:badges) {
+        const QImage& art=assets_.image("explore_plugin_full",name);
+        if(art.isNull())continue;
+        p.drawImage(QRectF(cursor,contentTop,art.width(),art.height()),art);
+        cursor+=art.width()+8.;
+    }
+    // progress_bar_playing_time (200x6) and label_playing_time. The Progress object carries no image in this
+    // container, so the widget draws paf's default progression art from system_plugin
+    // (tex_default_progress_base / tex_default_progress_slider, 24x20) - the same "the defaults live in
+    // system_plugin" rule the volume meter follows (5.2).
+    const qint64 position=shell_.mediaPosition(),total=shell_.mediaDuration();
+    const QRectF barRect(contentLeft+contentWidth-barWidth,contentTop+56.,barWidth,barHeight);
+    mediaPanelText(p,QRectF(barRect.left(),contentTop+26.,barWidth,22.),
+        MediaControls::formatTime(position)+" / "+MediaControls::formatTime(total),19,
+        QColor(240,240,240),Qt::AlignRight|Qt::AlignVCenter);
+    const QImage& barBase=assets_.image("system_plugin","tex_default_progress_base");
+    const QImage& barFill=assets_.image("system_plugin","tex_default_progress_slider");
+    if(!barBase.isNull()&&!barFill.isNull()&&total>0) {
+        const double ratio=std::clamp(double(position)/double(total),0.,1.);
+        p.drawImage(barRect,barBase);
+        if(ratio>0.)p.drawImage(QRectF(barRect.left(),barRect.top(),barRect.width()*ratio,barRect.height()),barFill);
+    }
+    // The 7-button group in the firmware's table order (cells 0, -1 ... -6), each icon at its own 90x60,
+    // with the shared tex_cp_focus drawn under the focused button.
+    const QImage& focus=assets_.image("explore_plugin_full","tex_cp_focus");
+    for(int i=0;i<musicPanelButtons;++i) {
+        const QRectF box(contentLeft+i*buttonWidth,contentTop+statusHeight+16.,buttonWidth,buttonHeight);
+        if(i==musicPanelFocus_ && !focus.isNull())p.drawImage(box,focus);
+        p.drawImage(box,assets_.image("explore_plugin_full",QString::fromLatin1(icons[i])));
+    }
+    p.restore();
+}
+// A local audio item is what the XMB panel belongs to: no video track, and not the photo viewer.
+bool View::mediaAudioOnly() const {
+    return shell_.mediaOpen() && !shell_.videoOpen() && !shell_.photoOpen();
+}
+void View::toggleMusicPanel() {
+    if(!mediaAudioOnly())return;
+    musicPanelOpen_=!musicPanelOpen_;
+    if(musicPanelOpen_) {
+        musicPanelFocus_=0;
+        // A fresh open starts the fade from nothing: the ease is reset so the 150 ms runs from 0.
+        musicPanelEase_=PafEase();
+        musicPanelEase_.retarget(0.);
+        qInfo().noquote()<<"media: music control panel opened (explore_plugin_full control_panel_page;"
+            " fade 150 ms, delay 0; scale 1.3)";
+    } else qInfo().noquote()<<"media: music control panel closed";
+    update();
+}
+void View::closeMusicPanel() {
+    if(!musicPanelOpen_)return;
+    musicPanelOpen_=false;
+    qInfo().noquote()<<"media: music control panel closed";
+    update();
+}
+void View::musicPanelMove(int delta) {
+    if(!musicPanelOpen_ || delta==0)return;
+    const int next=(musicPanelFocus_+delta%musicPanelButtons+musicPanelButtons)%musicPanelButtons;
+    if(next==musicPanelFocus_)return;
+    musicPanelFocus_=next;
+    update();
+}
+void View::musicPanelActivate() {
+    if(!musicPanelOpen_)return;
+    // Chrome only: each button runs the binding the player already had (audit 7.2 keeps the direct keys).
+    switch(musicPanelFocus_) {
+    case 0:shell_.skipMedia(-1);break;                    // msg_prev_with_icon_button
+    case 1:shell_.skipMedia(1);break;                     // msg_next_with_icon_button
+    case 2:shell_.togglePlayback();break;                 // msg_pause_button
+    case 3:shell_.back();break;                           // msg_stop_button: ends the session like Stop
+    case 4:shell_.cycleMediaRepeat();break;               // msg_repeat_button
+    case 5:shell_.toggleMediaShuffle();break;             // msg_shuffle_button
+    case 6:                                               // msg_volume_control_button: raise the meter
+        if(volumeLevel_>=0)volumeApply(volumeLevel_,QStringLiteral("MusicPanel"));
+        else qWarning().noquote()<<"media: the volume button has no endpoint to show";
+        break;
+    default:break;
+    }
+    update();
 }
 void View::zoomPhoto(int direction) {
     if(!shell_.photoOpen() || !photoViewport_.valid())return;
@@ -2215,6 +2550,18 @@ void View::keyPressEvent(QKeyEvent* e) {
         }
         return;
     }
+    // The music control panel owns its keys while it is up: Left/Right walk the seven buttons, Cross runs
+    // the focused one, Circle/Triangle close it. Nothing else in the frame reads them in this state.
+    if(musicPanelOpen_) {
+        switch(e->key()) {
+        case Qt::Key_Left:musicPanelMove(-1);e->accept();return;
+        case Qt::Key_Right:musicPanelMove(1);e->accept();return;
+        case Qt::Key_Return:case Qt::Key_Enter:musicPanelActivate();e->accept();return;
+        case Qt::Key_Escape:case Qt::Key_Backspace:closeMusicPanel();e->accept();return;
+        case Qt::Key_T:toggleMusicPanel();e->accept();return;
+        default:break;
+        }
+    }
     if(shell_.photoOpen() && shell_.message().isEmpty()) {
         switch(e->key()) {
         case Qt::Key_Plus:case Qt::Key_Equal:zoomPhoto(1);e->accept();return;
@@ -2241,8 +2588,10 @@ void View::keyPressEvent(QKeyEvent* e) {
     case Qt::Key_R:shell_.cycleMediaRepeat();break;
     case Qt::Key_PageUp:shell_.vertical(-10);break;case Qt::Key_PageDown:shell_.vertical(10);break;
     case Qt::Key_F5:shell_.refreshDirectory();break;
-    // Triangle on the XMB: the selected entry's options (keyboard substitute; controllers send Y).
-    case Qt::Key_T:shell_.toggleOptions();break;
+    // Triangle on the XMB: the selected entry's options (keyboard substitute; controllers send Y). While a
+    // local audio item plays it opens the firmware's own music control panel instead (audit 7.2: the console
+    // opens control_panel_page there; this build used to cycle Repeat on this key - R still does).
+    case Qt::Key_T:if(mediaAudioOnly())toggleMusicPanel();else shell_.toggleOptions();break;
     case Qt::Key_F11:shell_.setFullscreen(!window()->isFullScreen());break;
     default:QOpenGLWidget::keyPressEvent(e);return;
     }
@@ -2295,6 +2644,15 @@ void View::pollController() {
         if(edgePs&XINPUT_GAMEPAD_Y)shell_.toggleOptions();
         return;
     }
+    // The music control panel owns the pad while it is up, exactly as the item panel does above.
+    if(musicPanelOpen_) {
+        const auto edgePs=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;buttons_=buttons;
+        if(edgePs&XINPUT_GAMEPAD_DPAD_LEFT)musicPanelMove(-1);
+        if(edgePs&XINPUT_GAMEPAD_DPAD_RIGHT)musicPanelMove(1);
+        if(edgePs&XINPUT_GAMEPAD_A)musicPanelActivate();
+        if(edgePs&(XINPUT_GAMEPAD_B|XINPUT_GAMEPAD_Y))closeMusicPanel();
+        return;
+    }
     if(xinput || playstation) {
         const float lx=xinput?state.Gamepad.sThumbLX/32767.f:hid.lx,ly=xinput?-state.Gamepad.sThumbLY/32767.f:hid.ly; // +y down, as HID
         if(lx<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_LEFT;if(lx>.5f)buttons|=XINPUT_GAMEPAD_DPAD_RIGHT;
@@ -2341,11 +2699,13 @@ void View::pollController() {
     if(movement&XINPUT_GAMEPAD_DPAD_UP)shell_.vertical(-1);
     if(movement&XINPUT_GAMEPAD_DPAD_DOWN)shell_.vertical(1);
     if(edge&XINPUT_GAMEPAD_A)shell_.activate();if(edge&XINPUT_GAMEPAD_B)shell_.back();
-    // Triangle: the item options panel on a content row, and the in-player panel (subtitles, audio
-    // tracks, repeat, shuffle) while a video plays. Music, which has no player panel, keeps Triangle as
-    // Repeat, and Repeat also keeps the R key, so nothing lost a binding it had.
+    // Triangle: the item options panel on a content row, the in-player panel (subtitles, audio tracks,
+    // repeat, shuffle) while a video plays, and the firmware's music control panel (explore_plugin_full
+    // control_panel_page) while a local track plays - which is where the console puts it (audit 7.2). Repeat
+    // moved off this key and keeps R (and the panel's own Repeat button), so nothing lost a binding.
     if(edge&XINPUT_GAMEPAD_Y) {
         if(!shell_.mediaOpen() || shell_.videoOpen())shell_.toggleOptions();
+        else if(mediaAudioOnly())toggleMusicPanel();
         else shell_.cycleMediaRepeat();
     }
     if(shell_.mediaOpen()) {
