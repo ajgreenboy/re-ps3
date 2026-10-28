@@ -52,7 +52,12 @@ private:
     QHash<QString,QString> bestContainer_; // container/name -> container with the largest copy
     Container readContainer(const QString& name) const;
     QHash<QString,QString> readEnglish(const Container& container) const;
-    static QImage decodeGim(const QByteArray& bytes);
+    // GIM decoder: RGBA8888 (0x3), DXT1/3/5 (0x8/0x9/0xA) and the indexed formats
+    // INDEX4/INDEX8/INDEX16 (0x4/0x5/0x6) with the picture's palette block. Indexed
+    // pictures without a palette block decode as white coverage masks (the 4.93 OSK
+    // format-0x5 badge/caption textures use that form). XMB_GIM_TRACE=1 logs the
+    // header, palette and result of every picture.
+    static QImage decodeGim(const QByteArray& bytes,const QString& name={});
     static QImage decodeDds(const QByteArray& bytes);
 };
 }
