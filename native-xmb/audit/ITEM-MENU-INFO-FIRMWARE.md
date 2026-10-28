@@ -1587,3 +1587,130 @@ the shared tree, and the re-measure of the gate's captureBaseline once text rend
 - F6's nested-band note ("drawing the same band is the honest unmeasured choice") stands, now with the
   explicit mismatch verdict in H4.
 
+---
+
+# I. Dated measurement pass - 2026-10-28: the nested plate, the two-button confirm, and the error surface
+
+Read-only pass on the existing local artifacts, no new capture, no RPCS3 run, no source edit. Three items:
+I.1 states what the RCO fixes about the level-1 plate and what no local artifact can; I.2 records the
+two-button confirm as a **negative** with the capture that would settle it; I.3 restates the error surface
+so a future pass does not go looking for it. Tools used are the same helpers as
+`SETTINGS-FIRMWARE.md` 15 (`C:\dev\work\m.py` and friends) plus the already-dumped RCO trees in
+`C:\dev\out\rco-dump\`.
+
+## I.1 The nested plate (level 1): what is authored, what is not, what would settle it
+
+Command: `Select-String` over `C:\dev\out\rco-dump\all.txt` and the `--rco-tree` dump of
+`explore_plugin_full` (lines 1906-1993). `expage_menu` is 16 objects:
+
+```
+expage_menu                      Page  0x801 @222852
+  plane_menu0                    Plane 0x802 @222928  pos 0,0  size 0x0     (auto)
+    plane_menu0_BG0 / _BG1       Plane 0x802         size 0x0
+    plane_menu0_LowerMenu / _UpperMenu  MList 0x809  size 0x0   (ships empty)
+  plane_menu1                    Plane 0x802 @223844  pos 0,0  size 128x272
+    plane_menu1_BG0 / _BG1       Plane 0x802         size 0x0
+    plane_menu1_LowerMenu / _UpperMenu  MList 0x809  size 0x0   (ships empty)
+  plane_menu2                    Plane 0x802 @224760  pos 0,0  size 128x272
+    plane_menu2_BG0 / _BG1       Plane 0x802         size 0x0
+    plane_menu2_LowerMenu / _UpperMenu  MList 0x809  size 0x0   (ships empty)
+```
+
+A2/H4 already record this tree. What this pass adds is a statement of what it does and does not determine:
+
+1. **The level containers are siblings, not children of level 0.** `plane_menu1` and `plane_menu2` are
+   `expage_menu`'s children beside `plane_menu0`, each with its own `BG0`, `BG1` and two MLists. So a
+   level-1 list is a **second box with its own background plate and its own single focus plate**, and the
+   level-0 plate is not reparented: it still exists in the tree while level 1 is open. H4's "parent
+   visibility" row is therefore a real mismatch, not a modelling choice.
+2. **The authored datum is the size only, and even that is not a screen size.** All three levels carry
+   `posX=0 posY=0`, so the position is computed by `explore_plugin_all.c` (A2 cites the menu (0,0)/(0,1)
+   addressing); GEOMETRY-ROOT 3.7/5.6 already shows the same container family's info-bar plane authored
+   560x82 and drawn at 591x58, i.e. the RCO width/height is not 1:1 screen px. So 128x272 is a **box
+   declaration**, not a measured rectangle.
+3. **The numbers are at least self-consistent with a 4-row list.** At the menu's smallest text size (19 px,
+   `metric-size-19 "Sort By"` = 69.73 px in `audit/TEXT-RENDERER.md` 5) the level-1 labels fit inside 128 px,
+   and four rows at the measured 38 px pitch (E1/G2) occupy 152 of the 272 px of height. That is a
+   plausibility check, not a measurement.
+4. **The colour/material of the nested plate is not in `expage_menu` either.** `BG0`/`BG1` have no image
+   reference (both `image=null`), like level 0's; the plate look comes from the plugin's own material path,
+   which is why E1/G2 could only measure it from a frame.
+
+**What a future rig run must capture to close it.** No frame shows an open level 1 (G4); the route is
+replayable and is the one H2's row order implies:
+
+- Route A (preferred): XMB **Video** (or Music/Photo) column, focus a **folder-class item**, press Triangle.
+  The menu opens with the utility group above the action rows; focus starts on the item's own command, so
+  press `Up` once to reach **`Sort By`** (H2: `Sort By` is group 0, row 0), then Cross.
+- Route B (if the rig's media columns are empty): the **Game Data Utility** folder in the Game column
+  (Triangle on the folder), same `Sort By` -> Cross.
+- Keys on the batch-1/2 mapping: Triangle = `Insert`, Cross = `PgDown`, Back = `PgUp` (MANIFEST section 1).
+- Capture: one full-frame still **at least 1 s after the Cross** (SETTINGS 15.4: the dim ramps after the
+  band, so an earlier still reads high), plus a full-frame burst around the key for the arrival, plus a
+  1:1 crop burst of `x 1100..1920, y 100..900` so the second box's rectangle, its own BG1 and its distance
+  from the parent box can be resolved frame by frame.
+- Measured on those frames: the nested box's left/right/top/bottom, its fill profile, its row pitch and
+  first-row y, whether the level-0 rows and plate are still visible, and whether the nested box carries a
+  heading.
+
+Expected shape from the RCO: a **second, smaller, floating box** with its own focus plate, positioned by the
+plugin relative to the parent box, with the level-0 plate still behind it - which is the opposite of what
+this build draws (H4: same band, parent rows replaced). **Confidence: high that the shape is a second box
+(RCO, three attributes); zero on its screen rectangle (no frame, and the RCO size is not a screen size).**
+
+## I.2 The two-button confirm plate: no RCO declares one (negative result)
+
+The native draws its own two-button confirm box. This pass searched every container the local tree has for a
+plate (an image-bearing, sized plane) behind a two-button confirm, and found **none**.
+
+| container | what it holds | verdict |
+|---|---|---|
+| `msgdialog_plugin.rco` (257,900 B, 2 objects) | `page_msgdialog` only: **no plane, no button, no text** | no plate |
+| `system_plugin.rco` (59 objects, 17 animations) | pages `page_default_theme`, `page_wallpaper_theme`, `page_dummyload`, `page_infobar`, `page_busy`, `page_btnnavi`, `page_notification`, `page_pointcursor`, `page_autooff_guide` | **no dialog or confirm page at all** |
+| `sysconf_plugin.rco` | `page_dialog_base` @765056 exists but has **no children**; `page_base0` @766188; the `page_*_finish` family are text result pages (section 4) | no plate |
+| `explore_plugin_full.rco` `poweroff_page` @235652 | `Plane poweroff_base` with `pos 0,0 size 0x0 image=null`; `CheckboxGroup poweroff_select`; `Button poweroff_yes` and `poweroff_no`, both `image=null shadow=null image2=null`; `Text` = the turn-off question | **this is the two-button confirm, and it has no plate and no button textures** |
+| image tables, all dumps | the only dialog-ish image names are `icon_dialog_base` (an icon) and the generic `tex_button` / `tex_button_focus` / `tex_button_shadow` used by the file-copy and file-delete dialogs | no dialog plate texture |
+
+So on this console the two-button confirm is **drawn by code**, not by an authored plate: the one confirm
+page that exists (`poweroff_page`) is a bare container plus a checkbox group plus two buttonless buttons.
+The native's plate is a fit with no firmware counterpart, and it should be labelled as such rather than
+"measured".
+
+**What would settle it.** A frame of a real two-button confirm, in either of two routes:
+
+- Route A - the PS menu's system confirm (the case the native imitates): `--script` can drive it without a
+  controller, because the native's own script grammar has `pshold` (system menu) - on the firmware side the
+  equivalent is the PS button hold. Route: hold PS -> `Turn Off the System` -> Cross. **Careful:** accepting
+  it powers the console down, so capture the *dialog* (the frame after the second Cross) and stop there.
+- Route B - an in-XMB confirm that reuses the same visual: Game column -> `Saved Data Utility (PS3)` ->
+  a saved-data entry -> Triangle -> `Delete` -> Cross. This is `expage_fdelete_dialog`, which ships its own
+  buttons (`cmdbtn_select_all`, `deselect_all`, `decide_src`) with textures, so it is the closest authored
+  cousin and will show whether the confirm box has a plate when the page does carry textures.
+- Measure on those frames: plate rectangle and fill, corner radius, the two buttons' rects and their focus
+  treatment, the hint row, and the dim behind. That set is exactly what the native's own plate currently
+  guesses.
+
+**Confidence: high** that no RCO in the local tree declares the plate (four containers enumerated, all
+zero-sized or childless); **high** that the confirm is code-drawn; **unmeasured** for every pixel of it.
+
+## I.3 The error surface, restated so no future pass hunts for it
+
+Four routes were tried in batch 2 (`C:\dev\out\rpcs3-ref2-2026-10-28\`, `MANIFEST.md` 4.1) and this is the
+whole of what this console produces. There is **no 800xxxxx error code and no error dialog** reachable on
+this rig.
+
+| attempt | what actually happens | evidence |
+|---|---|---|
+| Start a title with no `PARAM.SFO` (`Corrupted Data`, `dev_hdd0/game/TEST12345`) | **no-op**: no dialog, no page, no visual reaction; the clock keeps advancing and the XMB stays interactive across 9 s + 13 s + three 20 s grabs | `error/column-corrupted-focused.png`, `error/launch-burst/` (387 f), `error/corrupt-launch-burst/` (740 f), `error/retry-t01..t06.png` |
+| `Settings > System Update > Update via Internet` | **not a firmware page**: vsh dies, RPCS3 fatal `fs::windows_file::write ... Access is denied (0x5)` in `ScePafJob`, console frozen on `Checking... Please wait.` with the host overlay drawn over the frame | `error/update2-launch-burst/` (660 f), `error/update2-settle-01..04.png`, `error/sysupdate-page-rest.png` |
+| Launch `PlayStation Store` offline | the app's "please wait" then a **system message page** (`Internet Connection Settings`, body about the connection, `OK`, `X Enter` / `O Back`) - the same page an Internet Connection Test failure raises. **No code, no error number** | `error/retry-t01.png`, `error/retry-t04/t06.png`, `error/icp-page-rest.png` |
+| `Settings > Network Settings > Internet Connection Test` | **the one producible string page**: title `Internet Connection Test`, message ink x 753-1163 y 530-546, one rule at y 199, a dimmed heading ghost, no focusable control, `O Back` | `error/ictest5-fail/` (10,569 crop frames at 234.9 fps), `error/ictest2-burst/`, `error/ictest3-burst/`, `error/page-at-rest.png` |
+
+Consequences to carry forward: (a) a native "error surface" cannot be validated against this console beyond
+the one message page in the last row; (b) the System Update failure is an emulator fault, so the
+`software_update_plugin` RCO (SETTINGS U8) stays open and no update-failure page exists to copy; (c) the
+corrupt-title no-op means a `Start` on an invalid title needs no native dialog either; (d) any 800xxxxx code
+in a future spec is unmeasurable here and must be attributed to a source other than these captures.
+
+No source file was edited for this section; no RCO, threshold or reference was touched.
+
