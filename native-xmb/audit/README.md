@@ -5,6 +5,10 @@ RPCS3 VSH recording. Project goal: a complete native C++ recreation.
 
 ## Read this set
 
+Current handoff (2026-10-27): [HANDOFF-2026-10-27.md](../HANDOFF-2026-10-27.md) - the tree at `0c8faee`,
+today's gate result, the known gaps by surface, the config migration policy, the [diagnose
+design](DIAGNOSE.md), the [install guide](../INSTALL.md) and the release checklist.
+
 Latest Friends continuation (2026-10-26): [signed-in Steam client connection](STEAM-CLIENT-FRIENDS.md), including the verified live list and external SDK build input.
 
 Latest continuations (2026-10-25): [Steam and installed-PKG content](STEAM-INTEGRATION.md),
