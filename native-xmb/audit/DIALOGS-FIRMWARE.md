@@ -792,3 +792,95 @@ info    --script "full,pause=4000,TRIANGLE,wait,wait,DOWN,wait,wait,ENTER,wait,w
 error   register an app whose executable exists but is not a valid image, then reach its row and press
         Cross; the ErrorCode page reports QProcess::errorString() as the cause.
 ```
+
+---
+
+## 8. Dated correction - 2026-10-27/28 capture batch
+
+Evidence added after sections 1-7 were written: one RPCS3 session of the real 4.93 XMB at 1920x1080
+(`C:\dev\out\rpcs3-ref-2026-10-28\`, `MANIFEST.md`), 135 stills and 9 full-frame bursts. This section
+marks each affected line above as resolved or still open. Nothing above is deleted or rewritten; the old
+text stays as the 2026-10-27 record. Frame paths are relative to the capture root. Numbers are screen
+pixels measured on the named frame; where the batch summary (`MANIFEST.md` section 6) rounds a value, the
+frame value is used and the difference is named.
+
+### 8.1 Resolved: the information page (D5) now has a 1080p firmware frame
+
+Old entries this closes:
+
+- section 2.5: "**UNVERIFIED geometry:** the native source cites 'reference 92 s' ... The 92 s frame
+  cannot be checked locally."
+- section 4.1, row `info page reference claim | "reference 92 s" ... | unverifiable: the local frame set
+  ends at 64.6 s`.
+- section 5, row `information page ("reference 92 s") | **unverifiable locally**`.
+- section 7.2: "Information page (D5) - no local firmware frame exists (audit 2.5)".
+- section 7.6, last bullet: "the information page's 'reference 92 s' claim is still unverifiable
+  locally".
+
+Frames: `dialogs/information-page-01.png` and `-02.png`, both 1920x1080. Route: XMB root, Game column,
+`Corrupted Data` focused, Triangle, Cross on `Information`. Measured on `-01` (rules by full-row luma
+profile; rows as ink bands at luma >= 150 over x 700..1300):
+
+| element | firmware, measured | frame |
+|---|---|---|
+| frame treatment | no dim; the info bar is replaced by the two rules; the category band is off-screen | `information-page-01.png` |
+| rule 1 | y = 199, 1 px, full width (mean luma 176.8 over x 200..1600) | `information-page-01.png` |
+| rule 2 | y = 879, 1 px, full width (mean luma 182.0) | `information-page-01.png` |
+| icon plate | x 665..985, y ~263..442 | `information-page-01.png` |
+| rows | `Title`, `Parental Control`, `Created`, `Size`; ink tops y 499/539/579/619 -> pitch 40 px | `information-page-01.png` |
+| label column | right-aligned; last ink x 802-803 | `information-page-01.png` |
+| value column | left-aligned; first ink x 844-853 | `information-page-01.png` |
+| back hint | `O Back` glyph + label, ink x 1155..1240, y 897..916 | `information-page-01.png` |
+
+That is the D4 convention, not a D1 box: two full-width 1 px rules, the rows between them, one hint
+under the lower rule, no dialog plate, no dim. The `Created` value in this frame is `22/10/2026 2:14`,
+`Size` is `0 KB`, and `Title` / `Parental Control` are `-`, i.e. `msg_info_none` - the firmware's own
+none/unknown behaviour that section 4.2 item 13 asks the native to copy with `msg_info_none` /
+`msg_info_unknown`.
+
+Deltas this gives the native info page (`View::drawMessageInfoPage`, described in 7.2):
+
+| quantity | native | firmware | delta |
+|---|---|---|---|
+| rule 1 | y 199 | y 199 | 0 |
+| rule 2 | y 866 | y 879 | **13 px high** |
+| row pitch | 40 px | 40 px | 0 |
+| label right edge | x 925 | x 803 | **122 px right** |
+| value left edge | x 961 | x 844 | **117 px right** |
+| back hint | x 1155, ink 889..910 | ink 1155..1240, y 897..916 | x 0, **7 px high** |
+
+Two caveats. The manifest gives the rules as "y~190 and y~915"; a direct scan of the frame it cites puts
+them at 199 and 879, and the older D4 frame measured 197/877, so 199/879 is used here (915 is the `Back`
+hint row, ink 897..916). And the frame proves geometry only: whether the rules are an alpha line or a 1 px
+texture is still spec-only.
+
+### 8.2 Batch items and what they do to this audit
+
+| batch item | capture | effect here |
+|---|---|---|
+| DIALOGS #1 options open + Down x4 | `dialogs/options-open-01.png`, `options-down-01.png` ... `-04.png` | not a D1-D9 dialog: it is the Triangle `expage_menu` overlay. It closes no row of section 5 and adds no dialog geometry; its numbers belong to `ITEM-MENU-INFO-FIRMWARE.md` A6/A7 |
+| DIALOGS #2 open/close bursts at 54.1 / 54.8 fps | `dialogs/options-open-burst2/` (108 frames, 1.977 s), `options-close-burst2/` (110 frames, 1.990 s) | the same menu overlay, not a message box: the band fades (mid-alpha at `options-open-burst2/f_0000692.png`, ~190 ms after the key; still partial at `options-close-burst2/f_0000610.png`, ~110 ms after the key) over a stationary XMB. It does **not** close the "button-hint fade" or "box open/close fade" rows of section 5 - no frame shows a hint row or a box - and it does not touch D6-D8 |
+| DIALOGS #3 Cross on `Information` | `dialogs/information-page-01.png`, `-02.png` | closes the information-page entries: 8.1 |
+| DIALOGS #4 signed-in indicators | none | not a dialog surface (the five slots are `ITEM-MENU-INFO-FIRMWARE.md` B5/B7) and not captured: the console is offline with no PSN account (MANIFEST section 7 no. 1). `dialogs/root-clock-mmdd-12h.png` records the unsigned-in bar (plate + clock only) |
+| DIALOGS #5 busy indicator / copy crowding | none | not captured: the VFS holds no copyable object (MANIFEST section 7 no. 2) |
+| DIALOGS #6 `MM/DD/YYYY` + 12-hour clock | `dialogs/root-clock-mmdd-12h.png`, `-2.png` | adds no dialog row; it closes the info-bar plate question: the plate is a fixed 591x58 (1329..1919 x 75..132), text right edge 1760, in both date formats. The D4 frame's convention (plate and date text hidden, analog clock kept) is unchanged |
+
+### 8.3 Still spec-only after the batch
+
+Every row of section 5 that this batch did **not** close, restated so it stays visible:
+
+| Surface | Status after 2026-10-27/28 | What would prove it |
+|---|---|---|
+| two-button confirm box (Cross/Circle, Yes/No) | spec-only: RCO + TRACED, no frame | a capture of any "Are you sure?" box |
+| the box's plate rectangle at 1080p | spec-only | the same capture plus the box's plane vertices |
+| error-code page | spec-only | a failing network sign-in (needs PSN, unavailable) |
+| dim behind a modal | spec-only; the info page is non-modal and shows none | the two-button capture, sampling background luma |
+| button-hint fade (100 units) | spec-only | a burst of a dialog's hint row appearing |
+| box open/close fade (200 / 1000 units) | spec-only | the same burst |
+| PS menu "Turn Off the System?" | native-only, no reference | a PS-hold capture on a console |
+| D6 delete / D7 copy / D8 busy | no frame | an object to delete or copy (empty VFS) |
+| which `tex_notification_*` glyph a box draws | still unproven | a normal message box |
+| what the info page's rules are made of | geometry only | a decode or a pixel sample at several backgrounds |
+
+No source file was edited for this section; no RCO or capture is committed. The frames stay under
+`C:\dev\out\rpcs3-ref-2026-10-28\` (git-ignored).

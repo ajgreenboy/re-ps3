@@ -648,6 +648,131 @@ the crops kept for review are under `work/`.
 
 ---
 
+---
+
+# E. Dated correction - 2026-10-27/28 capture batch
+
+Evidence added after Parts A-D were written: one RPCS3 session of the real 4.93 XMB at 1920x1080
+(`C:\dev\out\rpcs3-ref-2026-10-28\`, `MANIFEST.md`), 135 stills and 9 full-frame bursts. This part marks
+the parts of A5, A6, A7 and B3 the batch resolved, and the parts it did not. Nothing above is deleted;
+each old entry keeps its 2026-10-27 text. Frame paths are relative to the capture root.
+
+## E1. A6 - the options menu geometry, measured
+
+State: XMB root, Game column, `Corrupted Data` focused, Triangle. Frames: `dialogs/options-open-01.png`
+(settled), `options-down-01.png` ... `-04.png` (Down x4 with a grab per step), `options-open-03.png`
+(state check), `options-closed-03.png` (closed).
+
+| quantity | measured | note |
+|---|---|---|
+| menu surface | full-height vertical gradient band; left edge x ~1330, fading to transparent by x ~1690 | the XMB behind is dimmed. The luma at y=30 is 0 for x 1180..1300, 50 at x 1340, 2 at x 1700. This is not a plate sized to the rows |
+| rows | `Start`, `Delete`, `Information`; focused first row `Start` | the focused row is bright; `Delete` and `Information` are dim |
+| row text left edge | x ~1334 | measured run start on the settled frame |
+| row ink bands | y 538..562, 581..598, 621..638 | luma >= 120 over x 1340..1900 |
+| row baselines / pitch | ~560, 598, 636 -> **pitch 38 px** | the original A6 question (row pitch) is closed; 38 px agrees with the 37-38 px the manifest reports |
+| Down x4 | focus reaches `Information` and stays there (no wrap); the row set does not scroll | `options-down-01..04.png` |
+
+Two corrections to the record:
+
+- The absolute row y in `MANIFEST.md` section 6 is 479/516/554; a direct scan of the stills it cites puts
+  the baselines at 560/598/636, i.e. a constant 82 px lower. The pitch (37-38) is common to both, and the
+  frame value is used here. The frame is self-consistent with the rest of the batch (the info-bar plate
+  is at y 75..132 in the same frames).
+- A2's inference that the menu is "a plate-backed floating box, not a full-height translucent strip" is
+  **not what the frame shows**: the surface touches y 0 and y 1079. The RCO facts in A2 stand (three menu
+  levels, `BG0`/`BG1` per level, the 128x272 nested boxes); the *screen shape* is a full-height band with
+  a horizontal fade, and C1 items 5-6 should be read with that correction.
+
+Still unmeasured after this batch (A6's original list, minus the pitch and the first row):
+
+- the `BG1` highlight rectangle (it is not separable from the band's gradient in these frames);
+- the text cap height and the row paddings;
+- the panel's top/bottom (it is the full frame height, so there is no box edge to measure).
+
+## E2. A7 - open and close motion
+
+Frames: `dialogs/options-open-burst2/` (108 frames, 1.977 s, 54.1 fps; the key is pressed at t=500 ms) and
+`dialogs/options-close-burst2/` (110 frames, 1.990 s, 54.8 fps; the key is pressed at t=500 ms).
+
+Measured:
+
+- **Open**: `options-open-burst2/f_0000692.png` is ~192 ms after the key and the band is at partial
+  alpha (the XMB behind is visible through it). The settled frame of the same burst (`f_0002008.png`)
+  has the full row set.
+- **Close**: `options-close-burst2/f_0000610.png` is ~110 ms after the key and the band is still
+  partially visible; by `f_0002008.png` it is gone.
+- The open burst's mid-alpha frame also shows `Sort By` and `Group Content` above the three rows, which
+  the settled frame does not. The fade therefore composites more than the final row set, and the burst
+  cannot be read as a clean single-surface alpha curve.
+
+What this does to A7: the old inference was "the open should be about half the current duration
+[100 units] and the close is an instant destroy, not an animation". The first half is **not supported**:
+the open is still visibly at partial alpha ~190 ms in, so a ~100 ms fade is too short. The second half is
+**contradicted**: the close is a visible fade of at least ~110 ms, not an instant removal. What is still
+missing is the settle frame / duration, which the manifest does not publish; the exact open and close
+durations stay open. Do **not** apply C1 item 8 (drop `moveMilliseconds` to 100) on this evidence.
+
+## E3. A5 - the information page (`info_list`)
+
+Frames: `dialogs/information-page-01.png`, `-02.png`. The page is the D4/D5 convention, measured at
+1080p: rules at y 199 and 879 (1 px, full width), icon plate x 665..985 y ~263..442, rows `Title`,
+`Parental Control`, `Created`, `Size` at ink tops 499/539/579/619 (pitch 40 px), labels right-aligned to
+x 803, values left-aligned from x 844, `O Back` hint ink x 1155..1240 y 897..916, no dim, the info bar
+replaced by the rules. Full table and the native deltas: `DIALOGS-FIRMWARE.md` section 8.1.
+
+A5's page geometry is therefore closed. What the frame does not give: the page's own backdrop treatment
+(alpha vs a 1 px border) and whether other `info_list` variants (file, trophy) share the same rect.
+
+## E4. B3 - the clock plate does not grow with the string
+
+Old entry (B3): "The capture that settles it is the same one A6 needs, plus a second grab with a longer
+date format (`MM/DD/YYYY`) to see whether the plate grows with the string."
+
+Frames: `dialogs/root-clock-mmdd-12h.png` and `-2.png` (Date Format `MM/DD/YYYY`, Time Format
+`12-Hour Clock`, string `10/27 9:53 PM`), against the existing `C:\dev\xmb\out\native-reference\ab-rpcs3-root.png`
+(string `25/10 12:32`, DD/MM 24-hour).
+
+| quantity | `10/27 9:53 PM` | `25/10 12:32` |
+|---|---|---|
+| plate outline | left x 1329, top y 75, bottom y 132 (591 x 58, clipped by the right edge at 1919) | identical |
+| text right edge | x 1760 | x 1760 |
+| text left edge | x 1562 | x 1592 |
+| analog clock glyph | x 1774..1805, y 88..119 | identical |
+
+So: **the plate is fixed at 591x58 and the text is right-aligned to x 1760 in both formats; it does not
+grow with the string.** The 560x82 authored `indi_base` box remains a different object, and the question
+of why the runtime box differs from the authored one is still open (it was B3's "either the plugin resizes
+it or the plate is the tile's visible core"). B3's 591x58 measurement and its 1760 text edge are
+re-confirmed; `MANIFEST.md` section 6's "both end at x~1880" is not an edge in either frame (the glyph
+ends at 1805).
+
+## E5. D3 - status of the six capture wishes
+
+| # | Wish | Status after the batch | Frames |
+|---:|---|---|---|
+| 1 | options menu open + Down x4, one grab per step | **CLOSED for pitch, first row, text column and clamp**; E1 | `dialogs/options-open-01.png`, `options-down-01..04.png` |
+| 2 | Triangle again (close), >= 30 fps | **PARTIAL**: a visible fade of at least ~110 ms, exact duration not settled; E2 | `dialogs/options-close-burst2/` |
+| 3 | Cross on `Information` | **CLOSED**; E3 | `dialogs/information-page-01.png`, `-02.png` |
+| 4 | signed-in root with friends/message/download/avatar/plus | **OPEN**: the console is offline and has no PSN account (MANIFEST section 7 no. 1). `root-clock-mmdd-12h.png` is the unsigned-in bar only | none |
+| 5 | busiest state plus a copy/busy operation | **OPEN**: the VFS holds no copyable object (MANIFEST section 7 no. 2) | none |
+| 6 | `MM/DD/YYYY` + 12-hour clock, plate growth | **CLOSED**: plate does not grow; E4 | `dialogs/root-clock-mmdd-12h.png`, `-2.png` |
+
+Item 1's "one installed game" caveat also stands: the batch used `Corrupted Data`, whose menu is the same
+`expage_menu` page with the corrupt-item row set (`Start / Delete / Information`), not a game's
+(MANIFEST section 7 no. 5). Every geometry value in E1 is item-independent.
+
+## E6. Still unattributed after the batch
+
+- Which of the five indicator objects appears under which condition, their alphas, and the hiding order
+  when all five are eligible (B5/B7).
+- The busy indicator's position and timing in a real copy (B6).
+- The `BG1` rectangle, the menu text cap height and paddings (E1).
+- The exact options-menu open/close duration (E2).
+- The clock's per-minute writer (B6; PAGE-MOVE section 3 is still the state of that trace).
+- The plate/anchor reconciliation (560x82 authored vs 591x58 drawn) - measured but not explained.
+
+---
+
 # Summary
 
 **A. Options menu.** Supplied by `explore_plugin` as page `expage_menu` in `explore_plugin_full.rco`: three
@@ -681,3 +806,14 @@ focus plate, closed on Circle and animated in 100 not 200 units. (2) The info ba
 `system_plugin:tex_infobar` (the notification gradient) and inverts the plate polarity, where the
 firmware stretches the 24x24 `tex_indi_bg` 9-slice with a 5% black interior. (3) The indicator row does
 not exist in the native and the labels are English literals rather than `msg_*` table reads.
+
+---
+
+**Status of this summary, 2026-10-27/28.** Part E corrects three statements above without deleting them.
+(1) On screen the options menu is a **full-height band** (left edge x ~1330, fading out by x ~1690), not
+a floating box; its rows measure 38 px pitch at baselines 560/598/636; and its open/close motion is
+visible at 54 fps for at least ~190 ms (open) and ~110 ms (close), so "animated in 100 not 200 units" is
+not established. (2) The information page now has a 1080p frame (E3), and its rows sit 120 px left of
+where the native draws them. (3) The clock plate is fixed at 591x58 and does not grow with the date string
+(E4). A6's "row pitch, font size, paddings and screen box are unattributed" is now partly resolved: pitch
+and first row are measured, the `BG1` rectangle, font size and paddings are still open.

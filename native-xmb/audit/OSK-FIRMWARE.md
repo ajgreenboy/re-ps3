@@ -972,7 +972,7 @@ in the code comment."
 Resolved from `osk/caret-burst/` (172 frames, 3.185 s, 53.7 fps, frames `f_0000018.png` ... `f_0003203.png`;
 green metric in `logs/caret-series.csv`, measured with `tools/series.ps1`):
 
-| phase | frames | duration |
+| phase | time | duration |
 |---|---|---|
 | lit | 462 -> 957 ms | 495 ms |
 | dark | 957 -> 1399 ms | 442 ms |
@@ -1042,9 +1042,9 @@ Cross on `Edit`):
   693x35, with `X Edit` / `O Back`.
 
 Panel rect: a direct scan of `osk-default-focus.png` (luma >= 55 at x=500) gives **x 493..1426,
-y 290..789** (934 x 499). That agrees with section 4.1 (493, 290, 934x500) within 1 px and contradicts
-the batch summary's `x 493-1427, y 282-755`, which is 8 px high and 34 px short at the bottom; the frame
-value is used. The internal bands (title 46, field 58, grid 324, footer 58) were not re-measured.
+y 290..789** (934 x 499). That agrees with section 4.1 (493, 290, 934x500) within 1 px. The batch
+summary's `x 493-1427, y 282-755` starts 8 px higher and ends 34 px earlier (26 px shorter), so the
+frame value is used. The internal bands (title 46, field 58, grid 324, footer 58) were not re-measured.
 
 ### 13.4 Still open after the batch
 

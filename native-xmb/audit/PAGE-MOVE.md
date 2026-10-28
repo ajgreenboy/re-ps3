@@ -942,3 +942,62 @@ node -e "const j=require('./out/native-reference/rco-behavior/resources.json');.
 No `.cpp`/`.h` file was modified; no git command was run; no capture was taken; the RPCS3 rig was
 not touched. Firmware-derived numbers stay in these audit notes; no dump, module or capture is
 committed.
+
+---
+
+# PAGE-MOVE dated note - 2026-10-27/28: do the dialog bursts bear on the composite question?
+
+The 2026-10-27/28 capture batch (`C:\dev\out\rpcs3-ref-2026-10-28\`, `MANIFEST.md`) produced two full-frame
+timestamped bursts across a Triangle-menu open and close:
+
+| burst | frames | span | rate | key |
+|---|---:|---:|---:|---|
+| `dialogs/options-open-burst2/` | 108 | 1.977 s | 54.1 fps | Triangle at t = 500 ms |
+| `dialogs/options-close-burst2/` | 110 | 1.990 s | 54.8 fps | Triangle at t = 500 ms |
+
+The bursts are a timestamped open/close of an `explore_plugin` overlay, and they are of the right *kind*
+for section 1.4's asking price (a known frame index per capture, `frames.csv` gives `ms,file`). The
+question worth answering is whether they also settle the page-move composite question left open at the
+end of section 7.
+
+**They do not.** Four reasons, each checkable on the frames:
+
+1. **They are the wrong surface.** The animation is `expage_menu`, the Triangle item menu, which is an
+   `explore_plugin` page laid over the XMB. There is no XMB page change in either burst: the category
+   bar stays at rest and the item row stays on the 505 focus row. At the open's mid-alpha frame
+   (`dialogs/options-open-burst2/f_0000692.png`) the Game category icon is still at x 565 and
+   `Corrupted Data` is still on row 505; at the close's partial frame
+   (`dialogs/options-close-burst2/f_0000610.png`) the same is true. The 262 px bar recede is absent, and
+   so is the item-depth move.
+2. **They are the wrong channel.** What changes between `options-open-burst2/f_0000031.png` (closed) and
+   `f_0002008.png` (open) is the menu band's alpha and its row set, not a screen-space x and not
+   `_Eye.z` / `_Ambiant.w`. The composite question is precisely whether the captured 18-step screen
+   motion is the 12-frame item move plus the ~29-frame distance/brightness channel (section 7,
+   reading 1). An alpha fade has neither channel; it cannot separate them.
+3. **They carry no `_Eye` decode.** Section 7's closing condition is "one frame-indexed burst that
+   decodes `_Eye` as well as screen x". The batch has per-frame PNGs plus a `frames.csv`, not an
+   `XMB_FP_DUMP` window, so the cleanest record of the transition is not in it.
+4. **The rate is only just enough, and untested for this surface.** 54.1-54.8 fps is below the 60 Hz the
+   animation runs at (phase 4c used 139.7 fps and still saw 18 distinct steps). At 54.8 fps a 12-frame
+   move presents about 11 samples and an 18-frame move about 16; that could in principle separate the two
+   frame counts on a *page move*, but it has not been tested on one, and the menu fade is not that.
+
+What the bursts *do* add belongs to `ITEM-MENU-INFO-FIRMWARE.md` E2: the menu open is at partial alpha
+~192 ms after the key (`f_0000692.png`), and the close is still partial ~110 ms after the key
+(`f_0000610.png`), so the close is a visible fade rather than an instant destroy. That is a statement
+about a page overlay, not about `PhXmBar`, and it must not be imported into the page-move duration.
+
+**Effect on this document:** none. Section 7's conclusion stands - the firmware bar re-layout is traced
+at 200 ms mode 5, the 139.7 fps capture counted 18 steps (300 ms at 60 Hz), and the conflict is resolved
+only by reading 1 (a composite of the 12-frame item move and the slower bar recede) or by a page-move path
+outside the traced code. The missing artifact is still a page-oriented burst that decodes `_Eye.x` and
+`_Eye.z` per frame across one XMB page open and one close.
+
+**Constructive note:** the batch rig is the right instrument for that burst. `tools/refcap.ps1` already
+does full-frame `BitBlt` with a per-frame millisecond timestamp and writes `frames.csv`, which is exactly
+the "known frame index per capture" phase 1.4 asked for, and `tools/series.ps1` gives the per-frame luma
+channel. A future run only needs to park on a category and press Cross at 500 ms with the `XMB_FP_DUMP`
+window open; the analysis would then be the same `motion-track.ts` / `region-luma.ts` pair over the
+category band, with the frame count as the discriminator.
+
+No source, threshold or reference was touched by this section.

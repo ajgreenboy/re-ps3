@@ -612,3 +612,82 @@ and `work/p2-plugin-float-scan.ts`.
 * The single capture that would close the most remaining uncertainty: an RPCS3 frame of a
   two-level-deep page (a folder inside a category page) to confirm the label rule, plus a Triangle
   option menu for the sibling audit's eight numbers.
+
+---
+
+## 9. Dated correction - 2026-10-27/28 capture batch
+
+Evidence added after sections 1-8 were written: one RPCS3 session of the real 4.93 XMB at 1920x1080
+(`C:\dev\out\rpcs3-ref-2026-10-28\`, `MANIFEST.md`). This section records only what bears on this
+document's numbers: the info bar (3.7, 4.3), the option-menu deferral (4.4), and the settings-page grid
+that reuses the item-row geometry (4.2). Nothing above is deleted. Frame paths are relative to the
+capture root.
+
+### 9.1 Info bar: the plate does not grow with the clock string (3.7, 4.3)
+
+Section 3.7 ends with the reconciliation open ("it is *not* the visible band's rect ... Reconciliation
+needs the plane's runtime transform"), and 4.3 #40 records the measured 591x58 against the RCO's 560x82.
+The batch captured the same bar with a longer date string:
+
+| quantity | `10/27 9:53 PM` (MM/DD, 12-hour) | `25/10 12:32` (DD/MM, 24-hour) |
+|---|---|---|
+| plate | x 1329..1919, y 75..132 (591 x 58) | identical |
+| clock text right edge | x 1760 | x 1760 |
+| clock text left edge | x 1562 | x 1592 |
+| clock glyph | x 1774..1805, y 88..119 | identical |
+
+Frames: `dialogs/root-clock-mmdd-12h.png`, `-2.png`; the existing
+`C:\dev\xmb\out\native-reference\ab-rpcs3-root.png`. So the measured 591x58 is **not** a
+short-string artifact: the plate is fixed and the text is right-aligned inside it. The 560x82 authored
+`indi_base` box is still a different object, and *why* the runtime box differs remains open (3.7's
+hypothesis is unchanged, not confirmed).
+
+This also closes the second half of the capture list in 3.7 ("a second grab with a longer date format
+... to see whether the plate grows with the string"): it does not.
+
+Clock text: 4.3 #41 records the native rect right edge at 1765 and the frame at 1760. The batch gives 1760
+in both formats, so #41's -5 px delta stands. `MANIFEST.md` section 6's "both end at x~1880" is not an
+edge in either frame; the glyph ends at 1805.
+
+### 9.2 Options panel (4.4): the deferral is now partly answered
+
+Section 4.4 defers the native's panel numbers to `ITEM-MENU-INFO-FIRMWARE.md` A6 "and no local capture
+exists of a firmware Triangle menu". The batch supplies that capture; the full account is
+`ITEM-MENU-INFO-FIRMWARE.md` E1. The numbers that bear on this document's 4.4:
+
+| native value (4.4) | firmware, measured | delta |
+|---|---|---|
+| panel left edge `x0 = 1330 + ahead*600` | left edge x ~1330 (full-height band, fading out by x ~1690) | **0** on the left edge; the native's strip (A6 and `SETTINGS-FIRMWARE.md` 3.2) is described as reaching the right edge, while the firmware fades out by ~1690 |
+| panel spans the full height 0..1080 | also full height | 0 in shape |
+| first row `505 - (rows-1)*20` (465 for 3 rows) | `Start` baseline ~560 | the native's 3-row block sits ~95 px high |
+| row pitch 40 | 38 | -2 |
+| label x `x0+16` = 1346 | text left x ~1334 | -12 |
+| row text 23 px, `255*(.78+.22*focus)` | not measured | font size still open |
+
+So the native's panel *shape and left edge* are closer to the firmware than 4.4 implies (the RCO's
+"floating box" reading is contradicted by the screen), and the real deltas are the vertical anchor, the
+38 vs 40 pitch, the 12 px label inset and the missing right-hand fade.
+
+### 9.3 Settings pages reuse the item-row grid (4.2)
+
+The item-row constants in 4.2 (focus 505, pitch 80, next row +175) are not specific to the XMB root: the
+settings list pages use the same grid. Measured on `settings/accessory-rest.png`,
+`page-video-settings.png`, `page-system-settings.png` and `page-sound-settings.png`: the focused row's
+label ink is y 490..519 (centre 505), the rows below start at y 682/762/842/922/1002, i.e. **pitch 80**,
+and the first step is 177 px (the focused row's two-line expansion). Values start at x 1301, matching
+4.2 #36's value column.
+
+This is a confirmation rather than a correction: 4.2 #15/#16/#17 are exact for settings pages too, which
+is why `SETTINGS-FIRMWARE.md` D24's native 80 px pitch is right and only the expansion is missing.
+
+### 9.4 Not resolved here
+
+- The two-level-deep page (section 8's "single capture that would close the most uncertainty") was not
+  taken.
+- The artwork row (4.2 #32) and the level-0 label rule (5.4, +113) are untouched by this batch; no
+  captured page is a level-0 page with a non-tile row other than the existing `settings-b.png`.
+- The parent column, depth-1 neighbours, faint row and incoming column (5.1-5.3) are untouched.
+- The info-bar anchor/reconciliation (3.7, 5.6) is still an explanation short: the rect is measured, the
+  authored 560x82 is not the drawn box.
+
+No source file was edited for this section.
