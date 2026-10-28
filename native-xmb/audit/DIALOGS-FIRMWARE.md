@@ -1206,3 +1206,170 @@ score    bun work/ab-compare.ts out/parity-references/dialog__original__day__108
 The frame measurements were taken with numpy/PIL scripts kept under `out/native-dialog/` (git-ignored):
 `measure2.py`, `edges.py`, `elements.py`, `elements2.py`, `elements3.py`, `bars.py`, `blend.py`,
 `footer-check.py`, and on the native side `diff-after.py` and `measure-after2.py`.
+
+## 11. Dated correction - 2026-10-28: the box is a two-choice selector
+
+Section 10.5's behavioural residual is closed: `Shell::activate` no longer accepts a Box unconditionally on
+Cross. The captured frame's `No` focus is now a live selection the user can move and confirm, and a box whose
+call site asks no question keeps the single-action path it had.
+
+### 11.1 What the frame fixes about the order
+
+The still's two answer ink boxes (10.2) put `Yes` on the left (ink x 1183..1221) and `No` on the right (ink
+x 1341..1376, carrying the halo). The console focuses `No`, so the *drawn* order is Yes, No and the default is
+the second, right-hand answer. The footer's `X Enter` / `O Back` are the verbs: Enter confirms whichever
+answer is focused; Back leaves without answering.
+
+No local burst shows this box's D-pad, so the one thing the frame cannot settle is whether the focus clamps at
+the pair's ends or wraps. This pass wraps: on a two-answer row a step in either direction lands on the other
+answer. That keeps the spatial move the frame implies (No is the right answer, so LEFT from the default
+reaches Yes) and also lets RIGHT from the default reach Yes. A clamp would make one of the two directions a
+no-op on a two-item row; the wrap is stated here as a native decision, not a firmware claim, and it is the
+one navigational value in this section that is not measured.
+
+### 11.2 The choice model
+
+- `Shell::showConfirm` raises a Box with an answer row (`messageBoxChoices_ = true`) and starts it on
+  `BoxChoice::No` (0); `BoxChoice::Yes` is 1. That is the model's order, not screen space. The getters expose
+  it: `boxChoice()` returns 0 (No), 1 (Yes) or -1 (no answer row), and `boxChoiceSlot()` maps it to the drawn
+  pair: 0 = Yes (the left label), 1 = No (the right one), -1 = no answer row.
+- Left/Right, keyboard and pad, both already reach `Shell::horizontal`: a step moves the answer and plays
+  `Cue::Move` (`snd_cursor`, the XMB's own selection cue). `XMB_DIALOG_LOG=1` reports it as
+  `dialog: box move choice=yes|no`.
+- Cross/Enter confirms the focused answer with `Cue::Confirm` (`snd_decide`). Yes runs the box's action and
+  closes; No closes with the action dropped. The box closes on either answer.
+- Circle/Esc keeps `Shell::back`'s cancel path: `Cue::Back` (`snd_cancel`), the action is dropped whatever the
+  focus was, and the box closes.
+- A Box raised with `showMessage(text, MessageKind::Box)` has no answer row: both getters return -1,
+  horizontal presses are ignored, and Cross keeps the old single-action path (dismiss, and run the message's
+  own action if it has one). No call site changes behaviour: the tree's only Box call site is `showConfirm`
+  (Continue Watching's Remove), so the two-choice path is the one the route exercises.
+- `showMessage`, `showConfirm` and `clearMessage` all reset the row and the index, so a box never inherits a
+  previous one's focus.
+
+### 11.3 What changed
+
+`src/shell.h` (this pass):
+
+- `enum class BoxChoice { No = 0, Yes = 1 };` next to `MessageKind`, with the model order stated;
+- public `int boxChoice()` and `int boxChoiceSlot()` (0/1/-1 each) beside `messageActions()`;
+- private `messageBoxChoices_`, `messageBoxChoice_` and `dialogLog_` beside `messageAccept_`.
+
+`src/shell.cpp` (this pass):
+
+- `showConfirm` turns the answer row on and starts it on No; `showMessage`/`clearMessage` reset it;
+- `horizontal()` moves the answer when a Box with answers is up, with `snd_cursor`, and leaves every other
+  horizontal press exactly as before;
+- `activate()` commits only on Yes (`log: box enter choice=yes commit=1`) and dismisses on No without running
+  the action (`choice=no commit=0`); a Box with no answers logs `choice=none commit=1` and behaves as before;
+- `back()` logs the focus it cancels and keeps the existing `snd_cancel` path;
+- `boxChoice()`/`boxChoiceSlot()` definitions; `XMB_DIALOG_LOG=1` traces raised/moved/answered/cancelled.
+
+`src/dialogs.cpp` - one hunk, RETURNED, not applied by this pass (the draw files are held by the view pass;
+`view.cpp` is untouched as instructed). Without it the halo stays pinned to `No` by `kBoxFocusChoice` no
+matter what the shell selects. The hunk is:
+
+```diff
+@@ the box's metric block @@
+ constexpr double kBoxChoiceTop=579.;
+ constexpr int kBoxChoiceSize=22;
+-// The captured box focuses No: the console's default answer, and the non-destructive one. The native's box
+-// has one accept path (Shell::activate, see the comment in drawMessageBox), so this is the drawn default.
+-constexpr int kBoxFocusChoice=1;
++// The captured box focuses No: the console's default answer and the non-destructive one. That is where a
++// box starts, not a constant: the live focus comes from Shell::boxChoiceSlot() (0 = Yes, 1 = No).
+ // Footer: the captured box keeps a footer band under the box - one flat full-width 1 px rule at y 879
+
+@@ View::drawMessageBox, the answer row @@
+     // Choices: the firmware's own msg_yes / msg_no as text, not glyph hints, 120 px apart and centred on
+     // the body column. The focused one carries the XMB's soft white halo; the other does not (measured:
+     // Yes has no halo, No's halo adds ~3 px above and below its ink).
+-    // NOTE: Shell::activate still accepts on Cross whatever this draws, so the glow currently marks the
+-    // console's default answer rather than a live selection - the shell needs a choice index for that
+-    // (stated as the residual in audit/DIALOGS-FIRMWARE.md).
++    // The focus is Shell's live choice, not the console's default: boxChoiceSlot() is 0 for Yes (the frame's
++    // left answer), 1 for No (its right one) and -1 when the box has no answer row at all, so a
++    // single-action Box draws no halo.
+
+@@ the halo test @@
++    const int focused=shell_.boxChoiceSlot();
+     for(int i=0;i<2;++i) {
+         const QRectF rect(centres[i]-150.,kBoxChoiceTop,300.,30.);
+-        if(i==kBoxFocusChoice) {
++        if(i==focused) {
+```
+
+`src/view.h` needs no change for this hunk (the getter lives on `Shell`); its stale `drawMessageBox` comment
+("plate, two bars, two hints") is still the view pass's, and is still wrong (10.4).
+
+### 11.4 Verification
+
+Build: `build.ps1 -OutputDirectory C:\dev\out\native-boxchoice` succeeded. The binary was built with the
+`dialogs.cpp` hunk above applied so the two focus states could be captured; the delivered tree's
+`dialogs.cpp` is restored to its pre-pass bytes (sha256 `EAD077FA...9B5A`), and applying the hunk and
+rebuilding reproduces the frames.
+
+Seed: `C:\dev\out\native-dialogs\capture\box\data` (one `media/resume` record for the video library's
+`Top Level Clip.mp4`), copied fresh into each run's data directory. Pins:
+`--render-clock 20 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00 --focus-time 2000`.
+Route, after `full,pause=4000`:
+`LEFT,wait,wait,LEFT,wait,wait,ENTER,wait,wait,TRIANGLE,wait,wait,DOWN,wait,wait,DOWN,wait,wait,ENTER` then
+six waits so the box's 1000-unit plate fade settles. `XMB_DIALOG_LOG=1` names every box event on stderr.
+
+| proof | keys after the box is up | log (native.log) | state after | evidence |
+|---|---|---|---|---|
+| (a) default focus is No | none, `grab` | `dialog: box show choices=yes choice=no` | sidecar `pageKind=continueWatching`, depth 1, `entryCount=1`, `entryId=continue:117b37edc2b486d39670e7d8`; `preferences.json` still holds the record | `box-default.png`, halo on No, sha256 `160E7A90...BF166` |
+| (b) RIGHT moves to Yes, ENTER commits | `RIGHT,wait,wait,grab`, `ENTER,wait,wait,wait,grab` | `box move choice=yes`; `box enter choice=yes commit=1`; `continue: removed Top Level Clip ... 0 still remembered`; `the list is empty; the page closed` | `pageKind=root`, depth 0, `entryCount=4`; `preferences.json` `media/resume` = `{}` | `box-yes.png` (halo on Yes, `FD9187D7...C7C7F`); `page-after-yes.png` with the inline `There are no content items.` |
+| (c) LEFT back to No, ENTER leaves it | `RIGHT,wait,wait,LEFT,wait,wait,grab`, `ENTER,wait,wait,wait,grab` | `box move choice=yes`; `box move choice=no`; `box enter choice=no commit=0` | `pageKind=continueWatching`, depth 1, `entryCount=1`, same `entryId`; `media/resume` unchanged | `box-no-again.png` (halo back on No, same bytes as (a): `160E7A90...BF166`); `page-after-no.png` |
+| (d) Circle cancels without committing | `RIGHT,wait,wait,grab`, `ESC,wait,wait,wait,grab` | `box move choice=yes`; `box cancel choice=yes`; `cue Back ... source=snd_cancel` | `pageKind=continueWatching`, depth 1, `entryCount=1`; `media/resume` unchanged | `box-cancel.png` (halo on Yes, `FD9187D7...C7C7F`); `page-after-cancel.png`, byte-identical to (c)'s page (`69DFB9F9...8AAB6`) |
+
+Cue evidence: the (b) and (d) runs rerun with `XMB_AUDIO_LOG=1` print
+`cue Confirm ... source=snd_decide` on Enter, `cue Back ... source=snd_cancel` on Esc, and
+`cue Move ... source=snd_cursor` for the answer move - the mapping the pass was required to keep.
+
+Determinism: two independent runs of the default-focus recipe at `--render-clock 20` (`det-a`, `det-b`)
+produced byte-identical frames, both
+`160E7A9064B4246DB11B5B65100B86651AB393D83853B521EB3162B5004BF166` (1920x1080); the Yes-state rerun is
+identical to the first Yes capture (`FD9187D7...C7C7F`). A frame of every state was 1920x1080.
+
+Canonical gate, `bun work/ab-layers.ts --capture --exe C:/dev/out/native-boxchoice/re-ps3-native.exe`:
+**PASS 6/6**, text presence 1668 bright pixels in the clock crop (minimum 900) PASS. Frame 18.76 / 0.8360,
+top background 21.06 / 0.9434, category icon row 21.62 / 0.9062, item label row 11.99 / 0.3895, clock text
+11.41 / 0.4528, info bar 15.05 / 0.7667 - every layer at its recorded baseline (+0.00), which is the check
+that the change did not move the Box-free Game root the gate captures.
+
+The two focus captures are `out/native-boxchoice/runs/a-default-no/box-default.png` and
+`out/native-boxchoice/runs/b-right-yes/box-yes.png`.
+
+### 11.5 What remains open
+
+- Clamp vs wrap (11.1): no local burst shows the box's D-pad, so the wrap is a stated native decision.
+- The `dialogs.cpp` hunk must be applied by the view pass; until it is, a build from this tree still draws
+  the halo on No while the shell selects Yes (the binary in `out/native-boxchoice` already carries it).
+- A Box with no answer row draws no halo (`boxChoiceSlot()` = -1) but still draws the Yes/No strings, because
+  that is the captured surface. No such Box is reachable today; if a one-button Box ever appears it needs a
+  drawn-surface decision of its own.
+- The answer move plays `snd_cursor` by analogy with the XMB's selection move; no dialog burst ties that cue
+  to the box.
+- The box's 200/1000-unit open/close fades and the 100-unit hint fade remain TRACED only (10.7).
+- `view.h`'s stale `drawMessageBox` comment (10.4).
+
+### 11.6 Reproduction
+
+```
+build   & C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-boxchoice
+        (with the 11.3 dialogs.cpp hunk applied; the tree ships without it)
+seed    copy C:\dev\out\native-dialogs\capture\box\data\* to <run>\data
+pins    --render-clock 20 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00
+        --focus-time 2000
+script  full,pause=4000,LEFT,wait,wait,LEFT,wait,wait,ENTER,wait,wait,TRIANGLE,wait,wait,
+        DOWN,wait,wait,DOWN,wait,wait,ENTER,wait,wait,wait,wait,wait,wait
+        a: ,grab=<run>\box-default.png,quit
+        b: ,RIGHT,wait,wait,grab=<run>\box-yes.png,ENTER,wait,wait,wait,grab=<run>\page-after-yes.png,quit
+        c: ,RIGHT,wait,wait,LEFT,wait,wait,grab=<run>\box-no-again.png,ENTER,wait,wait,wait,
+           grab=<run>\page-after-no.png,quit
+        d: ,RIGHT,wait,wait,grab=<run>\box-cancel.png,ESC,wait,wait,wait,grab=<run>\page-after-cancel.png,quit
+env     XMB_LOG=<run>\native.log XMB_DIALOG_LOG=1   (add XMB_AUDIO_LOG=1 for the cue trace)
+runner  C:\dev\out\native-boxchoice\proofs.ps1
+```
+

@@ -80,7 +80,8 @@ constexpr double kBoxChoiceTop=579.;
 constexpr int kBoxChoiceSize=22;
 // The captured box focuses No: the console's default answer, and the non-destructive one. The native's box
 // has one accept path (Shell::activate, see the comment in drawMessageBox), so this is the drawn default.
-constexpr int kBoxFocusChoice=1;
+// The captured box focuses No: the console default answer and the non-destructive one. That is where a
+// box starts, not a constant: the live focus comes from Shell::boxChoiceSlot() (0 = Yes, 1 = No).
 // Footer: the captured box keeps a footer band under the box - one flat full-width 1 px rule at y 879
 // (RGB 200/192/183 over an RGB 78/52/22 background = white at 177/255, uniform from x 20 to x 1900, so not
 // the centre-bright 960 px tex_msgdialog_bar) and the Enter/Back hints at ink y 897..916.
@@ -260,9 +261,9 @@ void View::drawMessageBox(QPainter& p) {
     // Choices: the firmware's own msg_yes / msg_no as text, not glyph hints, 120 px apart and centred on
     // the body column. The focused one carries the XMB's soft white halo; the other does not (measured:
     // Yes has no halo, No's halo adds ~3 px above and below its ink).
-    // NOTE: Shell::activate still accepts on Cross whatever this draws, so the glow currently marks the
-    // console's default answer rather than a live selection - the shell needs a choice index for that
-    // (stated as the residual in audit/DIALOGS-FIRMWARE.md).
+    // The focus is Shell's live choice, not the console's default: boxChoiceSlot() is 0 for Yes (the
+    // frame's left answer), 1 for No (its right one) and -1 when the box has no answer row at all, so a
+    // single-action Box draws no halo.
     QFont choiceFont(shell_.fontFamily());choiceFont.setPixelSize(kBoxChoiceSize);
     const auto advance=[&](const QString& value){
         return textRenderer_.ready()?textRenderer_.measure(choiceFont,value):QFontMetrics(choiceFont).horizontalAdvance(value);
@@ -275,9 +276,10 @@ void View::drawMessageBox(QPainter& p) {
     const double left=kBoxTextX+(kBoxTextWidth-pairWidth)/2.;
     const double centres[2]={left+advance(choices[0])/2.,
                              left+advance(choices[0])+kBoxChoiceGap+advance(choices[1])/2.};
+    const int focused=shell_.boxChoiceSlot();
     for(int i=0;i<2;++i) {
         const QRectF rect(centres[i]-150.,kBoxChoiceTop,300.,30.);
-        if(i==kBoxFocusChoice) {
+        if(i==focused) {
             if(textRenderer_.ready())
                 textRenderer_.draw(*this,p,rect,choices[i],choiceFont,Qt::white,
                     Qt::AlignHCenter|Qt::AlignTop,1.,false,false);

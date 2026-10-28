@@ -140,6 +140,11 @@ struct Notification {
 //                   Spec-only: no local frame shows an error-code page.
 //   Info       D5 - the D4 frame with Key: value rows built from firmware strings.
 enum class MessageKind { None, Inline, Page, Box, ErrorCode, Info };
+// The Box's answers, in the shell's own model order: No is 0 because it is the answer the captured frame
+// focuses - the console's default and the non-destructive one - and Yes is 1. The box DRAWS them the other
+// way round: Yes is the left label and No the right (audit/DIALOGS-FIRMWARE.md 10.2 / section 11), so this
+// index never encodes screen space. The one place the two orders meet is Shell::boxChoiceSlot().
+enum class BoxChoice { No = 0, Yes = 1 };
 class Shell final:public QObject {
     Q_OBJECT
 public:
@@ -160,6 +165,15 @@ public:
     // The Suggested Actions bullets of an ErrorCode page (the firmware's msg_errorcode_solution_* family;
     // this build's actions are its own because no local firmware code produces a PS3 error code here).
     const QStringList& messageActions() const { return messageActions_; }
+    // The Box's answer row. 0 = No (the default showConfirm starts on), 1 = Yes, and -1 when the message is not
+    // a Box with answers: an information-only Box raised with showMessage keeps the single-action behaviour it
+    // has always had, so no call site suddenly needs a choice. Left/Right move the pair (the same keys and pad
+    // bits that already reach Shell::horizontal), Cross confirms the focused answer, Circle cancels.
+    int boxChoice() const;
+    // The same focus in the order the box draws it: 0 = Yes (the left answer), 1 = No (the right one), -1 = no
+    // answer row. dialogs.cpp compares its {Yes, No} pair against this, so the halo marks the live selection
+    // instead of the console's default. The frame puts Yes at x 1183 and No at x 1341 (audit 10.2).
+    int boxChoiceSlot() const;
     void setRenderer(const QString& renderer) { renderer_=renderer; }
     int theme() const { return preferences_.value("appearance/colour").toInt(); }
     QString fontFamily() const;
@@ -475,6 +489,15 @@ private:
     MessageKind messageKind_=MessageKind::None;
     QStringList messageActions_;
     std::function<void()> messageAccept_;
+    // The Box's answer row. messageBoxChoices_ is true only for a box raised by showConfirm, because only a
+    // question has answers: a box raised by showMessage keeps the single-action path (Cross dismisses it) and
+    // draws no live selection. messageBoxChoice_ is the answer, not the drawn slot - 0 = No (the console's
+    // default and where every box starts), 1 = Yes - and boxChoiceSlot() maps it to the {Yes, No} draw order.
+    bool messageBoxChoices_=false;
+    BoxChoice messageBoxChoice_=BoxChoice::No;
+    // XMB_DIALOG_LOG=1 names each box event (raised, moved, answered, cancelled) on stderr, so a scripted run
+    // can prove the choice it made without reading pixels. Off by default, like the other per-surface logs.
+    bool dialogLog_=false;
     QString mediaTitle_,renderer_;
     QDateTime clockOverride_;
     // Only the decoded pieces are kept (the .p3t itself is read again when the theme changes); nothing is written to disk.
