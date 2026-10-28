@@ -1854,3 +1854,197 @@ belong to the shell's row set, not to the drawing.
 - 11.9's list: the BG1 plate inside the band, the colour chips' rendered form, the two timer lists, the
   three missing page objects, the commit cue, and wiring the 45 RCO lists to live rows.
 - The gate's 6/6 once the text renderer pass lands (13.5).
+
+---
+
+## 14. Phase 11.3 data fix: the time zone token is a stored value, 2026-10-28
+
+Status: this closes **13.6a** and the parenthetical in **11.3** that said the stored value "is now the
+zone's own item token". Edited source: `src/preferences.{h,cpp}` and `src/settings_menu.{h,cpp}`. No hunk
+was needed in `src/shell.cpp` - this tree keeps `Shell::valueText`, `Shell::clockDateTime` and the
+Settings page open in `settings_menu.cpp` - and `view.*`, `main.cpp`, `assets.*`, the harness and CMake are
+untouched, as is every other choice list's values (11.3 stays true for all of them; `choices()` is
+byte-identical). Pixels are unchanged by construction and by the gate (14.6).
+
+### 14.1 The bug
+
+`Preferences::validBare` accepted only `System` or an id `QTimeZone` knows. Both load paths - the version-2
+load and the version-1 migration - go through `validBare`, so the token the choice model's Zone values are
+was dropped on load and could never be saved. Three consequences, all fixed here:
+
+- the stored value could never be one of the firmware's 110 items, so the band's current-row rule (13.4)
+  could never mark a row on the time zone list;
+- `Shell::valueText`'s token branch (11.3) was unreachable from a stored value, so the Time Zone row's
+  value column could never show the RCO label;
+- `Shell::clockDateTime`'s token branch was reachable only for a value set in memory, never for a saved one.
+
+### 14.2 The accepted forms, and why the bound is where it is
+
+`clock/timeZone` now accepts exactly four forms, and nothing else:
+
+| form | example | accepted by |
+|---|---|---|
+| the default | `System` | since before this pass |
+| the empty value | `` | new; behaves like `System` |
+| an IANA id | `America/Los_Angeles` | since before this pass; the host list still produces these and every older file holds one |
+| a firmware zone token | `date_time_config_timezone_pacific_us_canada` | new |
+
+The token's bound is one rule, shared by the store and the choice model
+(`Preferences::firmwareZoneTokenPrefix()` / `Preferences::isFirmwareZoneToken()`):
+
+    "date_time_config_timezone_" + 1..48 x [a-z0-9_], first character a letter, no trailing "_"
+
+That is the shape of the 110 MItem names without their `item_` namespace, which is exactly what
+`firmwareChoiceValue(ChoiceValues::Zone, ...)` produces. The store validates the *form* rather than
+membership because `Preferences` holds no firmware tree; membership is exact where it is used - the token is
+resolved through `sysconf_plugin`'s English table, and a well-formed name this firmware does not ship
+resolves to no label and no offset, so the row shows no value and the clock follows the host (logged once),
+never a guessed zone. All 110 values the model produces pass the same test (14.6), so every item the band
+draws can be written back and reloaded.
+
+Refused, with the stored value left alone: an empty name, a name starting with a digit, a trailing
+underscore, an upper-case name, a name with a space, the label instead of the token, a non-IANA path
+(`Europe/Nowhere`), lower-case `system`, and a name longer than the 48-character bound. The version-1
+migration keeps working unchanged: the shared time zone stays a bare key, the per-user keys still move
+under `profile/local/`, and the file is still rewritten as version 2 (14.6).
+
+### 14.3 The current row, reported by the model
+
+`ChoiceList` gained `currentRow`: the `rcoIndex` of the item the persisted value selects, or -1 when
+nothing in the list is current. `markCurrentRow()` derives it from the items' own `isCurrent`, so the list's
+current row and the item's mark cannot disagree, and it logs the time zone's verdict once per stored value:
+
+```
+settings: clock/timeZone date_time_config_timezone_pacific_us_canada is firmware zone item 4 of 110 (GMT-08:00 Pacific Time (US, Canada))
+settings: clock/timeZone America/Los_Angeles is not one of the firmware's 110 zone items; no current row (the band marks no item as current)
+```
+
+The band focuses by the rule it already had (13.4, rule 2: the drawn row whose label the row's displayed
+value names). `Shell::valueText` now returns that label, so the band's own log line reports the item:
+
+```
+view: settings choice band clock/timeZone -> 110 items from rco (page_date_time_config_timezone), current row 4, scrolls
+```
+
+On the deliverable build the Date and Time page's dump carries the same verdict:
+`entries-final.json.settings-date.json` -> `"currentRow": 4`, item 4
+`GMT-08:00 Pacific Time (US, Canada)`, `isCurrent: true`.
+
+**One residual, stated rather than papered over.** For a stored IANA id the *model* reports no current row
+(`currentRow: -1`, logged above), but the drawn band still rests its focus on a row, because
+`View::choiceBandFocus`'s third rule (`src/view.cpp:1227`) clamps to the model's position when no item
+matches. `view.*` is outside this pass's write fence, so that drawn position is unchanged from 13.6a (the
+band's line still reads `current row 109` for `America/Los_Angeles`). The model claims no row, `valueText`
+names no item, and the log says so; closing the drawn half is a three-line change in the draw pass (return
+-1 and draw no focus row when no item matches).
+
+A second, pre-existing mismatch is visible here and belongs to the draw/shell halves, not to storage: the
+options model for this row is still `choices()`'s host list (`System` plus every IANA id, ~600 entries)
+while the band draws the firmware's 110, so moving the cursor past the drawn list clamps the focus. The
+shell/choice-model half of "wire the 45 RCO lists to live rows" (11.7d) is what closes it; this pass does
+not change the list, as required.
+
+### 14.4 valueText and the clock
+
+| stored `clock/timeZone` | Time Zone row's value column | clock |
+|---|---|---|
+| `date_time_config_timezone_pacific_us_canada` | `GMT-08:00 Pacific Time (US, Canada)` - the RCO item's own text, through `firmwareZoneFor()` | fixed `-08:00` from the label's `GMT-08:00` |
+| `America/Los_Angeles` | `America/Los_Angeles` - the host list's label, as before | `QTimeZone("America/Los_Angeles")`, DST honoured |
+| `System` / empty | `System` / empty | host clock |
+| a well-formed token this firmware does not ship | empty, logged once | host clock, logged once |
+
+`firmwareZoneFor(Assets&, token)` replaces `firmwareZoneOffsetSeconds()`: it returns the label as well as the
+offset, is cached per token, and refuses anything the token test does not accept, so `valueText` and
+`clockDateTime` read one resolution rather than two.
+
+### 14.5 The diagnostic (`XMB_TZ_SELFCHECK`)
+
+Set `XMB_TZ_SELFCHECK=<dir>` on any run that opens a settings page: on the first page the shell runs the
+check once and writes `<dir>/tz-selfcheck.json`. It stores a token through the shell's own `Preferences`,
+reloads the file through a second `Preferences` (the same read path a restart takes), migrates a
+hand-written version-1 file, refuses the nine malformed values, then reports the band's current row, the
+band's focus rule and the row's `valueText` for the token and for an IANA id, and puts the store back. It is
+not a second implementation of the rules: it calls `Preferences`, `settingsChoiceLists()` and
+`Shell::valueText()` and applies the band's own label rule, so what it reports is what the app does.
+
+### 14.6 Verification
+
+Build: `& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-tz` -> clean at `/W4
+/permissive- /utf-8`, no warning from `preferences.cpp` or `settings_menu.cpp`; binary
+`C:\dev\out\native-tz\re-ps3-native.exe`, 3,708,416 bytes, 2026-10-28 00:46.
+
+**(a)-(d) in one run**: `--data-dir <token seeded> --render-clock 20 --ui-clock 2026-10-27T21:43:00
+--background-clock 2026-10-27T21:43:00 --focus-time 2000`, script `full,wait,LEFT x5,DOWN x7,ENTER,wait,wait,...`,
+with `XMB_TZ_SELFCHECK=C:/dev/out/native-tz/cap/selfcheck` and
+`XMB_DUMP_ENTRIES=C:/dev/out/native-tz/cap/entries-final.json`. The JSON's four cases:
+
+```
+load      : accepted true, reloaded "date_time_config_timezone_pacific_us_canada", kept true, fileVersion 2,
+            storedUnderSharedKey true
+migration : from "version 1", reloaded "date_time_config_timezone_pacific_us_canada", kept true, fileVersion 2,
+            volume 30 under profile/local/audio/volume, bare audio/volume gone, shared key stayed bare
+tokenCase : accepted true, items 110, currentRow 4, bandFocus 4, bandFocusLabel "GMT-08:00 Pacific Time (US, Canada)",
+            valueText "GMT-08:00 Pacific Time (US, Canada)", clock "10/27 6:43 PM",
+            tokenItemsAcceptedByStore 110, focusNamesTheCurrentRow true
+ianaCase  : accepted true, items 110, currentRow -1, bandFocus -1, valueText "America/Los_Angeles",
+            clock "10/27 7:43 PM", focusNamesTheCurrentRow false
+refused   : 9 of 9
+```
+
+Log lines from the same run (verbatim, 14.3 above): the token is item 4 of 110; the IANA id is no item;
+`stores=1 reloads=1 migrates=1 (v1->v2, 2) -> band current row 4 of 110, valueText "GMT-08:00 Pacific Time
+(US, Canada)", clock "10/27 6:43 PM"`; `iana ... current row -1 (band focus -1), valueText
+"America/Los_Angeles", clock "10/27 7:43 PM"`.
+
+The clock values are the fixed-offset resolution at work: the pinned UI clock is 21:43 at the host's
+`America/Chicago` (-05:00), so `-08:00` is 18:43 and the IANA zone is 19:43.
+
+**Capture with the stored token**, same pinned clocks, script `LEFT x5, DOWN x7, ENTER, wait,wait,wait,
+grab (page), DOWN x4, ENTER, wait,wait,wait,wait, grab (band)`. The deliverable binary renders text in this
+capture (the renderer regression of 13.6b was reverted in the tree by the pass that owns it before this
+build):
+
+| file | what it shows |
+|---|---|
+| `out/native-tz/cap/tz-token-page.png` | Date and Time page: `Time Zone` value column `GMT-08:00 Pacific Time (US, Canada)`, info-bar clock `10/27 6:43 PM` |
+| `out/native-tz/cap/tz-token-band.png` | the 110-item band: `GMT-11:00 American Samoa`, `GMT-11:00 Midway Islands`, `GMT-10:00 Hawaii`, `GMT-09:00 Alaska`, then **`GMT-08:00 Pacific Time (US, Canada)`** glowing on the 505 focus row, `GMT-08:00 Tijuana`, `GMT-07:00 Mountain Time (US, Canada)` below |
+| `out/native-tz/cap/tz-iana-page.png` | the IANA case's page: value column `America/Los_Angeles`, clock `10/27 7:43 PM` |
+| `out/native-tz/cap/tz-iana-band.png` | the IANA case's band: no row is current; the drawn focus is the model-position fallback of 14.3 (the last rows), which is stated as open, not as a current-row mark |
+
+Determinism of the band capture: two runs of the token chain give frames differing in 61 of 2,073,600
+pixels (max 11 luma, one glyph's antialiased edge on row 1); the band's fill, rows and focus are identical.
+
+**Gate.** `bun work\ab-layers.ts --capture --exe C:/dev/out/native-tz/re-ps3-native.exe` ->
+`PASS: 6/6 layers within budget`, layer for layer identical to the stored baselines: frame 18.29 / 0.8342,
+top background 20.25 / 0.9363, category icon row 20.93 / 0.8990, item label row 11.95 / 0.3925, clock text
+11.39 / 0.4500, info bar 14.98 / 0.7639 (every delta +0.00 dB / +0.0000). The canonical frame has no band
+and no time zone, so this is the expected result and the evidence that nothing on that path moved.
+
+**Named states.** `--states` currently reports 0/12 on **any** text-drawing build of this tree, and that is
+not this pass: the twelve stored state references were re-saved at 00:02:20 while the text renderer was
+broken (the reference for `steam-game-root` has no labels and no clock digits), and the renderer was
+restored at 00:42:59. The pre-change binary `out/native-final/re-ps3-native.exe` (00:01, textless) scores
+12/12 only because it is textless. A control build of this tree whose single behaviour-affecting line
+(`validBare`'s token branch) is reverted scores exactly the same as the deliverable on three states -
+`steam-game-root` 27.59 / 0.9758, `subtitle-cue` 23.04 / 0.9597, `xmb-notification` 26.96 / 0.9725, to four
+decimals - so the named states are unchanged by this pass; their references are stale and belong to the
+text-renderer pass to refresh.
+
+### 14.7 What stays approximate
+
+- **A token has no DST rule.** The firmware's 110 zones are GMT-offset zones whose own label states the
+  offset, so a token resolves to that fixed offset all year; the console applies "Daylight Saving" as a
+  separate setting (`msg_summertime`, still `Action::Unavailable` in this build). An IANA id keeps DST
+  through `QTimeZone`, which is why stored IANA ids still "work as they do today". So the same wall clock
+  can differ by an hour between a token and the IANA id for the same city, and the token is the one the
+  firmware's list names.
+- **The drawn focus for a value that names no firmware item** is still the model-position fallback of
+  `View::choiceBandFocus` (14.3): the model says no current row, the drawing rests on a row.
+- **Membership is checked at resolution, not in the store**: a well-formed token this firmware does not
+  ship is storable, and then resolves to nothing with one log line. `Preferences` has no firmware tree, and
+  the alternative - duplicating the 110 names in the store - is the "typed-in firmware data" 11.1 refuses.
+- **The options model is still the host IANA list** (`choices()` unchanged, requirement 5): the band draws
+  110 items the model does not contain, so cursor moves past the drawn list clamp. Unchanged from 13.6a;
+  wiring the row to the firmware list is the 11.7d slice.
+- The band's row text size, the per-list origin and the dim factor stay as 13.3/13.7 left them; this pass
+  draws nothing.
