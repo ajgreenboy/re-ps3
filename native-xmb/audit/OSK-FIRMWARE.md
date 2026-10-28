@@ -1090,3 +1090,264 @@ layout, palette-block field table, synthetic palette fixture and bounds results 
 these names can be retired; the `texturesDecoded` assertion text in `src/osk_layout.cpp`
 still carries the old 38/52 wording and is the only stale reference (it reports
 `52/52 decoded ... 0 need a text fallback`, applicability skip).
+
+---
+
+## 15. The draw and input rewrite (phase 12.5) - M
+
+The keyboard in `src/view.cpp` is now the resolved layout's. `View` owns one `RcoObjects` and one `OskLayout`,
+loaded once in the constructor through `loadOskLayout(assets_, oskObjects_)` (section 12), and every rect,
+caption, colour, action and texture name in the draw comes from it. The free-hand tables (`oskFunctionRows`,
+`oskRowY`, the lower/upper/symbols row strings, the private `OskAction`/`OskKey`, the 120/255 dim) are deleted.
+Written 2026-10-28 from a run of `C:/dev/out/native-osk/re-ps3-native.exe` (build 2026-10-27 22:54, later than
+every edited source file: `view.h` 22:24, `view.cpp` 22:53), its log and the 25 frames plus 8 System Name frames
+under `C:/dev/out/native-osk/evidence/` and `C:/dev/out/native-osk/sysname/`.
+
+### 15.1 State and dispatch
+
+`View::Osk` carries `page`, `paletteOpen`, `paletteRow`, `paletteColumn`, `paletteScroll` and `caretLit` next to
+`row/column/text/cursor/masked/...`; `shift`/`symbols` are gone because there is no longer a table they index.
+`openOsk` resets `page=0`, `row=OskLayout::defaultFocusRow`, `column=OskLayout::defaultFocusColumn` (row 2,
+column 4 = `g`), so the default focus is the firmware's and is not a constant in the view.
+
+| function | behaviour |
+|---|---|
+| `oskCharacter` | `OskLayout::keyAt(page,row,column)->label`, nothing else |
+| `oskMove` | palette first when `paletteOpen`; otherwise the page's own row count with wrap, and the horizontal step uses the focused key's `span` (`column+span` right, `column-1` left), so a wide key is jumped whole and a vertical move snaps to a key's left column |
+| `oskPaletteMove` | 7 columns with wrap, 5 visible rows, `maxScroll` computed from `symbols.size()` |
+| `oskPalettePress` | inserts `symbolAtCell(row,column,scroll)` at the caret and closes the popup (F: the capture never shows an accept; Back is the traced exit) |
+| `oskPress` | dispatches every `OskAction`: Character, Backspace, Space, Shift (page 0 <-> 1), Palette, Enter (accept), MoveUp/MoveDown, CaretLeft/CaretRight, and the three the native build cannot honour log once each - `Accent` ("accent page is not captured"), `Mode` ("Input Mode is unavailable (no IME modules)"), `Copy`/`Paste` ("not wired to a clipboard yet") |
+
+Escape and Circle are one layer at a time: the palette closes first, the keyboard second (`keyPressEvent`,
+`pollController`). Section 13.1's measured blink (period ~936 ms, lit ~470/dark ~440) post-dates the committed
+`OskCaret::blinkMilliseconds = 500`; the draw reads that field rather than a constant, so updating
+`src/osk_layout.cpp` is the one edit a traced period needs. It is labelled a FIT in the code comment.
+
+### 15.2 The draw, element by element
+
+| element | source |
+|---|---|
+| dim | `OskBands::dim` black at `dimAlpha` 0.70 over the whole 1920x1080 |
+| panel | `panel` rect filled with the measured plate 157,154,157 first, then the RCO nine-slice `oskpanel_base1x0..3x2` from `OskLayout::slices`; the right-hand pieces are a 34%-alpha shadow, so over the fill they shade the plate instead of letting the dimmed page through (the first attempt drew them straight onto the page and the panel's right edge read 16..27 where the capture reads 122..134) |
+| title bar | measured gradient 141,142,140 -> 140,146,140, white pencil (U+270E) and the title at 27 px |
+| field | measured 86 -> 62 -> 47 gradient, 20 px inset, one clipped line, 22 px text, `OskMask::glyph` per character when masked |
+| caret | `OskCaret`: colour 130,249,12, height 27 at field top + 9, 2 px shaft, 12 px serifs, and the hollow white triangle at `markerInset` 12, 14x20; the triangle is drawn whether or not the I-beam is lit (5.2) |
+| key faces | four measured stops per row role at 0/40/75/100% of the 66x50 face (letters 164/196/190/152, olive 152/175/179/122, blue 121/145/152/129, mint 109/137/148/110, arrow 116/140/140/110), corner radius 4; the focused face brightens 35% toward white (s3 measures 152,159,140 -> 206,219,140) |
+| captions | 24 px on the character rows, 19 px on the function rows, ink colour 30,40,50; the character rows' glyph centre is the measured `cell.left + 53.5` (all ten columns, all four rows), 2 px below the face centre; the function rows centre on the key 6 px below the face centre |
+| badges | the module's `LABEL_L1/R1/L2/R2/SQUARE/TRIANGLE/SELECT/START` 74x28 pills drawn at 20 px height (the pill fills the left 44 px of the art), a drawn pill as the fallback |
+| palette opener | mint face plus a drawn 4x3 block of 5 px squares on a 7 px pitch (the capture's cell has no caption and no decoded image) |
+| focus ring | `SBTN_FOCUS` 84x66, or `LBTN_FOCUS` 166x66 for a wide key, centred on the face (66+18 x 50+16) |
+| prediction list | measured plate 110,110,110 with the slice's 151 top edge and 100 bottom edge; the RCO's `CANDIDATE_WINDOW*` centre reads 129 (pre-composite artwork) |
+| prediction header | measured 92 -> 80 gradient, 120,124,125 bottom line, "Prediction" 16 px at x +14; mode and count cells 85,85,85 with white `a`/`A` and `0` |
+| copy / paste | measured face 137,169,175 -> 112,145,151; `KEYTOP_COPY`/`KEYTOP_PASTE` are white glyph masks (24x24 ink in a 72x54 card) for paf's icon material, so the mask is tinted to 30,50,60 and cached per texture; paste draws at 55% because the layout has it disabled |
+| footer | 70,70,70 with the measured 102,100,102 top edge and the layout's bottom colour |
+| symbol palette | `BASE_SYMBOL` 60x72 as a nine-slice over the 595,398 353x332 frame, 7x5 cells at 53x53 on a 48 px pitch, `FOCUS_SYMBOL` on the focused cell, symbols at 22 px; a scroll knob only when the symbol list runs past five rows (the module's 32 symbols do not) |
+
+`slices` and the `OskTexture` list drive every firmware image: `present && decoded` draws the image,
+otherwise the measured fallback stands in. No code change was needed for the 38 -> 52 decode landing of
+section 14 - the badges, both focus rings, the palette plate and `FOCUS_SYMBOL` started drawing from the RCO's
+own pixels on the first build after it.
+
+### 15.3 Input isolation for scripted runs (one behavioural change outside the draw)
+
+`pollController` now reads no physical pad when `--script` is present: `xinput` and `pad::latest` are skipped
+for that run. The scripted tokens go through `replayKeyTap`, i.e. the same handlers the pad drives
+(`Shell::vertical`/`activate`, `View::oskMove`/`oskPress`), so a scripted capture is the script's own input.
+Reason: a DualSense was attached to this machine reporting `DPAD_UP` held, which walked the keyboard focus
+(and the page selection) between two grabs - trace evidence from a build that still printed it:
+`osk: trace input buttons=1 edge=0 movement=1 row=2 column=4` repeated every poll, with the focus leaving `g`
+within 300 ms. With the gate in place the same run holds `row 2, column 4` and two grabs of the open keyboard
+hash equal (15.5). Unscripted runs are unchanged.
+
+### 15.4 Verification: build and captures
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-osk
+-> Built C:\dev\out\native-osk\re-ps3-native.exe
+```
+
+No compiler warning comes from these edits; the ones in the log (`QImage::mirrored` at view.cpp:348, an unused
+local at 488, a shadowed `at` at 623, `_wfopen` in main.cpp, `QtAudio::UnderrunError` in interaction_audio) are
+all pre-existing lines.
+
+Canonical capture recipe, identical to the ab-layers harness apart from `--render-clock 20` (the task's
+determinism value) and `--vsh-modules` (so the module's row strings and palette are the real ones):
+
+```
+re-ps3-native.exe --dev-flash C:/dev/rpcs3/bin/dev_flash --data-dir <copy of out/native-reference/store/jf-smoke>
+  --vsh-modules C:/dev/xmb/fw493/vsh_module --render-clock 20 --ui-clock 2026-10-25T12:32:00
+  --background-clock 2026-10-25T10:00:00 --focus-time 2000 --script <tokens>
+```
+
+The flow is the real one: `LEFT,UP,ENTER` opens the Jellyfin sign-in page from the registered service row,
+`ENTER` on `Username` opens the keyboard. Procedural log line at startup:
+
+```
+osk: layout from firmware firmware: rco=oskfullkeypanel_plugin (132 objects, 203 images, 65 strings, 193344 B);
+module=oskfullkeypanel_plugin.prx (407488 B, sha256 7b33ffb59d8cee58...); rows=module label table;
+palette=module string; captions=RCO text table; textures=52/52 named, 52 decoded;
+geometry=measured reference (RCO panel planes width=0)
+```
+
+### 15.5 Determinism (R)
+
+Two independent runs of the palette state and of the state after closing it, same recipe, `--render-clock 20`:
+
+| state | SHA-256 (both runs equal) |
+|---|---|
+| palette open | `A03C2EE08D445069D7ECDDA32E9DDA3F030961C006733F83883D955EE7B8BE2B` |
+| palette closed (Escape) | `E308FF3308964FD9490966BCB1E57127CDE2AD91A58DD04BB7483B55CA0B4ED6` |
+
+Within the 25-frame run these pairs are byte-identical as well, which is the behavioural evidence, not a
+second determinism test: `01-signin-page` == `08-signin-after-esc` (`1BE60E89...F2E1C74F`, Escape leaves the
+field and the page untouched), `22-signin-final` == `25-signin-after-second-esc` (`E9321273...21FE158`),
+`17-osk-palette` == `23-osk-palette-back` (`913140D1...6A99ADF`, the same palette state reached twice),
+`16-osk-palette-key` == `24-osk-after-palette-esc` (`C56865BE...AAB8121`, the keyboard unchanged after the
+palette's Back), and `02-osk-open` == `12-osk-username` (`DA710E77...CB6D33`, the same field reopened empty).
+
+### 15.6 Region scores against the reference frames
+
+`work/ab-compare.ts`, the same crops the phase's gates name. The three non-default reference frames are not
+panel-centred (section 13.4): the measured title-bar left edges are 494 (s1), 572 (s4b, +78), 533 (s11, +39)
+and 611 (s12, +117). Both numbers are given: the crop as instructed, and the same crop with the reference
+shifted left by its own offset so the panel contents line up.
+
+Default page, `02-osk-open.png` vs `s1/f0060-0257.png`:
+
+| region | crop | PSNR | SSIM |
+|---|---|---:|---:|
+| frame | 0,0,1920,1080 | 21.16 | 0.4856 |
+| panel | 493,290,934,500 | 20.93 | 0.7726 |
+| title bar | 494,290,932,46 | 21.95 | 0.8768 |
+| field | 494,336,932,58 | 24.12 | 0.8581 |
+| key grid | 496,406,714,324 | 19.98 | 0.7250 |
+| function rows | 496,622,714,108 | 17.84 | 0.6144 |
+| prediction column | 1216,394,203,336 | 20.61 | 0.7524 |
+
+Caps page, `20-osk-caps.png` vs `s4b/f0010-0038.png`: panel 13.87 / 0.6253 unaligned, 19.91 / 0.7530
+aligned; key grid 12.43 / 0.5696 unaligned, 19.32 / 0.7173 aligned. The whole loss here is the 78 px panel
+offset, not content.
+
+Symbol palette, `17-osk-palette.png` vs `s11-symbol/f0108-0299.png`: palette region 560,380,420,370
+18.53 / 0.6516 unaligned, 17.22 / 0.6386 aligned; panel 18.94 / 0.7174 aligned. This one does NOT improve
+when the panel is aligned, because the layout's palette frame (595,398) was measured in a frame whose panel
+sat at 532: its absolute position matches the capture (unaligned is better) while its position relative to
+the panel is 39 px right of the capture's relationship. That is a property of the committed layout, not of
+the draw, and it is listed in 15.8.
+
+Typed text, `07-osk-typed.png` (field reads the server URL plus "zz") vs `s12-type/f0095-0260.png` (field
+reads "User 1zz"): field 494,336,932,58 17.85 / 0.7330 unaligned, 22.15 / 0.8287 aligned; panel
+20.47 / 0.7641 aligned. The remaining field error is the text itself: different strings, and the glyph
+raster is the project's own reconstruction.
+
+The phase's suggested budgets (18 dB / 0.85 panel, 18 / 0.85 caps, 16 / 0.80 palette, 15 / 0.70 field,
+20 / 0.90 frame) are met on PSNR everywhere and on SSIM for the title bar and the field; the panel, grid,
+function-row and prediction SSIM numbers land at 0.61-0.77. What is left, measured by block (20x20) on the
+default page: the field's text (the reference shows `User 1`, the native field is empty in that state - the
+worst block is 67 at 513,350), then glyph edges on every caption (1-2 px of ink difference per key), the
+badge pills' 1-2 px placement, and the arrow keys' glyph (the reference's is the `LABEL_UP` mask, drawn
+smaller than a 19 px triangle).
+
+### 15.7 Behaviour and masking (R)
+
+| capture | what it proves |
+|---|---|
+| `02-osk-open.png` | the keyboard over the real sign-in page, default page, focus on `g`, empty Username field with the I-beam and marker |
+| `03/04/05/06` | Right -> `h`, Down -> `n`, Down Down -> the function rows, Up Up -> back to `b`: the span-aware walk in both axes |
+| `07-osk-typed.png` | `type=zz` through the keyboard's own key handler, caret after the text |
+| `09/10-osk-password*.png` | the masked field: one bullet per character (7 for `hunter2`), caret after the last bullet |
+| `11/14-signin-*-set.png` | Enter key accepted the field (5 DOWN + 3 RIGHT + Cross): the page rows show `alice` and seven bullets |
+| `17/18/19` | palette open, moved (Right+Down), and a symbol inserted at the caret - `19` differs from `16` only in the field |
+| `20/21` | `a/A` to the caps page (`!@#$%^&*()` / `QWERTYUIOP` / `ASDFGHJKL"` / `ZXCVBNM-_/`, mode cell `A`) and back to the lower page |
+| `22/25` | Escape closes the keyboard and leaves the page byte-identical |
+| `sysname/30-36` | System Name: the Settings column (`30`), `System Settings` row 5 (`31`), the page (`32`), row 1 `System Name` (`33`), the keyboard prefilled with the host name (`34`), `XMB` typed at the caret (`35`), accepted with the Enter key (`36`), and `preferences.json` gains `"system/name": "al-workstationXMB"` |
+
+Masking evidence, over every `.log` and every `.png.json` sidecar in the evidence directory:
+
+```
+typed string 'hunter2'         -> 0 hit(s)
+typed string 'alice'           -> 0 hit(s)
+typed string 'localhost:8096zz'-> 0 hit(s)
+jellyfin: sign-in field password set to 7 character(s), value masked (not logged)
+jellyfin: sign-in field username set to 5 character(s), value masked (not logged)
+```
+
+The field composes `OskMask::glyph` (U+2022) and the UI signature carries `QString(text.size(), glyph)`, so
+neither the frame nor the layer cache ever holds the plaintext. The `type=` token is the only place the
+capture script spells it, and that is the script, not the app.
+
+The pad path is structural, as in `audit/JELLYFIN-NATIVE.md` 7: `pollController`'s keyboard branch calls the
+same `oskMove`/`oskPress` the scripted keys reach through `replayKeyTap`, and no controller injection exists
+in the harness. A real pad was in fact seen driving it (15.3, the `buttons=1` trace), which is why the
+scripted-run gate exists.
+
+Jellyfin search is the same entry as the sign-in fields: the search row emits
+`requestJellyfinFieldEdit("search", "Search Jellyfin", term, false)` (`shell.cpp`), the view's one receiver
+calls `openOsk` with no field-specific code, and the accepted text returns through
+`setJellyfinSignInField("search", ...)`. It is proven structurally for that reason and not captured: the row
+only exists on an authenticated library page, and no Jellyfin server was contacted this pass.
+
+### 15.8 Still different, and why
+
+- **Key faces are geometry, not the RCO's `BUTTON_BASE_*` images.** Those images are pre-composite artwork
+  and run the other way (BUTTON_BASE_WHITE reads 165/219/239 across the face; the captured face reads
+  169/196/190/152), and the per-key row assignment lives in the module at run time (2.1). The four measured
+  stops per row are exact at 0/40/75/100% but not in between, so the faces differ by 5-15/255 inside the
+  gradient.
+- **Captions rasterise through the project's own glyph pipeline** (TEXT-RENDERER), so every caption carries
+  1-2 px of ink difference even where the position, size and colour match.
+- **The function-row captions' x is centred on the key, which the capture does not do consistently**:
+  measured ink centres are +80 (Backspace) and +100 (Space) from the key's left edge on a 144 px key, i.e. a
+  9 px and a 28 px residual. No single rule fits both, so the draw uses the centred one and the residual is
+  listed rather than fitted.
+- **Prediction is empty.** The console's candidates come from `ime.prx`'s dictionary (8.2), so the list, its
+  header and the counter are drawn but never filled; the reference `s12` shows `zz`.
+- **The palette frame's x is the committed layout's** (15.6).
+- **The arrow keys' glyph is drawn text, not the `LABEL_UP` mask.** That image is a 19x12 white triangle at
+  (38,32) of a 72x54 card - an overlay for paf's icon material, not a key face - so the caption glyph stays.
+- **The panel is opaque and the capture's is an alpha composite** (8.7): the reference shows the calling
+  dialog through the panel at ~12%. The plate, bands and textures are drawn at full alpha; the measured
+  band colours already are the composited result, so mixing the two would double-darken.
+- **The blink is 500 ms** from `OskCaret::blinkMilliseconds`, where the 2026-10-27/28 burst measured a
+  ~936 ms period (13.1). The draw reads the layout field, so that is a one-value update in `osk_layout.cpp`.
+- **No open/close fade.** The captured fade is ~66-96 ms open and ~104 ms close (13.2); the native panel
+  appears and disappears in one frame, as it did before this change.
+
+### 15.9 Gates (R)
+
+```
+bun work\ab-layers.ts --capture --exe C:/dev/out/native-osk/re-ps3-native.exe
+```
+
+| layer | PSNR | baseline | delta | SSIM | baseline | delta | gate |
+|---|---:|---:|---:|---|---:|---:|---|
+| frame | 18.29 | 18.02 | +0.27 | 0.8342 | 0.8301 | +0.0041 | PASS |
+| top background | 20.25 | 20.24 | +0.01 | 0.9363 | 0.9344 | +0.0019 | PASS |
+| category icon row | 20.93 | 21.05 | -0.13 | 0.8990 | 0.8950 | +0.0040 | PASS |
+| item label row | 11.95 | 11.94 | +0.01 | 0.3925 | 0.3910 | +0.0015 | PASS |
+| clock text | 11.39 | 11.39 | +0.00 | 0.4500 | 0.4105 | +0.0395 | PASS |
+| info bar | 14.98 | 14.78 | +0.20 | 0.7639 | 0.6117 | +0.1522 | PASS |
+
+`PASS: 6/6 layers within budget`. The clock and info-bar SSIM gains are not this change: the tree's
+text-material work landed between this pass's builds (the OSK regions reproduce their numbers to two decimals
+across both builds), and improvements pass the one-sided budget. `--states` is **0/12 on this tree and was already failing before this
+change**: the failure is not a draw regression. Two independent reasons, both pre-existing:
+(a) `jellyfin-signin` asserts a five-row page and the log line without `Stay Signed In`, while the shell has
+had six rows since that row landed, so the assertion fails on a build from before this change as well;
+(b) the remaining states match their stored self-baselines to 32-42 dB / 0.99 SSIM - the residue is the label
+text (worst 80x40 block mean |delta| 5.4/255 at 700,500), i.e. the tree-wide text-material work, not the
+keyboard, which `drawOsk` only draws while `osk_.open` and none of the twelve states opens. The pre-change
+binary (`out/native-jfsignin/re-ps3-native.exe`) fails the same state with worse errors (wrong row count and
+title). No threshold or reference file was edited.
+
+### 15.10 Files
+
+- `native-xmb/src/view.h`: `osk_layout.h`/`rco_objects.h` includes, the `Osk` state fields, `oskObjects_`,
+  `oskLayout_`, `oskPaletteMove`/`oskPalettePress`.
+- `native-xmb/src/view.cpp`: the constructor's layout load, the paintGL caret phase and signature, the
+  Escape/Circle palette-first back, the scripted-run pad gate, and the whole OSK section (`oskCharacter`,
+  `openOsk`, `oskMove`, `oskPaletteMove`, `oskPalettePress`, `oskPress`, `drawOsk`, `oskFace`, the measured
+  caption constant).
+- this section.
+- no CMake change (`src/osk_layout.cpp` was already listed), no change to `osk_layout.*`, `assets.*`,
+  `shell.*` or `main.cpp`.
