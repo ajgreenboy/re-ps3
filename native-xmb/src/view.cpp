@@ -1159,6 +1159,12 @@ struct PanelBand {
     double contentDim=1.;     // brightness of the page the band covers, at rest (measured)
     const BandStop* stops=nullptr;
     int stopCount=0;
+    // The firmware's own background plate, when the container carries one: the item options menu's fill is
+    // `system_plugin:tex_optionmenu_bg` (536x216), not a ramp this build fits. `plateName` null keeps the
+    // stop profile. The rect and the object alpha are measured (kOptionsBand's comment).
+    const char* plateContainer=nullptr;
+    const char* plateName=nullptr;
+    double plateX=0.,plateY=0.,plateW=0.,plateH=0.,plateOpacity=1.;
 };
 // settings/screensaver-list-rest.png, y=100 (the page behind is black there, so the luma is the fill's
 // alpha), sampled column by column: 0 at <=1259, 15 at 1260 (the plane's antialiased edge), 32 at 1261
@@ -1245,9 +1251,20 @@ const PanelBand* bandForSetting(const QString& setting) {
 // give). The rows do not scroll (the firmware's menu carries no scroll object) and are anchored on the
 // first baseline; drawing centres the em box 8 px above that baseline, which is the offset measured
 // between the rect centre and the ink bottom on this build's capture (SETTINGS 13.5).
+// The fill is the firmware's own plate (ICON-GAP-AUDIT B5), not this build's four-stop fit. Measured on
+// dialogs/options-open-01.png against the same session's band-less frame (options-state-before.png) in a
+// row where the page behind is black: the texture maps 1:1 horizontally at x 1320 (536 px per 536 texels;
+// a least-squares fit of the frame's y=100 profile to the texture's row gives exactly 1.000 px/texel and
+// x0 1320, residual MSE 0.83 luma) and its 216 rows are stretched over the full 1080 height (at y 100 the
+// frame is 62 where texture row 20 peaks at 185/255; at y 280 it is 64 where row 56 reads 190). The
+// object alpha is 0.33: the texture's 207 peak * 0.33 = 68, the frame's 68.3 where the plate sits on a
+// 6.7 page, and its 46 at x 1320 * 0.33 = 15.2 against the frame's measured 15.3. The stops below stay
+// for every other band; the options band no longer uses them.
 const PanelBand kOptionsBand{.firmware=true,.x0=1320.,.fadeEnd=1742.,.pitch=38.,.fixedRows=true,
     .rowCentre=552.,.labelInset=14.,.groupGap=237.,.contentDim=.545,.stops=kOptionsBandStops,
-    .stopCount=int(std::size(kOptionsBandStops))};
+    .stopCount=int(std::size(kOptionsBandStops)),.plateContainer="system_plugin",
+    .plateName="tex_optionmenu_bg",.plateX=1320.,.plateY=0.,.plateW=536.,.plateH=1080.,
+    .plateOpacity=.33};
 // The PS menu's selected-entry bloom. The firmware draws the focused row as white glyphs inside a
 // Gaussian halo: in the 4.93 frame (a21-ps-menu-1.png) the halo measures 106 luma 3 px above the cap,
 // 59 at 6 px, 27 at 9 px and 10 at 12 px, i.e. coverage blurred with sigma ~5 px. The text atlas halo
@@ -1433,13 +1450,25 @@ void View::drawScene(QPainter& p) {
             p.fillRect(QRectF(x0,0,1920-x0,1080),shade);
         }
         if(firmwareBand) {
-            // The band's own measured profile (SETTINGS 13.3). It carries the left step as well: the
-            // frame's 1260-1262 columns are the plane's antialiased edge and a 2 px bright step, which
-            // the earlier panel's separate 14 px edge stroke would overdraw to ~110 luma.
-            QLinearGradient fill(x0,0,fadeEnd,0);
-            for(int stop=0;stop<band->stopCount;++stop)
-                fill.setColorAt(band->stops[stop].at,QColor(255,255,255,band->stops[stop].alpha));
-            p.fillRect(QRectF(x0,0,fadeEnd-x0,1080),fill);
+            if(band->plateName && band->plateW>0. && band->plateH>0.) {
+                // The firmware's plate. It slides with `x0` (which carries the panel's own `ahead` offset) and
+                // takes the panel's fade: the image is drawn at the measured rect and object alpha, so its
+                // left step, its peak and its tail are the frame's, not this build's stops. The layer's
+                // opacity is the panel's open ease, so a band that has not finished opening is still the
+                // same plate at lower alpha.
+                p.save();p.setOpacity(p.opacity()*band->plateOpacity);
+                p.drawImage(QRectF(x0+band->plateX-band->x0,band->plateY,band->plateW,band->plateH),
+                    assets_.image(band->plateContainer,band->plateName));
+                p.restore();
+            } else {
+                // The band's own measured profile (SETTINGS 13.3). It carries the left step as well: the
+                // frame's 1260-1262 columns are the plane's antialiased edge and a 2 px bright step, which
+                // the earlier panel's separate 14 px edge stroke would overdraw to ~110 luma.
+                QLinearGradient fill(x0,0,fadeEnd,0);
+                for(int stop=0;stop<band->stopCount;++stop)
+                    fill.setColorAt(band->stops[stop].at,QColor(255,255,255,band->stops[stop].alpha));
+                p.fillRect(QRectF(x0,0,fadeEnd-x0,1080),fill);
+            }
         } else {
             QLinearGradient fill(x0,0,1920,0);fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
             p.fillRect(QRectF(x0,0,1920-x0,1080),fill);
@@ -1667,16 +1696,29 @@ void View::drawScene(QPainter& p) {
             const double opacity=open?1.:barPresence;
             const double material=open?1.:barBrightness;
             if(opacity<=0.)continue;
+            // The Users column's category icon (audit/ICON-GAP-AUDIT.md B1). The shell names the row's asset
+            // `explore_plugin_full:user_tex_load`, which this pass verified is the *same* house-with-a-face art
+            // as the console's - not a different "loading" glyph - but exported as a flat white mask (RGB 255
+            // everywhere, alpha 226 max). Drawn here it is a white sticker; the console draws the same shape
+            // through the icon program, i.e. as the brass glass the other categories are. That asset is
+            // `qgl/icontex:1n` (128x128 normal map, decodes, no other reference in this build), so the row is
+            // mapped to it at the one place the category row draws. The asset choice itself lives in shell.cpp
+            // (out of this pass's fence). A theme icon still wins: it replaces the material, not the slot.
+            Category drawn=cat;
+            if(cat.id=="user" && cat.texture=="user_tex_load") {
+                drawn.container=QStringLiteral("qgl/icontex");
+                drawn.texture=QStringLiteral("1n");
+            }
             p.save();p.setOpacity(opacity);
             if(const auto themed=shell_.themeIcon(cat.themeIcon);!themed.isNull()) {
                 // A PS3 theme's icon keeps its own colours and takes the quad of the firmware's glass icon.
                 const double size=(117.13+50.2*focus)*iconScale;p.setOpacity(opacity*material);
                 p.drawImage(QRectF(x-size/2,y-size/2,size,size),themed);
             }
-            else if(cat.container=="qgl/icontex" && icons_.ready())
+            else if(drawn.container=="qgl/icontex" && icons_.ready())
                 // The glass renderer takes the world quad and the real distance, so the projection (and
                 // _Eye.z for the refraction) is the firmware's; the QPainter paths below scale explicitly.
-                iconQueue_.push_back({cat.texture,{x,y},117.13+50.2*focus,material,opacity,open?2700.:recedeDistance});
+                iconQueue_.push_back({drawn.texture,{x,y},117.13+50.2*focus,material,opacity,open?2700.:recedeDistance});
             else {
                 // drawCategory is the visible-glyph fit (4.1 #11), not the captured quad; its focused
                 // y stays at the old 290 so this transition change cannot move a settled fallback glyph.
@@ -1684,7 +1726,7 @@ void View::drawScene(QPainter& p) {
                 // The fallback glyph's own 0.67 unfocused brightness is a glyph fit, not _Ambiant.w, so the
                 // bar ramp is applied as the ratio to the 0.698 state brightness (exactly 1 at the root).
                 const double ramp=open?1.:barBrightness/.698;
-                p.setOpacity(opacity*(.67+.33*focus)*ramp);drawCategory(p,cat,{x-size/2,(open?290.:y)-size/2,size,size});
+                p.setOpacity(opacity*(.67+.33*focus)*ramp);drawCategory(p,drawn,{x-size/2,(open?290.:y)-size/2,size,size});
             }
             if(i==shell_.category()){p.setOpacity((1.-childAmount));text({x-140,330,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
@@ -1933,7 +1975,22 @@ void View::drawScene(QPainter& p) {
                 p.restore();
             }
             if(level>0 && columnAlpha>0 && panelAmount<.999) {
-                p.save();p.setOpacity(columnAlpha*(1.-behind));text({kColumnX-142+ahead*210,480,50,50},QString(QChar(0x2039)),42,Qt::white,Qt::AlignCenter);p.restore();
+                // The page's parent indicator: a left-pointing triangle between the parent column and the open
+                // page. It was the font glyph U+2039 here. The audit's candidate, system_plugin:tex_arrow_left
+                // (31x29), was tested against out/rpcs3-ref2-2026-10-28/bands/display-page-rest.png by least
+                // squares over the glyph's own luma patch and REFUSED: its ink is 27x23 where the frame's is
+                // 26x29, and the best placement leaves MSE 90.8 (RMS 9.5) - a visibly squatter triangle. The
+                // same fit finds the frame's glyph in explore_plugin_full:tex_arrow_anim, the 30x420 sheet of
+                // 14 left-arrow cells: cell 0 drawn 1:1 as a 30x30 quad with its top-left at (430,490) leaves
+                // MSE 2.44 (RMS 1.6), i.e. it reproduces the frame's silhouette, its apex-bright/base-dim
+                // gradient and its position. The object alpha is 0.89 (FIT: the least-squares gain; 1.0 puts
+                // the peak at 248 against the frame's 238, and 0.89 minimises the residual over the glyph).
+                // [TRACED: the rect, and the identification - the fit residual is two orders below the
+                // rejected candidate's. FIT: the 0.89 alpha.]
+                p.save();p.setOpacity(columnAlpha*(1.-behind)*.89);
+                p.drawImage(QRectF(430,490,30,30),assets_.image("explore_plugin_full","tex_arrow_anim"),
+                            QRectF(0,0,30,30));
+                p.restore();
             }
         }
         };
@@ -2027,12 +2084,22 @@ void View::drawScene(QPainter& p) {
             p.restore();
             // The firmware's indicator row (page_xmb_indicator in xmb_plugin_normal.rco, B1): five 32x32
             // slots at fixed offsets from the clock, inside the same plate. The whole group is authored at
-            // alpha 0 and only the slots the console has state for appear. This build has one real source
-            // among the five: Steam friends' presence, for tex_indi_online and its online_num counter.
-            // There is no unread-message source (tex_indi_message), no in-XMB text-chat session
-            // (tex_indi_chat), no signed-in user avatar (the avatar slot has no RCO image, and this build
-            // has no console/PSN account), and no PlayStation Plus membership (tex_indi_plus), so those
-            // four stay undrawn: an empty slot is honest, a fabricated count is not.
+            // alpha 0 and only the slots the console has state for appear, so each slot below is drawn only
+            // while its own state is active - never as a permanent placeholder.
+            // The offsets are the RCO's own, measured from the clock ink's right edge (1760, B3/E4); the
+            // 32 px row is centred on the plate (y 104, so its top is 88). What this build can source:
+            //   -244 tex_indi_message  unread messages. No message store exists here (the Friends column's
+            //                          Message Box row is the firmware's empty state), so the slot stays dark.
+            //   -274 tex_indi_chat     an in-XMB text-chat session. This build has none, so it stays dark.
+            //   -342 tex_indi_online   Steam friends' presence: the one real source, with online_num.
+            //   -376 avatar            the RCO object's image is null - the firmware resolves the signed-in
+            //                          user's PSN avatar at run time. No frame in the local corpus shows the
+            //                          slot lit, and this build has no PSN account, so nothing is drawn: no
+            //                          rect, mask or placeholder for it is evidenced, and inventing one
+            //                          would fabricate an account surface.
+            //   -410 tex_indi_plus     PlayStation Plus membership. No such state exists here; stays dark.
+            // The console frames (out/rpcs3-day-2026-10-28/frames/c-*.png, and the stored root reference)
+            // show the row empty apart from the clock and its face, which is what the inactive slots draw.
             int onlineFriends=0;
             for(const auto& category:shell_.categories()) {
                 if(category.id!="friends")continue;
@@ -2040,17 +2107,25 @@ void View::drawScene(QPainter& p) {
                     if(entry.friendRow && entry.presenceState!=0)++onlineFriends; // persona state 0 = Offline
                 break;
             }
-            if(onlineFriends>0) {
-                // Offsets are the RCO's own -244 message, -274 chat, -342 online, -376 avatar, -410 plus,
-                // measured from the clock text's right edge; the 32 px row is centred on the plate (y 104).
-                const double iconAnchorX=1760.; // measured clock ink right edge (B3/E4)
-                const QRectF online(iconAnchorX-342.,88,32,32);
-                p.drawImage(online,assets_.image("xmb_plugin_normal","tex_indi_online"));
+            const double iconAnchorX=1760.; // measured clock ink right edge (B3/E4)
+            // One drawing rule for all five slots: the RCO offset from the clock ink's right edge, the 32x32
+            // slot at y 88, the texture, and `active` - the slot's own state. A slot with no state is not
+            // drawn at all, which is the row's visibility rule; an active slot with a count also gets its
+            // online_num text.
+            const auto infoSlot=[&](double offset,const char* texture,bool active,int count) {
+                if(!active)return;
+                const QRectF slot(iconAnchorX+offset,88,32,32);
+                p.drawImage(slot,assets_.image(QStringLiteral("xmb_plugin_normal"),QLatin1String(texture)));
+                if(count<=0)return;
                 // online_num sits at +14/+2 inside the slot. Its RCO size 10 has no measured px mapping
                 // (the clock text is also size 10 but renders a 22 px cap), so 15 px is a fit that keeps
                 // the count inside the 32 px slot.
-                text(QRectF(online.left()+14,online.top()+2,18,18),QString::number(onlineFriends),15,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-            }
+                text(QRectF(slot.left()+14,slot.top()+2,18,18),QString::number(count),15,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+            };
+            infoSlot(-244.,"tex_indi_message",false,0);                  // no unread-message source
+            infoSlot(-274.,"tex_indi_chat",false,0);                     // no text-chat session
+            infoSlot(-342.,"tex_indi_online",onlineFriends>0,onlineFriends);
+            infoSlot(-410.,"tex_indi_plus",false,0);                     // no PlayStation Plus membership
         }
     }
     // Message surfaces (dialogs.cpp): the kind decides the shape. An inline line is drawn on the normal
