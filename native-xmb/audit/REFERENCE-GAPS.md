@@ -480,3 +480,17 @@ covered (`ps-menu`'s black frame keeps the clock, the band and modal frames do n
 - Nothing here re-opens a budget. If a batch A cell lands below 18 dB / 0.88, the correct response is the
   one sections 6 and 15 already take: report the number, name the region, and go after the row/list
   geometry - not the threshold.
+## CORRECTION 2026-10-28: media-player-panel is group (c), not group (b)
+
+The prerequisite in 3.1 was wrong. A rig attempt placed a real 3.46 MB H.264/AAC MP4 (`avc1`+`mp4a`, 20 s)
+in `dev_hdd0/video` before boot: the Video column still drew only BD Data Utility / Search for Media
+Servers / Video Editor & Uploader. The same file in `dev_usb000/VIDEO` plus a column re-entry showed
+nothing, and a JPEG in `dev_hdd0/photo` left the Photo column empty.
+
+Cause, from the 47,749-line RPCS3 log: vsh opens `/dev_hdd0/mms/db/metadata_db_hdd` and its log/index
+files, and **`/dev_hdd0/video` appears zero times**; `/dev_usb000` appears only in the VFS mount dump.
+The media columns are drawn from the **MMS metadata database**, not a directory scan, so a host-side copy
+is invisible until the console's own importer writes a row - and its only sources are devices RPCS3 does
+not present (no USB enumeration/hotplug). Media-player-panel therefore joins the do-not-chase list for
+this rig. The content was removed and both columns re-grabbed empty; the rig was restored (xRegistry,
+input config, live config, dev_hdd0/game/TEST12345 byte-for-byte).
