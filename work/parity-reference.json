@@ -88,12 +88,15 @@
     "notRunHere": "This tool never launches RPCS3. The rig belongs to the capture agent (PARITY-PHASES dispatch row for P0.3); work/parity.ts only reads the reference set and reports what is missing.",
     "matrixRecipe": "Run the cell list printed by 'bun work/parity.ts --matrix' in firmware order: one console session per state, walking the four background presets (day, night, yoake, higure) and both resolutions, and switching the theme once per state (original, classic, 01.p3t). A cell that cannot be produced on the console (no PSN, no disc, a menu the firmware will not show without content) is recorded as 'unavailable' in the scorecard rather than captured from a different state."
   },
-  "registered": [
+  "registered": [],
+  "retired": [
     {
       "cell": "root__original__day__1080p",
       "reference": "out/native-reference/ab-rpcs3-root.png",
       "kind": "rpcs3-legacy",
-      "note": "The pre-contract RPCS3 frame work/ab-layers.ts already scores against (2026-10-25, 4.93, DD/MM 24-hour console clock). It is the only firmware frame in the tree. Its content does not match the native root by construction: the reference shows 'Corrupted Data' and the native build shows the Steam Store rows, and the pinned native clock is MM/DD 12-hour. Kept as a real Tier B number with a real reference, labelled mismatch-by-construction; it is not evidence of parity and must be replaced by a matched P0.3 capture."
+      "retired": "2026-10-28",
+      "replacedBy": "the matched day-window capture imported from C:/dev/out/rpcs3-day-2026-10-28 (console clock 10/28 10:00 AM, MM/DD, 12-Hour, theme Original evidenced in the same session)",
+      "note": "The pre-contract RPCS3 frame work/ab-layers.ts scores against (2026-10-25, 4.93, DD/MM 24-hour console clock). It stayed registered until a matched root capture existed; that capture now does, so the registered entry is retired rather than kept as a permanent mismatch-by-construction. work/ab-layers.ts still uses this PNG for its own historical comparison - that is a different instrument and is untouched."
     }
   ],
   "budgets": {

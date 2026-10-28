@@ -1582,3 +1582,24 @@ difference, not a rendering miss.
 **Not a parity claim.** 21 canonical cells are now backed by a matched day frame instead of a night frame;
 coverage moves 9 -> 22 of 30 canonical and 24 -> 37 of 720 matrix cells; no cell passes Tier A+B+C, no budget
 moved, and the first genuine Tier B numbers are structural numbers on a build that cannot draw text.
+## 14. The registered root is retired, and the canonical root is matched (2026-10-28)
+
+Scorecard 10.7 left one decision open: `root__original__day__1080p` was backed by the **pre-contract registered**
+frame, so the importer refused the matched day-window capture and the single most important cell in the corpus
+kept scoring a mismatch-by-construction 18.9 dB. That decision is now executed:
+
+- `work/parity-reference.json`: the `registered` entry is retired into a `retired` array that keeps the old frame,
+  its date and its replacement reason. Nothing is deleted, and `work/ab-layers.ts` still uses that PNG for its own
+  historical stored-pair comparison - a different instrument, untouched.
+- `work/parity-references-map.json`: a `root / original / day / 1080p` row maps the matched day frame
+  (`stills/root__original__day__1080p.png`, console clock `10/28 10:00 AM`, MM/DD, 12-Hour, theme Original
+  evidenced in the same session).
+- Import: **37 cells, 0 skipped**. Coverage is **22/30** firmware-reference canonical cells and **22/30**
+  firmware-referenced states (5 native-only states owe none of the 35).
+
+The root now scores against a frame with the same clock format, the same theme and the same preset as the app.
+It still differs in content - the console Game column holds PlayStation Store / Saved Data Utility / Corrupted
+Data, the app holds Steam rows - so it remains a labelled partial comparison, but no longer a clock mismatch.
+A fresh Tier B run on a **text-bearing** build is required before any score is quoted: the batch that filled
+these cells was measured against a build whose glyphs were missing, so its text-region numbers are structural
+only (see the harness text-presence guard added the same day).
