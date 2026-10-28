@@ -698,6 +698,21 @@ void View::paintGL() {
     if(const auto* note=shell_.notification())notificationShown_={note->title,note->detail,note->icon};
     notificationEase_.retarget(shell_.notification()?1.:0.,moveMilliseconds);
     notificationEase_.advance(dt);
+    // Message surfaces (audit/DIALOGS-FIRMWARE.md): the modal box is the only shape with traced open and
+    // close motion - 200 units on its label group (TRACED 0x00341BFC, DATA 0x0068C978) and 1000 on the
+    // plate child (TRACED 0x00344094, DATA 0x0068CA1C). The hint row's 100-unit per-button fade is the
+    // page_btnnavi animation, so every hinted surface uses it. The content is latched while the box fades
+    // out, so the exit still has something to draw after Shell has dismissed the message.
+    const MessageKind messageKind=shell_.message().isEmpty()?MessageKind::None:shell_.messageKind();
+    if(messageKind!=MessageKind::None)messageShown_={shell_.message(),messageKind,shell_.messageActions()};
+    const bool boxUp=messageKind==MessageKind::Box;
+    const bool surfaced=messageKind==MessageKind::Page || boxUp ||
+        messageKind==MessageKind::ErrorCode || messageKind==MessageKind::Info;
+    dialogEase_.retarget(boxUp?1.:0.,dialogMilliseconds);
+    dialogPlateEase_.retarget(boxUp?1.:0.,dialogPlateMilliseconds);
+    dialogHintEase_.retarget(surfaced?1.:0.,dialogHintMilliseconds);
+    dialogSettleEase_.retarget(messageKind==MessageKind::ErrorCode?1.:0.,dialogSettleMilliseconds);
+    dialogEase_.advance(dt);dialogPlateEase_.advance(dt);dialogHintEase_.advance(dt);dialogSettleEase_.advance(dt);
     // Local diagnosis: XMB_NOTIFY_LOG=1 also traces the composite's own curve, one line per frame while it
     // slides and fades, so the 200 ms mode-5 timing is measurable without scoring pixels.
     if(static const bool notifyLog=qEnvironmentVariableIsSet("XMB_NOTIFY_LOG");notifyLog && notificationEase_.running())
@@ -740,6 +755,11 @@ void View::paintGL() {
     QString signature=QString::asprintf("%.4f %.4f %.4f %d %d %d ",categoryPosition_,depthPosition_,categoryFade_,shell_.category(),shell_.depth(),uiRevision_);
     for(const auto& column:columns_)signature+=QString::number(column.position,'f',4)+' ';
     signature+=shell_.clockText()+shell_.message()+shell_.status();
+    // The message surface's own fades run between shell changes (the box in and out, the hint row, the
+    // error page's settle), so their amounts belong in the signature, quantised by 1/256.
+    if(dialogEase_.value>.002 || dialogPlateEase_.value>.002 || dialogHintEase_.value>.002 || dialogSettleEase_.value>.002)
+        signature+=QString::asprintf(" dialog %d %d %d %d ",
+            int(dialogEase_.value*256.),int(dialogPlateEase_.value*256.),int(dialogHintEase_.value*256.),int(dialogSettleEase_.value*256.));
     // The options panel animates (slide-in, row focus) without a shell change on every frame.
     if(shell_.optionsOpen() || optionsOpenEase_.value>0.)
         signature+=QString::asprintf(" options %d %.4f %.4f %d",shell_.optionsOpen()?1:0,optionsOpenEase_.value,optionsPanelEase_.value,shell_.optionsSelection());
@@ -1078,14 +1098,15 @@ void View::drawSubtitle(QPainter& p,const QString& cue) {
 void View::drawScene(QPainter& p) {
     iconQueue_.clear();
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
-    // A message whose body is "Key: value" rows (System Information, connection status, outputs) is a PS3 information
-    // page, not a dialog (reference 92 s): no categories or clock behind it, a titled header and a two-column table.
-    const bool infoPage=[&]{
-        const auto lines=shell_.message().split('\n');
-        if(lines.size()<4 || !lines[1].isEmpty())return false;
-        int pairs=0;for(int i=2;i<lines.size();++i)if(lines[i].contains(": "))++pairs;
-        return pairs>=2;
-    }();
+    // The message surface is an explicit kind the shell decides (Shell::MessageKind, audit/DIALOGS-FIRMWARE.md
+    // section 4.2 item 1): an inline empty-state line is a list row, a titled page / modal box / error page /
+    // information page is a full screen the message itself owns. Nothing is inferred from the string any more.
+    const MessageKind messageKind=shell_.message().isEmpty()?MessageKind::None:shell_.messageKind();
+    const bool messageUp=messageKind!=MessageKind::None;
+    const bool inlineMessage=messageKind==MessageKind::Inline;
+    // A Page/Box/ErrorCode/Info surface replaces the item list and the category band (the firmware's page is
+    // the whole screen: the reference frame's band is off-frame, and neither measured frame dims anything).
+    const bool messageScreen=messageUp && !inlineMessage;
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
         if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);textRenderer_.draw(*this,p,r,value,f,colour,flags);return;}
         QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(QColor(0,0,0,38));p.drawText(r.translated(1,1),flags,value);p.setPen(colour);p.drawText(r,flags,value);
@@ -1209,22 +1230,22 @@ void View::drawScene(QPainter& p) {
         previousMediaOpen_=false;
         const auto& categories=shell_.categories();
         const double childAmount=std::clamp(depthPosition_,0.,1.);
-        for(int i=0;i<categories.size();++i) {
+        for(int i=0;i<categories.size() && !messageScreen;++i) {
             // Firmware geometry (RPCS3 capture at 1920x1080, audit/PIPELINE.md): focus column at x 565, icons 200 px apart
             // with 10 px more either side of the focused one, centres y 290 (focused 280); quads 117 px, focused 167 px;
             // shader brightness 0.698 unfocused, 1 focused. Inside a page (reference 95 s) the open category steps 262 px
             // left (traced: RCO xmenu posX -395 and the captured open-page x 303, audit/LAYOUT-TRACE.md); the ones to its
             // right stay faintly (~0.1) on a 186 px pitch, and the ones to its left leave.
-            if(infoPage)break;
-            const auto& cat=categories[i];const double distance=i-categoryPosition_;
-            const bool open=i==shell_.category();
+            const auto& cat=categories[i];const double distance=i-categoryPosition_;            const bool open=i==shell_.category();
             const double level0X=kColumnX+distance*200+10*std::clamp(distance,-1.,1.);
             // Open-page recession (traced 2026-10-27, RPCS3 burst): the bar keeps its 200-unit pitch at the
             // recorded parent distance 2857.2, i.e. 200*2700/2857.2 = 189.0 px (measured 190.5 px in frames);
             // the old 186 was a fit. The 0.945 scale is the same recession.
             const double x=open || distance<0?level0X-childAmount*262:level0X+(kColumnX-40+distance*189.0-level0X)*childAmount;
             const double focus=std::max(0.,1.-std::abs(distance));
-            const double opacity=(open?1.:(1.-childAmount)+(distance>0?.1*childAmount:0.))*(shell_.message().isEmpty()?1.:.18);
+            // No dim behind a message: both measured reference frames keep the XMB at full brightness
+            // (audit 4.1 "frame dim behind a message"), so the 0.18 and 135-alpha washes are gone.
+            const double opacity=open?1.:(1.-childAmount)+(distance>0?.1*childAmount:0.);
             p.save();p.setOpacity(opacity);
             if(const auto themed=shell_.themeIcon(cat.themeIcon);!themed.isNull()) {
                 // A PS3 theme's icon keeps its own colours and takes the quad of the firmware's glass icon.
@@ -1234,7 +1255,7 @@ void View::drawScene(QPainter& p) {
             else if(cat.container=="qgl/icontex" && icons_.ready())
                 iconQueue_.push_back({cat.texture,{x,290-10*focus},117.13+50.2*focus,.698+.302*focus,opacity});
             else {const double size=76+focus*16;p.setOpacity(opacity*(.67+.33*focus));drawCategory(p,cat,{x-size/2,290-size/2,size,size});}
-            if(i==shell_.category()){p.setOpacity((1.-childAmount)*(shell_.message().isEmpty()?1.:.18));text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
+            if(i==shell_.category()){p.setOpacity((1.-childAmount));text({x-140,335,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
         }
         const auto isChoiceColumn=[](const Column& column) {
@@ -1346,6 +1367,10 @@ void View::drawScene(QPainter& p) {
                 const double idleFade=active && level==0 && idleCategories.contains(shell_.categories()[shell_.category()].id)?
                     std::clamp((resting-4000)/800.,0.,1.)*(1.-focus):0.;
                 p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus))*(1.-idleFade));
+                // An inline empty-state line stands in for the focused row's own label slot: the firmware's
+                // line sits where the list row would be (measured x 630, centre y 504), so the row keeps its
+                // icon and focus but not its title. No other row is affected.
+                const bool inlineStandIn=inlineMessage && active && level==shell_.depth() && i==column.selection;
                 // One label column per level, as on the PS3 (reference: icon centre +99 at the top level, +57 inside a page).
                 const double labelX=kColumnX+(level==0?(tile?173:99):57)+ahead*250+offset;
                 const double alpha=(.72+.28*focus)*(entry.disabled?.55:1.);
@@ -1373,27 +1398,29 @@ void View::drawScene(QPainter& p) {
                 // 3.4 s ease-in-out from a faint halo, about 0.35 of the peak, to the full bloom, starting faint when
                 // the row takes focus). The peak is the static halo measured from the reference crop.
                 const double breath=.35+.65*(.5-.5*std::cos(2*std::numbers::pi*double(resting)/3400.));
-                if(focus>.5)glow(labelRect,label,27,(focus-.5)*2*breath*(entry.disabled?.45:1.));
-                text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
-                if(elided.elided)
-                    text(QRectF(labelRect.left()+elided.ellipsisX,labelRect.top(),40,labelRect.height()),
-                         QString(QChar(0x2026)),27,QColor(255,255,255,int(255*alpha)));
-                if(!value.isEmpty() && panelAmount<.5) {
-                    QString shown=value;
-                    if(entry.action==Action::JellyfinSignInField) {
-                        QFont valueFont(shell_.fontFamily());valueFont.setPixelSize(21);
-                        if(textRenderer_.ready()) {
-                            const auto clipped=textRenderer_.elideToWidth(valueFont,value,440);
-                            shown=clipped.elided?clipped.prefix+QString(QChar(0x2026)):value;
-                        } else shown=QFontMetrics(valueFont).elidedText(value,Qt::ElideRight,440);
+                if(!inlineStandIn) {
+                    if(focus>.5)glow(labelRect,label,27,(focus-.5)*2*breath*(entry.disabled?.45:1.));
+                    text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
+                    if(elided.elided)
+                        text(QRectF(labelRect.left()+elided.ellipsisX,labelRect.top(),40,labelRect.height()),
+                             QString(QChar(0x2026)),27,QColor(255,255,255,int(255*alpha)));
+                    if(!value.isEmpty() && panelAmount<.5) {
+                        QString shown=value;
+                        if(entry.action==Action::JellyfinSignInField) {
+                            QFont valueFont(shell_.fontFamily());valueFont.setPixelSize(21);
+                            if(textRenderer_.ready()) {
+                                const auto clipped=textRenderer_.elideToWidth(valueFont,value,440);
+                                shown=clipped.elided?clipped.prefix+QString(QChar(0x2026)):value;
+                            } else shown=QFontMetrics(valueFont).elidedText(value,Qt::ElideRight,440);
+                        }
+                        text({1300+offset,y-25,440,50},shown,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
                     }
-                    text({1300+offset,y-25,440,50},shown,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
+                    const auto subtitle=shell_.subtitleText(entry);
+                    if(!subtitle.isEmpty())text({labelX,y+20,1100,30},subtitle,17,QColor(230,230,230,int(235*alpha)),Qt::AlignLeft|Qt::AlignTop);
+                    // The help line belongs to the selection, not the eased position: on the real XMB it moves to the new
+                    // row on the frame the move starts, fully opaque, including on every held-key repeat (RPCS3 capture).
+                    else if(i==column.selection && !entry.detail.isEmpty())text({labelX,y+24,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
                 }
-                const auto subtitle=shell_.subtitleText(entry);
-                if(!subtitle.isEmpty())text({labelX,y+20,1100,30},subtitle,17,QColor(230,230,230,int(235*alpha)),Qt::AlignLeft|Qt::AlignTop);
-                // The help line belongs to the selection, not the eased position: on the real XMB it moves to the new
-                // row on the frame the move starts, fully opaque, including on every held-key repeat (RPCS3 capture).
-                else if(i==column.selection && !entry.detail.isEmpty())text({labelX,y+24,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
                 p.restore();
             }
             if(level>0 && columnAlpha>0 && panelAmount<.999) {
@@ -1401,7 +1428,9 @@ void View::drawScene(QPainter& p) {
             }
         }
         };
-        if(shell_.message().isEmpty()) { // behind a message dialog the item columns give way (reference 14.4 s)
+        // The item columns are replaced by a message screen and kept behind an inline line, which stands
+        // in only for the focused row's label (the firmware's line sits in that list slot).
+        if(!messageScreen) {
             // On a category move the item columns do not travel a whole icon step (202 px): the reference slides the old
             // list ~150 px away while it fades and brings the new one in from ~150 px, crossing over each other.
             if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*150,false);
@@ -1414,10 +1443,12 @@ void View::drawScene(QPainter& p) {
                 drawOptionsPanel(titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,shell_.optionsTitle());
             }
         }
-        if(!shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
+        if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
         // Info bar (system_plugin tex_infobar: a translucent white band with a bright bottom edge) framing the clock in the
-        // top-right corner; the clock's centre sits at y~104 as in the reference video.
-        if(!infoPage) {
+        // top-right corner; the clock's centre sits at y~104 as in the reference video. A message page keeps
+        // only the analog clock face (measured on D4: plate and date text absent, clock kept), which
+        // drawPageChrome draws with the page.
+        if(!messageScreen) {
             // Measured from the saved 1920x1080 firmware root capture; runtime PAF projection remains to trace.
             const QRectF infoBar(1329,75,591,58);
             p.save();p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,20));p.drawRoundedRect(infoBar,4,4);
@@ -1434,44 +1465,11 @@ void View::drawScene(QPainter& p) {
             p.restore();
         }
     }
-    if(infoPage) {
-        // Reference 92 s (1080p): item icon ~36 px at x 125 and title at x 158 on y 176 above the rule at y 199; rows 40 px
-        // apart centred on y ~533, keys right-aligned to x 925 and values from x 961; "○ Back" at x ~1145, y 894.
-        auto lines=shell_.message().split('\n');const QString title=lines.takeFirst();lines.removeFirst();
-        int depth=shell_.depth();const Entry* source=nullptr;
-        if(!shell_.entriesAt(depth).isEmpty())source=&shell_.entriesAt(depth)[shell_.selectionAt(depth)];
-        if(source && source->texture=="23n" && depth>0)source=&shell_.entriesAt(depth-1)[shell_.selectionAt(depth-1)];
-        if(source)drawImage(p,source->container,source->texture,{107,158,36,36});
-        text({158,156,1200,40},title,22,Qt::white);
-        for(const double y:{199.,866.})p.drawImage(QRectF(0,y,1920,2),assets_.image("system_plugin","tex_msgdialog_bar"));
-        double height=0;for(const auto& line:lines)height+=line.isEmpty()?20:40;
-        double y=std::max(230.,533-height/2+20);
-        for(const auto& line:lines) {
-            if(line.isEmpty()){y+=20;continue;}
-            if(y>840)break;
-            const int split=line.indexOf(": ");
-            if(split<0)text({160,y-20,1600,40},line,22,QColor(235,235,235),Qt::AlignHCenter|Qt::AlignVCenter);
-            else {
-                text({125,y-20,800,40},line.left(split),22,QColor(235,235,235),Qt::AlignRight|Qt::AlignVCenter);
-                text({961,y-20,900,40},line.mid(split+2),22,QColor(235,235,235));
-            }
-            y+=40;
-        }
-        drawImage(p,"system_plugin","tex_circle",{1133,882,24,24});
-        text({1167,874,200,40},assets_.text("sysconf_plugin","msg_tool_button_behavior_back","Back"),21,QColor(235,235,235));
-    } else if(!shell_.message().isEmpty()) {
-        // PS3 dialog (reference frames 14.4 s / 20.6 s): the XMB dims, two thin full-width rules at y~200 and y~880
-        // frame the dialog, the text is centred in the upper part, and the button hint sits centred under the lower rule.
-        p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,135));
-        // Rules: system_plugin tex_msgdialog_bar, brightest at the centre and fading to both ends.
-        for(const double y:{199.,879.})p.drawImage(QRectF(0,y,1920,2),assets_.image("system_plugin","tex_msgdialog_bar"));
-        auto lines=shell_.message().split('\n');
-        const QString heading=lines.size()>2 && lines[1].isEmpty()?lines.takeFirst():QString();
-        if(!heading.isEmpty())lines.removeFirst();
-        if(!heading.isEmpty())text({260,250,1400,50},heading,25,Qt::white,Qt::AlignHCenter|Qt::AlignVCenter);
-        text({260,heading.isEmpty()?260.:320.,1400,540},lines.join('\n'),22,QColor(240,240,240),Qt::AlignHCenter|Qt::AlignTop|Qt::TextWordWrap);
-        drawImage(p,"system_plugin","tex_cross",{902,895,24,24});text({936,887,160,40},"OK",21,QColor(235,235,235));
-    }
+    // Message surfaces (dialogs.cpp): the kind decides the shape. An inline line is drawn on the normal
+    // frame; the other four own the screen. A box keeps drawing while its traced 200/1000-unit exit fade
+    // runs after Shell has dismissed it.
+    if(messageUp)drawMessageSurface(p);
+    else if(messageShown_.kind==MessageKind::Box && (dialogEase_.value>.002 || dialogPlateEase_.value>.002))drawMessageBox(p);
     if(osk_.open)drawOsk(p);
     // The transient volume HUD. It is a timed composite, not a panel: it appears on every change and fades on
     // the MediaControls model, takes no input (nothing here reads a key or a button), and draws only in the

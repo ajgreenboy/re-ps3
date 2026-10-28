@@ -224,6 +224,45 @@ private:
     void drawScene(QPainter& painter);
     void drawPsMenu(QPainter& painter);
     void drawControllerHud(QPainter& painter);
+    // ---- Message surfaces (dialogs.cpp) -------------------------------------------------------------
+    // Shell decides which of the firmware's five surfaces a message is (MessageKind); these paths draw
+    // the measured layouts. There is no dialog RCO - the box, its plate and its button row are built by
+    // vsh.elf at run time (audit/DIALOGS-FIRMWARE.md section 1) - so every rectangle here is either a
+    // measured reference value or a stated native fit, never a claim of a paf projection.
+    void drawMessageSurface(QPainter& painter);      // dispatches on Shell::messageKind()
+    void drawInlineMessage(QPainter& painter);       // D3 inline empty-state line
+    void drawMessagePage(QPainter& painter);         // D4 titled status page
+    void drawMessageBox(QPainter& painter);          // D1 modal box: plate, two bars, two hints
+    void drawErrorMessagePage(QPainter& painter);    // D2 error-code page
+    void drawMessageInfoPage(QPainter& painter);     // D5 information page
+    // The D4 chrome: icon + left title above rule 1 at the measured ink y 154..188, the two flat rules
+    // (alpha ~0.22 at y 197, ~0.15 at y 877, uniform across x - not tex_msgdialog_bar, which is
+    // centre-bright), and the analog clock face these pages keep while the info bar's plate is hidden.
+    void drawPageChrome(QPainter& painter,const QString& title);
+    void drawPageClock(QPainter& painter);
+    // One button hint: a page_btnnavi glyph (30x30 texture, alpha-bounds fitted) and a system_plugin
+    // label, laid out from the measured x 1155. The page kinds put its ink at y 889..909 (measured); a
+    // modal box has no measured hint baseline and passes its own, just below the plate.
+    struct Hint { QString glyph,label; };
+    void drawHintRow(QPainter& painter,const QVector<Hint>& hints,double inkTop,double opacity);
+    void drawMessageText(QPainter& painter,const QRectF& rect,const QString& value,int size,const QColor& colour,int flags=Qt::AlignLeft|Qt::AlignVCenter);
+    // Wraps a body to a column with the same metric authority the glyphs use (blank paragraphs come back
+    // as empty strings), so every line advances by the measured pitch instead of the layout engine's
+    // leading. drawMessageLines returns the y below the last line.
+    QStringList wrapMessage(const QString& body,double width,int size);
+    double drawMessageLines(QPainter& painter,const QString& body,double top,double pitch,int size,const QColor& colour,double left,double width);
+    // The message on screen. Latched while a box's traced fades run out, so its exit still draws.
+    struct MessageShown { QString text; MessageKind kind=MessageKind::None; QStringList actions; };
+    MessageShown messageShown_;
+    // The only traced dialog motion: 200 units on the dialog's own label group (TRACED 0x00341BFC with
+    // DATA 0x0068C978), 1000 on the plate child (TRACED 0x00344094 with DATA 0x0068CA1C), 100 per button
+    // group for the hint row (system_plugin anim_*_show/_hide, accel mode 0), and 150 for the error
+    // page's body settle (TRACED 0x00340964 with DATA 0x0068C2FC).
+    PafEase dialogEase_,dialogPlateEase_,dialogHintEase_,dialogSettleEase_;
+    static constexpr double dialogMilliseconds=200;
+    static constexpr double dialogPlateMilliseconds=1000;
+    static constexpr double dialogHintMilliseconds=100;
+    static constexpr double dialogSettleMilliseconds=150;
     void grabIntroFrame();
     // PS3 on-screen keyboard (reference frame 64 s): 10x4 character grid, two function rows, prediction panel.
     // `masked` is the password composition mode (audit/JELLYFIN-NATIVE.md): the field draws one dot per
