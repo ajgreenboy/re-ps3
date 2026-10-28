@@ -2797,3 +2797,190 @@ bands were stable across the two hunk-build capture runs except the deliberate `
   Original row and the value column's own name, not a firmware string.
 
 No other source file was edited for this section; no reference, threshold or RCO was touched.
+
+## 17. Phase 11.4 draw half applied against the current tree, 2026-10-28
+
+Status: the ten blocks of 16.6 are applied semantically in `src/view.h` and `src/view.cpp`. They were not
+pasted as a diff: the patch's final hunk, which would put the item-label column back to 57 px / .72 /
+27 px, is deliberately NOT applied, because the tree now carries the later measured values (60 px,
+.455+.545, 32 px). They are in commit 8ef9ecd (08:00:31), which landed while this pass was verifying and
+also returns `_MonthTime` to the documented time-of-day fit (17.5). The measured build
+`C:\dev\out\native-theme2` is that tree (built 08:11); its only `view.cpp` warnings are the three
+pre-existing ones (349, 489, 630). On that tree the four lists draw, the Color chips match the console
+where the build can apply them, a disabled chip is focusable, carries the note line and commits nothing,
+the Color crop scores reproduce 16.7 exactly, and the canonical gate passes 6/6.
+
+Note on the tree: after the measured build, a different pass began uncommitted edits to
+`src/view.cpp`/`src/view.h` (text-bloom helpers). This section and every number below describe 8ef9ecd,
+the tree the binary was built from; the in-flight bloom code is not part of this pass.
+
+### 17.1 Where each block landed
+
+| block | current location |
+|---|---|
+| 1. `ChoiceBand` fields | `src/view.h:158-165` (six fields after `scrollable`) |
+| 2. model copy loop | `src/view.cpp:1256-1261` (`band.swatch/colours/submenu/notes`, `windowRows`) |
+| 3. `choiceBandFocus` rule 1 | `src/view.cpp:1276-1283` (writable gate removed; comment now says why) |
+| 4. `drawOptionsPanel` signature | `src/view.cpp:1333-1337` (`swatches`, `chipColours`, `submenus`, `notes`, `windowRows`) |
+| 5. the 12-row window | `src/view.cpp:1344-1353` (`windowStart`, `chipList`, after `first`) |
+| 6. row loop head and row `y` | `src/view.cpp:1398-1410` (window continue, group-break `y`, window `y`) |
+| 7. swatch, focus outline, submenu chevron | `src/view.cpp:1424-1452` |
+| 8. disabled-item note | `src/view.cpp:1461-1473` (after the row loop, before the lambda's `p.restore()`) |
+| 9. choice-band call site | `src/view.cpp:1657-1660` |
+| 10. `kBackgroundBand` | `src/view.cpp:1209-1211` (`groupGap=160`, `groupBreakRow=1`) |
+
+The current tree already had `groupGap`/`groupBreakRow` on `kThemeBand` and `kOptionsBand`; only
+`kBackgroundBand` gained them. The patch's `PanelBand` context lines (the `groupGap` field) apply unchanged
+because the field was already there.
+
+### 17.2 What the applied code looks like
+
+- **Color.** 13 rows on the measured 40 px grid: row 0 is the `Original` text row, rows 1..12 are the
+  unlabelled chips. `windowRows=12` keeps rows 0..11 on screen at rest (Original + January..November);
+  when the focus reaches row 12 the window starts at row 1 and draws January..December. The rows keep
+  `rowCentre=505`, so the chip rects are `x 1341, y 531+40n, 27x28` - the measured console geometry.
+- **Swatches.** The writable chip fills are exactly `#b8bfca`, `#1d7b1d`, `#926fbd`, `#0837a6`,
+  `#b83524` (January, May, June, August, December). The seven months the build has no tint for are the
+  same fills at 40 % opacity. The six writable items are `Original` (a text row) plus those five chips.
+- **Focus outline.** The focused chip takes the 1 px white outline at alpha 215 when enabled or 150 when
+  disabled; the outline is on the same row rect as the fill, adjusted 1 px outwards. Measured on
+  `capture/color-jan.png` and `capture/color-feb.png`.
+- **Note line.** The disabled item's model note is printed under the list at 15 px, at
+  `y = listBottom + 8` (the Color list's listBottom is `505 + 11*40 + 28 = 973`, so the note starts at
+  981). February's capture shows the full 3-line reason; it is this build's own line, not the console's.
+- **Background.** `Brightness` is at `rowCentre - 160 = 385` with the right-pointing 11x10 px chevron at
+  x 1786..1796, `y-5..y+5`; `Original`/`Classic`/`Wallpaper` stay at 545/585/625. `Brightness` is
+  dimmed (level 115) and, with the writable gate gone, it takes the focused-row treatment when selected:
+  `capture/background-brightness.png` has selection 0 and the note line, where 16.3's deliverable had
+  no focused row at all.
+- **One console element is still not drawn.** The reference's Color list has a small down-chevron at
+  x 1345-1357, y 970-977 (measured in 16.2 as y 969-977). Neither the ten blocks nor the proof build
+  of 16.7 draw it; it is not invented here because the block set is the reviewed drawing, and any
+  chevron would be an eleventh, unmeasured block. The 12-row window itself is present and scrolls by
+  exactly one row at the last step.
+
+### 17.3 Dump and captures
+
+Dump: `C:\dev\out\native-theme2\capture\color-list.entries.json.settings-theme.json`; every run that
+opens the page writes its own `<run>.entries.json.settings-theme.json` and the four list records are the
+same in all of them. Four lists:
+
+```
+theme       4 items  capture  window 0  currentRow 1  (Install/Original/Classic/Air Paint, 1 writable)
+color      13 items  capture  window 12 currentRow 0  scrolls  (Original + 12 chips, 6 writable)
+background  4 items  capture  window 0  currentRow 1  (Brightness + Original/Classic/Wallpaper, 3 writable)
+font        3 items  capture  window 0  currentRow 0  (Original/Rounded/Pop, 3 writable)
+```
+
+Every item carries `swatch`, `colour`, `submenu`, `note`; the Color list carries `windowRows: 12` and
+`scrollable: true`. Band log lines from the same run:
+
+```
+view: settings choice band appearance/colour -> 13 items from capture (page_theme_config_color), current row 0, scrolls
+view: settings choice band appearance/background -> 4 items from capture (page_theme_config_background), current row 1, fits the band
+view: settings choice band appearance/font -> 3 items from capture (page_theme_config_font), current row 0, fits the band
+```
+
+Captures (1920x1080, pinned `--render-clock 20 --background-clock 2026-10-27T21:43:00 --ui-clock
+2026-10-27T21:43:00 --focus-time 2000`), all under `C:\dev\out\native-theme2\capture\`:
+
+| file | state (sidecar) |
+|---|---|
+| `theme-page.png` | depth 1, selection 0, 6 rows, `theme` |
+| `theme-list.png` | depth 2, Theme band (model dump: 4 items), Original focused |
+| `color-list.png` | depth 2, selection 0, 13 rows, Original |
+| `background-list.png` | depth 2, selection 1, 4 rows, Original |
+| `font-list.png` | depth 2, selection 0, 3 rows, Original |
+| `color-jan.png` | depth 2, selection 1, January chip (Silver) |
+| `color-feb.png` | depth 2, selection 2, February chip disabled, note line |
+| `color-end.png` | depth 2, selection 12, window at rows 1..12 (January..December) |
+| `background-brightness.png` | depth 2, selection 0, Brightness focused, chevron, note |
+| `color-feb-after.png` | after Cross on February: depth 2, selection 2, message screen, nothing stored |
+| `color-jan-after.png` | after Cross on January: depth 1, selection 1, `appearance/colour` 5 |
+
+The commit tests read the run's own data directory: `color-jan-data/preferences.json` holds
+`"appearance/colour": 5`; `color-feb-data/preferences.json` holds no `appearance/colour` at all. Pressing
+Cross on the disabled February row raises the shell's `The setting value is invalid.` message screen and
+leaves the column at depth 2, selection 2.
+
+### 17.4 Crop scores against the reference
+
+`bun work/ab-compare.ts <ref> <native> crop x,y,w,h`. Reference
+`C:\dev\out\rpcs3-ref2-2026-10-28\lists\color-list-rest.png`.
+
+| crop | this tree | proof build (16.7) |
+|---|---|---|
+| Color band `1300,0,460,1080` | **19.67 dB / 0.7430** | 19.67 / 0.7430 |
+| Color chip column `1330,460,120,540` | **17.71 / 0.7637** | 17.71 / 0.7637 |
+| Color frame `0,0,1920,1080` | 17.55 / 0.4661 | 17.55 / 0.4658 |
+| Background band `1300,0,470,1080` | 19.34 / 0.7463 | 19.34 / 0.7463 |
+| Background rows `1330,340,520,340` | 15.69 / 0.5450 | 15.69 / 0.5450 |
+| Font band `1300,0,470,1080` | 20.39 / 0.7756 | 20.39 / 0.7756 |
+| Font rows `1330,460,240,150` | 13.98 / 0.5757 | 13.98 / 0.5757 |
+| Theme band `1300,0,470,1080` | 19.42 / 0.7425 | 19.43 / 0.7427 |
+
+The Color band and chip column are identical to the published numbers; the frame SSIM differs by
+0.0003 and the Theme band by 0.01 dB / 0.0002, which is capture-state noise on the same code (the
+proof build's two runs also moved by that much).
+
+The per-chip means are unchanged from 16.7: January, May, June and August are pixel-identical to the
+console's swatches (0.0 mean absolute channel difference; December is row 12 and is not on screen at
+rest); the seven disabled chips read as the 40 % composite (for example February 129.4/114.0/38.4 against
+the frame's 204/184/28), which is the honest cost of not having a tint for those months.
+
+### 17.5 The month term, the gate and determinism
+
+The tree moved while this pass was being verified, and the move is worth recording because it is the one
+thing that changes every number above. The first build of the draw half was made against 2fb0e15's
+day-quantised `_MonthTime`. At the canonical `--background-clock 2026-10-25T10:00` that phase crosses a
+palette boundary: the background renders gold where the stored reference is dark brown, the Color band
+and chip column fall to 17.60/0.7345 and 15.93/0.7211, and the canonical gate fails 0/6 (frame
+10.97/0.6642, text presence 1873 PASS). A control build of the same tree with only `b.month` held at the
+previous time-of-day fit gives the published 19.67/0.7430 and 17.71/0.7637 and PASS 6/6, so the drop is
+the month term and not the draw half. Commit 8ef9ecd then kept the time-of-day fit, with a comment that
+names the unresolved phase convention between the captured constant and the shader parameter; the
+day-quantised term is not in the measured tree.
+
+**Canonical gate** on `C:\dev\out\native-theme2` (8ef9ecd):
+
+```
+  text presence: 1677 bright pixels in the clock crop (minimum 900) PASS
+frame              18.48 dB / 0.8327   PASS   (base 18.29 / 0.8342)
+top background     20.25 / 0.9363      PASS   (base 20.25 / 0.9363)
+category icon row  21.20 / 0.9029      PASS   (base 20.93 / 0.8990)
+item label row     11.92 / 0.3891      PASS   (base 11.95 / 0.3925)
+clock text         11.39 / 0.4500      PASS   (base 11.39 / 0.4500)
+info bar           14.98 / 0.7639      PASS   (base 14.98 / 0.7639)
+PASS: 6/6 layers within budget
+```
+
+**Named states.** `bun work/ab-layers.ts --states --exe C:\dev\out\native-theme2\re-ps3-native.exe` gives
+**1/12 pass** (only `subtitle-cue`). The state gate is a 55 dB self-baseline, and the frames now score
+28.49-38.57 dB with rows 21.76-29.34 dB: the background matches its stored render again, and the residual
+is the later item-label metrics. The references were captured on the 07:03 build, before the 07:14
+item-label change (32 px, pen 60, .455 pen), so the states with page labels drift by their text. No
+named-state reference was edited, as the brief requires. `subtitle-cue` is the one state with no page
+label and it is byte-identical.
+
+**Determinism.** Two independent Color-list runs at `--render-clock 20`, same script, same pins:
+`det-color-list-1.png` and `det-color-list-2.png` both hash
+`731420FF97733F9835742DD7DC9BF57D22621C39A2A5597C0FFA14467C2A92F9` (also equal to the first
+`color-list.png`). The two runs used separate data directories and separate logs.
+
+### 17.6 Still open after this pass
+
+- **The month-term phase convention.** 8ef9ecd keeps the time-of-day term as a labelled fit. The
+  captured console constant at 10:00 on 10-25 is day-quantised, but using it at the canonical pin renders
+  the wrong palette and fails the gate (17.5), so the stored references and the shader's parameter are
+  on the fit's side of the boundary. Proving the convention and switching terms requires re-capturing
+  the root reference and the band crops first; that is outside this fence.
+- **The Color list's down-chevron** (x 1345-1357, y 970-977 in the reference) is not drawn by the
+  reviewed blocks; adding it needs a measured eleventh block. The up-chevron at the last step has no
+  measurement at all.
+- **The live focus preview** (the console recolours the whole screen before commit) is still open; the
+  model supplies the value, the render path does not apply it.
+- **The Brightness second level**, the **other seven month tints**, and the **non-Original value names**
+  remain as 16.9 records.
+
+Files touched by this pass: `src/view.cpp`, `src/view.h`, and this note. No reference, threshold, parity
+tool, shell, settings_menu, main, assets or RCO was touched.
