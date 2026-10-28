@@ -358,7 +358,7 @@
       "expect": {
         "category": "settings",
         "depth": 2,
-        "entryId": "appearance/background/0",
+        "entryId": "appearance/background/1",
         "entryCount": 4,
         "pageKind": "page",
         "log": [{ "pattern": "view: settings choice band appearance/background -> 4 items from capture" }]
