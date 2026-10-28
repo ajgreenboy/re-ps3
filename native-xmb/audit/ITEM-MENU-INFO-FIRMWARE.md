@@ -817,3 +817,375 @@ not established. (2) The information page now has a 1080p frame (E3), and its ro
 where the native draws them. (3) The clock plate is fixed at 591x58 and does not grow with the date string
 (E4). A6's "row pitch, font size, paddings and screen box are unattributed" is now partly resolved: pitch
 and first row are measured, the `BG1` rectangle, font size and paddings are still open.
+
+---
+
+# F. Phase 12.2 shell pass - the conditional row set and the label reads
+
+Status: the **shell half** is implemented in `src/shell.cpp` / `src/shell.h`; the **drawing half** is recorded
+in F6 as exact `view.cpp` hunks and was not applied. Nothing above is deleted; where F contradicts A this
+section says so. Evidence classes are the same three as Parts A-E.
+
+## F1. What the shell now does
+
+`Shell::buildOptions()` builds the item menu as the firmware does - the item's own command first, optional
+rows under their own conditions, `Information` last - and every row title is read from
+`explore_plugin_full`'s English table through `Assets::text("explore_plugin_full", key, fallback)`, the same
+read `showEntryInformation()` already uses (`shell.cpp` `msg_format`/`msg_size`/...). The old code called
+`QObject::tr()` for every row. The one exception is the Continue Watching row (F3), whose command the
+firmware does not have.
+
+The label, its key and the condition that put the row in the list travel on the row
+(`MenuOption::labelKey`, `MenuOption::condition`), so the panel log and a JSON dump name both:
+
+```
+shell: options opened category= video depth= 1 entry= .../Movies rows= 5 Open|Copy|Delete|Sort By|Information
+shell: options rows entry= ... keys= msg_open|msg_copy|msg_del|msg_sort|msg_info
+   conditions= actionable|local-content|local-content|page-sortable|always-last
+shell: options eject labels msg_eject= Remove msg_disc_eject= Remove Disc
+```
+
+With `XMB_DUMP_ENTRIES=<file>` set, the same code writes `<file>.options.json`: every built row with its
+key, command, condition, enabled flag and note, plus **all 27 item-menu labels the brief's string map names**
+resolved from the table with a `row` boolean - so a key this build cannot use is still proven to read
+correctly instead of being invisible. The `.options.json` dump is written by the shell, like the existing
+`.folder.json`/`.dl.json`/`.store.json` dumps.
+
+Rows the firmware proves but this build cannot offer are **left out, not faked**; F3 names each one and the
+condition that is missing. Two firmware rows are listed but not selectable (`Copy`, `Delete`): the item is
+local, so the firmware's condition holds, but this build has no copy/delete backend, and the panel's existing
+disabled-row rule puts the reason on screen (`this native build does not copy files yet.`) instead of
+pretending. Cross on such a row plays `snd_system_ng` (`Cue::Error`), the firmware's refused-row cue (A8).
+
+There is **no Close row** and no `OptionCommand::Close` any more. Circle and Escape close the list through
+`Shell::optionsClose()` (`view.cpp:1948`, `:2064`), which was already the behaviour; a nested Sort By list
+steps back one level on Circle and has no Close row either. There is **no scroll object** and none was added;
+`Shell::optionsMove()` now clamps the item menu instead of wrapping (E1: Down x4 stops on `Information`), and
+a move that cannot move plays no cursor cue and writes no selection line. The in-player panel keeps its
+existing wrap because its traversal has never been measured (it is a native surface, not `expage_menu`).
+
+## F2. The text table, read directly (`RCO`)
+
+Reproduction: `bun work/rco-table-dump.ts <dev_flash>/vsh/resource/explore_plugin_full.rco --text` (861
+entries; the same reader `src/assets.cpp` uses). The keys the brief's string map names, with the values that
+dump gives them (the shell resolves every one of them for the options dump, whether or not it builds a row):
+
+| key | value | row in this build |
+|---|---|---|
+| `msg_open` | Open | first row, folder/store/list row |
+| `msg_play` | Play | first row, playable file |
+| `msg_display` | View | first row, image or information row |
+| `msg_game_start` | Start | first row, game title |
+| `msg_resume` | Resume | first row when a resume record exists |
+| `msg_play_begin` | Play from Beginning | second row when a resume record exists |
+| `msg_info` | Information | always, last |
+| `msg_sort` | Sort By | local folder page with more than one row |
+| `msg_copy` / `msg_del` | Copy / Delete | local content, disabled (F3) |
+| `msg_created_date_time_f` / `_r` | Creation Date ^ / Creation Date v | Sort By submenu (U+25B2/U+25BC) |
+| `msg_updated_date_f` / `_r` | Update Date ^ / Update Date v | Sort By submenu |
+| `msg_display_all` | Display All | never built (no filtered page) |
+| `msg_folder_class` | Group Content | never built (nothing is grouped) |
+| `msg_add_to_playlist` | Add to Playlist | never built (no playlist backend) |
+| `msg_copy_plural` / `msg_del_plural` | Copy Multiple / Delete Multiple | never built (no multi-select) |
+| `msg_eject` / `msg_disc_eject` | Remove / Remove Disc | never built (no optical drive) |
+| `msg_cancel` / `msg_cancel2` | Cancel / Cancel | not a row: Circle closes |
+| `msg_check_for_update` | Check for Update | never built (no update backend) |
+| `msg_game_update_history` | Update History | never built |
+| `msg_internet_search` | Internet Search | never built (no search provider) |
+| `msg_purchase` | Purchase | never built (no store purchase) |
+| `msg_about_game` | About this Game | never built (no title metadata) |
+| `msg_psmove_notice` | PlayStation(R)Move Safety Notice | never built (no Move hardware) |
+| `msg_health_warning_psn` | Health Warnings | never built (no disc/PSN title metadata) |
+| `msg_intellectual_property_notices` | Intellectual Property Notices | never built (no per-title notice data) |
+
+A3's table stops at `msg_psmove_notice`; the last two keys are in the same table and are what the brief's
+"Health Warning" and "IP Notice" rows need, so they are named here rather than guessed at.
+
+**Two corrections proven by the same dump:**
+
+- **There is no `Close` key.** A grep of the 861-entry table for `Close` returns nothing, so the old
+  `QObject::tr("Close")` row was invented (A3 already said so).
+- The eject labels are **`Remove` (`msg_eject`) and `Remove Disc` (`msg_disc_eject`)** - never "Eject Disc".
+  That string exists only in this project's prose (`audit/OPTIONS-MENU.md:47`, `:475`, `:15`), not in the RCO
+  and never in the shell. No eject row is built because this build has no optical drive
+  (`audit/OPTIONS-MENU.md:473` says none is planned), so the panel log prints the resolved pair and the
+  options dump records both labels with `row: false`. The fix is therefore in the label table and in the
+  prose, and that is the whole of it - a row would need a disc backend, which the brief forbids inventing.
+
+`Cancel` is not a row either. The confirm box already draws `msg_ok`/`msg_cancel` from
+`explore_plugin_full` (`dialogs.cpp`), and Circle on the item menu is `snd_cancel`; no menu row is needed to
+"cover" it.
+
+## F3. The row set, per context (measured runs)
+
+Every run below is the built `re-ps3-native.exe`, `--dev-flash C:/dev/rpcs3/bin/dev_flash`, a seeded
+`--data-dir`, pinned clocks, and a scripted TRIANGLE; the rows are read from the `.options.json` dump and the
+panel log, not from a screenshot. `condition` is the token the shell writes on the row.
+
+| context | entry | rows (label - key - condition) |
+|---|---|---|
+| installed Steam title (Game > All Games > All Titles, first installed row) | `steam:2807960` Battlefield 6 | Start - `msg_game_start` - actionable; Information - `msg_info` - always-last |
+| local video folder (Video > Video Library, row 0) | `...video-library/Movies` | Open - `msg_open` - actionable; Copy - `msg_copy` - local-content (disabled); Delete - `msg_del` - local-content (disabled); Sort By - `msg_sort` - page-sortable; Information - `msg_info` - always-last |
+| local video file with a resume record (Video Library, row 2) | `.../Top Level Clip.mp4` | Resume - `msg_resume` - resume-record; Play from Beginning - `msg_play_begin` - resume-record; Copy - `msg_copy` - local-content (disabled); Delete - `msg_del` - local-content (disabled); Sort By - `msg_sort` - page-sortable; Information - `msg_info` - always-last |
+| photo (Photo > Photo Library, row 0) | `...photo-lib/Alpha.png` | View - `msg_display` - actionable; Copy - `msg_copy` - local-content (disabled); Delete - `msg_del` - local-content (disabled); Sort By - `msg_sort` - page-sortable; Information - `msg_info` - always-last |
+
+Conditions, and where each comes from:
+
+- **actionable** - the entry has an action this build performs; the row is the item's own command
+  (`activateLabel()`), labelled by the entry's kind exactly as A3 maps the keys (`msg_open` folder/store,
+  `msg_play` playable file, `msg_display` image/information, `msg_game_start` game title).
+- **resume-record** - `optionResumePoint()` is non-zero: a Jellyfin row's own `resumeMs`, or a local file
+  with a `media/resume` point (including a Continue Watching row, whose record is the reason it is listed).
+  The first row becomes `msg_resume` and the second is `msg_play_begin`; without a record neither appears, so
+  "Play from Beginning" can never be a duplicate of row 0.
+- **local-content** - `optionIsLocalContent()`: a `File`/`Folder` row whose value is an existing path on this
+  PC, excluding Continue Watching rows (a resume record, not a library item). This is the build's stand-in for
+  A4's copyable/not-disc condition; both rows are disabled because the backend is absent.
+- **page-sortable** - the open page is a local directory with more than one row (the old Sort By gate).
+- **continue-row** - a Continue Watching row. `Remove from Continue Watching` is a native command with no
+  firmware row (A3 has no key for it), so it keeps a native wording and the dump gives it no `key`.
+- **always-last** - `Information`, appended last in every context; A4's invariant (`msg_info` at
+  `explore_plugin_all.c:60986`).
+
+**Start.** A3 maps `msg_game_start` to "Activate (game row)", and that is what the build implements: Start is
+the first-row label only for a launchable title (`Launch`/`LaunchSteam`/`LaunchApp`), never for a folder, a
+file, a photo or a settings row. The firmware's own Start row is gated on a disc/BD title
+(`*(char*)(state+0xd4)`, A4 row 0); **this build cannot evaluate that predicate** - it has no disc item and no
+BD state - so the disc gate is not reproduced and the key is used where A3's mapping puts it. "Running" is
+read as "a title that runs" (a title row), not "currently executing": under the literal reading the row would
+relaunch an already-running game, which no firmware builder does.
+
+**Rows deliberately absent** (A4 lists them, this build has no condition evaluable or no backend):
+
+| firmware row | firmware condition (A4) | why it is out |
+|---|---|---|
+| Internet Search | always (game builder) | no search provider for this build's titles; a row would open nothing |
+| Purchase | entitlement flag `(state+0x2e4 & 0x80000)` + `state+0x6a8` | no store/entitlement state |
+| Check for Update | always | no title-update backend (Steam's own update state is not the firmware's) |
+| Update History | `*(char*)(state+0x676)` | no update history exists |
+| Health Warning (PSN) | disc/BD title | no disc/PSN title metadata |
+| PS Move Safety Notice | `(state+0x2e4 & 0x100)` | no Move hardware or title capability |
+| About this Game | `*(char*)(state+0x6aa) == 0` | no title metadata source (no SFO/PSN read) |
+| Intellectual Property Notice | always | no per-title notice data |
+| Display All | (list-page command) | a page already lists every row it has; nothing is filtered |
+| Group Content | (list-page command) | nothing is grouped |
+| Add to Playlist | (music command) | no playlist backend |
+| Copy Multiple / Delete Multiple | (multi-select) | no multi-select and no copy/delete backend |
+| Remove / Remove Disc | disc item | no optical drive (F2) |
+| Cancel | not a row | Circle closes |
+
+Rows the build can evaluate and does offer, but whose counts change with state: a disabled Copy/Delete adds
+two rows on every local content item; a resume record adds one; a non-directory page (Steam, Jellyfin) has no
+Sort By. That is the "conditional, not flat" requirement: the same panel draws 2 rows on a Steam title and 6
+on a resumable local file.
+
+## F4. Sound (verified against `audit/INTERACTION-AUDIO.md`)
+
+The shell's existing call sites were checked, not changed blindly. Per INTERACTION-AUDIO section 2 and its
+call-site evidence list:
+
+| event | call | cue | evidence class |
+|---|---|---|---|
+| open the list | `toggleOptions` | Options (`snd_option`) | **guessed**: no decompiled call site; label/role inference plus a `sysconf_plugin.prx` string reference (INTERACTION-AUDIO sections 2 and 10.4). Correct in kind and unchanged. |
+| move | `optionsMove` | Move (`snd_cursor`) | **trusted**: `explore_plugin_all.c:9245`, `:9318` |
+| confirm a row | `optionsActivate` (Activate -> `activate()`, Information, Play from Beginning, sort choice) | Confirm (`snd_decide`) | **trusted**: `:33256`, `:34446`, `:34899-34914` |
+| close / step back | `optionsClose`, `dismissOptions` | Back (`snd_cancel`) | **trusted**: `:26546` |
+| refused row | `optionsActivate` disabled branch | Error (`snd_system_ng`) | **guessed-but-corroborated**: no options-menu call site; `snd_system_ng` has raw instruction references in `explore_plugin.prx` (INTERACTION-AUDIO 10.4), stronger than the label-only `snd_option` case |
+| open the Sort By submenu | `optionsActivate` SortMenu | Options (`snd_option`) | **guessed**, as "open a menu" |
+| open the remove-confirm box | `optionsActivate` RemoveResume | Options (`snd_option`) | **guessed**, keep (it opens a box, not a list) |
+
+**No mismatch was found.** The three trusted cues (move, confirm, close) are on the three events the firmware's
+call sites prove, and the guessed assignments are the same ones the audio audit already marks as guesses. Two
+consequences of this pass: the refused-row cue is now reachable from the item menu for the first time (the
+disabled Copy/Delete rows), and the new Play from Beginning row uses Confirm, the row-confirm cue. Nothing was
+added to `interaction_audio.*`.
+
+The mapping was also run, not only read: `XMB_AUDIO_LOG=1` on the verification runs gives
+`cue Options source=snd_option` when the panel opens, `cue Move source=snd_cursor` on each row change,
+`cue Confirm source=snd_decide` on the item's own command, `cue Back source=snd_cancel` on Escape
+(`shell: options closed`), and `cue Error source=snd_system_ng` plus `shell: option unavailable Copy ...` when
+the disabled Copy row is pressed.
+
+## F5. Open timing - why the "100-unit open" is not in this pass
+
+The brief for this pass repeats A7's "100-unit open". E2 measured that the open is still at partial alpha
+~190 ms after the key and says explicitly **"Do not apply C1 item 8 (drop `moveMilliseconds` to 100) on this
+evidence"**, and the close is a visible fade of at least ~110 ms, not the instant destroy A7 inferred. The
+shell half does not own the animation (`view.h:45`, `view.cpp:689-698`), and the view hunks below do not touch
+it. So the timing stays at the current 200 ms and this note records that the task brief contradicts E2; E2 is
+the dated, measured evidence.
+
+## F6. The measured band - `view.cpp` hunks (not applied)
+
+The current `drawOptionsPanel` is shared by the settings choice column, the item menu and the in-player panel,
+and its geometry (`x0=1330+ahead*600`, full height to 1920, first row `505-(n-1)*20`, pitch 40, label `x0+16`,
+glow) is the settings-panel language, not the measured options menu. The hunk below adds one parameter,
+`firmwareBand`, set only by the Triangle-menu call site, and gives that surface E1's numbers: a full-height
+band from x1330 fading to nothing at x1690, row baselines `560 + 38*i`, label x1334, rows fixed as focus moves
+(no scroll). It also hands the item menu its own `MenuOption` rows (the call site passed titles only before),
+so the two disabled Copy/Delete rows are dimmed and their reason line is drawn, while the dark plate stays
+with the in-player panel - the item menu is over the XMB, where a plate is not in the frame. The settings
+column and the in-player panel are otherwise untouched because their geometry is a different, unmeasured
+surface. The `BG1` focus rectangle is still unattributed (E1/E6), so the text halo and the
+`255*(.78+.22*focus)` brightness stay for now; the hunk does not invent a plate rect. The nested heading
+position is also unmeasured and is placed one pitch above the first baseline so it cannot overlap it.
+
+The hunk was validated by applying it to a scratch copy of the tree (not this repository) and capturing the
+Video Library panel at 1920x1080: the band's luma delta over the background is +43 at x1340 and +1 at x1690;
+the five row ink bands start at y 549/588/626/664/703 (baselines 560/598/636/674/712, pitch 38) and the first
+ink is at x1332-1341, i.e. the measured text column. The workspace's `view.cpp` is untouched.
+
+```diff
+diff --git a/native-xmb/src/view.cpp b/native-xmb/src/view.cpp
+index bce2fa9..c055faa 100644
+--- a/native-xmb/src/view.cpp
++++ b/native-xmb/src/view.cpp
+@@ -1135,13 +1135,17 @@ void View::drawScene(QPainter& p) {
+             p.setPen(QColor(235,245,255,int(alpha*strength)));p.drawText(r.translated(std::cos(a)*radius,std::sin(a)*radius),flags,value);
+         }
+     };
+-    // Options panel (reference frame 45.4 s): a translucent light strip from x~1330 to the right edge with a bright
+-    // left edge; options 23 px, 40 px apart, centred on the focus row; the focused option glows. Slides in from the right.
+-    // Shared by the settings choice columns, the item-level Triangle menu and the in-player panel so all three keep
+-    // one visual language. `rows` switches it to the player panel's form: a marker column on the left for the current
+-    // choice, dimmed rows for the ones this build cannot honour, and the focused row's note under the list.
++    // Options panel. The item menu's settled shape is measured on the 4.93 frame
++    // (audit/ITEM-MENU-INFO-FIRMWARE.md E1): a full-height vertical band whose left edge is x1330 and which
++    // fades to nothing by x1690, with row baselines 560/598/636 at a 38 px pitch and the row text starting at
++    // x1334. The list does not scroll: the rows stay where they are as focus moves, and Down stops on the last
++    // row. That is what `firmwareBand` switches on for the Triangle menu; the settings choice column and the
++    // in-player panel keep the existing form because their screen geometry is a different, unmeasured surface.
++    // `rows` carries the shell's own flags for either menu (a dimmed row this build cannot honour, the current
++    // choice, its reason line); only the in-player panel, which sits over video, gets the dark plate, which is
++    // why `firmwareBand` also identifies the item-menu form.
+     const auto drawOptionsPanel=[&](const QStringList& items,double position,double alpha,double ahead,const QString& heading,
+-                                    const QVector<MenuOption>* rows=nullptr) {
++                                    const QVector<MenuOption>* rows=nullptr,bool firmwareBand=false) {
+         const double x0=1330+ahead*600;
+         const double rowCount=rows?double(rows->size()):double(items.size());
+         const double first=505-(rowCount-1.)*20.;
+@@ -1149,25 +1153,39 @@ void View::drawScene(QPainter& p) {
+         // Over the XMB's own background the light strip is enough. Over video it is not: white 23 px text
+         // on a bright frame is unreadable, so the in-player panel lays the strip on a dark plate (the
+         // console's control panel dims the picture behind it for the same reason).
+-        if(rows) {
++        if(rows && !firmwareBand) {
+             QLinearGradient shade(x0,0,1920,0);
+             shade.setColorAt(0,QColor(0,0,0,158));shade.setColorAt(1,QColor(0,0,0,120));
+             p.fillRect(QRectF(x0,0,1920-x0,1080),shade);
+         }
+-        QLinearGradient fill(x0,0,1920,0);fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
+-        p.fillRect(QRectF(x0,0,1920-x0,1080),fill);
+-        QLinearGradient edge(x0-10,0,x0+4,0);edge.setColorAt(0,QColor(255,255,255,0));edge.setColorAt(.75,QColor(255,255,255,70));edge.setColorAt(1,QColor(255,255,255,0));
+-        p.fillRect(QRectF(x0-10,0,14,1080),edge);
+-        // The list scrolls with the focused row, so the heading and the note follow the row they belong
+-        // to rather than the list's resting box: `first` is only where row 0 sits when focus is at 0.
+-        const double rowZero=505-position*40;
++        if(firmwareBand) {
++            // Luma at x1340 is 50 over the dimmed XMB and 2 at x1700 (E1), so the band is white at alpha 50
++            // at its left edge fading to nothing at x1690. No plate box and no bright left edge in the frame.
++            QLinearGradient band(x0,0,1690,0);
++            band.setColorAt(0,QColor(255,255,255,50));band.setColorAt(1,QColor(255,255,255,0));
++            p.fillRect(QRectF(x0,0,1690-x0,1080),band);
++        } else {
++            QLinearGradient fill(x0,0,1920,0);fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
++            p.fillRect(QRectF(x0,0,1920-x0,1080),fill);
++            QLinearGradient edge(x0-10,0,x0+4,0);edge.setColorAt(0,QColor(255,255,255,0));edge.setColorAt(.75,QColor(255,255,255,70));edge.setColorAt(1,QColor(255,255,255,0));
++            p.fillRect(QRectF(x0-10,0,14,1080),edge);
++        }
++        // The settings column scrolls with the focused row, so its heading and note follow the row they belong
++        // to rather than the list's resting box: `first` is only where row 0 sits when focus is at 0. The item
++        // menu's band does not move at all (no scroll object in the firmware), so its row 0 is fixed at 560.
++        const double rowZero=firmwareBand?560.:505-position*40;
+         if(!heading.isEmpty()) { // a submenu (Sort By) or the player panel names itself above its list
+-            const double headingY=rows?std::max(56.,rowZero-68.):first-64;
+-            text({x0+(rows?34:16),headingY,1920-x0-40,40},heading,19,QColor(255,255,255,190));
++            // The nested menu's heading position is still unmeasured (the frame shows only the level-0 band);
++            // it is placed one row pitch above the first baseline so it cannot overlap it.
++            const double headingY=rows?std::max(56.,rowZero-68.):(firmwareBand?rowZero-48.:first-64);
++            text({firmwareBand?1334.:x0+(rows?34:16),headingY,firmwareBand?1690-1334-24:1920-x0-40,40},heading,19,QColor(255,255,255,190));
+         }
+-        const double labelX=x0+(rows?34:16),labelWidth=1920-labelX-24;
++        const double labelX=firmwareBand?1334.:x0+(rows?34:16),labelWidth=firmwareBand?1690-labelX-24:1920-labelX-24;
+         for(int i=0;i<int(rowCount);++i) {
+-            const double distance=i-position,y=505+distance*40;
++            // Firmware rows are top-anchored on the measured baselines and do not travel with focus; the
++            // settings column keeps its pitch and its centred-with-focus motion.
++            const double distance=i-position;
++            const double y=firmwareBand?560.+i*38.:505+distance*40;
+             if(y<-40 || y>1120)continue;
+             const double focus=std::max(0.,1.-std::abs(distance));
+             const QRectF rect(labelX,y-20,labelWidth,40);
+@@ -1187,7 +1205,7 @@ void View::drawScene(QPainter& p) {
+                 // reason a row cannot be chosen. Never a claim the shell has not measured.
+                 const QString note=(*rows)[i].note;
+                 if(!note.isEmpty())
+-                    text({labelX,std::min(1010.,rowZero+rowCount*40.+8),labelWidth,90},note,16,QColor(225,225,225,235),
++                    text({labelX,std::min(1010.,firmwareBand?560.+rowCount*38.+8:rowZero+rowCount*40.+8),labelWidth,90},note,16,QColor(225,225,225,235),
+                         Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
+             }
+         }
+@@ -1454,7 +1472,8 @@ void View::drawScene(QPainter& p) {
+             if(shell_.optionsOpen() && optionsOpenEase_.value>0.) {
+                 QStringList titles;titles.reserve(shell_.options().size());
+                 for(const auto& option:shell_.options())titles<<option.title;
+-                drawOptionsPanel(titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,shell_.optionsTitle());
++                drawOptionsPanel(titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,shell_.optionsTitle(),
++                                 &shell_.options(),true);
+             }
+         }
+         if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
+```
+
+Notes on the hunk:
+- With three rows the baselines are exactly the measured 560/598/636. A longer list runs on downward at the
+  same pitch (the firmware's own 12-row game list would end at 978) and nothing scrolls or clips; E1 measured
+  a three-row item, which is why "3 visible rows" is a property of that item, not a window on the list.
+- `x0` still carries the `ahead*600` slide, so the settled edge is 1330 and the open still comes in from the
+  right. The band fades at 1690; the area right of it is untouched, which is what the frame shows.
+- The item menu keeps the band over the XMB (no dark plate: `firmwareBand` now gates the plate that the
+  in-player panel needs over video). The menu passes its `MenuOption` list, so a disabled row is dimmed at
+  level 115 and its note is drawn under the list; before this hunk the item menu passed titles only and a
+  disabled row would have looked selectable. Until the hunk lands, the refusal is only the `snd_system_ng`
+  cue plus the log line `shell: option unavailable ...` - the shell side is honest, the drawing is owed.
+- The nested item menu shares `firmwareBand` and so gets the same band (a second level is a 128x272 box in
+  the RCO, A2, but no frame shows it on screen; drawing the same band is the honest unmeasured choice and is
+  noted here).
+- Applying these hunks changes rendered pixels, so `video-options-panel`'s stored reference must be
+  re-saved after the view pass (`--states --save-reference`), together with the log assertion in F7.
+
+## F7. Verification harness consequences
+
+`bun work/ab-layers.ts --capture --exe C:/dev/out/native-options/re-ps3-native.exe` scores the canonical
+Game-root capture, which has no options panel open: its six layers are unaffected. Measured on the phase 12.2
+build: frame 18.29/0.8342, top background 20.25/0.9363, category icon row 20.93/0.8990, item label row
+11.95/0.3925, clock text 11.39/0.4500, info bar 14.98/0.7639 - **PASS 6/6**, no layer below its budget.
+
+The named state `video-options-panel` (`work/ab-layers.thresholds.json:230-252`) asserts the old list:
+
+```
+"log": [{ "pattern": "shell: options opened category= video depth= 1 .*rows= 4 Open\\|Information\\|Sort By\\|Close" }]
+```
+
+It cannot pass any more, by design. The new row set on the same surface (Video Library, `Movies` folder row)
+is:
+
+```
+shell: options opened category= video depth= 1 entry= .../Movies rows= 5 Open|Copy|Delete|Sort By|Information
+shell: options rows entry= ... keys= msg_open|msg_copy|msg_del|msg_sort|msg_info conditions= actionable|local-content|local-content|page-sortable|always-last
+```
+
+So the expected assertion becomes `rows= 5 Open\|Copy\|Delete\|Sort By\|Information`, with no `Close`; its
+stored reference frame must be regenerated after the F6 hunk lands (the rows move to the measured band and
+there is one more row). `work/parity-catalogue.json:403-405` carries the same old `Open|Information|Sort
+By|Close` trace and needs the same update. Neither file was edited by this pass (harness fence). Running the
+state against the phase 12.2 build fails exactly there, not on the pixels: `ASSERT FAIL: the dump says a
+different state - log "...rows= 4 Open|Information|Sort By|Close": no matching line`, after the discovery
+capture and one retry (`--state video-options-panel --exe C:/dev/out/native-options/re-ps3-native.exe`).
+
+**Status of F, 2026-10-27.** Shell half done and measured in four contexts; drawing half recorded, not
+applied. Labels: 27 keys proven from the table, no Close key, eject pair reads Remove/Remove Disc. Rows:
+conditional, Information last, no scroll, Down clamps. Sounds: four trusted cues on their traced events, two
+guessed assignments unchanged, refused-row cue now reachable. Open timing: brief's "100 units" contradicts
+E2 and is not applied. Still open: the `BG1` rect, the text cap height/paddings, the nested-level box on
+screen, and the harness reference/log refresh that the view pass owes.

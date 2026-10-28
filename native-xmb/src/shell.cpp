@@ -1648,25 +1648,64 @@ void Shell::psMenuClose() {
     emit changed();
 }
 // --- Item options (Triangle) ----------------------------------------------------------------------
-// Firmware behaviour (manual): Triangle opens a per-item options list as a panel on the right, not a new
-// column; the listed actions vary by category. This build lists only commands it really performs. The list
-// is derived from the selected entry, so any content surface gets the panel; a local folder page (Video
-// Library) is the first surface proven end to end. Display All is deliberately absent: a page already lists
-// every row it has, nothing is grouped or hidden, so the command would be a no-op.
-QString Shell::activateLabel(const Entry& entry) const {
+// The firmware's item menu is explore_plugin's `expage_menu`: rows are installed at run time from an array
+// of table keys, Information is always the last row, the other rows appear only under the condition the
+// builder checks, and there is no Close row at all - Circle dismisses the list (audit/ITEM-MENU-INFO-FIRMWARE
+// A2-A4, A8). This build keeps that shape: every label below is read from explore_plugin_full's English
+// text table (A3), and a firmware row whose condition this build cannot evaluate is left out rather than
+// invented (the audit's appended phase 12.2 table names each one and the condition that is missing).
+OptionLabel Shell::activateLabel(const Entry& entry) const {
     switch(entry.action) {
     case Action::Folder:case Action::SteamFolder:case Action::JellyfinFolder:
     case Action::Library:case Action::SteamStoreBrowse:case Action::SteamStoreSection:
     case Action::SteamDownloads:
-        return QObject::tr("Open");
+        return {"msg_open","Open"};
     case Action::File:
-        return categories_[category_].id=="photo"?QObject::tr("View"):QObject::tr("Play");
-    case Action::JellyfinPlay:return entry.resumeMs>0?QObject::tr("Resume"):QObject::tr("Play");
+        return categories_[category_].id=="photo"?OptionLabel{"msg_display","View"}:OptionLabel{"msg_play","Play"};
+    case Action::JellyfinPlay:return entry.resumeMs>0?OptionLabel{"msg_resume","Resume"}:OptionLabel{"msg_play","Play"};
     case Action::Launch:case Action::LaunchSteam:case Action::LaunchApp:
-        return QObject::tr("Play");
-    case Action::Information:return QObject::tr("View");
-    default:return QObject::tr("Start");
+        return {"msg_game_start","Start"};
+    case Action::Information:return {"msg_display","View"};
+    default:return {"msg_game_start","Start"};
     }
+}
+QString Shell::optionLabel(const OptionLabel& label) {
+    // The table is the source. The fallback covers a flash image without explore_plugin_full.rco, the same
+    // contract Assets::text already gives the shell's other firmware strings.
+    if(!label.key || !*label.key)return label.fallback;
+    return assets_.text("explore_plugin_full",QString::fromLatin1(label.key),label.fallback);
+}
+void Shell::addOption(const OptionLabel& label,OptionCommand command,const char* condition,bool enabled,
+                      const QString& note,int index) {
+    MenuOption row;
+    row.title=optionLabel(label);
+    row.command=command;
+    row.index=index;
+    row.enabled=enabled;
+    row.note=note;
+    row.labelKey=label.key?QString::fromLatin1(label.key):QString{};
+    row.condition=QString::fromLatin1(condition);
+    options_.push_back(row);
+}
+qint64 Shell::optionResumePoint(const Entry& entry) const {
+    // The two resume stores this build keeps: the provider's own millisecond field for a Jellyfin row, and
+    // media/resume for a local playable file (including a Continue Watching row, whose record is the reason
+    // it is listed). A game title has neither, which is why Start never turns into Resume.
+    if(entry.action==Action::JellyfinPlay)return entry.resumeMs;
+    if(entry.action==Action::File && !entry.value.isEmpty())return resumePositionFor(entry.value);
+    return 0;
+}
+bool Shell::optionIsLocalContent(const Entry& entry) const {
+    // The firmware gates Copy on the item being copyable and Delete on local storage (A4); this build's
+    // equivalent is a row backed by a path on this PC. A Continue Watching row is a resume record rather
+    // than a library item, so the page's own remove command stands in for the file commands there.
+    if(entry.id.startsWith("continue:"))return false;
+    if(entry.action!=Action::File && entry.action!=Action::Folder)return false;
+    if(entry.value.isEmpty() || QFileInfo(entry.value).isRelative())return false;
+    return QFileInfo::exists(entry.value);
+}
+bool Shell::optionPageSortable() const {
+    return !pages_.isEmpty() && !pages_.last().directory.isEmpty() && entries().size()>1;
 }
 QString Shell::entryKind(const Entry& entry) const {
     // A Continue Watching row is always a remembered playable file, so the kind comes from the column it
@@ -1694,26 +1733,94 @@ QString Shell::entryKind(const Entry& entry) const {
 void Shell::resetOptions() {
     optionsOpen_=optionsNested_=false;optionsSelection_=0;
     options_.clear();optionsParent_.clear();optionsTitle_.clear();
-    playerPanel_=false;
+    playerPanel_=false;playFromBeginning_=false;
 }
 void Shell::buildOptions() {
     resetOptions();
     if(entries().isEmpty())return;
     const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
-    // No Play/Start row for a row the shell itself cannot act on; Information stays honest for those.
-    if(entry.action!=Action::Unavailable)options_.push_back({activateLabel(entry),OptionCommand::Activate});
-    if(entry.action==Action::JellyfinPlay && entry.resumeMs>0)
-        options_.push_back({QObject::tr("Play from Beginning"),OptionCommand::JellyfinRestart});
-    options_.push_back({QObject::tr("Information"),OptionCommand::Information});
-    // A remembered Continue Watching row can be forgotten right where it is listed; nothing else in the
-    // XMB owns that state, so the row is offered on this page only. It stays offered for a stale row,
-    // which is the one thing such a row can still do.
+    const qint64 resumeAt=entry.action==Action::Unavailable?0:optionResumePoint(entry);
+    // Row 0 is the item's own command, the first row every firmware builder appends (A4). Its label comes
+    // from the row's kind (A3: Open for a folder/store row, Play for a playable file, View for an image or an
+    // information row, Start for a game title) and becomes Resume while a resume record exists.
+    if(entry.action!=Action::Unavailable)
+        addOption(resumeAt>0?OptionLabel{"msg_resume","Resume"}:activateLabel(entry),OptionCommand::Activate,
+                  resumeAt>0?"resume-record":"actionable");
+    // msg_play_begin. The firmware's restart row is what a resume record makes different from the title's own
+    // command; without a record it would repeat row 0, so it is only offered when there is one.
+    if(resumeAt>0)
+        addOption({"msg_play_begin","Play from Beginning"},OptionCommand::PlayFromBeginning,"resume-record");
+    // msg_copy / msg_del. The firmware's per-item file commands, offered only for local content (A4's Copy
+    // condition). This build has no copy or delete backend, so both rows are listed and cannot be chosen:
+    // the panel's disabled-row rule puts the reason on screen instead of pretending the command exists.
+    if(optionIsLocalContent(entry)) {
+        addOption({"msg_copy","Copy"},OptionCommand::Copy,"local-content",false,
+                  tr("This native build does not copy files yet."));
+        addOption({"msg_del","Delete"},OptionCommand::Delete,"local-content",false,
+                  tr("This native build does not delete files yet."));
+    }
+    // msg_sort. A local folder page that has more than one row is what the command can act on; Steam and
+    // Jellyfin pages are not directory listings, so they do not offer it.
+    if(optionPageSortable())
+        addOption({"msg_sort","Sort By"},OptionCommand::SortMenu,"page-sortable");
+    // A Continue Watching row is this build's own record, not a firmware item: the firmware has no row for
+    // forgetting a resume point, so this one keeps a native wording and the dump marks it with no key.
     if(entry.id.startsWith("continue:"))
-        options_.push_back({QObject::tr("Remove from Continue Watching"),OptionCommand::RemoveResume});
-    // Sort By reorders the rows actually on this page, which is exactly the firmware's promise.
-    if(!pages_.isEmpty() && !pages_.last().directory.isEmpty() && entries().size()>1)
-        options_.push_back({QObject::tr("Sort By"),OptionCommand::SortMenu});
-    options_.push_back({QObject::tr("Close"),OptionCommand::Close});
+        addOption({nullptr,tr("Remove from Continue Watching")},OptionCommand::RemoveResume,"continue-row");
+    // Information is always the last row (A4's invariant; msg_info, the builder's own key at :60986).
+    addOption({"msg_info","Information"},OptionCommand::Information,"always-last");
+}
+void Shell::logOptions(const Entry& entry) {
+    QStringList titles,keys,conditions;
+    for(const auto& option:options_) {
+        titles<<option.title;
+        keys<<(option.labelKey.isEmpty()?QStringLiteral("(native)"):option.labelKey);
+        conditions<<option.condition;
+    }
+    // The established panel line (the harness and the audits read this shape), then the row provenance:
+    // which RCO key each label came from and which condition put the row in this list.
+    qInfo().noquote()<<"shell: options opened category="<<categories_[category_].id<<"depth="<<pages_.size()
+        <<"entry="<<entry.id<<"rows="<<options_.size()<<titles.join('|');
+    qInfo().noquote()<<"shell: options rows entry="<<entry.id<<"keys="<<keys.join('|')
+        <<"conditions="<<conditions.join('|');
+    // The two eject labels the audit corrected from "Eject Disc". No row uses them in this build (there is no
+    // optical drive), so the check is that the table resolves them to the firmware's own words.
+    qInfo().noquote()<<"shell: options eject labels msg_eject="<<optionLabel({"msg_eject","Remove"})
+        <<"msg_disc_eject="<<optionLabel({"msg_disc_eject","Remove Disc"});
+    if(!qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES"))return;
+    // Every label the audit's map names (A3), resolved whether or not this build has a row for it: a key with
+    // no row still proves what the firmware string says and keeps the omission checkable.
+    static const OptionLabel probes[]={
+        {"msg_open","Open"},{"msg_play","Play"},{"msg_display","View"},{"msg_game_start","Start"},
+        {"msg_resume","Resume"},{"msg_play_begin","Play from Beginning"},{"msg_info","Information"},
+        {"msg_sort","Sort By"},{"msg_display_all","Display All"},{"msg_folder_class","Group Content"},
+        {"msg_add_to_playlist","Add to Playlist"},{"msg_copy","Copy"},{"msg_copy_plural","Copy Multiple"},
+        {"msg_del","Delete"},{"msg_del_plural","Delete Multiple"},{"msg_eject","Remove"},
+        {"msg_disc_eject","Remove Disc"},{"msg_cancel","Cancel"},{"msg_cancel2","Cancel"},
+        {"msg_check_for_update","Check for Update"},{"msg_game_update_history","Update History"},
+        {"msg_internet_search","Internet Search"},{"msg_purchase","Purchase"},{"msg_about_game","About this Game"},
+        {"msg_psmove_notice","PlayStation(R) Move Safety Notice"},
+        {"msg_health_warning_psn","Health Warnings"},
+        {"msg_intellectual_property_notices","Intellectual Property Notices"}};
+    QJsonArray rows,labels;
+    for(const auto& option:options_) {
+        QJsonObject row{{"title",option.title},{"command",int(option.command)},{"enabled",option.enabled},
+                        {"condition",option.condition}};
+        if(!option.labelKey.isEmpty())row.insert("key",option.labelKey);
+        if(!option.note.isEmpty())row.insert("note",option.note);
+        rows.push_back(row);
+    }
+    for(const auto& probe:probes) {
+        const QString text=optionLabel(probe);
+        bool used=false;
+        for(const auto& option:options_)if(option.labelKey==QString::fromLatin1(probe.key))used=true;
+        labels.push_back(QJsonObject{{"key",QString::fromLatin1(probe.key)},{"text",text},{"row",used}});
+    }
+    QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".options.json");
+    if(file.open(QIODevice::WriteOnly))
+        file.write(QJsonDocument(QJsonObject{{"category",categories_[category_].id},{"depth",pages_.size()},
+            {"entryId",entry.id},{"entryTitle",entry.title},{"rows",rows},{"count",rows.size()},
+            {"labels",labels}}).toJson());
 }
 void Shell::toggleOptions() {
     touch();
@@ -1750,16 +1857,21 @@ void Shell::toggleOptions() {
     if(options_.isEmpty())return;
     optionsOpen_=true;
     interactionAudio_.play(InteractionAudio::Cue::Options);
-    QStringList titles;for(const auto& option:options_)titles<<option.title;
     const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
-    qInfo().noquote()<<"shell: options opened category="<<categories_[category_].id<<"depth="<<pages_.size()
-        <<"entry="<<entry.id<<"rows="<<options_.size()<<titles.join('|');
+    logOptions(entry);
     emit changed();
 }
 void Shell::optionsMove(int delta) {
     if(!optionsOpen_ || options_.isEmpty() || delta==0)return;
     const int count=options_.size();
-    optionsSelection_=(optionsSelection_+delta%count+count)%count;
+    // The item menu clamps at its ends: the firmware's Down x4 stops on Information and does not wrap or
+    // scroll (audit/ITEM-MENU-INFO-FIRMWARE E1). The in-player panel is a different surface with no measured
+    // traversal, so it keeps its existing wrap. A move that changes nothing is not a focus move and stays
+    // silent, which is also why the boundary does not repeat the cursor cue.
+    const int next=playerPanel_?(optionsSelection_+delta%count+count)%count
+                                :std::clamp(optionsSelection_+delta,0,count-1);
+    if(next==optionsSelection_)return;
+    optionsSelection_=next;
     interactionAudio_.play(InteractionAudio::Cue::Move);
     qInfo().noquote()<<"shell: options selection"<<optionsSelection_<<options_[optionsSelection_].title;
     emit changed();
@@ -1790,20 +1902,34 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     case OptionCommand::SortMenu:
-        optionsParent_=options_;optionsNested_=true;optionsTitle_=QObject::tr("Sort By");
-        options_={{QObject::tr("Name (A-Z)"),OptionCommand::SortByNameAscending},
-                  {QObject::tr("Name (Z-A)"),OptionCommand::SortByNameDescending},
-                  {QObject::tr("Close"),OptionCommand::Close}};
+        // The firmware's sort rows are date pairs with the direction glyph in the string itself (A3:
+        // msg_created_date_time_f/_r, msg_updated_date_f/_r). Only the two pairs whose dates this build can
+        // read (a file's or folder's creation and modification times) are offered; Import Date, Release Year,
+        // Film Date and Earned Date have no source in this build, so they are not invented. There is no Close
+        // row: Circle steps back to the item list.
+        optionsParent_=options_;optionsNested_=true;optionsTitle_=optionLabel({"msg_sort","Sort By"});
+        options_.clear();
+        addOption({"msg_created_date_time_f",QStringLiteral("Creation Date ")+QChar(0x25B2)},
+                  OptionCommand::SortCreatedAscending,"sort-row");
+        addOption({"msg_created_date_time_r",QStringLiteral("Creation Date ")+QChar(0x25BC)},
+                  OptionCommand::SortCreatedDescending,"sort-row");
+        addOption({"msg_updated_date_f",QStringLiteral("Update Date ")+QChar(0x25B2)},
+                  OptionCommand::SortUpdatedAscending,"sort-row");
+        addOption({"msg_updated_date_r",QStringLiteral("Update Date ")+QChar(0x25BC)},
+                  OptionCommand::SortUpdatedDescending,"sort-row");
         optionsSelection_=0;
         interactionAudio_.play(InteractionAudio::Cue::Options);
-        qInfo().noquote()<<"shell: options sort menu opened";
+        qInfo().noquote()<<"shell: options sort menu opened rows="<<options_.size()<<"labels=creation/update date pairs";
         emit changed();
         break;
-    case OptionCommand::SortByNameAscending:
-    case OptionCommand::SortByNameDescending: {
-        const bool ascending=option.command==OptionCommand::SortByNameAscending;
+    case OptionCommand::SortCreatedAscending:
+    case OptionCommand::SortCreatedDescending:
+    case OptionCommand::SortUpdatedAscending:
+    case OptionCommand::SortUpdatedDescending: {
+        const bool created=option.command==OptionCommand::SortCreatedAscending||option.command==OptionCommand::SortCreatedDescending;
+        const bool ascending=option.command==OptionCommand::SortCreatedAscending||option.command==OptionCommand::SortUpdatedAscending;
         resetOptions();
-        sortPageByName(ascending);
+        sortPageByDate(ascending,created);
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
         emit changed();
         break;
@@ -1822,10 +1948,21 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     }
-    case OptionCommand::JellyfinRestart:
+    case OptionCommand::PlayFromBeginning:
+        // msg_play_begin, the firmware's restart row. A Jellyfin item restarts through its own re-open with
+        // the resume bypass; a local file sets the one-shot flag startQueuedMedia reads below.
         resetOptions();
         if(entry.action==Action::JellyfinPlay)openJellyfinMedia(entry,true);
+        else if(entry.action==Action::File) {playFromBeginning_=true;openFile(entry);}
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        emit changed();
+        break;
+    // Listed but not choosable (the copy/delete backend does not exist yet), so this is unreachable until a
+    // future backend enables the row and opens its own page here.
+    case OptionCommand::Copy:
+    case OptionCommand::Delete:
+        interactionAudio_.play(InteractionAudio::Cue::Error);
+        qInfo().noquote()<<"shell: option unavailable"<<option.title<<option.note;
         emit changed();
         break;
     // The in-player rows. Choosing one keeps the panel open so the marker moves on the spot, which is
@@ -1849,7 +1986,6 @@ void Shell::optionsActivate() {
         toggleMediaShuffle();
         refreshPlayerOptions();
         break;
-    case OptionCommand::Close:optionsClose();break;
     }
 }
 void Shell::optionsClose() {
@@ -2194,20 +2330,29 @@ void Shell::showEntryInformation(const Entry& entry) {
     showMessage(entry.title,rows.join('\n'),MessageKind::Info);
     qInfo().noquote()<<"shell: options information title="<<entry.title<<"rows="<<rows.size();
 }
-void Shell::sortPageByName(bool ascending) {
+void Shell::sortPageByDate(bool ascending,bool created) {
     if(pages_.isEmpty())return;
     auto& page=pages_.last();
     if(page.entries.size()<2)return;
     const QString selected=page.entries.value(page.selection).id;
-    // Folders first, then titles alphabetically; a stable sort keeps equal titles in their existing order.
-    std::stable_sort(page.entries.begin(),page.entries.end(),[ascending](const Entry& left,const Entry& right){
-        const bool leftFolder=left.action==Action::Folder,rightFolder=right.action==Action::Folder;
-        if(leftFolder!=rightFolder)return leftFolder;
-        const int order=QString::compare(left.title,right.title,Qt::CaseInsensitive);
-        return ascending?order<0:order>0;
+    // The firmware's own sort fields are dates (A3: Creation Date / Update Date / Import Date / Release Year /
+    // Film Date / Earned Date). A local row carries the two dates this build can read from the file system;
+    // a row with no readable time sorts after the ones that have one rather than being given an invented date.
+    const auto stamp=[created](const Entry& entry){
+        const QFileInfo info(entry.value);
+        const QDateTime when=created?info.birthTime():info.lastModified();
+        return when.isValid()?when:info.lastModified();
+    };
+    std::stable_sort(page.entries.begin(),page.entries.end(),[&stamp,ascending](const Entry& left,const Entry& right){
+        const QDateTime l=stamp(left),r=stamp(right);
+        const bool leftKnown=l.isValid(),rightKnown=r.isValid();
+        if(leftKnown!=rightKnown)return leftKnown;
+        if(!leftKnown)return false;
+        return ascending?l<r:l>r;
     });
     for(int i=0;i<page.entries.size();++i)if(page.entries[i].id==selected){page.selection=i;break;}
-    qInfo().noquote()<<"shell: options sorted page"<<page.title<<(ascending?"A-Z":"Z-A")<<page.entries.size()<<"rows";
+    qInfo().noquote()<<"shell: options sorted page"<<page.title<<(created?"creation date":"update date")
+        <<(ascending?"ascending":"descending")<<page.entries.size()<<"rows";
 }
 void Shell::back() {
     touch();
@@ -2480,9 +2625,11 @@ void Shell::startQueuedMedia() {
     const auto* selected=mediaQueue_.current();if(!selected)return;
     const auto item=*selected; // player callbacks must not invalidate the selected queue entry
     ++mediaRequest_;mediaOpen_=true;mediaTitle_=item.title;loading_=true;status_.clear();
-    // A saved position resumes here; the seek itself happens on LoadedMedia.
+    // A saved position resumes here; the seek itself happens on LoadedMedia. msg_play_begin set the one-shot
+    // flag that skips this row's own record, and it is consumed here so the next title resumes normally.
     resumePath_=item.path;
-    resumePending_=resumePositionFor(item.path);
+    resumePending_=playFromBeginning_?0:resumePositionFor(item.path);
+    playFromBeginning_=false;
     if(resumePending_>0) {
         const qint64 seconds=resumePending_/1000;
         status_=QObject::tr("Resuming at %1:%2").arg(seconds/60).arg(seconds%60,2,10,QChar('0'));
