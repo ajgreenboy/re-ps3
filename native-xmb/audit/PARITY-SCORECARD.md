@@ -1794,3 +1794,244 @@ an options menu on. The content was removed and both columns were re-grabbed emp
    clock string alone (three characters and the AM/PM); the region numbers that gate these three cells are not
    clock-bearing. A future run that wants the plate to agree should pin the capture to the reference's own
    clock, and say which pin it used.
+
+## 17. Scoring validity: content-difference regions and the ribbon-phase diagnostic (2026-10-28 08:00Z)
+
+Two scoring-validity defects were fixed in the scorecard tool (`work/parity.ts`) and in the catalogue
+annotation (`work/parity-catalogue.json`) only. No source file, CMake line, budget, reference frame or
+capture pin was changed. Every number below is on `C:/dev/out/native-text3/re-ps3-native.exe`, sha256
+`cff205dd2baded517dbf15379ecca90b9f32c42c13947cbf1e72ed55f0614164`, the current text-metric build.
+
+The defects, both already visible in sections 14-15 and in `PIPELINE.md` "Exposure and ribbon phase":
+
+1. **The ribbon phase was not comparable, and the scorecard charged for it anyway.** The pinned
+   `--render-clock 30` freezes the cloth: `dt = seconds - lastSeconds_` is 0 after the first frame, so
+   captures at 30 s and 45 s differ by at most 1/255 and every parity still holds the settle's phase,
+   while the console reference holds an arbitrary instant of the swell. The scorecard then read the
+   difference as a fidelity failure of the picture.
+2. **Content-difference regions were charged as fidelity failures.** The console Game column holds
+   PlayStation Store / Saved Data Utility / Corrupted Data; the native column holds Steam Store rows. The
+   `item label row` is 11.03 dB on that content, not on a rendering defect, and the scorecard gated it.
+
+### 17.1 The ribbon-phase sweep (scoring-only)
+
+`work/parity.ts` now has a capture-time diagnostic:
+
+- `--phase-sweep <sec,...>` (env `PARITY_PHASE_SWEEP`) and `--phase-state <id,...>` (env
+  `PARITY_PHASE_STATE`, default `root`).
+- The shipped cell is captured exactly as before: `--render-clock 30`, the same pins, the cell that
+  gates. The sweep never replaces it.
+- For each offset the tool captures the same cell again **without** `--render-clock`, so the app's own
+  live render clock advances the cloth (60 fixed steps per second), and inserts `pause=<offset*1000>`
+  as a script token immediately before the grab. The route is run first and settled, so only the
+  animation clock moves during the pause.
+- Phase cells are stored as `<cell>.phaseN`, recorded in the manifest under `phase`, and kept out of
+  `cells`, the per-state worst status, `totals.failed` and every gate. They are scored against the same
+  reference and the same budgets; the best is the Tier A-valid phase with the highest whole-frame PSNR
+  (SSIM breaks ties). The scorecard prints shipped vs best plus every phase, with the ribbon band
+  (y 360-840) PSNR for each, in `phaseSweep` and in the markdown section "Ribbon-phase sweep
+  (scoring only - not a gate)".
+
+Root at the canonical cell, eight offsets covering the sampled cycle (`run-20261028-073733`):
+
+| phase | frame PSNR / SSIM | ribbon band PSNR |
+|---|---:|---:|
+| shipped (`--render-clock 30`) | 17.97 dB / 0.8225 | 16.00 dB |
+| live+0 s | 17.80 dB / 0.8257 | 15.82 dB |
+| live+6 s | 17.79 dB / 0.8270 | 15.74 dB |
+| live+12 s | 18.26 dB / 0.8321 | 16.39 dB |
+| live+18 s | 18.52 dB / 0.8377 | 16.79 dB |
+| live+24 s | 18.09 dB / 0.8328 | 16.32 dB |
+| live+30 s | 18.08 dB / 0.8339 | 16.15 dB |
+| **live+36 s (best)** | **18.59 dB / 0.8400** | **16.89 dB** |
+| live+42 s | 17.82 dB / 0.8318 | 15.76 dB |
+
+The best sampled phase recovers **+0.63 dB on the frame and +0.89 dB in the ribbon band**, and root is
+still below its 20.00 / 0.900 icon-heavy frame budget. The phase term is therefore real but it is not
+the whole residual: the remaining band gap is the sheet's extent (about 140 px higher and about 220 px
+shorter, PIPELINE 3) and the background pedestal, neither of which a phase can move. The sampled peak is
+about 6 s wide; a finer sweep could find a few tenths more, not a different verdict.
+
+A scratch diagnostic that subtracts that pedestal (the 17/255 correction PIPELINE 4 used; not a tool
+number) reads the same pair as 19.47 -> 20.51 dB on the frame and 16.75 -> 18.00 dB in the band: the
+phase signal is about 1.0 dB once the additive term is out of the way, and at the best phase the
+corrected frame clears 20 dB. Raw PSNR hides it because the pedestal sits on both phases equally. Even
+corrected, the extent gap does not close, so the sheet's shape remains a cloth-state question and not a
+phase.
+
+Limits, stated because they bound what the number means:
+
+- The app has one animation clock. The pause advances the cloth **and** the background wave, particles
+  and icon animation, so a swept frame is a scene-instant match, not a cloth-only re-render. The ribbon
+  band is printed so the cloth's own band can be read apart from the whole frame.
+- The offsets are requested in integer milliseconds and the cloth integrates at 60 fixed steps per
+  second, so an offset is a deterministic number of cloth steps in expectation; the pause itself is a
+  real-time timer. Two captures at the same offset measured 45.1 dB / 0.9921 in the ribbon band (47.4 dB
+  over the frame), i.e. they agree to a few cloth steps. The absolute phase is the app's live start-up
+  phase, which this pass cannot pin because it may not touch `src/`; the tool therefore reports offsets
+  from the shipped run's live base, not an absolute phase.
+- The sweep is a correlation probe, not a fidelity claim: it says "at this phase the frame is this
+  close", not "the renderer is this close".
+
+**Method note (ribbon phase).** Ribbon-phase comparison is scoring-only. The gate is computed on the
+shipped cell at `--render-clock 30`; no gate, total or claim in this corpus uses a swept phase. A
+swept-phase number may be quoted only with its offset (`live+36 s`) and never as a gate. If a future gate
+is ever defined on a ribbon region, it must state the phase it used - the shipped pin, or a named sweep
+offset - because the number is phase-dependent.
+
+### 17.2 Content-difference regions (informative, not gating)
+
+A region in `work/parity-catalogue.json` may now carry `contentDiffers: true` and a one-line
+`contentDiffersReason`. The contract is validated in `loadCatalogue`:
+
+- `contentDiffers` must be a boolean and a reason is mandatory when it is true;
+- the `frame` region can never be annotated (the whole-picture score would excuse any rendering error);
+- the scorecard prints every annotation, its measured value and its reason on every run, and prints the
+  catalogue-wide count, so the set cannot grow silently.
+
+`scoreCell` makes `gating = required && (!contentDiffers || strict)`. A cell is `pass` when no gating
+region fails, `informative` when the only failed required regions are content-difference regions, and
+`fail` otherwise. The state verdict spells it out (`A pass, B informative, C n/a`), `totals.failed`
+excludes informative cells, and `--strict` puts the annotated regions back in the gate, reproducing the
+pre-annotation numbers from the same frames.
+
+The sixteen annotations added, with the measured value in this run and the reason tied to the reference
+frame (all ASCII, all one line in the catalogue):
+
+| state | region | measured (this run) | why the content cannot match |
+|---|---|---:|---|
+| root | item label row | 11.08 dB / 0.4003 | reference Game column holds PlayStation Store / Saved Data Utility (PS3) / Corrupted Data; the native column holds Steam Store rows, so the focused label is PS Vita System Application Utility on the console and Steam Store here |
+| column-user | item label row | 11.60 dB / 0.4089 | reference Users column focuses Turn Off System from the console account rows; the native column focuses Create New User from the host profile store |
+| column-photo | item label row | 10.54 dB / 0.3692 | reference Photo column focuses Search for Media Servers over an empty console VFS; the native column focuses Photo Library from the host photo folder |
+| column-music | item label row | 10.68 dB / 0.3707 | reference Music column focuses Search for Media Servers over an empty console VFS; the native column focuses Music Library from the host music folder |
+| column-video | item label row | 10.32 dB / 0.3958 | reference Video column focuses BD Data Utility; the native column focuses Continue Watching from the host video folder |
+| column-psn | item label row | 10.23 dB / 0.4227 | reference PSN column shows the console signed-out Sign Up row over its sign-up artwork; the native column shows Sign In from its own signed-out list |
+| column-friends | item label row | 9.85 dB / 0.4348 | reference Friends column is rowless because the console is signed out and offline; the native column draws its own Open Steam Friends row |
+| page-settings-system | page rows | 16.60 dB / 0.7494 | reference page is the console 25 firmware rows with console values (PS3-354, English (UK)); the native page is built from sysconf_plugin schemas and host strings, so the row set and values differ |
+| page-settings-video | page rows | 16.91 dB / 0.7967 | reference page is the console 19 BD/DVD rows; the native page draws seven measured rows plus three native-only media rows |
+| page-network-status-list | status rows | 12.02 dB / 0.5804 | reference rows are the console fixed 13-row network report (Internet Connection Enabled through UPnP Enabled); the native page answers with the host own network report |
+| page-network-test-error | message body | 9.16 dB / 0.2567 | reference body reads "An Ethernet cable is not connected."; the native row answers with this build own "not available in the native recreation yet" message |
+| page-network-connection-settings | message body | 9.64 dB / 0.3163 | reference body is the firmware "Adjust settings for connection to the Internet" text; the native row answers with this build own not available message |
+| color-list | chip column | 19.93 dB / 0.8404 | reference draws 12 unlabelled colour chips; the native list draws six labelled colours in its own panel, so the chip content has no native counterpart |
+| background-list | band rows | 16.81 dB / 0.6845 | reference rows are Brightness (submenu), Original, Classic, Wallpaper; the native list has three values and no Brightness row |
+| font-list | band rows | 17.59 dB / 0.6630 | reference rows are Original, Rounded, Pop; the native list draws the firmware faces this build registers (SCE-PS3 Seurat LATIN, VAGRundschriftDLig) |
+| options-panel | options panel | 19.46 dB / 0.8324 | reference panel was opened on Game > Corrupted Data and lists Sort By, Group Content, Start, Delete, Information; the native route opens Video Library and lists Open, Copy, Delete, Information |
+
+Judgement calls that were deliberately **not** annotated, so the set stays honest:
+
+- **root `clock text` and `info bar`** (11.57 / 0.5376 and 14.54 / 0.7669): the console plate reads
+  `10/28 10:00 AM`; the shipped pin renders `10/25 12:32 PM`. This is a pin difference the app *can*
+  reproduce by pinning to the reference's clock (section 16.8 item 5 says the same), so it is not
+  content the app cannot match. `info bar` stays gating; `clock text` was already non-gating.
+- **column-settings and column-network `item label row`**: the focused first label is the same string on
+  both (`System Update`; `Online Instruction Manuals`), so the region's content matches. They stay
+  gating.
+- **page-settings-theme `page rows`**: the same four firmware rows and values (Theme, Color, Background,
+  Font, all Original) are drawn on both. It stays gating; its 15.53 dB is geometry, not content.
+- **page-settings-network `page rows`**: the five row labels match; only the two console value cells
+  (`Enabled`) differ. The region is mostly matchable, so it stays gating rather than being excused.
+- **osk `osk panel`**: the key grid, function row and prediction column are the same content; only the
+  title/field strings differ (`User Name` / `User 1` vs `Username` / empty) because the reference was
+  opened from Create New User and the native OSK from the Jellyfin sign-in. Most of the panel is
+  matchable, so it stays gating.
+- **theme-list `band rows`**: the same four labels (Install, Original, Classic, Air Paint) are drawn on
+  both; its 16.96 dB is geometry. It stays gating.
+
+### 17.3 Before and after
+
+The tool change is separated from the capture change by rescoring the **same** frames both ways. Run
+`run-20261028-072013` was captured with the old tool; its stored scorecard is
+`scorecard-20261028-073317`.
+
+| scoring of run `run-20261028-072013` | B pass | B informative | gating cell failures | claims |
+|---|---:|---:|---:|---:|
+| old tool (stored scorecard) | 0 | - | 22 | 0 |
+| new tool, `--strict` (pre-annotation gate) | 0 | 0 | 22 | 0 |
+| new tool, informative default | 0 | 2 | 20 | 0 |
+
+The two informative cells are `page-settings-system` and `page-settings-video`: their frames pass and
+their only failed required region is an annotated content-difference region.
+
+The fresh after run is `run-20261028-073733`, scorecard `scorecard-20261028-075605`, with the phase sweep
+on root. Total as captured:
+
+| metric | before (`run-20261028-072013`, old tool) | after (`run-20261028-073733`, new tool) |
+|---|---:|---:|
+| Tier A pass | 32 / 35 | 32 / 35 |
+| Tier B pass | 0 | 0 |
+| Tier B informative | - | 2 |
+| Tier B fail (measured) | 22 | 23 |
+| gating cell failures | 22 | 23 |
+| content-difference annotations | 0 | 16 regions / 16 states |
+| claims (A+B+C) | 0 | 0 |
+
+The raw counts are not like-for-like: a concurrent pass imported three new composite references
+(`dialog`, `info-indicator`, `ps-menu`) at 07:43-07:48, between the two runs, so the after run scores
+three more cells and all three fail. Restricted to the 22 states that had a reference in both runs, the
+before/after split is identical and is the honest comparison:
+
+| 22-state like-for-like | gating failures | informative |
+|---|---:|---:|
+| before, informative mode (`scorecard-20261028-073335`) | 20 | 2 |
+| after, informative mode (`scorecard-20261028-075605`) | 20 | 2 |
+| after, strict mode (`scorecard-20261028-075736`) | 22 | 0 |
+
+Strict mode on the after run reports 25 gating failures (the 22-state 22 plus the three new composites),
+and zero informative cells. The gate delta is exactly the two annotated states; no other cell moved.
+
+Tier A is 32/35 on this build, not 35/35: `color-list`, `background-list` and `font-list` fail their
+settings-choice-panel assertions (row counts and the panel log line) in both runs. That is a pre-existing
+build issue recorded by the same assertions, not a consequence of the annotations, and their Tier B
+numbers are still measured.
+
+### 17.4 What still gates, per annotated state
+
+Every annotation removes exactly one region from the gate; the state still fails unless every remaining
+gating region passes. This is the split for each annotated state in the after run:
+
+| state | verdict | still gating (and failing) |
+|---|---|---|
+| root | A pass, B fail | frame 17.97 / 0.8225; info bar 14.54 / 0.7669 |
+| column-user | A pass, B fail | frame 18.42 / 0.8449; category icon row 19.60 / 0.8682 |
+| column-photo | A pass, B fail | frame 17.66 / 0.8342; category icon row 18.73 / 0.8753 |
+| column-music | A pass, B fail | frame 17.75 / 0.8376; category icon row 18.20 / 0.8633 |
+| column-video | A pass, B fail | frame 17.81 / 0.8325; category icon row 18.30 / 0.8621 |
+| column-psn | A pass, B fail | frame 8.82 / 0.6140; category icon row 9.68 / 0.7513 |
+| column-friends | A pass, B fail | frame 17.76 / 0.8456 |
+| page-settings-system | A pass, B informative | none (frame 18.69 / 0.8560 and category icon row pass) |
+| page-settings-video | A pass, B informative | none (frame 18.81 / 0.8738 and category icon row pass) |
+| page-network-status-list | A pass, B fail | frame 16.84 / 0.8335; title rule 16.22 / 0.6867 |
+| page-network-test-error | A pass, B fail | frame 15.36 / 0.7783; back hint 11.39 / 0.5155 |
+| page-network-connection-settings | A pass, B fail | frame 15.44 / 0.7774; back hint 11.40 / 0.5154 |
+| color-list | A fail, B fail | frame 19.23 / 0.8639; band column 19.77 / 0.8766 |
+| background-list | A fail, B fail | frame 18.82 / 0.8617; band column 19.93 / 0.8797 |
+| font-list | A fail, B fail | frame 18.38 / 0.8544 |
+| options-panel | A pass, B fail, C pass | frame 18.84 / 0.8697 |
+
+The six unannotated scored states still gate every required region: `column-settings`,
+`column-network`, `page-settings-network`, `page-settings-theme`, `theme-list` and `osk`. The three
+composites whose references arrived during the run (`dialog`, `info-indicator`, `ps-menu`) gate their
+frames and regions as before. The five states without a reference, and the five native-only surfaces,
+are unchanged.
+
+### 17.5 Verification, exit codes and files
+
+- `bun work/parity.ts --catalogue` - **exit 0**; prints the 16 annotations with `*`, the count and the
+  reasons, and its JSON carries every region's `contentDiffers` and reason. The annotation validation
+  rejects a missing reason, a non-boolean flag, or a `frame` annotation before any capture runs.
+- `bun work/parity.ts --references-missing` on the full inventory - **exit 1**, unchanged from before
+  this pass: 5 firmware-referenced states still owe a reference (`column-tv`,
+  `page-download-management`, `notification`, `volume-hud`, `media-player-panel`). Scoped to the 25
+  states that have one, the same command exits **0** (`25/25 firmware-reference cells present`). The
+  exit-1-on-debt contract was left alone; annotations do not touch it.
+- `bun work/parity.ts --capture --score --exe C:\dev\out\native-text3\re-ps3-native.exe` - exit 1 on
+  both runs because the gated cells fail, which is the scorecard's contract, not a tool error.
+- `bun work/parity.ts --score --strict --run ...` reproduces the pre-annotation gate from the same
+  frames (22 failures on the 22-state subset, 25 on the full after run), and `--regression` reports an
+  annotation change as a finding, so the informative set cannot grow through a scoring run unnoticed.
+
+Files touched by this pass: `work/parity.ts` (the phase sweep, the informative gate, `--strict`,
+`--phase-sweep`/`--phase-state`, the printed split and totals); `work/parity-catalogue.json` (only the 16
+`contentDiffers` / `contentDiffersReason` fields); `native-xmb/audit/PARITY-SCORECARD.md` (this section).
+No reference frame, no budget, no capture pin, no app source, no CMake and no `work/ab-layers.*` file was
+touched. Scratch captures and comparison images live under `out/phase-probe/` and are not tracked.
