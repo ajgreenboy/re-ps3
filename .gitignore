@@ -48,3 +48,5 @@ console-psid*
 steam_api_key*
 steam_api_key
 idps*
+!/work/parity-catalogue.json
+!/work/parity-reference.json

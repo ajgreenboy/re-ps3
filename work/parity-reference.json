@@ -1,0 +1,129 @@
+{
+  "schema": "xmb-parity-reference/1",
+  "updated": "2026-10-27",
+  "note": "The reference contract for Tier B. Firmware-derived images and everything captured from them stay local: the reference root is inside out/, which is gitignored (.gitignore line 9) and never committed. This file is the contract, not the images.",
+  "root": "out/parity-references",
+  "naming": {
+    "pattern": "<state>__<theme>__<background>__<resolution>.png",
+    "example": "root__original__day__1080p.png",
+    "rules": [
+      "Tokens are lowercase ASCII from the matrix tables below; ids may contain '-' but never '__'.",
+      "One file is one cell: a reference never covers more than one state/theme/background/resolution combination.",
+      "Frames are stored at the cell's own resolution (1920x1080 or 1280x720). Never rescale a reference to make it pair.",
+      "A reference without its <name>.state.json provenance file is still paired, but the scorecard marks the cell 'provenance missing' and refuses to call it a pass."
+    ]
+  },
+  "provenance": {
+    "pattern": "<state>__<theme>__<background>__<resolution>.state.json",
+    "fields": {
+      "cell": "the cell id, exactly the file's basename without .png",
+      "kind": "rpcs3 | rpcs3-legacy",
+      "captured": "ISO date the frame was taken from the emulator",
+      "firmware": "the vsh.self firmware version the frame came from (4.93)",
+      "rpcs3Build": "the RPCS3 build/commit used, or 'unknown' for a pre-contract frame",
+      "resolution": "the cell's resolution id",
+      "preset": "the console preset and the RPCS3 renderer settings that affect the picture (Vulkan, 1920x1080, exclusive fullscreen disabled)",
+      "clock": "the console/PCRTC values the frame was taken at, if known; 'unknown' otherwise",
+      "sha256": "sha256 of the PNG bytes, so a moved or replaced file is detectable",
+      "note": "anything a reader must know before treating the number as fidelity"
+    }
+  },
+  "pairing": {
+    "rule": "A captured cell pairs with the reference whose basename equals the cell id. A cell with no reference is reported as 'no reference yet', never scored against a different state.",
+    "dimensionRule": "If the reference and the capture differ in size, the cell is reported as 'dimension mismatch' and not scored; nothing is rescaled.",
+    "registered": "A few references predate this contract. They are listed under 'registered' with their real path and are paired by the cell id there; everything else is discovered by scanning the reference root.",
+    "refreshing": "A reference is replaced deliberately (a matched state, a corrected renderer, a new firmware capture) and the change is recorded in native-xmb/audit/PARITY-SCORECARD.md with a dated reason. A reference is never updated to make a failing screen pass."
+  },
+  "notReferences": [
+    "out/native-reference/layers/*.png are deterministic native self-baselines used by work/ab-layers.ts. They prove repeatability and catch drawing changes; they are not firmware references and must never be scored as Tier B.",
+    "out/native-reference/phase7/* screenshots are harness probes.",
+    "native-xmb/screenshots/* and docs/screenshots/* are documentation images."
+  ],
+  "matrix": {
+    "note": "States come from work/parity-catalogue.json. The theme axis is the three states appearance/background and appearance/theme actually produce in this build; the plan's 'Original + the four presets' background presets are the background axis, because one pinned background clock selects both the ICONS.mnu override (icons.cpp:50-65) and the LINE1/PARTICLES preset (ribbon.cpp:341-345) - capturing them as two axes would count the same pin twice. That is stated in PARITY-SCORECARD.md.",
+    "themes": [
+      {
+        "id": "original",
+        "preferences": {},
+        "note": "appearance/background 0: the wave, particles and the reconstructed icon material (the canonical capture's theme)"
+      },
+      {
+        "id": "classic",
+        "preferences": { "appearance/background": 1 },
+        "note": "appearance/background 1: the firmware 'classic' background path; native particles are hidden"
+      },
+      {
+        "id": "p3t-01",
+        "preferences": { "appearance/theme": "${flash}/vsh/resource/theme/01.p3t", "appearance/background": 2 },
+        "note": "the firmware's own theme (stored in dev_flash, not user content) through the p3t path: theme background image, icontable, sound roles"
+      }
+    ],
+    "backgrounds": [
+      { "id": "day", "clock": "2026-10-25T10:00:00", "note": "the traced daylight pin the stored RPCS3 baseline was captured at: 10:00 is 3/4 of the way from the 07:00 yoake key to the 11:00 day key (icons.cpp:64-65), so this cell is daylight as the reference frame saw it, not the exact preset key" },
+      { "id": "night", "clock": "2026-10-25T00:00:00", "note": "night is held from 23:00 to 01:00, so midnight is the preset's own value" },
+      { "id": "yoake", "clock": "2026-10-25T05:00:00", "note": "yoake is reached at 05:00 and held to 07:00" },
+      { "id": "higure", "clock": "2026-10-25T17:00:00", "note": "higure is reached at 17:00 and held to 19:00" }
+    ],
+    "resolutions": [
+      { "id": "1080p", "width": 1920, "height": 1080, "token": "full", "note": "fullscreen at the monitor's own 1920x1080 (the canonical capture)" },
+      { "id": "720p", "width": 1280, "height": 720, "token": "size=1280x720", "note": "a windowed 1280x720 framebuffer: the host has no 720p display mode, so the console's own 720p projection is P10's work, not this cell's" }
+    ],
+    "canonical": { "theme": "original", "background": "day", "resolution": "1080p" },
+    "size": "25 capturable states x 3 themes x 4 backgrounds x 2 resolutions = 600 cells; one cell is one capture"
+  },
+  "rpcs3": {
+    "howTo": "native-xmb/HANDOFF-PHASES.md, section 'Capturing the real XMB in RPCS3 (how-to, learned 2026-10-25)' (lines 102-121)",
+    "boot": "rpcs3.exe --no-gui --config <scratch yml> <dev_flash>/vsh/module/vsh.self, with the scratch config outside the repo and outside the RPCS3 folder; never close an RPCS3 the user started",
+    "renderer": "Vulkan, 1920x1080; 'Exclusive Fullscreen Mode: Disable' (with exclusive fullscreen, desktop capture returns one frozen frame while the overlay still reports 60 FPS)",
+    "captureMethod": "desktop CopyFromScreen of the whole 1920x1080 frame after the scripted navigation settles; PrintWindow returns stale frames under Vulkan",
+    "input": "vsh.self ignores --input-config, so RPCS3 uses config/input_configs/global/Default.yml. Back it up, check its sha256 before and after (the user's original is e624da0d66a8e971173c39a69a1dc2c89ffe146d57bf2a03c2c8cfacb459ceee), map Cross/Circle to PgDown/PgUp, and restore the file in the same run. Changing it needs the user's approval every time.",
+    "perCellRecipe": [
+      "1. Boot with the scratch config and wait for the settled XMB (the 'Preloading cached shaders' overlay must be gone; if it stalls over a minute, restart).",
+      "2. Drive the state with the keyboard map: arrows for column/row moves, PgDown for Cross (open), PgUp for Circle (back), Backspace for the PS button. The route in work/parity-catalogue.json is the same route the native capture runs, translated key for key.",
+      "3. Match the cell's pinned state before grabbing: theme (console Theme Settings), background preset (console Date and Time, or the equivalent clock), output resolution, and the console's own clock string.",
+      "4. Let the transition settle (the page move is about 300 ms; two seconds is enough), then CopyFromScreen the full frame.",
+      "5. Save as <root>/<state>__<theme>__<background>__<resolution>.png and write the provenance sidecar described above.",
+      "6. Record in the scorecard why the frame is matched or not (console clock, profile, content set) - the one number that matters is whether the state is matched, not how high the score is."
+    ],
+    "notRunHere": "This tool never launches RPCS3. The rig belongs to the capture agent (PARITY-PHASES dispatch row for P0.3); work/parity.ts only reads the reference set and reports what is missing.",
+    "matrixRecipe": "Run the cell list printed by 'bun work/parity.ts --matrix' in firmware order: one console session per state, walking the four background presets (day, night, yoake, higure) and both resolutions, and switching the theme once per state (original, classic, 01.p3t). A cell that cannot be produced on the console (no PSN, no disc, a menu the firmware will not show without content) is recorded as 'unavailable' in the scorecard rather than captured from a different state."
+  },
+  "registered": [
+    {
+      "cell": "root__original__day__1080p",
+      "reference": "out/native-reference/ab-rpcs3-root.png",
+      "kind": "rpcs3-legacy",
+      "note": "The pre-contract RPCS3 frame work/ab-layers.ts already scores against (2026-10-25, 4.93, DD/MM 24-hour console clock). It is the only firmware frame in the tree. Its content does not match the native root by construction: the reference shows 'Corrupted Data' and the native build shows the Steam Store rows, and the pinned native clock is MM/DD 12-hour. Kept as a real Tier B number with a real reference, labelled mismatch-by-construction; it is not evidence of parity and must be replaced by a matched P0.3 capture."
+    }
+  ],
+  "budgets": {
+    "updated": "2026-10-27",
+    "provisional": true,
+    "revisionNote": "First policy. Every number below is a target, not a measurement: no matched RPCS3 reference exists yet, so the only measured firmware comparison in the tree is the unmatched root pair (18.20 dB / 0.8388 whole frame, work/ab-layers.thresholds.json). The budgets are set where a matched state could plausibly land, so the first matched reference produces an honest pass or an honest fail; they are not set at today's values minus a delta, which is the regression-gate pattern in work/ab-layers.thresholds.json and would prove nothing about firmware fidelity.",
+    "datedChangeRule": "A budget changes only with a dated entry here (updated + revisionNote) and a matching dated paragraph in native-xmb/audit/PARITY-SCORECARD.md. Widening a budget to make a failing screen pass is not a change; it is the failure being hidden.",
+    "classes": {
+      "icon-heavy": {
+        "psnrDb": 20.0,
+        "ssim": 0.9,
+        "wholeFramePsnrDb": 20.0,
+        "wholeFrameSsim": 0.9,
+        "rationale": "Root and the ten columns: the structure is icons, labels and the clock over the wave. The unmatched root pair measures 18.20 dB / 0.8388, and its whole-frame error is dominated by content that differs by construction. A matched column should clear 20 dB / 0.90 on the frame and on each required region; the category icon row is the tightest structural region, and the item label row carries the glyph phase, so it fails first when text placement is wrong."
+      },
+      "text-heavy": {
+        "psnrDb": 18.0,
+        "ssim": 0.85,
+        "wholeFramePsnrDb": 18.0,
+        "wholeFrameSsim": 0.85,
+        "rationale": "List and form pages (settings submenus, folder pages, the download page, the Jellyfin sign-in page, Continue Watching). Text-dominated regions score lower than structure even on a matched state because the console's glyph phase and coverage compositing are not reproduced bit-exactly (audit/TEXT-RASTER.md); the glyph-metric half of this class's policy is still open (P3.1) and the crop gate is the interim budget."
+      },
+      "composite": {
+        "psnrDb": 18.0,
+        "ssim": 0.88,
+        "wholeFramePsnrDb": 18.0,
+        "wholeFrameSsim": 0.88,
+        "rationale": "Transient and overlay surfaces (options panel, dialog, notification, volume HUD, PS menu, OSK, player panel). The surface region is what matters, not the scene under it; a region may raise its own budget where the console is unambiguous (the PS menu blacks the frame, so its entries are gated at 26 dB / 0.95)."
+      }
+    },
+    "regionOverrides": "A region in work/parity-catalogue.json may carry psnrDb/ssim to tighten or relax its class budget. Tightening is always allowed; relaxing is a dated change."
+  }
+}

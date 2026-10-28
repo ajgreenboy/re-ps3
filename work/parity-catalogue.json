@@ -1,0 +1,578 @@
+{
+  "schema": "xmb-parity-catalogue/1",
+  "generated": "2026-10-27",
+  "note": "Every reachable XMB state, with the firmware XMBML view that defines it, the script route that opens it in the native build, its native reachability, dump assertions (Tier A), trace assertions (Tier C) and the region crops the scorecard scores (Tier B). Routes are resolved at capture time from one discovery dump of the Game column (work/parity.ts), so no LEFT/RIGHT or DOWN count is typed in here.",
+  "flash": "C:/dev/rpcs3/bin/dev_flash",
+  "xmbmlRoot": "vsh/resource/explore/xmb",
+  "xmbmlInventory": {
+    "documents": 28,
+    "views": 206,
+    "items": 788,
+    "source": "native-xmb/README.md:41 (readXmbDocument over all 28 explore/xmb documents)"
+  },
+  "defaults": {
+    "dataSeed": "out/native-reference/store/ui3-data",
+    "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
+    "waits": 10,
+    "settleWaits": 3
+  },
+  "states": [
+    {
+      "id": "root",
+      "title": "XMB root, Game column settled",
+      "class": "icon-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_game.xml", "view": "root" },
+      "native": { "reachable": "yes", "how": "the app's start state; no script input" },
+      "route": { "column": "game" },
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "pageKind": "root",
+        "catalogueHas": ["steam-store", "steam-folder-all-games"],
+        "noStoreDump": true
+      },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "top background", "crop": [0, 0, 700, 200], "required": true },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true },
+        { "name": "clock text", "crop": [1570, 80, 260, 50], "psnrDb": 16.0, "ssim": 0.70 },
+        { "name": "info bar", "crop": [1329, 75, 591, 58], "required": true, "psnrDb": 17.0, "ssim": 0.75 }
+      ]
+    },
+    {
+      "id": "column-user",
+      "title": "Users column",
+      "class": "icon-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_user.xml", "view": "root" },
+      "native": { "reachable": "yes", "how": "LEFT to the Users column" },
+      "route": { "column": "user" },
+      "expect": { "category": "user", "depth": 0, "pageKind": "root", "entryCount": { "ge": 2 } },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+      ]
+    },
+    {
+      "id": "column-settings",
+      "title": "Settings column",
+      "class": "icon-heavy",
+      "pageModel": "native+xmbml",
+      "xmbml": { "document": "category_sysconf.xml", "view": "root" },
+      "native": { "reachable": "yes", "how": "LEFT to the Settings column; titles project from category_sysconf.xml seg_fixed_items" },
+      "route": { "column": "settings" },
+      "expect": { "category": "settings", "depth": 0, "pageKind": "root", "entryCount": { "ge": 10 } },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+      ]
+    },
+    {
+      "id": "column-photo",
+      "title": "Photo column",
+      "class": "icon-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_photo.xml", "view": "root" },
+      "native": { "reachable": "yes", "how": "LEFT to the Photo column" },
+      "route": { "column": "photo" },
+      "expect": { "category": "photo", "depth": 0, "pageKind": "root" },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+      ]
+    },
+    {
+      "id": "column-music",
+      "title": "Music column",
+      "class": "icon-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_music.xml", "view": "root" },
+      "native": { "reachable": "yes", "how": "LEFT to the Music column" },
+      "route": { "column": "music" },
+      "expect": { "category": "music", "depth": 0, "pageKind": "root" },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+      ]
+    },
+    {
+      "id": "column-video",
+      "title": "Video column",
+      "class": "icon-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_video.xml", "view": "root" },
+      "native": { "reachable": "yes", "how": "LEFT to the Video column; Continue Watching is its first row" },
+      "route": { "column": "video" },
+      "expect": { "category": "video", "depth": 0, "pageKind": "root", "catalogueHas": ["continue", "library"] },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+      ]
+    },
+    {
+      "id": "column-tv",
+      "title": "TV/Video Services column",
+      "class": "icon-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_tv.xml", "view": "root" },
+      "native": { "reachable": "yes", "how": "LEFT to the TV/Video Services column; registered service apps (Jellyfin) appear here" },
+      "route": { "column": "tv" },
+      "expect": { "category": "tv", "depth": 0, "pageKind": "root" },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+      ]
+    },
+    {
+      "id": "column-network",
+      "title": "Network column",
+      "class": "icon-heavy",
+      "pageModel": "xmbml",
+      "xmbml": { "document": "category_network.xml", "view": "root" },
+      "native": { "reachable": "yes", "how": "RIGHT to the Network column; rows are generated from category_network.xml" },
+      "route": { "column": "network" },
+      "expect": { "category": "network", "depth": 0, "pageKind": "root", "catalogueHas": ["manual", "browser"] },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+      ]
+    },
+    {
+      "id": "column-psn",
+      "title": "PlayStation Network column",
+      "class": "icon-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_psn.xml", "view": "root" },
+      "native": { "reachable": "yes", "how": "RIGHT to the PSN column; the rows open honest unavailable messages" },
+      "route": { "column": "psn" },
+      "expect": { "category": "psn", "depth": 0, "pageKind": "root" },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+      ]
+    },
+    {
+      "id": "column-friends",
+      "title": "Friends column",
+      "class": "icon-heavy",
+      "pageModel": "native+xmbml",
+      "xmbml": { "document": "category_friend.xml", "view": "root" },
+      "xmbmlNote": "The column is defined by category_friend.xml (six firmware rows); the native build rebuilds it as the Steam friends surface (Shell::rebuildFriends replaces the entries), so on this host the column shows the Steam rows instead of the firmware ones. That divergence is recorded here rather than asserted away.",
+      "native": { "reachable": "yes", "how": "RIGHT to the Friends column; rows are rebuilt from the Steam friends state" },
+      "route": { "column": "friends" },
+      "expect": {
+        "category": "friends",
+        "depth": 0,
+        "pageKind": "root",
+        "catalogueHas": ["steam-friends:open", "steam-friends:refresh", "steam-friends:setup"]
+      },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
+        { "name": "item label row", "crop": [400, 425, 800, 100], "required": true }
+      ]
+    },
+    {
+      "id": "page-settings-system",
+      "title": "Settings > System Settings page",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_sysconf.xml", "view": "seg_console_qa" },
+      "xmbmlNote": "The row is defined by category_sysconf.xml seg_fixed_items (title_rsc/icon_rsc); the page body is built by src/settings_menu.cpp from sysconf_plugin RCO schemas, not from an XMBML listview.",
+      "native": { "reachable": "yes", "how": "Settings column, System Settings row, ENTER" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "system" }] },
+      "expect": { "category": "settings", "depth": 1, "entryCount": { "ge": 4 } },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "page rows", "crop": [400, 380, 1000, 620], "required": true },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "psnrDb": 18.0, "ssim": 0.84 }
+      ]
+    },
+    {
+      "id": "page-game-all-games",
+      "title": "Game > All Games (Steam library folder)",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "No firmware equivalent: this is the native Steam library folder (collections, Not Installed, Family Shared). It is in the catalogue because it is a reachable XMB page with a saved regression reference.",
+      "native": { "reachable": "yes", "how": "Game column, All Games row (steam-folder-all-games), ENTER" },
+      "route": { "column": "game", "stages": [{ "catalogueId": "steam-folder-all-games" }] },
+      "expect": {
+        "category": "game",
+        "depth": 1,
+        "folderTitle": "All Games",
+        "folderMode": "all",
+        "folderRowsPrefix": "steam-folder-",
+        "noStoreDump": true
+      },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "page rows", "crop": [430, 420, 700, 560], "required": true }
+      ]
+    },
+    {
+      "id": "page-video-library",
+      "title": "Video > Video Library folder page",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_video.xml", "view": "root" },
+      "xmbmlNote": "The row is from category_video.xml; the page lists the host's chosen video folder, which has no firmware view.",
+      "native": { "reachable": "yes", "how": "Video column, Video Library row, ENTER" },
+      "dataSeed": "out/native-reference/store/video-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini"],
+      "route": { "column": "video", "stages": [{ "catalogueId": "library" }] },
+      "expect": { "category": "video", "depth": 1, "pageKind": "folder" },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "page rows", "crop": [430, 420, 700, 560], "required": true }
+      ]
+    },
+    {
+      "id": "page-steam-store-sections",
+      "title": "Game > Steam Store sections page",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "Native Steam surface, no firmware equivalent; included because it is reachable and network-free.",
+      "native": { "reachable": "yes", "how": "Game column, Steam Store row, ENTER" },
+      "route": { "column": "game", "stages": [{ "catalogueId": "steam-store" }] },
+      "expect": {
+        "category": "game",
+        "depth": 1,
+        "entryId": "store-section:top_sellers",
+        "entryTitle": "Top Sellers",
+        "entryCount": 3,
+        "noStoreDump": true
+      },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "page rows", "crop": [440, 400, 640, 320], "required": true }
+      ]
+    },
+    {
+      "id": "page-download-management",
+      "title": "Network > Download Management page",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_network.xml", "view": "root" },
+      "xmbmlNote": "The firmware row is the ese://download_control query; this build answers it from Steam's own queue files (audit/STEAM-DOWNLOADS.md).",
+      "native": { "reachable": "yes", "how": "Network column, Download Management row, ENTER; needs a Steam queue fixture" },
+      "env": { "XMB_STEAM_ROOT": "${repo}/out/native-reference/phase5/steam-dl" },
+      "route": { "column": "network", "stages": [{ "catalogueId": "dlctrl" }] },
+      "expect": {
+        "category": "network",
+        "depth": 1,
+        "downloads": { "count": 4, "error": "" },
+        "log": [{ "pattern": "steam downloads: page opened with 4 row\\(s\\)" }]
+      },
+      "trace": [{ "pattern": "steam downloads: page opened with 4 row\\(s\\)" }],
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "download rows", "crop": [400, 400, 800, 420], "required": true }
+      ]
+    },
+    {
+      "id": "page-jellyfin-signin",
+      "title": "TV > Jellyfin sign-in page",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "Native in-XMB sign-in page (audit/JELLYFIN-NATIVE.md); a registered service app row in the TV column, no firmware view.",
+      "native": { "reachable": "yes", "how": "TV/Video Services column, a registered Jellyfin service row (custom:jellyfin), ENTER" },
+      "dataSeed": "out/native-reference/store/jf-smoke",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "apps.json", "cache"],
+      "waits": 12,
+      "route": { "column": "tv", "stages": [{ "catalogueId": "custom:jellyfin" }] },
+      "expect": {
+        "category": "tv",
+        "depth": 1,
+        "pageKind": "jellyfinSignIn",
+        "entryCount": { "ge": 5 },
+        "sidecar": {
+          "signInOpen": true,
+          "signInState": "idle",
+          "focusedRow": { "prefix": "jellyfin-signin:" },
+          "modalWidget": ""
+        },
+        "log": [{ "pattern": "jellyfin: sign-in page opened" }]
+      },
+      "tierANote": "The focused row depends on the registered service: with the seed's apps.json a server URL is pre-filled and the page starts on Server URL, without one it starts on Username. The assertion therefore checks the page's identity (a jellyfin-signin row is focused) rather than one row, so a seed edit does not read as a state failure.",
+      "trace": [{ "pattern": "jellyfin: sign-in page opened" }],
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "signin rows", "crop": [400, 300, 900, 620], "required": true }
+      ]
+    },
+    {
+      "id": "osk",
+      "title": "On-screen keyboard over the Jellyfin sign-in page",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "The OSK panel is drawn by src/view.cpp (osk_plugin resources); no XMBML view. There is no sidecar or log field that reports an open keyboard, so this state has a picture and a route but no Tier A oracle yet.",
+      "native": { "reachable": "yes", "how": "Jellyfin sign-in page, Username row, ENTER opens the keyboard" },
+      "dataSeed": "out/native-reference/store/jf-smoke",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "apps.json", "cache"],
+      "waits": 12,
+      "route": { "column": "tv", "stages": [{ "catalogueId": "custom:jellyfin" }], "preGrab": ["ENTER", "wait", "wait"], "postGrab": ["ESC", "wait"] },
+      "expect": { "category": "tv", "depth": 1, "pageKind": "jellyfinSignIn", "sidecar": { "modalWidget": "" } },
+      "tierANote": "The dump/sidecar cannot see the keyboard: the assertions prove the sign-in page underneath, not the OSK. Scored as Tier B only.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "osk panel", "crop": [480, 280, 960, 520], "required": true }
+      ]
+    },
+    {
+      "id": "dialog",
+      "title": "Message dialog (Continue Watching with nothing to continue)",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "A native message dialog over the Video column; the firmware dialog surface is system_plugin's msgdialog objects (audit/DIALOGS-FIRMWARE.md).",
+      "native": { "reachable": "yes", "how": "Video column, Continue Watching row with no remembered position, ENTER" },
+      "dataSeed": "out/native-reference/store/video-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini"],
+      "route": { "column": "video", "stages": [{ "catalogueId": "continue" }] },
+      "expect": {
+        "category": "video",
+        "depth": 0,
+        "entryId": "continue",
+        "pageKind": "root",
+        "log": [{ "pattern": "continue watching: nothing to continue" }]
+      },
+      "trace": [{ "pattern": "continue watching: nothing to continue" }],
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "dialog", "crop": [240, 190, 1440, 700], "required": true }
+      ]
+    },
+    {
+      "id": "continue-watching",
+      "title": "Video > Continue Watching page (populated)",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "Native page built from media/resume (audit/MEDIA-CONTROLS.md); no firmware view.",
+      "native": { "reachable": "yes", "how": "Video column, Continue Watching row with a seeded resume record, ENTER" },
+      "dataSeed": "out/native-reference/phase5/resume-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini"],
+      "route": { "column": "video", "stages": [{ "catalogueId": "continue" }] },
+      "expect": {
+        "category": "video",
+        "depth": 1,
+        "pageKind": "continueWatching",
+        "entryCount": 1,
+        "sidecar": { "entryTitle": "Top Level Clip.mp4" },
+        "log": [{ "pattern": "continue watching: page opened with 1 row\\(s\\)" }]
+      },
+      "trace": [{ "pattern": "continue watching: page opened with 1 row\\(s\\)" }],
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "continue row", "crop": [400, 410, 760, 220], "required": true }
+      ]
+    },
+    {
+      "id": "options-panel",
+      "title": "Triangle options panel on the Video Library page",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "The firmware's per-item options panel (audit/OPTIONS-MENU.md); the native panel is drawn over the page, no XMBML view.",
+      "native": { "reachable": "yes", "how": "Video column, Video Library row, ENTER, then TRIANGLE" },
+      "dataSeed": "out/native-reference/store/video-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini"],
+      "route": {
+        "column": "video",
+        "stages": [{ "catalogueId": "library" }],
+        "preGrab": ["TRIANGLE", "wait", "wait", "wait"]
+      },
+      "expect": {
+        "category": "video",
+        "depth": 1,
+        "pageKind": "folder",
+        "log": [{ "pattern": "shell: options opened" }]
+      },
+      "trace": [{ "pattern": "shell: options opened .*Open\\|Information\\|Sort By\\|Close" }],
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "options panel", "crop": [1300, 430, 620, 300], "required": true }
+      ]
+    },
+    {
+      "id": "notification",
+      "title": "XMB notification pop-up over the root",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "The firmware's notification composite (system_plugin tex_notification_*), audit/NOTIFICATIONS.md; no XMBML view.",
+      "native": { "reachable": "yes", "how": "root, then the NOTIFY script token (the same Shell::notify path a real event uses)" },
+      "env": { "XMB_NOTIFY_LOG": "1" },
+      "route": { "column": "game", "preGrab": ["NOTIFY=Message received|From Albert", "wait", "wait"] },
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "pageKind": "root",
+        "sidecar": {
+          "notificationCount": 1,
+          "notificationTitle": "Message received",
+          "notificationIcon": "tex_notification_info",
+          "notificationRemainingMs": { "gt": 0 }
+        },
+        "log": [{ "pattern": "notify: enqueue Message received" }]
+      },
+      "trace": [{ "pattern": "notify: enqueue Message received" }],
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "notification plaque", "crop": [1480, 135, 440, 110], "required": true }
+      ]
+    },
+    {
+      "id": "volume-hud",
+      "title": "Volume display (HUD) at a pinned 25%",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "The PS3 volume display is a system_plugin composite; the native HUD is drawn by View::drawVolumeHud, audit/HTPC-IDEAS.md section 6.",
+      "native": { "reachable": "yes", "how": "root, then VOLSET=25 (the same apply path the Windows media keys use); VOLRESTORE puts the endpoint back" },
+      "route": { "column": "game", "preGrab": ["VOLSET=25", "wait", "wait"], "postGrab": ["VOLRESTORE"] },
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "pageKind": "root",
+        "log": [{ "pattern": "volume: VOLSET request 25% -> Windows reports 25% \\(muted 0\\)" }]
+      },
+      "trace": [{ "pattern": "volume: VOLSET request 25% -> Windows reports 25% \\(muted 0\\)" }],
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "volume hud", "crop": [990, 65, 250, 80], "required": true }
+      ]
+    },
+    {
+      "id": "info-indicator",
+      "title": "Information panel controller indicator (PS tap)",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "The info panel is system_plugin's infobar (audit/INFO-BAR.md); the controller indicator is its PS-tap HUD.",
+      "native": { "reachable": "yes", "how": "root, then the ps script token (a PS tap flashes the controller indicator beside the clock)" },
+      "route": { "column": "game", "preGrab": ["ps"] },
+      "expect": { "category": "game", "depth": 0, "pageKind": "root" },
+      "tierANote": "No sidecar field reports the indicator, so the assertions only prove the root underneath; the indicator itself is a pixel claim.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "controller indicator", "crop": [1200, 80, 340, 60], "required": true },
+        { "name": "info bar", "crop": [1329, 75, 591, 58] }
+      ]
+    },
+    {
+      "id": "ps-menu",
+      "title": "PS system menu (PS hold)",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "The console's system menu (audit/PS-BUTTON.md), measured from an RPCS3 capture; no XMBML view.",
+      "native": { "reachable": "yes", "how": "root, then the pshold script token (press, hold 1200 ms, release)" },
+      "route": { "column": "game", "preGrab": ["pshold", "wait", "wait", "wait", "wait", "wait"] },
+      "tierANote": "The PS hold only opens the menu while the XMB owns the foreground, so this state's route depends on the host's focus at that instant; a rejected hold is visible in ps.log as 'event: press not actionable' and the capture is retried once.",
+      "expect": { "category": "game", "depth": 0, "pageKind": "root" },
+      "trace": [{ "pattern": "event: system menu opened" }],
+      "traceLog": "ps",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "ps menu entries", "crop": [300, 470, 1320, 240], "required": true, "psnrDb": 26.0, "ssim": 0.95 },
+        { "name": "ps menu footer", "crop": [140, 650, 600, 130], "required": true }
+      ]
+    },
+    {
+      "id": "media-player-panel",
+      "title": "Media player panel with a sidecar subtitle cue",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "The native player panel over local media (audit/MEDIA-CONTROLS.md, audit/SUBTITLES.md); the firmware panels are the photoviewer/videoplayer RCOs (audit/MEDIA-PANELS-FIRMWARE.md).",
+      "native": { "reachable": "yes", "how": "Video Library page, first row (the fixture clip), ENTER to play, then pause and seek left to 0" },
+      "dataSeed": "out/native-reference/phase5/subtitle-data",
+      "seedPaths": ["preferences.json", "profiles.json", "settings.ini"],
+      "env": { "XMB_SUBTITLE_LOG": "1" },
+      "route": {
+        "column": "video",
+        "stages": [{ "catalogueId": "library" }, { "rowIndex": 0 }],
+        "preGrab": ["wait", "wait", "wait", "wait", "ENTER", "wait", "LEFT", "wait", "wait"]
+      },
+      "expect": {
+        "category": "video",
+        "depth": 1,
+        "sidecar": {
+          "mediaOpen": true,
+          "mediaPaused": true,
+          "mediaPosition": { "le": 500 },
+          "subtitleCue": 1,
+          "subtitleTrackCount": 1
+        },
+        "log": [{ "pattern": "subtitle: sidecar" }]
+      },
+      "trace": [{ "pattern": "subtitle: sidecar" }],
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "player panel", "crop": [200, 860, 1520, 160], "required": true },
+        { "name": "subtitle band", "crop": [210, 650, 1500, 200], "required": true }
+      ]
+    },
+    {
+      "id": "psn-signin",
+      "title": "PlayStation Network sign-in",
+      "class": "composite",
+      "pageModel": "none",
+      "xmbml": { "document": "category_psn.xml", "view": "seg_regist" },
+      "native": {
+        "reachable": "message-only",
+        "how": "PSN column, Sign In row: the row answers with the firmware's own unavailable message",
+        "reason": "No PSN backend exists and none may be fabricated (audit/FIRMWARE-PARITY-GAPS.md section 4). Captured as the message, not as the sign-in page."
+      },
+      "captures": false,
+      "route": { "column": "psn", "stages": [{ "catalogueId": "signin" }] },
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "dialog", "crop": [240, 190, 1440, 700], "required": true }
+      ]
+    },
+    {
+      "id": "disc-game",
+      "title": "Disc game row (BD/PS1 CD)",
+      "class": "icon-heavy",
+      "pageModel": "none",
+      "xmbml": { "document": "category_game.xml", "view": "root" },
+      "native": {
+        "reachable": "no",
+        "how": "category_game.xml's seg_device xcb:// query needs an inserted disc",
+        "reason": "No BD/DVD drive is exposed to this build, so the device query returns nothing; the state is unreachable on a PC without a disc."
+      },
+      "captures": false,
+      "regions": [{ "name": "frame", "crop": [0, 0, 1920, 1080] }]
+    },
+    {
+      "id": "trophy-collection",
+      "title": "Trophy Collection",
+      "class": "text-heavy",
+      "pageModel": "none",
+      "xmbml": { "document": "category_psn.xml", "view": "seg_trophy" },
+      "native": {
+        "reachable": "message-only",
+        "how": "PSN column, Trophy Collection row: an honest empty/unavailable message",
+        "reason": "Trophies are PSN-backed and encrypted per console; no honest native collection exists."
+      },
+      "captures": false,
+      "regions": [{ "name": "frame", "crop": [0, 0, 1920, 1080] }]
+    }
+  ]
+}
