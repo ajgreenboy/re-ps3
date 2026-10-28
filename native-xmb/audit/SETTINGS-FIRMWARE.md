@@ -1007,3 +1007,368 @@ because `View::replayKeyTap` dispatches straight to `keyPressEvent`.
   **D27-D29** confirm/apply/result pages and the commit cue.
 - The choice page class (11.3) - none of this slice binds a new choice list.
 
+---
+
+## 11. Phase 11.3 applied: the choice lists (data half), 2026-10-27/28
+
+Status: the data model and its dump are implemented in `src/settings_menu.{h,cpp}`; this slice edits no
+other source file (`view.cpp`, `shell.cpp`, `main.cpp` and `assets.*` are untouched by it). The band
+renderer is the later view pass and is written out in 11.8 as hunks, not applied. Pixels are unchanged by
+construction (nothing on the draw path reads the new model) and by the gate:
+`PASS: 6/6 layers within budget` (11.5).
+
+Scope: for every Settings row whose firmware counterpart is a choice setting, the list the firmware's
+own page declares - labels, authored order, item identity, and the page's Scroll object - read from
+`sysconf_plugin.rco` at run time, with the current value marked from the preference. Where the RCO page
+is empty (the plugin builds the list in code) the fallback is named per list and never presented as the
+firmware's.
+
+### 11.1 Where the labels come from
+
+Every `MItem` carries its own label as a text reference: `[MItem]` is defined as `text = text`,
+`altText = text`, `unknownRef4 = ref` (`out/native-reference/objattribdef-ps3.ini`), and the existing
+`RcoObjects` reader resolves that reference through the container's English table. The object dump shows
+it directly (all 24 extra bytes of an MItem are those three references):
+
+```
+MItem item_display_config_5min @625552 +24B text=text#882:msg_5min="After 5 Minutes" altText=null unknownRef4=null
+MItem item_date_time_config_timezone_samoa_independent ... text=text#...:msg_timezone_samoa_independent="GMT+13:00 Independent State of Samoa"
+```
+
+So the list is enumerated as: the page's `Plane` child -> its `MList` child (`LowerMenu`) -> its `MItem`
+children in document order, each item's `text` -> English string. No label is synthesised, and no label
+is taken from this build's `choices()`. The `text` reference's table index and the object offset are kept
+per item in the dump, so every label can be cited to the RCO.
+
+The current-value mark is **not** in the RCO: the MItems have no children (3.1, negative evidence), and
+the capture batch found no check/dot on the frame (U4, closed). It is therefore computed here against
+the persisted preference, and the model says so (`ChoiceItem::isCurrent` with the source of the item
+separate from the source of the mark).
+
+The RCO read is lazy and cached: one `RcoObjects` per process, `sysconf_plugin.rco` read once on the
+first choice page (the same reader the `--rco-tree` CLI uses). A run that never opens a settings page
+and does not ask for the dump never reads it.
+
+### 11.2 The API (`settings_menu.h`)
+
+```cpp
+struct ChoiceItem {
+    QString label; QVariant value; bool isCurrent; QString source; bool scrollable;
+    QString item; int rcoIndex; quint32 rcoOffset; bool writes;
+};
+struct ChoiceList {
+    QString pageId, rowId, rowTitle, setting, rcoPage; quint32 rcoPageOffset;
+    QString container, source, note; bool scrollable; QString scrollObject;
+    QVector<ChoiceItem> items; bool fromRco() const; int count() const;
+};
+QVector<ChoiceItem> settingsChoices(const QString& pageId,const QString& rowId,Assets& assets,
+                                    const QVariant& current=QVariant());
+QVector<ChoiceList> settingsChoiceLists(const QString& pageId,Assets& assets,
+    const std::function<QVariant(const QString&)>& currentFor={});
+QVector<ChoiceList> settingsChoiceCatalogue(Assets& assets,
+    const std::function<QVariant(const QString&)>& currentFor={});
+bool choiceValueMatches(const QVariant& current,const QVariant& value);
+```
+
+| field | meaning |
+|---|---|
+| `label` | the RCO item's own text, in the page's authored order; the fallback's label when the page is empty |
+| `value` | exactly what the existing `Action::SetSetting` path stores for that item (11.3); the item's ordinal when `writes` is false |
+| `isCurrent` | the persisted value equals this item's `value` (bool/int/string compared through `choiceValueMatches`) |
+| `source` | per item: `rco`, `capture` (Theme's captured list) or `native` (this build's `choices()`) |
+| `scrollable` | the page carries a `Scroll` object, or the list is longer than the 27 items the measured band holds |
+| `item` / `rcoIndex` / `rcoOffset` | the MItem object name, its position in the LowerMenu, and its table-section offset - the citation |
+| `writes` | `value` is a real preference value; false for a firmware item this build cannot honour yet |
+| `ChoiceList::note` | per list: why a fallback, or which capture attests the labels |
+| `ChoiceList::rcoPage` / `rcoPageOffset` | the page object and its offset, or empty when the RCO has no page |
+
+`settingsChoices` accepts the row's native id (`"screensaver"`) or the Preferences key it writes
+(`"display/screensaverMinutes"`), which is the shorthand a view pass will want.
+
+### 11.3 Value semantics: a choice still writes what it writes today
+
+The list replaces `choices()` for drawing only in the later pass; the write path is unchanged
+(`Action::SetSetting`, `entry.option`, the same Preferences key). Every item's `value` is the value the
+current `choices()` returns for the same semantic item, so a view that draws the item and commits it
+writes the identical key and value:
+
+| setting | today's `choices()` values | the firmware list's values | identical? |
+|---|---|---|---|
+| `display/screensaverMinutes` | 5, 10, 20, 30, 0 | 5, 10, 20, 30, 0 (Do Not Use = 0) | yes |
+| `clock/dateFormat` | 0 = DD/MM, 1 = MM/DD, 2 = YYYY/MM/DD | authored `YYYY/MM/DD` -> 2, `DD/MM/YYYY` -> 0, `MM/DD/YYYY` -> 1 | yes, by label |
+| `clock/hourFormat` | 0 = 24-hour, 1 = 12-hour | authored `12-Hour Clock` -> 1, `24-Hour Clock` -> 0 | yes, by label |
+| `audio/keyTone` and every other Off/On page (BD/DVD, browser, remote, network) | `Off` false, `On` true | `Off` false, `On` true (an inert row's items are still false/true, marked `writes=false`) | yes |
+| `clock/timeZone` | host IANA ids (`QTimeZone::availableTimeZoneIds`) | the 110 firmware zones (offset zones) | **no** - see below |
+| `appearance/theme` | `Original` = `""` | `Original` = `""`; `Install`/`Classic`/`Air Paint` marked `writes=false` | Original yes; the other three are not installable here |
+
+The time zone list is the one value identity that cannot be preserved: the firmware's 110 zones are
+GMT-offset zones with a city label (`GMT-08:00 Pacific Time (US, Canada)`), not IANA identities, and the
+old list was the host's IANA ids. The stored value is now the zone's own item token
+(`date_time_config_timezone_pacific_us_canada`); `Shell::clockDateTime` resolves it through the same
+label's `GMT+HH:MM` text to a fixed-offset zone, and **still resolves every IANA id already in the
+store first**, so no stored preference is orphaned. The D13 row of section 7 is closed by this, with
+that value change stated. A time zone row's value text resolves a firmware token back to its RCO label
+(`Shell::valueText`), so the band and the list row show the same string.
+
+The 110-item list's ordering is the RCO's; its first item is `GMT-11:00 American Samoa` and its last
+`GMT+13:00 Independent State of Samoa` - the same string the capture batch's session showed as the
+console's current value (`settings/date-time-page-fresh.png`), which is an independent check that the
+enumeration is the firmware's own.
+
+### 11.4 The choice tables
+
+Enumerated at run time. Counts and sources are from `entries.json.settings-choices.json` produced by
+11.5; "offset" is the page object's offset in `sysconf_plugin.rco` (sha256
+`6f4d743ad9ad176c400e7e07742835d27d78bf8feb40534259ac24190fa0b5ed`, version 304, 1,440,648 bytes).
+
+| page | row | items | source | RCO page object | offset |
+|---|---|---|---:|---|---:|
+| Game | `game_psp_emu_viewmode` | 2 | rco | `page_game_config_pspemu_viewmode` | 483940 |
+| Game | `game_psp_emu_adhoc_ch` | 4 | rco | `page_game_config_pspemu_adhoc_mode_channel` | 484812 |
+| Game | `game_psp_emu_adhoc_mode` | 2 | rco | `page_game_config_pspemu_adhoc_mode_wlan` | 485812 |
+| Game | `game_ps_emu_upcon` | 3 | rco | `page_game_config_ps_ps2_upconvert` | 486684 |
+| Game | `game_ps_emu_smooth` | 2 | rco | `page_game_config_ps_ps2_smoothing` | 487620 |
+| Game | `game_psp_emu_3d` | 0 | none | - | - |
+| Video | `bd_menu_lang` / `bd_audio_lang` / `bd_subtitle_lang` | 18 each | rco | `page_bdvd_config_bd_menu_lang` / `_bd_voice_lang` / `_bd_subtitles_lang` | 489244 / 491140 / 493036 |
+| Video | `bd_internet_connection` | 2 | rco | `page_bdvd_config_internet_connect` | 494932 |
+| Video | `dvd_menu_lang` / `dvd_audio_lang` / `dvd_subtitle_lang` | 18 each | rco | `page_bdvd_config_dvd_menu_lang` / `_dvd_voice_lang` / `_dvd_subtitles_lang` | 495804 / 497700 / 499596 |
+| Video | `repeat` / `shuffle` / `volume` | 3 / 2 / 11 | native | - (this build's own rows) | - |
+| Music | `import_musiccd` (codec) | 3 | rco | `page_music_config_codec_select` | 515676 |
+| Music | `crossfade_play` | 11 | rco | `page_music_config_crossfade_play` | 518008 |
+| Music | `output_frequency` | 2 | rco | `page_music_config_output_frequency` | 519456 |
+| Music | `bitmapping` | 4 | rco | `page_music_config_bitmapping` | 520328 |
+| Music | `dnormal` | 2 | rco | `page_music_config_dnormal` | 521328 |
+| Music | `repeat` / `shuffle` / `volume` | 3 / 2 / 11 | native | - | - |
+| Chat | `av_chat_start` | 2 | rco | `page_chat_config_when_chat_start` | 522464 |
+| System | `console_lang` | 20 | rco | `page_console_system_lang` | 524088 |
+| Theme | `theme` | 4 | capture | `page_theme_config_theme` (empty page) | 588460 |
+| Theme | `color` | 6 | native | `page_theme_config_color` (empty page) | 588536 |
+| Theme | `background` | 3 | native | `page_theme_config_background` (empty page) | 588612 |
+| Theme | `font` | 3 | native | `page_theme_config_font` (empty page) | 588688 |
+| Date | `autodate` | 2 | rco | `page_date_time_config_automatic_setting` | 590492 |
+| Date | `date_fmt` | 3 | rco | `page_date_time_config_date_format` | 591364 |
+| Date | `time_fmt` | 2 | rco | `page_date_time_config_time_format` | 592300 |
+| Date | `timezone` | **110** | rco | `page_date_time_config_timezone` | 593172 |
+| Date | `summertime` | 2 | rco | `page_date_time_config_summer_time` | 600956 |
+| Power | `idle` | 5 | native | `page_console_auto_power_off_option` (empty page) | 602804 |
+| Power | `controller` | 0 | none | - | - |
+| Accessory | `pd_keyboard_type` | **24** | rco | `page_device_config_keyboard_type` | 606956 |
+| Accessory | `pd_keyrepeat_start` | 3 | rco | `page_device_config_key_repeat_start_time` | 611916 |
+| Accessory | `pd_keyrepeat_speed` | 3 | rco | `page_device_config_key_repeat_speed` | 612852 |
+| Accessory | `pd_mouse_type` | 2 | rco | `page_device_config_mouse_type` | 613788 |
+| Accessory | `pd_pointer_speed` | 3 | rco | `page_device_config_pointer_speed` | 614660 |
+| Accessory | `pd_keyboard_input` / `pd_pad_vibration` | 0 | none | - | - |
+| Display | `screensaver` | 5 | rco | `page_display_config_screensaverstartup` | 624808 |
+| Display | `cross_color_filter` | 2 | rco | `page_display_config_cross_color_filter` | 625872 |
+| Display | `rgb_full_range` | 2 | rco | `page_display_config_rgb_full_range` | 626744 |
+| Display | `super_white` | 2 | rco | `page_display_config_super_white` | 627616 |
+| Display | `deep_color` | 2 | rco | `page_display_config_deep_color_output` | 628488 |
+| Sound | `audio_multi_output` | 2 | rco | `page_sound_config_multi_output` | 635292 |
+| Sound | `keytone` | 2 | rco | `page_sound_config_operation_sound` | 636164 |
+| Security | `bd_pc` | 2 | rco | `page_security_config_bd_parental_control` | 637300 |
+| Security | `bd_dvd_pcregion` | 2 | rco | `page_security_config_dvd_region_code_control` | 638172 |
+| Security | `dvd_pc` | 9 | rco | `page_security_config_dvd_parental_control` | 639044 |
+| Security | `gameetc_pc` | **12** | rco | `page_security_config_parental_lock_level` | 640364 |
+| Security | `pc_browser` | 2 | rco | `page_security_config_browser` | 641876 |
+| Remote | `remote_start` | 2 | rco | `page_remote_config_remote_boot` | 661872 |
+| Remote | `audio_output_device` | 2 | rco | `page_remote_config_audio_config` | 663868 |
+| Network | `net_internet` | 2 | rco | `page_network_config_internet_connect` | 645652 |
+| Network | `net_media_server` | 2 | rco | `page_network_config_mediaserver_connection_config` | 646752 |
+| Photo | `interval` / `fit` / `repeat` | 4 / 2 / 2 | native | - (this build's own page) | - |
+
+Totals: **63 lists, 434 items** - 45 RCO lists (373 items), 1 captured list (4), 13 native lists (57),
+4 rows with no page at all. Printer Settings has no choice row (0).
+
+Two lists whose item counts are the audit's evidence for "long list": the time zone page has 110 MItems
+in one `LowerMenu` and the keyboard page 24, both enumerated in full. `scrollable` is true only for the
+time zone list: no settings choice page carries a `Scroll` child (the RCO's 30 `Scroll` objects belong to
+list pages and to `page_console_characterset`, `page_first_config_lang_select` and
+`page_first_config_tz_select`, not to any choice page this build opens), and 110 items exceed the 27 rows
+the measured band holds at the 40 px pitch. This is stated as the criterion, not as a firmware child.
+
+Labels verified against the two lists the capture batch measured, exactly and in order:
+
+| list | expected (capture batch 4.4) | enumerated | match |
+|---|---|---|---|
+| Screensaver (5) | `After 5 Minutes`, `After 10 Minutes`, `After 20 Minutes`, `After 30 Minutes`, `Do Not Use` (`settings/screensaver-list-rest.png`) | identical, in order | yes |
+| Theme (4) | `Install`, `Original`, `Classic`, `Air Paint` (`settings/theme-choice.png`) | identical, in order (captured fallback, RCO page empty) | yes |
+
+`System Language` (20) enumerates `Dansk`, `Deutsch`, the two Englishes, then the European languages,
+and closes with Japanese, Korean, Simplified Chinese and Traditional Chinese written in their own
+scripts; `Parental Control` (12) enumerates `Off`, `Level 11` ... `Level 1`; `DVD - Parental Control` (9)
+enumerates `Off`, `Level 8` ... `Level 1`. Every label is the RCO's own (the RCO's items are UTF-8 and
+the dump is UTF-8 JSON).
+
+### 11.5 Verification
+
+Build: `& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-choices` (clean at
+`/W4 /permissive- /utf-8`; no warning from `settings_menu.cpp`). Binary
+`C:\dev\out\native-choices\re-ps3-native.exe`, 3,632,128 bytes, 2026-10-27 23:14.
+
+Dump, one scripted run (`XMB_DUMP_ENTRIES=C:/dev/out/native-choices/entries.json`, opens Settings >
+Game Settings; the catalogue is written once on the first settings page):
+
+- `C:/dev/out/native-choices/entries.json.settings-choices.json` - 16 pages, 63 ChoiceList records,
+  434 items, the container's name/path/version/bytes, and per item `item`, `rcoIndex`, `rcoOffset`,
+  `value`, `isCurrent`, `writes`.
+- `C:/dev/out/native-choices/entries.json.settings-game.json` - the same run's per-page dump, now with
+  its `choices` array (six rows; five RCO lists 2/4/2/3/2 and the 3D Display row with no page).
+- Log: `settings: settingsChoices API -> display/screensaver 5 items, date/clock-dateFormat 3 items`
+  (the public single-list entry point is exercised by the same dump, by row id and by preference key).
+
+Pixels: `bun work\ab-layers.ts --capture --exe C:/dev/out/native-choices/re-ps3-native.exe` ->
+`PASS: 6/6 layers within budget` (frame 18.29/.8342, top background 20.25/.9363, category icon row
+20.93/.8990, item label row 11.95/.3925, clock text 11.39/.4500, info bar 14.98/.7639; every delta
+positive except the icon row's -0.13 dB, inside the 0.50 dB budget). `--list-states` on the same build
+lists twelve states (root, Steam catalogue/folder/store/download, video options/continue/subtitle,
+Jellyfin sign-in, notification, volume HUD), none of them a settings page or a choice list, so this
+slice cannot move a named state.
+
+### 11.6 Dated corrections to earlier sections
+
+- **4.4's "Time Format order: `24-Hour Clock`, then `12-Hour Clock`" is wrong, and its own frame
+  contradicts it.** `settings/timeformat-list-rest.png` shows `12-Hour Clock` at ink y ~461 and
+  `24-Hour Clock` (focused, the session's current value) at ~505, i.e. the RCO's authored order
+  (`item_date_time_config_time_format_0` = 12-Hour, `_1` = 24-Hour). What 4.4 says after that ("Down
+  clamps at the last item, Up selects 12-hour") is consistent with that order. The list enumerates in
+  the frame's order.
+- **U2's band fade: the measured profile.** At y 100 on `settings/screensaver-list-rest.png` the band's
+  luma (the page is black there, so it is the band's own fill) is 0 at x 1255, 34 at 1262, 60 by 1300,
+  61 at 1310-1320, 53 at 1400, 37 at 1500, 25 at 1550, 9 at 1600, 2 at 1650, 0 at 1690. So "fading out
+  by 1660" is the visible end within ~2 luma; the geometric zero is ~1690, the same end as the item
+  menu's band in 6.1. The left edge is a 1-2 px step at 1260, and the item text starts at 1276-1278.
+- **D22's dot is not drawn on a settings choice today.** The settings-choice call site
+  (`view.cpp:1296`) passes no `rows`, and the 4.5 px dot is inside the `rows` path (`view.cpp:1179-1182`)
+  used by the player panel; the item-menu call passes no rows either. The band must keep that: no check
+  and no dot (U4). 11.8 keeps the invariant explicit.
+
+### 11.7 Mismatches: no firmware page, and lists built at run time
+
+**(a) A native setting whose firmware counterpart is a choice setting, but with no choice page object
+in `sysconf_plugin.rco`.** These are reported as empty lists with a `note`, not invented:
+
+| page / row | row label | what is missing |
+|---|---|---|
+| Game / `game_psp_emu_3d` | `PSP(TM) Remaster - 3D Display` | no page object named for the 3D Display row |
+| Power / `controller` | `Controller Auto-Off` | no page object; only the list page `page_console_auto_power_off_option` exists, and it ships no items |
+| Accessory / `pd_keyboard_input` | `Keyboard Entry Method` | no page object |
+| Accessory / `pd_pad_vibration` | `Controller Vibration Function` | no page object (the captured page `settings/restore/restore7-vibration-page.png` exists, so the list is built by code or lives in another plugin; `deviceconf_plugin.rco` was not searched) |
+
+**(b) A firmware choice page that ships empty (the plugin builds the list at run time).** Per list the
+fallback and its provenance:
+
+| page / row | RCO page | what it ships | fallback | provenance |
+|---|---|---|---|---|
+| Theme / `theme` | `page_theme_config_theme` | a Page with **no children** | `Install`, `Original`, `Classic`, `Air Paint` | **capture** (`settings/theme-choice.png`); only `Original` is installable here |
+| Theme / `color` | `page_theme_config_color` | Plane, no MList items | this build's 6 colours | **native**; the capture has 12 items (`Original` + 11 colour chips, `settings/color-choice.png`) whose labels were not transcribed |
+| Theme / `background` | `page_theme_config_background` | Plane, no MList items | this build's 3 | **native**; capture contents not transcribed |
+| Theme / `font` | `page_theme_config_font` | Plane, no MList items | this build's font families | **native**; capture contents not transcribed |
+| Power / `idle` | `page_console_auto_power_off_option` | Plane, no MList items | this build's 5 timers | **native**; the two-timer list was not captured (D20) |
+
+**(c) Native settings with no firmware choice page at all** (this build's own rows, kept where they are
+a feature's only surface; 10.4): Video and Music `Repeat` (3), `Shuffle` (2), `Volume` (11), and Photo
+Settings `Slideshow Interval` (4), `Display Mode` (2), `Repeat` (2). Their lists are `choices()`'s,
+marked `native`.
+
+**(d) Read but not yet writable.** Every firmware choice row that is `Action::Unavailable` in this build
+(Game's five, Video's and Music's firmware rows, Chat's one, System's language, Security's five,
+Display's four non-screensaver rows, Remote's two, Network's two, Accessory's five, Date's `Set
+Automatically` and `Daylight Saving`) now has its list enumerated and dumped, with `writes=false` on every
+item. The rows that already write a preference - Screensaver, Key Tone, Date Format, Time Format, Time
+Zone, Power's `System Auto-Off`, and Theme's Color/Background/Font lists - carry the real value on every
+item; the Theme row itself writes only `Original` (11.3). Making the rest writable is a row-action change
+(a later slice), not a choice-model one; their values are already the ordinal the page authors.
+
+### 11.8 The view hunks for the band (not applied)
+
+Three hunks in `src/view.cpp`. Anchored by code text, because another session edits this file.
+
+**Hunk A - `drawOptionsPanel` gains the firmware band form.** Replace the signature, the `x0`/`first`
+block and the fill (the block that starts `const auto drawOptionsPanel=` and ends with the `edge`
+`fillRect`):
+
+```cpp
+    // `firmwareBand` (Phase 11.3): a settings choice list is the firmware's full-height right-hand band
+    // over the dimmed parent page (SETTINGS 9.1/U2, 9.3a; profile re-measured in 11.6: left edge 1260,
+    // 60 alpha by 1300, zero by 1690, item text 1276, 40 px pitch, current item on the 505 focus row,
+    // no check/dot). The item-menu overlay and the player panel keep their form at x 1330 to the edge.
+    const auto drawOptionsPanel=[&](const QStringList& items,double position,double alpha,double ahead,const QString& heading,
+                                    const QVector<MenuOption>* rows=nullptr,bool firmwareBand=false) {
+        const double x0=(firmwareBand?1260.:1330.)+ahead*600;
+        const double fadeEnd=firmwareBand?1690.:1920.;
+        const double rowCount=rows?double(rows->size()):double(items.size());
+        const double first=505-(rowCount-1.)*20.;
+        p.save();p.setOpacity(alpha);
+        if(firmwareBand) {
+            // The parent page is dimmed behind the band. The dim is not separable from the band's own
+            // gradient in the captured frames (SETTINGS 9.5), so this alpha is a re-measure target.
+            p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,120));
+        }
+        // Over the XMB's own background the light strip is enough. Over video it is not: white 23 px text
+        // on a bright frame is unreadable, so the in-player panel lays the strip on a dark plate (the
+        // console's control panel dims the picture behind it for the same reason).
+        if(rows) {
+            QLinearGradient shade(x0,0,1920,0);
+            shade.setColorAt(0,QColor(0,0,0,158));shade.setColorAt(1,QColor(0,0,0,120));
+            p.fillRect(QRectF(x0,0,1920-x0,1080),shade);
+        }
+        QLinearGradient fill(x0,0,fadeEnd,0);
+        if(firmwareBand) {
+            // The band's own profile, sampled at y 100 on settings/screensaver-list-rest.png, where the
+            // page is black so the luma is the fill's alpha: 0 at 1260, 60 at 1300, 61 at 1320, 37 at
+            // 1500, 9 at 1600, 0 at 1690 (SETTINGS 11.6).
+            fill.setColorAt(0,QColor(255,255,255,0));fill.setColorAt(.005,QColor(255,255,255,60));
+            fill.setColorAt(.14,QColor(255,255,255,61));fill.setColorAt(.558,QColor(255,255,255,37));
+            fill.setColorAt(.79,QColor(255,255,255,9));fill.setColorAt(1,QColor(255,255,255,0));
+        } else {
+            fill.setColorAt(0,QColor(255,255,255,46));fill.setColorAt(.08,QColor(255,255,255,30));fill.setColorAt(1,QColor(255,255,255,22));
+        }
+        p.fillRect(QRectF(x0,0,fadeEnd-x0,1080),fill);
+        QLinearGradient edge(x0-10,0,x0+4,0);edge.setColorAt(0,QColor(255,255,255,0));edge.setColorAt(.75,QColor(255,255,255,70));edge.setColorAt(1,QColor(255,255,255,0));
+        p.fillRect(QRectF(x0-10,0,14,1080),edge);
+```
+
+and, in the same lambda, the dot must never be drawn for a firmware band (U4: the firmware marks the
+current item by focus only):
+
+```cpp
+            if(rows && !firmwareBand && (*rows)[i].active) { // the player panel's current-choice dot
+```
+
+**Hunk B - the settings choice column passes the band form** (`view.cpp:1296`):
+
+```cpp
+-                    drawOptionsPanel(titles,column.position,columnAlpha,ahead,QString());
++                    // Phase 11.3: a settings choice is the firmware's own band, not the item-menu overlay.
++                    drawOptionsPanel(titles,column.position,columnAlpha,ahead,QString(),nullptr,true);
+```
+
+**Hunk C - the info bar is absent while the band is up.** The captured frame has no clock plate and no
+analog clock while the band is open (luma 0 at x 1750..1918, y 100 on
+`settings/screensaver-list-rest.png`), and the band does not reach there. Insert before the info-bar
+block (`if(!messageScreen) {` at `view.cpp:1466`) and use it in that condition:
+
+```cpp
+        // A settings choice band replaces the info bar (SETTINGS 11.6): the frame has neither the plate
+        // nor the analog clock. The item-menu overlay does not do this.
+        const bool choiceBandUp=columns_.size()>=2 && isChoiceColumn(columns_.back())
+            && depthPosition_>double(columns_.size()-2)+0.001;
+        if(!messageScreen && !choiceBandUp) {
+```
+
+Not in these hunks: the `BG1` focus plate inside the band (9.5 still open), the band's item font size
+(the 40 px pitch and x 1276 are measured; the glyph height is not), and the open/close animation (U3's
+video is captured, its cue is not).
+
+### 11.9 Still open after this slice
+
+- The `BG1` plate rectangle inside the band and the dim alpha (9.5) - Hunk A uses a placeholder dim.
+- Background and Font list contents (U9, still untranscribed); Colour's 11 chip labels.
+- The two timer option lists behind `System Auto-Off` / `Controller Auto-Off` (D20) - no RCO items, no
+  capture of the timer page.
+- `Keyboard Entry Method`, `Controller Vibration Function` and `3D Display` page objects: absent from
+  `sysconf_plugin.rco`; they may be built in `deviceconf_plugin.rco` or in code, which was not searched.
+- The commit cue (U5) and the band's open/close duration (U3's audio/settle frame).
+- Wiring the 45 RCO lists to live rows (11.7d) and the choice-page row actions that follow.
+
+

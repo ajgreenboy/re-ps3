@@ -4,9 +4,13 @@
 #include "host.h"
 #include "p3t.h"
 #include "xmbml_view.h"
+#include "rco_objects.h"
 #include <cmath>
+#include <memory>
+#include <iterator>
 #include <QTimeZone>
 #include <QDateTime>
+#include <QMetaType>
 #include <QImageReader>
 #include <QFileInfo>
 #include <QFile>
@@ -15,6 +19,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QSet>
 
 namespace xmb {
@@ -338,9 +343,458 @@ PageRows pageRows(const QString& id,Assets& assets,const QString& dateTimeInfo) 
         .arg(id).arg(int(data.entries.size())).arg(data.nativeOnly.size());
     return data;
 }
+// === Phase 11.3: the choice list a settings row opens (audit/SETTINGS-FIRMWARE.md 3.1, 9.3a) =======
+// The measured band holds 27 items at the 40 px pitch over 1080 px (SETTINGS 9.1/U2); a longer list has
+// to scroll. Items that fit need no Scroll object, and the RCO ships one only on some pages.
+constexpr int kBandRows=27;
+// The firmware's choice pages are page class B: Page{Plane{BG0, BG1, LowerMenu(MList) -> MItem...}}.
+// Every MItem carries its own label as a text reference, so the labels and their order are read from
+// sysconf_plugin.rco's own bytes at run time, never typed in. What the RCO does not carry is the
+// current-value mark (MItems have no children: SETTINGS 3.1 and U4, and the frames show no check/dot),
+// so isCurrent is computed against the persisted preference by the caller.
+//
+// One reader per process, bound to the first Assets it sees. Constructing it does no I/O; the first
+// container() call reads and parses sysconf_plugin.rco once, and later calls are cached
+// (audit/RCO-OBJECT-MODEL.md). The application has one Assets for its lifetime; a second instance would
+// be a wiring error, so it is logged rather than silently served from the wrong firmware tree.
+RcoObjects& choiceObjects(Assets& assets) {
+    static Assets* owner=nullptr;
+    static std::unique_ptr<RcoObjects> reader;
+    if(!reader){owner=&assets;reader=std::make_unique<RcoObjects>(assets);}
+    else if(owner!=&assets)qWarning()<<"settings: the choice reader is bound to another Assets instance";
+    return *reader;
+}
+// How a page's authored item maps to the value this build stores. The RCO's item order is the screen
+// order (verified on screensaver-list-rest.png and timeformat-list-rest.png); the native values are the
+// ones choices() already writes, so a view pass that draws these items commits exactly what it does now.
+enum class ChoiceValues {
+    Index,            // the item's position in the page (inert rows: not a preference value)
+    Bool,             // Off/On -> false/true
+    DateFormat,       // YYYY/MM/DD -> 2, DD/MM/YYYY -> 0, MM/DD/YYYY -> 1 (choices()'s values)
+    HourFormat,       // 12-Hour Clock -> 1, 24-Hour Clock -> 0 (choices()'s values)
+    ScreenMinutes,    // 5, 10, 20, 30, 0 (choices()'s values; Do Not Use is 0)
+    Zone,             // the firmware zone token clock/timeZone stores (see clockDateTime)
+};
+// One row whose firmware counterpart is a choice page. `rcoPage` empty means no page object in
+// sysconf_plugin.rco: that is a mismatch stated in the note, not a list to invent.
+struct ChoiceBinding {
+    const char* page=nullptr;
+    const char* row=nullptr;
+    const char* rcoPage=nullptr;
+    const char* note=nullptr;
+    ChoiceValues values=ChoiceValues::Index;
+};
+const QVector<ChoiceBinding>& choiceBindings() {
+    // RCO page objects and item counts: SETTINGS 3.3; row ids: the pages in 10.4 and 10.3. A page that
+    // exists but is empty (its Page has no Plane/MList items) is the run-time-built case of 9.3f.
+    static const QVector<ChoiceBinding> table{
+        // Game Settings (seg_game; every row is an explained refusal in this build)
+        {"game","game_psp_emu_viewmode","page_game_config_pspemu_viewmode",nullptr,ChoiceValues::Index},
+        {"game","game_psp_emu_3d",nullptr,"no page object for the 3D Display row in sysconf_plugin.rco",ChoiceValues::Index},
+        {"game","game_psp_emu_adhoc_ch","page_game_config_pspemu_adhoc_mode_channel",nullptr,ChoiceValues::Index},
+        {"game","game_psp_emu_adhoc_mode","page_game_config_pspemu_adhoc_mode_wlan",nullptr,ChoiceValues::Index},
+        {"game","game_ps_emu_upcon","page_game_config_ps_ps2_upconvert",nullptr,ChoiceValues::Index},
+        {"game","game_ps_emu_smooth","page_game_config_ps_ps2_smoothing",nullptr,ChoiceValues::Index},
+        // Video Settings (the seven measured rows of 9.2; the BD/DVD language pages are 18 items each)
+        {"video","bd_menu_lang","page_bdvd_config_bd_menu_lang",nullptr,ChoiceValues::Index},
+        {"video","bd_audio_lang","page_bdvd_config_bd_voice_lang",nullptr,ChoiceValues::Index},
+        {"video","bd_subtitle_lang","page_bdvd_config_bd_subtitles_lang",nullptr,ChoiceValues::Index},
+        {"video","bd_internet_connection","page_bdvd_config_internet_connect",nullptr,ChoiceValues::Bool},
+        {"video","dvd_menu_lang","page_bdvd_config_dvd_menu_lang",nullptr,ChoiceValues::Index},
+        {"video","dvd_audio_lang","page_bdvd_config_dvd_voice_lang",nullptr,ChoiceValues::Index},
+        {"video","dvd_subtitle_lang","page_bdvd_config_dvd_subtitles_lang",nullptr,ChoiceValues::Index},
+        // Music Settings (9.2: five rows; the codec is the Audio CD Import row's value)
+        {"music","import_musiccd","page_music_config_codec_select",
+            "the frame's value for this row is the codec (AAC 128 kbps); the page names the codec only",ChoiceValues::Index},
+        {"music","crossfade_play","page_music_config_crossfade_play",nullptr,ChoiceValues::Index},
+        {"music","output_frequency","page_music_config_output_frequency",nullptr,ChoiceValues::Index},
+        {"music","bitmapping","page_music_config_bitmapping",nullptr,ChoiceValues::Index},
+        {"music","dnormal","page_music_config_dnormal",nullptr,ChoiceValues::Bool},
+        // Chat Settings
+        {"chat","av_chat_start","page_chat_config_when_chat_start",nullptr,ChoiceValues::Index},
+        // System Settings: System Language is the page's one choice row this build lists
+        {"system","console_lang","page_console_system_lang",nullptr,ChoiceValues::Index},
+        // Theme Settings: all four pages are empty in the RCO (9.3f); Theme's list is the captured one
+        {"theme","theme","page_theme_config_theme",
+            "the Page has no children at all; the list is built by the plugin at run time (captured labels)",ChoiceValues::Index},
+        {"theme","color","page_theme_config_color",
+            "the Page has no LowerMenu items; the plugin builds the colour chips at run time (12 captured, labels not transcribed)",ChoiceValues::Index},
+        {"theme","background","page_theme_config_background",
+            "the Page has no LowerMenu items; the plugin builds the list at run time (contents not transcribed)",ChoiceValues::Index},
+        {"theme","font","page_theme_config_font",
+            "the Page has no LowerMenu items; the plugin builds the list at run time (contents not transcribed)",ChoiceValues::Index},
+        // Date and Time (9.2: winter/summer row is Daylight Saving in the US build)
+        {"date","autodate","page_date_time_config_automatic_setting",nullptr,ChoiceValues::Bool},
+        {"date","date_fmt","page_date_time_config_date_format",nullptr,ChoiceValues::DateFormat},
+        {"date","time_fmt","page_date_time_config_time_format",nullptr,ChoiceValues::HourFormat},
+        {"date","timezone","page_date_time_config_timezone",nullptr,ChoiceValues::Zone},
+        {"date","summertime","page_date_time_config_summer_time",nullptr,ChoiceValues::Index},
+        // Power Save (System Auto-Off opens a page of two timers; no option list is shipped or captured)
+        {"power","idle","page_console_auto_power_off_option",
+            "the Page has a Plane but no LowerMenu items; the timer list is built at run time and was not captured",ChoiceValues::Index},
+        {"power","controller",nullptr,"no page object for Controller Auto-Off in sysconf_plugin.rco",ChoiceValues::Index},
+        // Accessory Settings (seg_device)
+        {"device","pd_keyboard_type","page_device_config_keyboard_type",nullptr,ChoiceValues::Index},
+        {"device","pd_keyboard_input",nullptr,"no page object for Keyboard Entry Method in sysconf_plugin.rco",ChoiceValues::Index},
+        {"device","pd_keyrepeat_start","page_device_config_key_repeat_start_time",nullptr,ChoiceValues::Index},
+        {"device","pd_keyrepeat_speed","page_device_config_key_repeat_speed",nullptr,ChoiceValues::Index},
+        {"device","pd_mouse_type","page_device_config_mouse_type",nullptr,ChoiceValues::Index},
+        {"device","pd_pointer_speed","page_device_config_pointer_speed",nullptr,ChoiceValues::Index},
+        {"device","pd_pad_vibration",nullptr,"no page object for Controller Vibration Function in sysconf_plugin.rco",ChoiceValues::Index},
+        // Display Settings (9.2 values: After 20 Minutes, Off, Limited, Off, Automatic)
+        {"display","screensaver","page_display_config_screensaverstartup",nullptr,ChoiceValues::ScreenMinutes},
+        {"display","cross_color_filter","page_display_config_cross_color_filter",nullptr,ChoiceValues::Bool},
+        {"display","rgb_full_range","page_display_config_rgb_full_range",nullptr,ChoiceValues::Index},
+        {"display","super_white","page_display_config_super_white",nullptr,ChoiceValues::Bool},
+        {"display","deep_color","page_display_config_deep_color_output",nullptr,ChoiceValues::Index},
+        // Sound Settings (9.2: Audio Multi-Output Off, Key Tone On)
+        {"sound","audio_multi_output","page_sound_config_multi_output",nullptr,ChoiceValues::Bool},
+        {"sound","keytone","page_sound_config_operation_sound",nullptr,ChoiceValues::Bool},
+        // Security Settings (9.2: BD Off, region United States, DVD Off, Parental Level 9, Browser Off)
+        {"security","bd_pc","page_security_config_bd_parental_control",nullptr,ChoiceValues::Bool},
+        {"security","bd_dvd_pcregion","page_security_config_dvd_region_code_control",nullptr,ChoiceValues::Index},
+        {"security","dvd_pc","page_security_config_dvd_parental_control",nullptr,ChoiceValues::Index},
+        {"security","gameetc_pc","page_security_config_parental_lock_level",nullptr,ChoiceValues::Index},
+        {"security","pc_browser","page_security_config_browser",nullptr,ChoiceValues::Bool},
+        // Remote Play (9.2: Remote Start Off, Audio Output Device = Remote Play Device)
+        {"remote","remote_start","page_remote_config_remote_boot",nullptr,ChoiceValues::Bool},
+        {"remote","audio_output_device","page_remote_config_audio_config",nullptr,ChoiceValues::Index},
+        // Network Settings (the status list is an information row; the setup/test rows are flows)
+        {"network","net_internet","page_network_config_internet_connect",nullptr,ChoiceValues::Bool},
+        {"network","net_media_server","page_network_config_mediaserver_connection_config",nullptr,ChoiceValues::Bool}};
+    return table;
+}
+const ChoiceBinding* choiceBinding(const QString& pageId,const QString& rowId) {
+    for(const auto& binding:choiceBindings())
+        if(pageId==QLatin1String(binding.page) && rowId==QLatin1String(binding.row))return &binding;
+    return nullptr;
+}
+QVariant firmwareChoiceValue(ChoiceValues kind,int index,const QString& label,const QString& item) {
+    switch(kind) {
+    case ChoiceValues::Bool:
+        if(label==QLatin1String("Off"))return false;
+        if(label==QLatin1String("On"))return true;
+        return index;
+    case ChoiceValues::DateFormat: {
+        static const int values[]{2,0,1};  // authored order: YYYY/MM/DD, DD/MM/YYYY, MM/DD/YYYY
+        return index<int(std::size(values))?values[index]:index;
+    }
+    case ChoiceValues::HourFormat: {
+        static const int values[]{1,0};    // authored order: 12-Hour Clock, 24-Hour Clock
+        return index<int(std::size(values))?values[index]:index;
+    }
+    case ChoiceValues::ScreenMinutes: {
+        static const int values[]{5,10,20,30,0};
+        return index<int(std::size(values))?values[index]:index;
+    }
+    case ChoiceValues::Zone: {
+        // The zone's own item name without its "item_" namespace: a stable, localization-free token.
+        // clockDateTime resolves it through the item's msg_timezone_* text (the GMT offset in the label),
+        // because the firmware's 110 zones are offset zones, not IANA identities.
+        return item.startsWith(QLatin1String("item_"))?item.mid(5):item;
+    }
+    case ChoiceValues::Index: break;
+    }
+    return index;
+}
+// The firmware's time zones are offset zones: every label states "GMT+HH:MM" (SETTINGS 5.7), and
+// clock/timeZone stores the zone's item token rather than an IANA id. This turns a token back into the
+// offset its own label states, read through the same English table the list was drawn from.
+int firmwareZoneOffsetSeconds(Assets& assets,const QString& token,bool& known) {
+    known=false;
+    static const QString prefix=QStringLiteral("date_time_config_timezone_");
+    if(!token.startsWith(prefix))return 0;
+    static QHash<QString,int> offsets;
+    static QHash<QString,bool> knownTokens;
+    if(knownTokens.contains(token)){known=knownTokens.value(token);return offsets.value(token);}
+    const auto label=assets.text(QStringLiteral("sysconf_plugin"),
+        QStringLiteral("msg_timezone_")+token.mid(prefix.size()));
+    static const QRegularExpression pattern(QStringLiteral("GMT([+-])(\\d{1,2}):(\\d{2})"));
+    const auto match=pattern.match(label);
+    const bool ok=match.hasMatch();
+    int seconds=0;
+    if(ok) {
+        const int sign=match.captured(1)==QLatin1String("-")?-1:1;
+        seconds=sign*(match.captured(2).toInt()*3600+match.captured(3).toInt()*60);
+    }
+    offsets.insert(token,seconds);knownTokens.insert(token,ok);known=ok;
+    return seconds;
+}
+// The MItem's own label: its `text` reference resolved through the container's English table, then
+// `altText` as the second choice. Empty when the entry has neither (never happens in sysconf_plugin).
+QString choiceItemLabel(const RcoObjects::Container& container,const RcoObjects::Object& item) {
+    for(const auto& property:container.properties(item)) {
+        if(property.name!=QLatin1String("text") && property.name!=QLatin1String("altText"))continue;
+        if(property.value.refKind()!=RcoObjects::RefKind::Text)continue;
+        const auto text=container.text(property.value.target);
+        if(!text.isEmpty())return text;
+    }
+    return {};
+}
+// A page's authored items, plus the page's own Scroll object when the RCO declares one. The RCO carries
+// a Scroll child on only a few pages (first-config language/timezone, characterset, the utility lists);
+// none of the settings choice pages has one, so scrollability also comes from the measured band: 40 px
+// pitch over 1080 px holds 27 items (SETTINGS 9.1/U2), and a longer list must scroll.
+struct RcoChoicePage {
+    const RcoObjects::Container* container=nullptr;
+    const RcoObjects::Object* page=nullptr;
+    QVector<const RcoObjects::Object*> items;
+    QString scrollObject;
+    QString error;
+};
+RcoChoicePage readChoicePage(Assets& assets,const QString& containerName,const QString& pageName) {
+    RcoChoicePage result;
+    const auto& container=choiceObjects(assets).container(containerName);
+    result.container=&container;
+    if(!container.ok) {result.error=container.error.isEmpty()?QStringLiteral("container unreadable"):container.error;return result;}
+    const auto* page=container.object(pageName);
+    if(!page) {result.error=QStringLiteral("no object named ")+pageName;return result;}
+    result.page=page;
+    const RcoObjects::Object* plane=nullptr;
+    for(const auto* child:container.children(*page)) {
+        if(child->type==QLatin1String("Plane")){plane=child;break;}
+    }
+    if(!plane)return result;  // an empty Page: the plugin builds the list at run time
+    for(const auto* child:container.children(*plane)) {
+        if(child->type==QLatin1String("Scroll")&&result.scrollObject.isEmpty())result.scrollObject=child->name;
+    }
+    const RcoObjects::Object* menu=nullptr;
+    for(const auto* child:container.children(*plane)) {
+        if(child->type==QLatin1String("MList")){menu=child;break;}
+    }
+    if(!menu)return result;
+    for(const auto* child:container.children(*menu)) {
+        if(child->type==QLatin1String("MItem"))result.items.push_back(child);
+    }
+    return result;
+}
+// The captured Theme list: page_theme_config_theme is an empty Page in the RCO (9.3f), so the labels are
+// the 2026-10-28 capture's (settings/theme-choice.png). Only Original is installable in this build: the
+// other three are firmware themes this build has no asset for, and Install is the native file picker.
+ChoiceList themeCaptureChoices(const QVariant& current) {
+    ChoiceList list;
+    list.pageId=QStringLiteral("theme");list.rowId=QStringLiteral("theme");list.rowTitle=QStringLiteral("Theme");
+    list.setting=QStringLiteral("appearance/theme");list.rcoPage=QStringLiteral("page_theme_config_theme");
+    list.source=QStringLiteral("capture");
+    list.note=QStringLiteral("page_theme_config_theme is an empty Page in sysconf_plugin.rco (0 children), so the "
+        "plugin builds this list at run time; these four labels are the capture batch's "
+        "(out/rpcs3-ref-2026-10-28/settings/theme-choice.png). Original is the only item this build can install; "
+        "Install is the native .p3t picker and Classic/Air Paint ship no asset here.");
+    struct Spec {const char* label;bool writes;};
+    static const Spec specs[]{{"Install",false},{"Original",true},{"Classic",false},{"Air Paint",false}};
+    int index=0;
+    for(const auto& spec:specs) {
+        ChoiceItem item;
+        item.label=QString::fromLatin1(spec.label);
+        item.source=QStringLiteral("capture");
+        item.rcoIndex=index++;
+        item.writes=spec.writes;
+        if(spec.writes) {
+            item.value=QString{};
+            item.isCurrent=choiceValueMatches(current,item.value);
+        }
+        list.items.push_back(item);
+    }
+    return list;
+}
+// A list this build's own choices() produces, because the firmware has no shipped list: an empty RCO
+// page, a native-only row, or a row whose page object is absent. The labels are this build's, marked as
+// such - never presented as the firmware's.
+ChoiceList nativeChoiceList(const QString& pageId,const Entry& row,Assets& assets,
+                            const QVariant& current,const QString& source,const QString& note) {
+    ChoiceList list;
+    list.pageId=pageId;list.rowId=row.id;list.rowTitle=row.title;list.setting=row.setting;
+    list.source=source;list.note=note;
+    if(row.setting.isEmpty())return list;
+    int index=0;
+    for(const auto& choice:choices(row.setting,assets)) {
+        ChoiceItem item;
+        item.label=choice.title;item.value=choice.value;item.source=source;item.rcoIndex=index++;
+        item.writes=true;
+        item.isCurrent=choiceValueMatches(current,choice.value);
+        list.items.push_back(item);
+    }
+    return list;
+}
+// One row's list. `entry` is the page's own row (id, title, setting, action), so a row's write path and
+// its list cannot disagree.
+ChoiceList buildChoiceList(const QString& pageId,const Entry& entry,Assets& assets,const QVariant& current) {
+    ChoiceList list;
+    list.pageId=pageId;list.rowId=entry.id;list.rowTitle=entry.title;list.setting=entry.setting;
+    const auto* binding=choiceBinding(pageId,entry.id);
+    if(!binding) {
+        // A row with no firmware counterpart that this build still makes a choice: the three media
+        // settings and Photo Settings. Its list is choices()'s, marked native.
+        if(entry.action!=Action::SettingChoices || entry.setting.isEmpty())return list;
+        return nativeChoiceList(pageId,entry,assets,current,QStringLiteral("native"),
+            QStringLiteral("this build's own setting: the sysconf inventory has no page for it"));
+    }
+    list.rcoPage=QString::fromLatin1(binding->rcoPage?binding->rcoPage:"");
+    if(binding->rcoPage)list.container=QStringLiteral("sysconf_plugin");
+    const bool verbose=qEnvironmentVariableIsSet("XMB_XMBML_LOG") && qEnvironmentVariable("XMB_XMBML_LOG")!=QStringLiteral("0");
+    if(!binding->rcoPage) {
+        list.source=QStringLiteral("none");
+        list.note=QString::fromLatin1(binding->note);
+        if(verbose)qInfo().noquote()<<"settings: no choice page for"<<pageId+"/"+entry.id<<"("<<binding->note<<")";
+        return list;
+    }
+    const auto page=readChoicePage(assets,QStringLiteral("sysconf_plugin"),list.rcoPage);
+    if(!page.error.isEmpty()) {
+        list.source=QStringLiteral("none");
+        list.note=QStringLiteral("sysconf_plugin.rco: ")+page.error;
+        qWarning().noquote()<<"settings: choice page"<<list.rcoPage<<"unreadable:"<<page.error;
+        return list;
+    }
+    if(pageId==QLatin1String("theme") && entry.id==QLatin1String("theme")) {
+        auto captured=themeCaptureChoices(current);
+        captured.rcoPageOffset=page.page?page.page->offset:0;
+        return captured;
+    }
+    list.rcoPageOffset=page.page?page.page->offset:0;
+    list.scrollObject=page.scrollObject;
+    if(page.items.isEmpty()) {
+        // The page exists but ships no items: the run-time-built case (SETTINGS 3.3/9.3f). A row this
+        // build can write falls back to its own choices(); the note says exactly which fallback this is.
+        const auto why=binding->note?QString::fromLatin1(binding->note)
+            :QStringLiteral("the page object has no LowerMenu items");
+        if(entry.setting.isEmpty()||entry.action!=Action::SettingChoices) {
+            list.source=QStringLiteral("rco-page-empty");list.note=why;
+            return list;
+        }
+        auto fallback=nativeChoiceList(pageId,entry,assets,current,QStringLiteral("native"),
+            why+QStringLiteral("; the list below is this build's, not the firmware's"));
+        // Keep the page object's identity even though its items are this build's: the provenance of a
+        // fallback is both facts - which page was empty, and where the fallback came from.
+        fallback.rcoPage=list.rcoPage;fallback.rcoPageOffset=list.rcoPageOffset;
+        fallback.container=QStringLiteral("sysconf_plugin");fallback.scrollObject=list.scrollObject;
+        return fallback;
+    }
+    list.source=QStringLiteral("rco");
+    list.note=binding->note?QString::fromLatin1(binding->note):QString{};
+    const auto& container=*page.container;
+    int index=0;
+    for(const auto* object:page.items) {
+        ChoiceItem item;
+        item.label=choiceItemLabel(container,*object);
+        item.source=QStringLiteral("rco");
+        item.item=object->name;
+        item.rcoIndex=index++;
+        item.rcoOffset=object->offset;
+        item.value=firmwareChoiceValue(binding->values,item.rcoIndex,item.label,item.item);
+        item.writes=!entry.setting.isEmpty() && item.value.isValid();
+        item.isCurrent=item.writes && choiceValueMatches(current,item.value);
+        list.items.push_back(item);
+    }
+    list.scrollable=!list.scrollObject.isEmpty() || list.items.size()>kBandRows;
+    for(auto& item:list.items)item.scrollable=list.scrollable;
+    if(verbose)qInfo().noquote()<<"settings: choice list"<<pageId+"/"+entry.id<<"rco="+list.rcoPage
+        <<"items="<<list.items.size()<<"source="<<list.source;
+    return list;
+}
+QVector<ChoiceList> choiceListsForRows(const QString& pageId,const QVector<Entry>& rows,Assets& assets,
+                                       const std::function<QVariant(const QString&)>& currentFor) {
+    QVector<ChoiceList> lists;
+    for(const auto& entry:rows) {
+        const auto current=entry.setting.isEmpty()||!currentFor?QVariant{}:currentFor(entry.setting);
+        auto list=buildChoiceList(pageId,entry,assets,current);
+        // A row is a choice row when it has a page, a note about a missing page, or a native list.
+        if(list.items.isEmpty() && list.source.isEmpty())continue;
+        lists.push_back(std::move(list));
+    }
+    return lists;
+}
+// Photo Settings is this build's own page (the sysconf inventory has no photo page): its three choice
+// rows are listed by the catalogue so "no firmware page" is on the record rather than an omission.
+QVector<Entry> photoChoiceRows() {
+    QVector<Entry> rows;
+    rows.push_back(option("interval","Slideshow Interval","","photo/interval"));
+    rows.push_back(option("fit","Display Mode","","photo/fit"));
+    rows.push_back(option("repeat","Repeat","","media/repeat"));
+    return rows;
+}
+QJsonObject choiceItemJson(const ChoiceItem& item) {
+    QJsonValue value=QJsonValue::Null;
+    switch(item.value.metaType().id()) {
+    case QMetaType::Bool: value=item.value.toBool();break;
+    case QMetaType::Int: value=item.value.toInt();break;
+    case QMetaType::QString: value=item.value.toString();break;
+    default: break;
+    }
+    return QJsonObject{{"label",item.label},{"value",value},{"isCurrent",item.isCurrent},
+        {"source",item.source},{"scrollable",item.scrollable},{"item",item.item},
+        {"rcoIndex",item.rcoIndex},{"rcoOffset",qint64(item.rcoOffset)},{"writes",item.writes}};
+}
+QJsonObject choiceListJson(const ChoiceList& list) {
+    QJsonArray items;
+    for(const auto& item:list.items)items.push_back(choiceItemJson(item));
+    return QJsonObject{{"row",list.rowId},{"rowTitle",list.rowTitle},{"setting",list.setting},
+        {"rcoPage",list.rcoPage},{"rcoPageOffset",qint64(list.rcoPageOffset)},
+        {"container",list.container},{"source",list.source},{"note",list.note},
+        {"scrollable",list.scrollable},{"scrollObject",list.scrollObject},
+        {"count",list.count()},{"items",items}};
+}
+// The Settings-column page order (SETTINGS 1.1/10.2), for the aggregate catalogue.
+const QStringList& choicePageOrder() {
+    static const QStringList pages{"game","video","music","chat","system","theme","date","power","device",
+        "print","display","sound","security","remote","network","photo"};
+    return pages;
+}
+// The aggregate catalogue: every page's choice rows in one file, so a run that opens any settings page
+// records the whole choice model with its provenance. Written once per process.
+void dumpChoiceCatalogue(Assets& assets,const std::function<QVariant(const QString&)>& currentFor) {
+    if(!qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES"))return;
+    static bool written=false;
+    if(written)return;
+    written=true;
+    QJsonArray pages;
+    QString containerName,containerPath,containerVersion;
+    qint64 containerBytes=0;
+    for(const auto& pageId:choicePageOrder()) {
+        QVector<Entry> rows;
+        QString title;
+        if(pageId==QLatin1String("photo")) {rows=photoChoiceRows();title=QStringLiteral("Photo Settings");}
+        else {
+            auto data=pageRows(pageId,assets,QString());
+            rows=data.entries;title=data.title;
+        }
+        const auto lists=choiceListsForRows(pageId,rows,assets,currentFor);
+        QJsonArray choices;
+        for(const auto& list:lists) {
+            choices.push_back(choiceListJson(list));
+            if(containerName.isEmpty() && list.source==QLatin1String("rco"))containerName=list.container;
+        }
+        pages.push_back(QJsonObject{{"page",pageId},{"title",title},
+            {"rows",int(rows.size())},{"choices",choices},{"choiceRows",int(lists.size())}});
+    }
+    // The container the lists were read from, with its own identity (name, path, version, byte size), so
+    // every rcoPageOffset above can be cited against a known file.
+    if(!containerName.isEmpty()) {
+        const auto& container=choiceObjects(assets).container(containerName);
+        containerPath=container.path;containerBytes=container.fileBytes;
+        containerVersion=QString::number(container.version);
+    }
+    QJsonObject object{{"catalogue",true},{"bandRows",kBandRows},{"bandPitch",40},
+        {"container",containerName},{"containerPath",containerPath},{"containerVersion",containerVersion},
+        {"containerBytes",containerBytes},{"pages",pages}};
+    QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".settings-choices.json");
+    if(file.open(QIODevice::WriteOnly)) {
+        file.write(QJsonDocument(object).toJson());
+        qInfo().noquote()<<"settings: wrote the choice catalogue"<<file.fileName()<<"("<<pages.size()<<" pages)";
+    } else qWarning().noquote()<<"settings: cannot write the choice catalogue";
+    // Exercise the single-list API a view pass will call, by row id and by preference key, so a dump run
+    // proves the public entry points too and not only the catalogue's own path.
+    const auto byRow=settingsChoices(QStringLiteral("display"),QStringLiteral("screensaver"),assets,
+        currentFor?currentFor(QStringLiteral("display/screensaverMinutes")):QVariant{});
+    const auto byKey=settingsChoices(QStringLiteral("date"),QStringLiteral("clock/dateFormat"),assets,
+        currentFor?currentFor(QStringLiteral("clock/dateFormat")):QVariant{});
+    qInfo().noquote()<<QStringLiteral("settings: settingsChoices API -> display/screensaver %1 items, "
+        "date/clock-dateFormat %2 items").arg(byRow.size()).arg(byKey.size());
+}
 // Verification hook (the same XMB_DUMP_ENTRIES the shell's catalogue/folder/store dumps use): every
 // settings page opened in a scripted run writes its row list, so a capture can be checked without pixels.
-void dumpSettingsPage(const PageRows& data) {
+// Phase 11.3 adds each row's choice list with its provenance (RCO page, item names and offsets).
+void dumpSettingsPage(const PageRows& data,Assets& assets,
+                      const std::function<QVariant(const QString&)>& currentFor) {
     if(!qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES"))return;
     QJsonArray rows;
     for(const auto& entry:data.entries) {
@@ -349,14 +803,65 @@ void dumpSettingsPage(const PageRows& data) {
             {"texture",entry.texture},{"source",entry.source},
             {"nativeOnly",data.nativeOnly.contains(entry.id)}});
     }
+    QJsonArray choices;
+    for(const auto& list:choiceListsForRows(data.id,data.entries,assets,currentFor))choices.push_back(choiceListJson(list));
     QJsonObject object{{"page",data.id},{"title",data.title},{"count",int(data.entries.size())},
-        {"rows",rows},{"firmware",data.firmware},
+        {"rows",rows},{"firmware",data.firmware},{"choices",choices},
         {"skipped",QJsonArray::fromStringList(data.notes)}};
     QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".settings-"+data.id+".json");
     if(file.open(QIODevice::WriteOnly))file.write(QJsonDocument(object).toJson());
     else qWarning().noquote()<<"settings: cannot write the"<<data.id<<"page dump";
 }
 } // namespace
+
+// The firmware's own choice list for one settings row (Phase 11.3). `rowId` names the row on `pageId`
+// or its Preferences key; the list is the page's LowerMenu in document order, exactly as the RCO
+// authors it. An empty result means the row is not a choice row (or its page could not be read, which
+// is logged); a non-empty result with `source` "none" is a row whose firmware choice page is missing.
+QVector<ChoiceItem> settingsChoices(const QString& pageId,const QString& rowId,Assets& assets,
+                                    const QVariant& current) {
+    QVector<Entry> rows;
+    if(pageId==QLatin1String("photo"))rows=photoChoiceRows();
+    else {auto data=pageRows(pageId,assets,QString());rows=data.entries;}
+    if(rows.isEmpty())return {};
+    // The row may be named by its id (the view's normal case) or by the Preferences key it writes (the
+    // shorthand `settingsChoices("date","clock/dateFormat")`), so a caller with either can ask.
+    const Entry* found=nullptr;
+    for(const auto& row:rows)
+        if(row.id==rowId || (!row.setting.isEmpty() && row.setting==rowId)){found=&row;break;}
+    if(!found)return {};
+    const auto list=buildChoiceList(pageId,*found,assets,current);
+    return list.items;
+}
+QVector<ChoiceList> settingsChoiceLists(const QString& pageId,Assets& assets,
+    const std::function<QVariant(const QString&)>& currentFor) {
+    QVector<Entry> rows;
+    if(pageId==QLatin1String("photo"))rows=photoChoiceRows();
+    else {auto data=pageRows(pageId,assets,QString());rows=data.entries;}
+    if(rows.isEmpty())return {};
+    return choiceListsForRows(pageId,rows,assets,currentFor);
+}
+QVector<ChoiceList> settingsChoiceCatalogue(Assets& assets,
+    const std::function<QVariant(const QString&)>& currentFor) {
+    QVector<ChoiceList> all;
+    for(const auto& pageId:choicePageOrder()) {
+        QVector<Entry> rows;
+        if(pageId==QLatin1String("photo"))rows=photoChoiceRows();
+        else {auto data=pageRows(pageId,assets,QString());rows=data.entries;}
+        all+=choiceListsForRows(pageId,rows,assets,currentFor);
+    }
+    return all;
+}
+bool choiceValueMatches(const QVariant& current,const QVariant& value) {
+    if(!current.isValid() || !value.isValid())return false;
+    if(current==value)return true;
+    // A preference may hold an int where the choice is a bool or a string ("5" vs 5): compare the numeric
+    // and text forms before saying no, so the current-value mark cannot disappear on a QVariant type.
+    bool currentNumeric=false,valueNumeric=false;
+    const qlonglong a=current.toLongLong(&currentNumeric),b=value.toLongLong(&valueNumeric);
+    if(currentNumeric && valueNumeric)return a==b;
+    return current.toString()==value.toString();
+}
 
 // The Settings column, resolved from the firmware's own definition. See settings_menu.h for the contract;
 // audit/SETTINGS-FIRMWARE.md 1.1-1.2 and 9 list what each row is and what was omitted.
@@ -436,6 +941,16 @@ QVector<Entry> settingsColumnEntries(const QVector<Entry>& builtin,Assets& asset
 void Shell::openSettings(const QString& id) {
     if(pages_.size()>=32)return;
     const auto tr=[&](const QString& key,const QString& fallback){return assets_.text("sysconf_plugin",key,fallback);};
+    // Phase 11.3: the current value of a choice row's preference, for the isCurrent mark of its list.
+    // The same read the openChoices path does, including the two values that are read from the computer
+    // rather than stored (host volume/mute) and the media repeat mode, so a list's mark and the row's
+    // value text cannot disagree.
+    const std::function<QVariant(const QString&)> currentFor=[this](const QString& key)->QVariant {
+        if(key=="host/volume")return int(std::lround(host::masterVolume()/10.)*10);
+        if(key=="host/muted")return host::masterMuted();
+        if(key=="media/repeatMode")return mediaRepeatMode();
+        return preferences_.value(key);
+    };
     Page page;
     if(id=="update") { // System Update (software_update_plugin). Not in sysconf_plugin.rco: SETTINGS 5.16/U8.
         const auto su=[&](const QString& key,const QString& fallback){return assets_.text("software_update_plugin",key,fallback);};
@@ -468,8 +983,11 @@ void Shell::openSettings(const QString& id) {
         auto data=pageRows(id,assets_,dateTimeInfo());
         if(data.entries.isEmpty())return; // an id with no page: the caller's row opens nothing
         page.title=data.title;
-        // Dump before the rows move into the page, so the file is what the page will show.
-        dumpSettingsPage(data);
+        // Dump before the rows move into the page, so the file is what the page will show. The aggregate
+        // catalogue is written once per process: it is the whole choice model, so opening any page records
+        // every page's lists (audit/SETTINGS-FIRMWARE.md 11).
+        dumpChoiceCatalogue(assets_,currentFor);
+        dumpSettingsPage(data,assets_,currentFor);
         page.entries=std::move(data.entries);
     }
     pages_.push_back(std::move(page));
@@ -501,13 +1019,32 @@ QString Shell::valueText(const Entry& entry) const {
     if(entry.setting=="system/name")return value.toString();
     if(entry.setting=="appearance/theme" && !theme_.path.isEmpty())return theme_.name.isEmpty()?QFileInfo(theme_.path).completeBaseName():theme_.name;
     for(const auto& choice:choices(entry.setting,assets_))if(choice.value==value)return choice.title;
+    // A time zone stored as a firmware zone token (Phase 11.3) is not in choices()'s host-IANA list; its
+    // label is the RCO's own, so the row shows exactly the text its choice list drew.
+    if(entry.setting=="clock/timeZone")
+        for(const auto& choice:settingsChoices(QStringLiteral("date"),QStringLiteral("timezone"),assets_,value))
+            if(choice.isCurrent)return choice.label;
     return {};
 }
 QString Shell::fontFamily()const{return assets_.fontFamily(preferences_.value("appearance/font").toInt());}
 QDateTime Shell::clockDateTime()const {
     const auto zone=preferences_.value("clock/timeZone").toString();
     auto now=clockOverride_.isValid()?clockOverride_:QDateTime::currentDateTime();
-    if(zone!="System")now=now.toTimeZone(QTimeZone(zone.toUtf8()));
+    if(zone!="System") {
+        const QTimeZone named(zone.toUtf8());
+        if(named.isValid())now=now.toTimeZone(named);
+        else {
+            // A firmware zone token (Phase 11.3): the firmware's 110 zones are GMT-offset zones with a city
+            // label, not IANA identities, so the offset comes from the item's own label. IANA ids already in
+            // the store keep working through the branch above, which is why no stored value was migrated.
+            bool known=false;
+            const int seconds=firmwareZoneOffsetSeconds(assets_,zone,known);
+            if(known) {
+                const auto fixed=QTimeZone::fromSecondsAheadOfUtc(seconds);
+                if(fixed.isValid())now=now.toTimeZone(fixed);
+            }
+        }
+    }
     return now;
 }
 QString Shell::clockText()const {
