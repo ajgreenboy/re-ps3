@@ -490,3 +490,181 @@ change adds the dust deltas measured in `PARTICLES.md` 5 (6,000 pixels, 0.29% of
 harness was not edited. `--states` cannot complete in this environment at all: discovery fails on
 `steam-not-installed: could not resolve path stage 1: no folder dump`, and the same failure reproduces with the
 stored `native-phase3` exe, so it is a fixture gap, not a regression.
+
+## Exposure and ribbon phase: the residual measured, 2026-10-28
+
+The layout pass closed with a fitted per-channel gain of 0.785 (root), 0.762 (`page-settings-system`) and 0.772
+(`theme-list`) lifting the whole frame from 17.86 to 20.12 dB, 18.50 to 21.51 and 18.92 to 22.18, and called the
+remainder an "exposure and ribbon-phase" difference (`GEOMETRY-ROOT.md` 12.6). This pass localised it on the matched
+pair. The answer changes the framing: the residual is **not a gain at all**. It is (a) a uniform **additive
+pedestal** in the background layer's own output, equal in all three channels, and (b) a **ribbon whose drawn sheet
+sits about 140 px higher and reaches about 220 px less far to the right** than the console's, with 86 % of its
+energy. Neither is in `hdr.cpp` or `ribbon.cpp`'s arithmetic in a form that can be corrected there without faking a
+number, and no source file was edited by this pass - the temporary diagnostic described in 3 was removed and a
+rebuild of the reverted tree reproduces the canonical frame with **0 differing pixels** and PASS 6/6.
+
+Method: the native frame captured with the harness's own pins (`--render-clock 30`, `--background-clock`
+2026-10-25T10:00, `--ui-clock` 2026-10-25T12:32, `--focus-time 2000`) against
+`out/parity-references/root__original__day__1080p.png`, plus the settings-page and theme-list references. All
+numbers below are Pillow/numpy statistics on those PNGs; the scripts are scratch files outside the repo
+(`out/bgprobe/`), so nothing derived from the firmware enters Git.
+
+### 1. The per-band table
+
+Means over 12 horizontal bands of 90 px, 8-bit, native minus console. The 10-28 column re-runs the same binary
+with `--background-clock 2026-10-28T10:00:00`, the date the console's own clock reads on the reference
+(`root__original__day__1080p.state.json`), to separate the month-palette term from the rest.
+
+| band | y | R nat / con / d | G nat / con / d | B nat / con / d | luma d (10-28) |
+|---|---|---|---|---|---|
+| 0 | 0-90 | 117.5 / 99.9 / **+17.6** | 96.1 / 78.9 / **+17.2** | 56.2 / 39.7 / **+16.4** | +17.2 |
+| 1 | 90-180 | 116.0 / 98.3 / **+17.8** | 94.1 / 76.8 / **+17.4** | 55.8 / 39.2 / **+16.6** | +17.4 |
+| 2 | 180-270 | 111.2 / 93.4 / **+17.8** | 88.8 / 71.4 / **+17.4** | 50.7 / 34.0 / **+16.7** | +17.4 |
+| 3 | 270-360 | 109.7 / 90.6 / **+19.1** | 88.9 / 70.6 / **+18.3** | 52.8 / 35.2 / **+17.6** | +18.4 |
+| 4 | 360-450 | 109.5 / 79.5 / +30.1 | 85.8 / 56.6 / +29.2 | 50.2 / 22.1 / +28.1 | +29.3 |
+| 5 | 450-540 | 127.0 / 92.3 / +34.7 | 104.2 / 70.4 / +33.8 | 72.2 / 38.8 / +33.4 | +34.0 |
+| 6 | 540-630 | 111.0 / 84.7 / +26.3 | 86.6 / 60.7 / +25.9 | 54.1 / 28.5 / +25.6 | +26.0 |
+| 7 | 630-720 | 88.8 / 97.0 / **-8.2** | 63.8 / 72.1 / **-8.3** | 32.5 / 40.8 / **-8.3** | -8.3 |
+| 8 | 720-810 | 91.8 / 96.5 / -4.7 | 66.4 / 71.0 / -4.7 | 35.8 / 40.3 / -4.5 | -4.7 |
+| 9 | 810-900 | 94.7 / 85.0 / +9.7 | 68.4 / 59.2 / +9.2 | 38.3 / 29.5 / +8.8 | +9.3 |
+| 10 | 900-990 | 99.0 / 82.6 / **+16.4** | 72.1 / 56.5 / **+15.7** | 42.4 / 27.3 / **+15.1** | +15.8 |
+| 11 | 990-1080 | 100.7 / 84.2 / **+16.5** | 73.8 / 58.5 / **+15.3** | 44.7 / 30.7 / **+14.0** | +15.5 |
+
+With the harness's pinned date (10-25) the four ribbon-free bands read +19.6 .. +21.4 and the bottom two
++16.4 .. +17.1; the 10-28 date removes about 3 levels and leaves 17. The "per-channel gain of 0.785" is the
+least-squares shadow of this additive term: the console's B is the darkest channel, so a constant offset inflates
+its **ratio** (1.50 in band 0) far more than R (1.21), and a single fitted gain lands in between. Fitted per channel
+the gains would have to be 0.826 (R), 0.787 (G) and 0.663 (B) - three different numbers, which is the signature of a
+constant, not a scale.
+
+Within one band the difference is flat to +-0.6/255 across the full width. Horizontal profile of the top 70 rows
+(no ribbon, no clock plate): native 80.2 -> 102.2 -> 74.9, console 63.8 -> 84.7 -> 57.7 over x = 0 .. 1760, and
+`native - console` = 16.4, 16.4, 16.5, 16.6, 17.0, 17.5, 17.8, 18.0, 17.9, 17.8, 17.5, 17.2. Modelling the pair as
+`con = a * nat + b` per channel over 63,980 background pixels gives `b` = -0.0135 / -0.0426 / -0.0504 with
+`a` = 0.868 / 0.925 / 0.923 and, restricted to the top band, a pure additive model fits to rms **0.0028** (0.7/255)
+against 0.024 for a pure multiplicative one. The difference is additive, and it is smaller in B only because the
+console's B is smaller.
+
+### 2. Which layer owns it: five independent exclusions
+
+1. **Not the tone map and not the glare.** `XMB_BG_SCENE` dumps the scene target (background + ribbon +
+   procedural pass) *before* `Hdr::finish`. In that linear dump the native is already +16.2 .. +17.5 (8-bit scene
+   units) above the console's implied scene (`ToneMap` inverted with the day preset: EXPOSURE 1.05, WHITE LEVEL
+   0.899181). A tone-map or exposure error cannot be present before the tone map, and an additive display-space
+   offset cannot be present in the scene. The glare's own contribution in the same region is
+   `final - toneMap(scene)` = 0.0146 / 0.0136 / 0.0118 (3.7/255), i.e. 22 % of the pedestal at most, and it is
+   confined to the ribbon's halo.
+2. **Not the particles.** The dump is taken before `particles_.render` (view.cpp 438 vs 458), so the dust is not in
+   the numbers that carry the pedestal.
+3. **Not the ribbon.** A temporary `XMB_RIBBON_SKIP` early return in `Ribbon::render` (added for this measurement,
+   removed again) changes **0 pixels** outside y 240-700 and leaves the top four bands bit-identical
+   (16.5 / 16.4 / 16.4 / 16.4). The ribbon is a *local* contributor (mean |delta| up to 31/255 in its band), never
+   the flat term.
+4. **Not the UI and not a display transfer.** In the `osk` pair the panel interior (which covers the background)
+   reads +1.0/255 while the background around it reads +5.3/255, and the pedestal scales with the scrim that dims
+   the background (the same background pixel is 63 native in `root` and 19.7 in `osk`, and the pedestal falls with
+   it). A display-level offset would be constant over both. The text, icons and panels are not offset.
+5. **Not the clock.** Captures at `--render-clock` 30 and with `--no-intro` (a different boot path, different boot
+   weights) give the same 111.9 / 90.5 / 50.5 to 0.0.
+
+That leaves one owner: `renderOriginalBackground`'s `back_colours0.fpo` draw, i.e. the firmware's own translated
+moyou shader. Every input that `view.cpp` feeds it was re-checked against the firmware files this pass:
+`_DayTime` 1168.77 at 10:00 (the RPCS3 FP dump value), `_NightTime` 2200, `_NightDayBlend` 1, `_NightBrightness`
+0.486059 = `override/day/BACKGROUND.mnu`'s NIGHT WHIT BIAS, `_Alpha` 1, the four `month_bg/{rgb,night}/10|11.dds`
+palettes decoded and dumped (October = 226/163/12 at the top row, November = 152/115/45). All match. A sweep of the
+month term over four dates (10-01, 10-15, 10-28, 11-05) moves the top band from 162.8/147.5/31.6 to
+111.9/90.9/51.4 and no date reaches the console's 95.1/74.0/34.6, so the month blend is a ~3-level term inside the
+pedestal, not its cause.
+
+The remaining candidate class is therefore a **runtime constant the plugin sets that the native never sets**, or a
+constant-slot assignment in the ucode translation (`src/rsx_program.cpp`; the shader body is the firmware's). This
+is checkable with one experiment that this environment cannot run: an RPCS3 `XMB_FP_DUMP` of `back_colours0`'s
+uniform block at the same clock, compared field by field with what `renderOriginalBackground` passes. Until then a
+constant subtraction in `hdr.cpp` would be a symptom fix with a fitted magnitude, which is exactly what the gain
+already was.
+
+Note on the number: the pedestal is 0.057 in scene units and 17.0/255 in display units, i.e. **1/17.5**, close to
+but not equal to the 1/16 of `ToneApplyDisplay`'s `- noise / 8` (the pre-exposure dither the native deliberately
+omits, "the same sum without the dither"). That term is ruled out as the cause by its own texture: `Noise.tga` is
+64x64 random with mean 127.6 and corner texels 102/119/124/192, so sampling it the way the shader does
+(`texture(tex13, gl_FragCoord)`, clamped, i.e. a constant) can only give 12.75, 14.9, 15.5 or 24 levels, and if the
+sampler is REPEAT the console would carry a 30-px dither pattern that its frame does not have (its local
+neighbour-difference energy is 0.33/255 against the native's 0.16).
+
+### 3. The ribbon: separated, and two earlier readings corrected
+
+Rendering with and without the ribbon separates its contribution exactly (`native_ribbon = with - without`,
+`console_ribbon = console - (without - 16.4)`, 8-bit luma):
+
+| y | native ribbon | console ribbon |
+|---|---:|---:|
+| 360-480 | 17.0 | -0.2 |
+| 480-600 | 30.5 | 15.9 |
+| 600-720 | 2.3 | 22.6 |
+| 720-840 | 0.0 | 19.2 |
+| whole frame (sum) | 11.55 M | 13.35 M (**0.86x**) |
+
+So the native's sheet is drawn in y 360-660, the console's in y 480-840: the native's sits about **140 px higher**,
+not lower, and it is **narrower** (its energy is gone by y 720 where the console still has 19), reaching x ~1700
+against the console's 1920. `GEOMETRY-ROOT.md` 12.6's "lower and wider" is a misreading of per-cell ratios: cells
+above the native's band are brighter because the native's ribbon is there, which is the opposite of its position.
+Crest centroids: native 0.42 (x 960) -> 0.50 (x 0), console 0.45 (x 960) -> 0.60 (x 0) - the same slope direction,
+the console's steeper and lower, which is a **phase of the swell**, and the total energy within 14 % of the
+console's agrees with a phase, not with a brightness error.
+
+The phase and the extent are both set by the cloth's state, and the cloth's state here is the documented
+approximation: without `--vsh-modules` the sheet settles from the plugin's generic flat start (FUN_0004ec90) for
+14,400 steps, while the firmware starts from the preset-1 tables (FUN_0004e624). The pinned `--render-clock 30`
+freezes whatever phase the settle produced after one extra step, and the reference still froze an arbitrary phase of
+a 22 s cycle. Nudging POS/ANG or FFD SCALE2 to move the band would be fitting a live animation state to one still -
+it would move every other state's ribbon out of place.
+
+**The pinned clock freezes the cloth, measured.** Captures at `--render-clock` 30 and 45 differ by 77,793 pixels
+whose largest channel delta is 1 (the map of the difference is 0.0 +- 0.2 everywhere), i.e. the pinned clock does not
+advance the cloth: `dt = seconds - lastSeconds_` is 0 after the first frame, so each parity still shows the settle's
+phase plus one 1/60 s step. The reference still, captured from a live console, holds an arbitrary phase of the same
+22 s swell. This is worth stating plainly because it bounds what any ribbon work can buy on this scorecard: the
+ribbon's 82 % share of the residual (4) is mostly a **pinning artifact** - two different instants of one animation
+compared as if they were the same instant - not a material or brightness error, and the 0.86 total-energy ratio
+says the material is close. Scoring the ribbon needs a cloth-phase pin (a second, advancing clock that the frame
+grab does not use), which is harness work, not `ribbon.cpp`.
+
+### 4. Effect on the scores, and what remains
+
+With the tree unchanged (and the canonical frame byte-identical, 0 differing pixels against the pre-pass capture)
+the three states read exactly the stored values: `root` frame 17.86 / 0.8226 (top background **22.24 / 0.9710,
+which already passes 20.00 / 0.900**), `theme-list` 18.98 / 0.8602, `page-settings-system` 18.50 / 0.8533 with page
+rows 16.26 / 0.7397. Canonical gate PASS 6/6 with the text-presence line (1,677 bright pixels): frame 18.31,
+top background 20.25, category icon row 21.20 / 0.9029, item label row 11.95, clock text 11.39, info bar 14.98 -
+the same six numbers as `GEOMETRY-ROOT.md` 12.5.
+
+Two consequences worth recording before the next pass spends time on exposure:
+
+- A **perfect** pedestal fix is worth 1.46 dB on `root`, not the gain's 2.26. Measured by subtracting k/255 from
+  every pixel of the captured frame and rescoring: 17.86 dB as captured, **19.31-19.32 dB for k = 15..20** (the
+  optimum is broad and flat, as an additive term that is only part of the error must be). The fitted 0.785 gain
+  reaches 20.12 dB only because it also darkens the **too-bright ribbon band and the label rows**, i.e. part of its
+  effect is a compression of the content mismatches (the reference's Game column holds PlayStation Store rows where
+  the native holds Steam Store rows), not an exposure correction.
+- The largest single region failure is not exposure at all: `item label row` 11.03 / 0.3957 is a content mismatch
+  (different strings on the same rows), and `info bar` 14.54 / 0.7669 and `clock text` 11.57 / 0.5376 are the
+  info-bar/text layers. Fixing the pedestal cannot move the root frame past about 19.2 dB while those stand.
+
+Where the error sits after the pedestal is removed (same frame, 17/255 subtracted, MSE by band):
+
+| band | y | MSE | share of pixels | share of error energy | PSNR |
+|---|---|---:|---:|---:|---:|
+| top | 0-360 | 163.7 | 33.3 % | 7.2 % | 25.99 |
+| ribbon | 360-480 | 1124.3 | 11.1 % | 16.4 % | 17.62 |
+| ribbon | 480-600 | 2632.8 | 11.1 % | **38.5 %** | 13.93 |
+| ribbon | 600-720 | 864.3 | 11.1 % | 12.6 % | 18.76 |
+| ribbon | 720-840 | 996.6 | 11.1 % | 14.6 % | 18.15 |
+| bottom | 840-1080 | 365.0 | 22.2 % | 10.7 % | 22.51 |
+
+**82 % of what is left lives in y 360-840, the ribbon's own band**, and y 480-600 alone carries 38.5 % at 13.93 dB;
+the top and bottom of the frame are at 26.0 and 22.5 dB. That is the ordering the next pass should work in: first
+the ribbon's sheet state (the 140 px / 220 px geometry gap in 3), then the pedestal, then the text layers - and not
+exposure first, which is what the fitted gain suggested.
+
+Nothing in this pass edited `src/`; `hdr.cpp`, `hdr.h`, `ribbon.cpp` and `ribbon.h` are unchanged, no budget,
+reference or harness file was touched, and the scratch scripts and dumps under `out/bgprobe/` are local only.

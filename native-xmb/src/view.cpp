@@ -1702,13 +1702,13 @@ void View::drawScene(QPainter& p) {
                 const bool inlineStandIn=inlineMessage && active && level==shell_.depth() && i==column.selection;
                 // One label column per level, as on the PS3 (GEOMETRY-ROOT 8: icon centre +113 at the top
                 // level - the measured 678 px origin, not the 664 the +99 gave - and +57 inside a page).
-                const double labelX=kColumnX+(level==0?(tile?173:113):57)+ahead*250+offset;
-                const double alpha=(.72+.28*focus)*(entry.disabled?.55:1.);
+                const double labelX=kColumnX+(level==0?(tile?173:113):60)+ahead*250+offset;
+                const double alpha=(.455+.545*focus)*(entry.disabled?.55:1.);
                 // A row's own value wins when it sets one (the sign-in page's fields: server URL, user name and
                 // the password as dots). Every other row leaves Entry::fieldValue empty, so this falls through to
                 // Shell::valueText() exactly as before and no existing frame changes.
                 const auto value=active?(entry.fieldValue.isEmpty()?shell_.valueText(entry):entry.fieldValue):QString{};
-                QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(27);
+                QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(32);
                 // Elision keeps the firmware's shape (audit/TEXT-RENDERER.md section 4): PAF draws a character
                 // range and explore_plugin positions a separate label2_text_ellipsis Text object after the last
                 // visible character, so the prefix and the ellipsis are two draws from one metric authority
@@ -1729,8 +1729,8 @@ void View::drawScene(QPainter& p) {
                 // the row takes focus). The peak is the static halo measured from the reference crop.
                 const double breath=.35+.65*(.5-.5*std::cos(2*std::numbers::pi*double(resting)/3400.));
                 if(!inlineStandIn) {
-                    if(focus>.5)glow(labelRect,label,27,(focus-.5)*2*breath*(entry.disabled?.45:1.));
-                    text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
+                    if(focus>.5)glow(labelRect,label,32,(focus-.5)*2*breath*(entry.disabled?.45:1.));
+                    text(labelRect,label,32,QColor(255,255,255,int(255*alpha)));
                     if(elided.elided)
                         text(QRectF(labelRect.left()+elided.ellipsisX,labelRect.top(),40,labelRect.height()),
                              QString(QChar(0x2026)),27,QColor(255,255,255,int(255*alpha)));
