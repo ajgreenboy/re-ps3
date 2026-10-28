@@ -155,6 +155,14 @@ private:
         QVector<QVariant> values;
         QVector<bool> writable;   // false: a firmware item this build cannot commit yet
         bool scrollable=false;
+        // Phase 11.4: a Theme run-time list. `swatch` marks a colour chip (drawn from `colours`, no label),
+        // `submenu` the firmware's right-hand chevron row (`Brightness`), `notes` the per-item reason a
+        // disabled item carries, and `windowRows` the number of rows the captured list shows at once (the
+        // Color list's 12; 0 keeps every other band's own rule). The note line is this build's own.
+        QVector<bool> swatch,submenu;
+        QVector<quint32> colours;
+        QStringList notes;
+        int windowRows=0;
     };
     QHash<QString,ChoiceBand> choiceBands_;
     QSet<QString> choiceBandsLogged_;
