@@ -1147,21 +1147,38 @@ int main(int argc,char** argv) {
                 if(!stateFile.open(QIODevice::WriteOnly) || stateFile.write(bytes)!=bytes.size())qWarning()<<"script: state save FAILED"<<stateFile.errorString();
                 qInfo()<<"script: state"<<state;
             } else if(token.startsWith("burst=")) {
-                // 12 consecutive frames as fast as the window renders, kept in memory and saved afterwards as
-                // prefix_NN_<ms since the key>.png; "burst=prefix@LEFT" presses the key on the same tick.
+                // Consecutive frames as fast as the window renders, kept in memory and saved afterwards as
+                // prefix_NN_<ms since the trigger>.png. Grammar:
+                //   burst=<prefix>[@<key|ps|pshold>[@<frames>[@<intervalMs>]]]
+                // Defaults are 12 frames at 12 ms. The trigger is pressed on the same tick as the onset grab and
+                // an immediate grab is recorded BEFORE the timer starts, because a bare 12 ms timer loses 20-160
+                // ms to grabFramebuffer before its first frame and the transition onset became unobservable
+                // (transition harness, 2026-10-28). ps/pshold reuse the PS-button script verbs so a burst can
+                // start on a surface the plain key map cannot press.
                 const auto parts=token.mid(6).split('@');const QString prefix=parts[0];
+                int count=12;int intervalMs=12;
+                if(parts.size()>2 && parts[2].toInt()>0)count=std::clamp(parts[2].toInt(),1,600);
+                if(parts.size()>3 && parts[3].toInt()>0)intervalMs=std::clamp(parts[3].toInt(),1,1000);
                 auto started=std::make_shared<QElapsedTimer>();started->start();
-                if(parts.size()>1 && keys.contains(parts[1]))tap(keys[parts[1]]);
-                auto* burst=new QTimer(&app);burst->setTimerType(Qt::PreciseTimer);burst->setInterval(12);
+                if(parts.size()>1) {
+                    if(keys.contains(parts[1]))tap(keys[parts[1]]);
+                    else if(parts[1]=="ps")view->replayPsTap();
+                    else if(parts[1]=="pshold")view->replayPsHold();
+                }
                 auto frames=std::make_shared<QVector<QPair<qint64,QImage>>>();
-                QObject::connect(burst,&QTimer::timeout,&app,[view,burst,frames,prefix,started]{
-                    frames->push_back({started->elapsed(),view->grabFramebuffer()});
-                    if(frames->size()<12)return;
-                    burst->stop();burst->deleteLater();
-                    for(int i=0;i<frames->size();++i)
-                        (*frames)[i].second.save(prefix+QString("_%1_%2ms.png").arg(i,2,10,QChar(48)).arg((*frames)[i].first,4,10,QChar(48)));
-                });
-                burst->start();
+                const auto save=[frames,prefix]{for(int i=0;i<frames->size();++i)
+                        (*frames)[i].second.save(prefix+QString("_%1_%2ms.png").arg(i,2,10,QChar(48)).arg((*frames)[i].first,4,10,QChar(48)));};
+                frames->push_back({started->elapsed(),view->grabFramebuffer()});
+                if(frames->size()>=count){save();}
+                else {
+                    auto* burst=new QTimer(&app);burst->setTimerType(Qt::PreciseTimer);burst->setInterval(intervalMs);
+                    QObject::connect(burst,&QTimer::timeout,&app,[view,burst,frames,prefix,started,count,save]{
+                        frames->push_back({started->elapsed(),view->grabFramebuffer()});
+                        if(frames->size()<count)return;
+                        burst->stop();burst->deleteLater();save();
+                    });
+                    burst->start();
+                }
             } else if(token.startsWith("type=")) {
                 for(const QChar c:token.mid(5)){QKeyEvent event(QEvent::KeyPress,0,Qt::NoModifier,QString(c));QCoreApplication::sendEvent(view,&event);}
             } else if(keys.contains(token)) {
