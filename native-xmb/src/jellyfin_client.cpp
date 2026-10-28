@@ -1,23 +1,110 @@
 #include "jellyfin_client.h"
 
+#include <QBuffer>
+#include <QCryptographicHash>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSaveFile>
 #include <QTimer>
 #include <QUuid>
 #include <QUrlQuery>
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <utility>
+
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <dpapi.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "crypt32.lib")
+#endif
+#endif
 
 namespace xmb {
 namespace {
 constexpr int RequestTimeoutMs = 15000;
 constexpr qsizetype MaxResponseBytes = 4 * 1024 * 1024;
+constexpr qsizetype MaxImageBytes = 4 * 1024 * 1024;
 constexpr int PageLimit = 200;
+// Artwork is bounded on both sides of the network: the server is asked for a small picture, and
+// whatever arrives is refused before decode if its declared size is unreasonable.
+constexpr int PosterMaxHeight = 480;
+constexpr int BackdropMaxWidth = 640;
+constexpr int ImageDecodeLimit = 1024;
+constexpr int ImageCacheFiles = 400;
+
+bool validImageKey(const QString& value) {
+    if (value.isEmpty() || value.size() > 128) return false;
+    for (const QChar ch : value) {
+        if (!ch.isLetterOrNumber() && ch != QLatin1Char('-') && ch != QLatin1Char('_')) return false;
+    }
+    return true;
+}
+
+// Bounded decode: the byte length is already capped by the caller; this refuses an absurd pixel
+// count before allocating it and scales anything over the limit down before reading.
+QImage decodeBoundedArtwork(const QByteArray& bytes) {
+    QBuffer buffer;
+    buffer.setData(bytes);
+    if (!buffer.open(QIODevice::ReadOnly)) return {};
+    QImageReader reader(&buffer);
+    reader.setDecideFormatFromContent(true);
+    const QSize size = reader.size();
+    if (!size.isValid() || size.width() <= 0 || size.height() <= 0 ||
+        size.width() > 4096 || size.height() > 4096) return {};
+    if (size.width() > ImageDecodeLimit || size.height() > ImageDecodeLimit)
+        reader.setScaledSize(size.scaled(ImageDecodeLimit, ImageDecodeLimit, Qt::KeepAspectRatio));
+    const QImage image = reader.read();
+    if (image.isNull() || image.width() > ImageDecodeLimit || image.height() > ImageDecodeLimit) return {};
+    return image;
+}
+
+#ifdef Q_OS_WIN
+QByteArray protectForUser(const QByteArray& plain) {
+    const QByteArray entropy = QByteArrayLiteral("xmb-native-jellyfin-session-v1");
+    DATA_BLOB in{static_cast<DWORD>(plain.size()), reinterpret_cast<BYTE*>(const_cast<char*>(plain.constData()))};
+    DATA_BLOB extra{static_cast<DWORD>(entropy.size()), reinterpret_cast<BYTE*>(const_cast<char*>(entropy.constData()))};
+    DATA_BLOB out{0, nullptr};
+    if (!CryptProtectData(&in, L"XMB Jellyfin session", &extra, nullptr, nullptr,
+                          CRYPTPROTECT_UI_FORBIDDEN, &out)) return {};
+    QByteArray result(reinterpret_cast<const char*>(out.pbData), int(out.cbData));
+    SecureZeroMemory(out.pbData, out.cbData);
+    LocalFree(out.pbData);
+    return result;
+}
+
+QByteArray unprotectForUser(const QByteArray& sealed) {
+    const QByteArray entropy = QByteArrayLiteral("xmb-native-jellyfin-session-v1");
+    DATA_BLOB in{static_cast<DWORD>(sealed.size()), reinterpret_cast<BYTE*>(const_cast<char*>(sealed.constData()))};
+    DATA_BLOB extra{static_cast<DWORD>(entropy.size()), reinterpret_cast<BYTE*>(const_cast<char*>(entropy.constData()))};
+    DATA_BLOB out{0, nullptr};
+    if (!CryptUnprotectData(&in, nullptr, &extra, nullptr, nullptr,
+                            CRYPTPROTECT_UI_FORBIDDEN, &out)) return {};
+    QByteArray result(reinterpret_cast<const char*>(out.pbData), int(out.cbData));
+    SecureZeroMemory(out.pbData, out.cbData);
+    LocalFree(out.pbData);
+    return result;
+}
+#else
+QByteArray protectForUser(const QByteArray&) { return {}; }
+QByteArray unprotectForUser(const QByteArray&) { return {}; }
+#endif
 
 bool safeToken(const QString& token) {
     if (token.isEmpty() || token.size() > 4096) return false;
@@ -61,6 +148,17 @@ bool validId(const QString& value) {
 }
 
 QString typeName(const QJsonObject& item) { return item.value(QStringLiteral("Type")).toString(); }
+
+qint64 millisecondsFromTicks(const QJsonValue& value) {
+    if (!value.isDouble()) return 0;
+    const double ticks = value.toDouble(-1.0);
+    // JSON numbers are doubles; reject non-finite, negative, and values outside
+    // qint64 before converting, then truncate sub-millisecond ticks.
+    if (!std::isfinite(ticks) || ticks < 0.0 ||
+        ticks >= static_cast<double>(std::numeric_limits<qint64>::max())) return 0;
+    return static_cast<qint64>(ticks / 10000.0);
+}
+
 JellyfinItem parseItem(const QJsonObject& json) {
     JellyfinItem result;
     result.id = json.value(QStringLiteral("Id")).toString();
@@ -68,6 +166,20 @@ JellyfinItem parseItem(const QJsonObject& json) {
     result.type = typeName(json);
     result.overview = json.value(QStringLiteral("Overview")).toString();
     result.folder = json.value(QStringLiteral("IsFolder")).toBool();
+    result.durationMs = millisecondsFromTicks(json.value(QStringLiteral("RunTimeTicks")));
+    const QJsonObject userData = json.value(QStringLiteral("UserData")).toObject();
+    result.played = userData.value(QStringLiteral("Played")).toBool(false);
+    result.resumeMs = millisecondsFromTicks(userData.value(QStringLiteral("PlaybackPositionTicks")));
+    if (result.played || (result.durationMs > 0 && result.resumeMs >= result.durationMs))
+        result.resumeMs = 0;
+    // Image tags are the server's own version stamp for the picture: they key the local cache, so
+    // replacing a poster on the server replaces it here instead of replaying the old file.
+    const QJsonObject tags = json.value(QStringLiteral("ImageTags")).toObject();
+    const QString primary = tags.value(QStringLiteral("Primary")).toString();
+    if (validImageKey(primary)) result.primaryTag = primary;
+    const QJsonArray backdrops = json.value(QStringLiteral("BackdropImageTags")).toArray();
+    const QString backdrop = backdrops.isEmpty() ? QString{} : backdrops.first().toString();
+    if (validImageKey(backdrop)) result.backdropTag = backdrop;
     return result;
 }
 }
@@ -279,9 +391,37 @@ quint64 JellyfinClient::items(QString parentId, int startIndex) {
     query.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("false"));
     query.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("SortName"));
     query.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Ascending"));
+    query.addQueryItem(QStringLiteral("EnableUserData"), QStringLiteral("true"));
     query.addQueryItem(QStringLiteral("Fields"), QStringLiteral("Overview"));
     url.setQuery(query);
     return send(Operation::Items, get(url), QString::number(startIndex));
+}
+
+quint64 JellyfinClient::search(QString term, int startIndex) {
+    if (!signedIn()) { const quint64 request = ++nextRequest_; fail(request, QStringLiteral("Sign in to Jellyfin first.")); return request; }
+    term = term.trimmed();
+    bool printable = !term.isEmpty() && term.size() <= 200;
+    for (const QChar ch : term) if (ch.isNull() || ch.category() == QChar::Other_Control) printable = false;
+    if (!printable || startIndex < 0) {
+        const quint64 request = ++nextRequest_;
+        fail(request, QStringLiteral("Enter a search term."));
+        return request;
+    }
+    QUrl url = apiUrl(QStringLiteral("Items"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("UserId"), userId_);
+    query.addQueryItem(QStringLiteral("SearchTerm"), term);
+    query.addQueryItem(QStringLiteral("StartIndex"), QString::number(startIndex));
+    query.addQueryItem(QStringLiteral("Limit"), QString::number(PageLimit));
+    query.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
+    query.addQueryItem(QStringLiteral("IncludeItemTypes"),
+                       QStringLiteral("Movie,Episode,Video,MusicVideo,Audio,Trailer,Recording,Series,Season"));
+    query.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("SortName"));
+    query.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Ascending"));
+    query.addQueryItem(QStringLiteral("EnableUserData"), QStringLiteral("true"));
+    query.addQueryItem(QStringLiteral("Fields"), QStringLiteral("Overview"));
+    url.setQuery(query);
+    return send(Operation::Search, get(url), QString::number(startIndex));
 }
 
 quint64 JellyfinClient::playback(QString itemId, bool audio) {
@@ -353,6 +493,151 @@ void JellyfinClient::reportPlayback(const JellyfinPlayback& playbackInfo, qint64
     }
 }
 
+void JellyfinClient::setImageCache(QString directory) {
+    imageCache_ = std::move(directory);
+    if (!imageCache_.isEmpty()) QDir().mkpath(imageCache_);
+}
+
+QString JellyfinClient::cachedImagePath(const QString& itemId, const QString& tag, bool backdrop) const {
+    if (imageCache_.isEmpty() || !validId(itemId)) return {};
+    const QByteArray stamp = QCryptographicHash::hash(tag.toUtf8(), QCryptographicHash::Sha1).toHex().left(8);
+    const QString name = itemId + (backdrop ? QStringLiteral("-b-") : QStringLiteral("-p-")) +
+                         QString::fromLatin1(stamp) + QStringLiteral(".img");
+    return QDir(imageCache_).filePath(name);
+}
+
+void JellyfinClient::writeImageCache(const QString& path, const QByteArray& bytes) const {
+    if (path.isEmpty() || bytes.isEmpty() || bytes.size() > MaxImageBytes) return;
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) return;
+    if (file.write(bytes) != bytes.size() || !file.commit()) {
+        QFile::remove(path);
+        return;
+    }
+    trimImageCache();
+}
+
+// A poster per item accumulates for as long as the library is browsed. The cap is generous and
+// the oldest files go first, so the cache stays a cache rather than a second library.
+void JellyfinClient::trimImageCache() const {
+    if (imageCache_.isEmpty()) return;
+    QDir directory(imageCache_);
+    const auto files = directory.entryInfoList({QStringLiteral("*.img")}, QDir::Files, QDir::Time);
+    if (files.size() <= ImageCacheFiles) return;
+    for (qsizetype i = ImageCacheFiles; i < files.size(); ++i) QFile::remove(files[i].absoluteFilePath());
+}
+
+quint64 JellyfinClient::artwork(QString itemId, QString tag, bool backdrop) {
+    if (!signedIn() || !validId(itemId)) {
+        const quint64 request = ++nextRequest_;
+        QTimer::singleShot(0, this, [this, request, itemId, backdrop] {
+            emit artworkReady(request, itemId, backdrop, QImage{});
+        });
+        return request;
+    }
+    if (!validImageKey(tag)) tag.clear();
+    const QString cached = cachedImagePath(itemId, tag, backdrop);
+    if (!cached.isEmpty()) {
+        QFile file(cached);
+        if (file.exists() && file.size() > 0 && file.size() <= MaxImageBytes && file.open(QIODevice::ReadOnly)) {
+            const QByteArray bytes = file.readAll();
+            file.close();
+            const QImage image = decodeBoundedArtwork(bytes);
+            if (!image.isNull()) {
+                const quint64 request = ++nextRequest_;
+                QTimer::singleShot(0, this, [this, request, itemId, backdrop, image] {
+                    emit artworkReady(request, itemId, backdrop, image);
+                });
+                return request;
+            }
+            file.close(); // a truncated or corrupt cache entry is dropped and fetched again
+            QFile::remove(cached);
+        }
+    }
+    QUrl url = apiUrl(QStringLiteral("Items/") + itemId + QStringLiteral("/Images/") +
+                      (backdrop ? QStringLiteral("Backdrop") : QStringLiteral("Primary")));
+    QUrlQuery query;
+    if (backdrop) query.addQueryItem(QStringLiteral("maxWidth"), QString::number(BackdropMaxWidth));
+    else query.addQueryItem(QStringLiteral("maxHeight"), QString::number(PosterMaxHeight));
+    query.addQueryItem(QStringLiteral("quality"), QStringLiteral("80"));
+    if (!tag.isEmpty()) query.addQueryItem(QStringLiteral("tag"), tag);
+    url.setQuery(query);
+    return send(Operation::Artwork, get(url), itemId + QLatin1Char('#') + (backdrop ? QLatin1Char('1') : QLatin1Char('0')) +
+                QLatin1Char('#') + tag);
+}
+
+void JellyfinClient::setSessionStore(QString path) { sessionPath_ = std::move(path); }
+
+bool JellyfinClient::hasStoredSession() const {
+    if (sessionPath_.isEmpty()) return false;
+    const QFileInfo info(sessionPath_);
+    return info.isFile() && info.size() > 9 && info.size() <= 16 * 1024;
+}
+
+bool JellyfinClient::saveSession() {
+    if (sessionPath_.isEmpty() || !signedIn()) return false;
+    if (accessToken_.isEmpty() || accessToken_.size() > 4096) return false;
+    QJsonObject record{{QStringLiteral("v"), 1},
+                       {QStringLiteral("server"), server_.toString()},
+                       {QStringLiteral("userId"), userId_},
+                       {QStringLiteral("token"), QString::fromUtf8(accessToken_)}};
+    QByteArray plain = QJsonDocument(record).toJson(QJsonDocument::Compact);
+    record.insert(QStringLiteral("token"), QString{});
+    const QByteArray sealed = protectForUser(plain);
+    plain.fill('\0');
+    if (sealed.isEmpty()) return false;
+    const QFileInfo info(sessionPath_);
+    QDir().mkpath(info.absolutePath());
+    QSaveFile file(sessionPath_);
+    if (!file.open(QIODevice::WriteOnly)) return false;
+    static const QByteArray magic = QByteArrayLiteral("XMBJF1\n");
+    if (file.write(magic) != magic.size() || file.write(sealed) != sealed.size() || !file.commit()) {
+        QFile::remove(sessionPath_);
+        return false;
+    }
+    return true;
+}
+
+bool JellyfinClient::restoreSession() {
+    if (sessionPath_.isEmpty() || signedIn()) return false;
+    QFile file(sessionPath_);
+    if (!file.exists() || file.size() <= 9 || file.size() > 16 * 1024 || !file.open(QIODevice::ReadOnly)) return false;
+    QByteArray bytes = file.readAll();
+    file.close();
+    static const QByteArray magic = QByteArrayLiteral("XMBJF1\n");
+    if (!bytes.startsWith(magic)) { forgetSession(); return false; }
+    QByteArray sealed = bytes.mid(magic.size());
+    bytes.fill('\0');
+    const QByteArray plain = unprotectForUser(sealed);
+    sealed.fill('\0');
+    if (plain.isEmpty()) return false; // the record belongs to another user or machine: leave it alone
+    const auto document = QJsonDocument::fromJson(plain);
+    const auto record = document.object();
+    const QString token = record.value(QStringLiteral("token")).toString();
+    const QString id = record.value(QStringLiteral("userId")).toString();
+    const QUrl server(record.value(QStringLiteral("server")).toString());
+    const auto scheme = server.scheme().toLower();
+    if (!safeToken(token) || !validId(id) || !server.isValid() || server.host().isEmpty() ||
+        (scheme != QLatin1String("http") && scheme != QLatin1String("https")) ||
+        !server.userName().isEmpty() || server.hasQuery() || server.hasFragment()) {
+        forgetSession();
+        return false;
+    }
+    deviceId_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    ++generation_;
+    cancelRequests(false);
+    accessToken_.fill('\0');
+    accessToken_ = token.toUtf8();
+    userId_ = id;
+    server_ = server;
+    return true;
+}
+
+void JellyfinClient::forgetSession() {
+    if (sessionPath_.isEmpty()) return;
+    QFile::remove(sessionPath_);
+}
+
 bool JellyfinClient::trustedServerUrl(const QUrl& target) const {
     if (!target.isValid() || target.scheme().toLower() != server_.scheme().toLower() ||
         target.host().compare(server_.host(), Qt::CaseInsensitive) != 0 ||
@@ -376,15 +661,30 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
                     bytes.size() <= MaxResponseBytes;
     reply->deleteLater();
     if (operation == Operation::Report) {flushLogouts();return;}
+    // Artwork missing or broken is not an error the viewer needs: the row keeps its built-in
+    // glyph and the report is a null image.
+    if (operation == Operation::Artwork) {
+        const auto parts = context.split(QLatin1Char('#'));
+        const QString itemId = parts.value(0);
+        const bool backdrop = parts.value(1) == QLatin1String("1");
+        const QString tag = parts.value(2);
+        QImage image;
+        if (ok && bytes.size() <= MaxImageBytes) {
+            image = decodeBoundedArtwork(bytes);
+            if (!image.isNull()) writeImageCache(cachedImagePath(itemId, tag, backdrop), bytes);
+        }
+        emit artworkReady(request, itemId, backdrop, image);
+        return;
+    }
     if (!ok) { fail(request, QStringLiteral("Jellyfin could not complete that request.")); return; }
     QJsonParseError parse{};
     const auto document = QJsonDocument::fromJson(bytes, &parse);
     if (parse.error != QJsonParseError::NoError) {
         fail(request, QStringLiteral("Jellyfin returned an unexpected response.")); return;
     }
-    if (operation == Operation::Views || operation == Operation::Items) {
+    if (operation == Operation::Views || operation == Operation::Items || operation == Operation::Search) {
         JellyfinPage page;
-        page.startIndex = operation == Operation::Items ? context.toInt() : 0;
+        page.startIndex = operation == Operation::Items || operation == Operation::Search ? context.toInt() : 0;
         QJsonArray values;
         if (document.isArray()) values = document.array();
         else if (document.isObject()) {
@@ -455,6 +755,26 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
             result.playSessionId = session;
             result.playMethod = method;
             result.audio = audio;
+            // The server's own stream list. What the player can actually switch to is decided
+            // later against QMediaPlayer::audioTracks(), so this is a catalogue, not a promise.
+            const QJsonArray streams = source.value(QStringLiteral("MediaStreams")).toArray();
+            for (const auto& streamValue : streams) {
+                if (!streamValue.isObject()) continue;
+                const auto entry = streamValue.toObject();
+                JellyfinTrack track;
+                track.index = entry.value(QStringLiteral("Index")).toInt(-1);
+                track.type = entry.value(QStringLiteral("Type")).toString();
+                track.codec = entry.value(QStringLiteral("Codec")).toString();
+                track.language = entry.value(QStringLiteral("Language")).toString();
+                track.channels = entry.value(QStringLiteral("Channels")).toInt(0);
+                track.external = entry.value(QStringLiteral("IsExternal")).toBool(false);
+                track.isDefault = entry.value(QStringLiteral("IsDefault")).toBool(false);
+                track.title = entry.value(QStringLiteral("DisplayTitle")).toString().trimmed();
+                if (track.title.isEmpty()) track.title = track.language;
+                if (track.title.isEmpty()) track.title = track.codec;
+                if (track.type.isEmpty() || track.title.isEmpty()) continue;
+                result.streams.push_back(track);
+            }
             emit playbackReady(request, result);
             return;
         }

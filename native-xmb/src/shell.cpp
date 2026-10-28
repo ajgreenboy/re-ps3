@@ -1201,7 +1201,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         if(mediaOpen_ && !photoOpen()) {
             loading_=state==QMediaPlayer::LoadingMedia || state==QMediaPlayer::StalledMedia;
             // A saved resume point is applied once the media reports LoadedMedia, not before.
-            if(state==QMediaPlayer::LoadedMedia && resumePending_>0) {
+            if(state==QMediaPlayer::LoadedMedia && resumePending_>0 && !jellyfinQueue_) {
                 player_->setPosition(resumePending_);
                 qInfo()<<"media: resumed at"<<resumePending_<<"ms";
                 resumePending_=0;
@@ -1461,7 +1461,18 @@ void Shell::activate() {
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
     case Action::JellyfinPlay:openJellyfinMedia(entry);break;
-    case Action::JellyfinMore:loadJellyfinPage(entry.value,entry.detail,entry.option.toInt());break;
+    case Action::JellyfinMore:
+        // A search page's More row carries the term in value and the page title in detail; a folder's
+        // carries its parent id and the page title, exactly as before.
+        if(!pages_.isEmpty() && pages_.last().jellyfinSearch)loadJellyfinSearchPage(entry.value,entry.detail,entry.option.toInt());
+        else loadJellyfinPage(entry.value,entry.detail,entry.option.toInt());
+        break;
+    case Action::JellyfinSearch:
+        // The keyboard belongs to the view: this asks for it through the one field-edit signal the
+        // sign-in page already uses, with "search" as the field key, and the accepted text comes back
+        // through setJellyfinSignInField("search", ...). No new view code.
+        emit requestJellyfinFieldEdit(QStringLiteral("search"),QObject::tr("Search Jellyfin"),jellyfinSearchTerm_,false);
+        break;
     case Action::JellyfinSignOut:signOutJellyfin();break;
     // The sign-in page's own rows. A field asks the view for the XMB keyboard on that field's current value,
     // masked for the password; Submit sends, Cancel leaves the page and aborts a request still running.
@@ -1471,6 +1482,15 @@ void Shell::activate() {
         emit requestJellyfinFieldEdit(field,entry.title,initial,field=="password");
         break;
     }
+    case Action::JellyfinSignInRemember:
+        // The explicit opt-in. Turning it off is effective immediately: the stored record is deleted
+        // here, not on the next successful sign-in.
+        signInRemember_=!signInRemember_;
+        if(!signInRemember_)jellyfin_.forgetSession();
+        qInfo().noquote()<<"jellyfin: stay signed in"<<(signInRemember_?"on":"off")
+            <<(signInRemember_?"(an accepted sign-in will store the session for this Windows user)":"(the stored session record, if any, was deleted)");
+        refreshJellyfinSignInPage();emit changed();
+        break;
     case Action::JellyfinSignInSubmit:submitJellyfinSignIn();break;
     case Action::JellyfinSignInCancel:cancelJellyfinSignInPage();break;
     case Action::Unavailable:
@@ -1566,7 +1586,8 @@ QString Shell::activateLabel(const Entry& entry) const {
         return QObject::tr("Open");
     case Action::File:
         return categories_[category_].id=="photo"?QObject::tr("View"):QObject::tr("Play");
-    case Action::Launch:case Action::LaunchSteam:case Action::LaunchApp:case Action::JellyfinPlay:
+    case Action::JellyfinPlay:return entry.resumeMs>0?QObject::tr("Resume"):QObject::tr("Play");
+    case Action::Launch:case Action::LaunchSteam:case Action::LaunchApp:
         return QObject::tr("Play");
     case Action::Information:return QObject::tr("View");
     default:return QObject::tr("Start");
@@ -1591,6 +1612,7 @@ QString Shell::entryKind(const Entry& entry) const {
     case Action::SteamDownloads:return QObject::tr("Downloads");
     case Action::Information:return entry.id.startsWith("download:")?QObject::tr("Download"):QObject::tr("Item");
     case Action::JellyfinApp:case Action::JellyfinPlay:return QObject::tr("Jellyfin media");
+    case Action::JellyfinSearch:return QObject::tr("Search");
     default:return QObject::tr("Item");
     }
 }
@@ -1605,6 +1627,8 @@ void Shell::buildOptions() {
     const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
     // No Play/Start row for a row the shell itself cannot act on; Information stays honest for those.
     if(entry.action!=Action::Unavailable)options_.push_back({activateLabel(entry),OptionCommand::Activate});
+    if(entry.action==Action::JellyfinPlay && entry.resumeMs>0)
+        options_.push_back({QObject::tr("Play from Beginning"),OptionCommand::JellyfinRestart});
     options_.push_back({QObject::tr("Information"),OptionCommand::Information});
     // A remembered Continue Watching row can be forgotten right where it is listed; nothing else in the
     // XMB owns that state, so the row is offered on this page only. It stays offered for a stale row,
@@ -1718,6 +1742,12 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     }
+    case OptionCommand::JellyfinRestart:
+        resetOptions();
+        if(entry.action==Action::JellyfinPlay)openJellyfinMedia(entry,true);
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        emit changed();
+        break;
     // The in-player rows. Choosing one keeps the panel open so the marker moves on the spot, which is
     // also what makes the state checkable from a capture; Circle is what closes it.
     case OptionCommand::SubtitlesOff:
@@ -1771,8 +1801,30 @@ void Shell::buildPlayerOptions() {
     resetOptions();
     playerPanel_=true;
     optionsTitle_=QObject::tr("Playback");
+    // A Jellyfin stream's tracks are the server's own MediaStreams; a local file's are the sidecars
+    // beside it and what QMediaPlayer reports. The panel keeps the same honesty rule in both cases:
+    // a track this build cannot switch is listed with the reason and cannot be chosen.
+    const bool streamed=mediaProvider()=="Jellyfin" && !jellyfinPlayback_.streams.isEmpty();
     options_.push_back({QObject::tr("Subtitles Off"),OptionCommand::SubtitlesOff,-1,true,subtitleTrackIndex_<0,{}});
-    if(subtitleTracks_.isEmpty()) {
+    if(streamed) {
+        int seen=0;
+        for(const auto& stream:jellyfinPlayback_.streams) {
+            if(stream.type!="Subtitle")continue;
+            ++seen;
+            MenuOption row{QObject::tr("Subtitles %1: %2").arg(seen).arg(stream.title),OptionCommand::SubtitleTrack};
+            row.index=-1;row.enabled=false;
+            row.note=stream.external
+                ?QObject::tr("External subtitle stream: this build does not download subtitle streams.")
+                :QObject::tr("Subtitle stream inside the file: the media backend cannot switch stream subtitles.");
+            options_.push_back(row);
+        }
+        if(!seen) {
+            MenuOption row{QObject::tr("Subtitles: none in this stream"),OptionCommand::SubtitlesOff};
+            row.enabled=false;
+            row.note=QObject::tr("The server's PlaybackInfo lists no subtitle stream for this item.");
+            options_.push_back(row);
+        }
+    } else if(subtitleTracks_.isEmpty()) {
         MenuOption row{QObject::tr("Subtitles: none found"),OptionCommand::SubtitlesOff};
         row.enabled=false;
         row.note=mediaProvider()=="Jellyfin"
@@ -1791,7 +1843,31 @@ void Shell::buildPlayerOptions() {
     }
     // What the player itself reports, never a list this build invents.
     refreshAudioTracks();
-    if(audioTracks_.isEmpty()) {
+    if(streamed) {
+        int seen=0;
+        for(const auto& stream:jellyfinPlayback_.streams) {
+            if(stream.type!="Audio")continue;
+            ++seen;
+            MenuOption row{QObject::tr("Audio %1: %2").arg(seen).arg(stream.title),OptionCommand::AudioTrack};
+            row.index=seen-1;row.active=(seen-1)==activeAudioTrack_;
+            if(seen-1>=audioTracks_.size()) {
+                row.enabled=false;
+                row.note=QObject::tr("The player reports %1 audio track(s) for this stream, so the server's track %2 cannot be selected.")
+                    .arg(audioTracks_.size()).arg(seen);
+            } else if(!audioTracks_[seen-1].switchable) {
+                row.enabled=false;row.note=audioTracks_[seen-1].reason;
+            } else if(audioTracks_.size()>1) {
+                row.note=QObject::tr("Selects track %1 of the %2 the player reports.").arg(seen).arg(audioTracks_.size());
+            }
+            options_.push_back(row);
+        }
+        if(!seen) {
+            MenuOption row{QObject::tr("Audio: none in this stream"),OptionCommand::AudioTrack};
+            row.enabled=false;
+            row.note=QObject::tr("The server's PlaybackInfo lists no audio stream for this item.");
+            options_.push_back(row);
+        }
+    } else if(audioTracks_.isEmpty()) {
         MenuOption row{QObject::tr("Audio: not reported"),OptionCommand::AudioTrack};
         row.enabled=false;
         row.note=QObject::tr("The media backend reports no audio track for this file, so there is nothing to choose.");
@@ -2311,7 +2387,7 @@ void Shell::startQueuedMedia() {
 }
 void Shell::advanceMedia(bool failed,const QString& error) {
     if(jellyfinQueue_) {
-        finishJellyfinPlayback();
+        finishJellyfinPlayback(!failed);
         if(failed){++mediaRequest_;jellyfinRequest_=0;loading_=false;player_->stop();status_="Playback stopped";message_="Jellyfin\n\nThis media could not be played. Check the server and its transcoding support.";emit changed();return;}
     }
     if(mediaQueue_.empty())return;
@@ -2476,7 +2552,7 @@ QString Shell::pageKind() const {
     if(pages_.isEmpty())return QStringLiteral("root");
     const auto& page=pages_.last();
     if(page.signIn)return QStringLiteral("jellyfinSignIn");
-    if(page.jellyfin)return page.jellyfinViews?QStringLiteral("jellyfinViews"):QStringLiteral("jellyfinFolder");
+    if(page.jellyfin)return page.jellyfinViews?QStringLiteral("jellyfinViews"):page.jellyfinSearch?QStringLiteral("jellyfinSearch"):QStringLiteral("jellyfinFolder");
     if(page.downloads)return QStringLiteral("downloads");
     if(page.continuePage)return QStringLiteral("continueWatching");
     if(!page.directory.isEmpty())return QStringLiteral("folder");
@@ -2493,6 +2569,9 @@ void Shell::openJellyfinSignInPage(QUrl server) {
     signInUser_.clear();
     signInPassword_.fill(QChar(0));signInPassword_.clear();
     signInError_.clear();status_.clear();
+    // The opt-in shows what is actually on disk: a record exists only after an accepted sign-in with
+    // the row turned on, so its presence is the remembered choice.
+    signInRemember_=jellyfinRemembered();
     Page page;page.title=jellyfinServiceTitle_.isEmpty()?QObject::tr("Jellyfin"):jellyfinServiceTitle_;
     page.signIn=true;
     // Focus starts on Username, not on the server line: the address came from the registration and is usually
@@ -2500,7 +2579,7 @@ void Shell::openJellyfinSignInPage(QUrl server) {
     page.selection=1;
     pages_.push_back(std::move(page));
     refreshJellyfinSignInPage();
-    qInfo().noquote()<<"jellyfin: sign-in page opened rows= Server URL|Username|Password|Sign In|Cancel focus= Username";
+    qInfo().noquote()<<"jellyfin: sign-in page opened rows= Server URL|Username|Password|Stay Signed In|Sign In|Cancel focus= Username";
     emit changed();
 }
 void Shell::refreshJellyfinSignInPage() {
@@ -2525,6 +2604,15 @@ void Shell::refreshJellyfinSignInPage() {
     field(QStringLiteral("jellyfin-signin:password"),QObject::tr("Password"),QStringLiteral("password"),
         QObject::tr("Cross to type your password. It is shown as dots."),maskedValue(signInPassword_));
     {
+        // The explicit opt-in. It is a row like every other one, so the pad reaches it; the value on the
+        // right is the current choice, and Cross flips it.
+        auto e=item(QStringLiteral("jellyfin-signin:remember"),QObject::tr("Stay Signed In"),"23n","qgl/icontex",
+            Action::JellyfinSignInRemember);
+        e.fieldValue=signInRemember_?QObject::tr("On"):QObject::tr("Off");
+        e.detail=QObject::tr("Cross to turn this on: an accepted sign-in then stores the session on this PC, protected for this Windows user.");
+        page.entries.push_back(std::move(e));
+    }
+    {
         auto e=item(QStringLiteral("jellyfin-signin:submit"),QObject::tr("Sign In"),"tex_Sign_In","explore_plugin_full",
             Action::JellyfinSignInSubmit);
         // One place carries the outcome: the page's own status line (drawn under the rows), where the loading
@@ -2542,6 +2630,17 @@ void Shell::refreshJellyfinSignInPage() {
     page.selection=std::clamp(page.selection,0,std::max(0,int(page.entries.size())-1));
 }
 void Shell::setJellyfinSignInField(const QString& field,const QString& value) {
+    // The one field-edit signal also carries the Jellyfin search term: the row that asks for it sends
+    // the key "search", and the accepted text opens a result page. It is not a credential field, so it
+    // is kept (for the next keyboard prefill) but only its length is logged.
+    if(field==QStringLiteral("search")) {
+        const QString term=value.trimmed();
+        if(term.isEmpty())return;
+        jellyfinSearchTerm_=term;
+        qInfo().noquote()<<"jellyfin: search term accepted ("<<term.size()<<" character(s))";
+        openJellyfinSearch(term);
+        return;
+    }
     if(!jellyfinSignInOpen())return;
     if(field=="server")signInServer_=value;
     else if(field=="username")signInUser_=value;
@@ -2558,9 +2657,10 @@ void Shell::submitJellyfinSignIn() {
     if(jellyfinSigningIn_){qInfo()<<"jellyfin: sign-in ignored, a request is already in flight";return;}
     signInError_.clear();status_=QObject::tr("Signing in to Jellyfin...");
     // No credentials here either: the server, and whether a user name and a password were supplied.
-    qInfo().noquote()<<QString("jellyfin: sign-in request to %1 (username %2, password %3; values masked)")
+    qInfo().noquote()<<QString("jellyfin: sign-in request to %1 (username %2, password %3, stay signed in %4; values masked)")
         .arg(signInServer_,signInUser_.isEmpty()?QStringLiteral("empty"):QStringLiteral("set"),
-             signInPassword_.isEmpty()?QStringLiteral("empty"):QStringLiteral("set"));
+             signInPassword_.isEmpty()?QStringLiteral("empty"):QStringLiteral("set"),
+             signInRemember_?QStringLiteral("on"):QStringLiteral("off"));
     authenticateJellyfin(QUrl(signInServer_.trimmed(),QUrl::StrictMode),signInUser_,signInPassword_);
     refreshJellyfinSignInPage();emit changed();
 }
