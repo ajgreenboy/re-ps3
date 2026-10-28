@@ -597,3 +597,198 @@ Native and reference evidence (existing):
   `out/native-reference/font-match/dialog.png` - native message-dialog captures.
 - `out/native-reference/options/options-info.png` - native information page.
 - `out/native-reference/ps-menu/native-ps-menu-confirm.png` - native PS-menu confirmation.
+
+---
+
+## 7. Implemented (2026-10-27 pass)
+
+This section records what was built from sections 1-4, what was measured against the two reference
+frames afterwards, and what is still open. All numbers are 1920x1080. Every capture was taken from the
+build this section describes (`C:\dev\out\native-dialogs\re-ps3-native.exe`) with the animation clocks
+pinned (`--render-clock 20 --background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00
+--focus-time 2000`), then measured by pixel analysis (ink = pixels above the local background by 45
+luma; the native text boxes are differences against the same frame with the message dismissed, so the
+animated background cancels out). One exception is stated where it matters: the titled-page pair was
+captured from the build immediately before the final recompiles, which touched only the box and
+hint-row plumbing - the page constants and draw path are byte-identical.
+
+### 7.1 The surface model
+
+`Shell` now decides the surface where it raises the message, and `View` only draws it:
+
+| Kind | Who sets it | Draw path |
+|---|---|---|
+| `Inline` | empty list / empty page sites (`openSteamFolder`, Steam Store empty, Download Management empty, Continue Watching empty, an open directory page with no rows) | `View::drawInlineMessage` |
+| `Page` | every titled status message (start failure fallback, crash return, Steam/RPCS3/app/URL failures, max depth, theme/media failures) | `View::drawMessagePage` |
+| `Box` | the two-button confirm (`Remove from Continue Watching`) | `View::drawMessageBox` |
+| `ErrorCode` | a launch that fails after the OS rejects it (`startTracked`, `QProcess::FailedToStart`) | `View::drawErrorMessagePage` |
+| `Info` | `Action::Information`, the download page, the Continue Watching info page | `View::drawMessageInfoPage` |
+
+`Shell::showMessage(text, kind)` is the only writer of `message_`, so the kind can no longer disagree
+with the text. `messageKind()`, `messageActions()` and the private `showConfirm`/`showErrorPage`/
+`clearMessage` are the whole API. `Shell::activate` accepts a `Box` (confirm, `snd_decide`) and
+dismisses the other four (their dismiss cue is still UNPROVEN, so they keep `snd_system_ok`);
+`Shell::back` cancels a box (no action) and dismisses everything else (`snd_cancel`).
+
+The draw code lives in `src/dialogs.cpp` (new translation unit, added to the CMake target). Its
+interface is the `View` members declared in `view.h`; a separate `dialogs.h` would only duplicate them,
+so there is none. Every constant there is either a measurement of one of the two reference frames or a
+value explicitly marked as a native fit.
+
+### 7.2 Measured native vs firmware
+
+Inline empty state - firmware `frame-00014400.jpg` (D3) vs `capture/inline-page-on/shot.png` (a photo
+library page opened on an empty folder, so the page is open and its list has no rows):
+
+| Quantity | Firmware | Native | Delta |
+|---|---|---|---|
+| ink box | 630..982 x 494..514 | 628..985 x 494..516 | left -2, top 0, right +3, bottom +2 |
+| ink height | 21 px | 23 px | +2 |
+| font pixel size | ~24..28 (audit 2.3) | 26 | inside the band |
+| alignment | level-1 label column | x 628 (measured ink origin) | column-aligned |
+| rules / hint / plate / dim | none / none / none / none | none / none / none / none | same |
+
+Titled page - firmware `frame-00020600.jpg` (D4) vs `capture/page3/shot.png` (a Network message page):
+
+| Quantity | Firmware | Native | Delta |
+|---|---|---|---|
+| header icon ink | 118..154 x 153..188 | 126..147 x 154..189 (36x36 box at 119,154; the glyph inside is narrower) | box y +1 |
+| title ink x0 | 169 | 170 | +1 |
+| title ink y | 165..184 | 164..183 | -1 |
+| rule 1 | y 198, alpha 0.218 | y 198, alpha 0.227 | 0 px, +0.009 |
+| body line 1 ink top | 509 | 509 | 0 |
+| body line pitch | 543 - 509 = 34 | 32 (constant; the captured body is one line) | -2 (inside the upscale quantum of 1.5 px) |
+| rule 2 | y 872, alpha 0.201 | y 872, alpha 0.203 | 0 px, +0.002 |
+| hint ink box | 1154..1239 x 888..909 | 1155..1235 x 889..910 | +1 / -4 / +1 / +1 |
+| hint glyph | ~20 px ink | 22 px rect (alpha-bounds fitted) | +2 |
+| info bar | plate and date absent, clock face only | plate and date absent, clock face at (1776,93) | same |
+| frame treatment | none (background luma identical to the frame without a message) | none | same |
+
+Modal box (D1) - spec-only, no firmware frame exists, so these are stated as a native fit rather than
+a parity claim: plate 480..1440 wide with the height fitted to its text, two `tex_msgdialog_bar` bars
+at the plate's own 960 px width (measured bright rows 250 and 469), title left inside the plate, body
+centred at 32 px pitch, and the two hints (`tex_cross` + `msg_ok`, `tex_circle` + `msg_cancel`) from
+x 1155 on a row just under the plate (measured ink 490..511). The page's measured 889 baseline belongs
+to D4; a box has no measured hint row.
+
+Information page (D5) - no local firmware frame exists (audit 2.5), so only the D4 frame is claimed:
+icon 36x36 at (119,154), title from x 169, rules at 198/872, rows at 22 px on a 40 px pitch with keys
+right-aligned to 925 and values from 961, hint `tex_circle` + `msg_back` at x 1155, ink y 889..910.
+
+Error-code page (D2) - spec-only. Header, the two rules, `msg_errorcode_cause_label` and
+`msg_errorcode_solution_label` (the firmware strings carry the full-width brackets), the cause and the
+action lines, `msg_enter`/`msg_back` hints and the 150-unit settle.
+
+Fades, all on the existing `View::PafEase` (mode 5, the XMB's own curve): the box's label group 200
+units, its plate 1000, the hint row 100 per button group, the error page's body settle 150. Measured
+effect on the box plate pixel at (1350,400): settled (94,82,63), ~300 units after opening (99,87,64),
+and still drawn ~300 units after cancel (115,97,67) - the exit keeps the latched content until the
+ease reaches zero.
+
+### 7.3 What changed, file by file
+
+- `src/shell.h`, `src/shell.cpp` - `MessageKind`; `showMessage`/`showConfirm`/`showErrorPage`/
+  `clearMessage`; every former `message_=` site classified; the information rows rebuilt from
+  `explore_plugin_full` strings (`msg_format`, `msg_size`, `msg_created_date_time`,
+  `msg_resolution`, `msg_info_detail`, `msg_info_unknown`), with the path row the one stated as native;
+  the empty-list sites use `msg_error_no_content`; the removal confirmation is the new two-button box;
+  `activate`/`back` own the box's confirm/cancel cues.
+- `src/view.h`, `src/view.cpp` - the kind-driven dispatch in `drawScene`, the invented 135-alpha
+  full-frame dim deleted, the 0.18 background multipliers deleted, the flat rules, the icon+left-title
+  header for the page/info/error surfaces, the measured body metrics, the analog-clock-only frame for
+  those surfaces, the five eases and their place in the UI signature, and the latched box content.
+- `src/dialogs.cpp` (new, in `CMakeLists.txt`) - the five draw paths, the shared chrome, the hint row,
+  the plate fill sampled from `tex_msgdialog_bg`/`tex_msgdialog_bg2` at run time, and the metric table.
+- `audit/DIALOGS-FIRMWARE.md` - this section.
+
+### 7.4 Status of the 13 items
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Split the surfaces into an explicit kind | done (`MessageKind`, five paths) |
+| 2 | Draw the inline case the firmware way | done (line at the measured ink origin, no plate/rules/hint/dim) |
+| 3 | Remove the invented dim | done (no dim on any kind) |
+| 4 | Flat rules, `tex_msgdialog_bar` only for a true box | done (flat 1 px at 198/872; the bar texture is used only by the box, at 960 px) |
+| 5 | Move the header to icon + left title | done (119/154 icon, title 169) |
+| 6 | Body metrics | done (ink 509, 24 px, 32 px pitch for every line) |
+| 7 | Real button row from `page_btnnavi` glyphs + `system_plugin` labels | done (Cross/Circle/Triangle/Rectangle textures; `msg_ok`, `msg_cancel`, `msg_back`, `msg_enter`) |
+| 8 | Hint-row fade | done (100 units, per group, `PafEase`) |
+| 9 | Box open/close fade | done (200 label / 1000 plate) |
+| 10 | Plate from the RCO | done (flat fill sampled from the 12x12 tile, no nine-slice, two bars) |
+| 11 | Error-code page | done (layout + real call site); evidence caveat below |
+| 12 | Confirm plays `snd_decide` from the dialog's own path | done (box accept); dismiss cues stay unproven and keep `snd_system_ok` |
+| 13 | Information rows from firmware strings | done (`Format`, `Size`, `Created`, `Resolution`, `Details`, `Unknown`; the path row marked native) |
+| 14 | Two-button dialogs | done (Remove from Continue Watching; body is native wording, buttons are the firmware pair); the PS menu confirm keeps its native wording as item 14 allows |
+
+### 7.5 Verification
+
+- Build: `& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-dialogs` - succeeds
+  (only pre-existing warnings in `view.cpp`/`main.cpp`).
+- A/B gate: `bun work\ab-layers.ts --capture --exe C:/dev/out/native-dialogs/re-ps3-native.exe` -
+  **PASS 6/6** (frame 18.30 dB / 0.8323 SSIM, top background 20.25 / 0.9363, category icon row 20.92 /
+  0.8990, item label row 11.95 / 0.3927, clock text 11.39 / 0.4105, info bar 14.78 / 0.6117). The root
+  frame is unchanged by this pass because no message is up in it.
+- Determinism: two `--render-clock 20` captures of the same state are byte-identical (root state
+  SHA256 `BC67C6B892065B4C88EEA71B24878F53511452AFEF01EBD1321E8C477920D06D` twice; an earlier pair of
+  the page-message state was also identical, `9E80E7FA...` twice).
+- Region scores, `bun work\ab-compare.ts <ref> <native> <crop>` (the two frames have different
+  wallpapers, so these bound shape and position, not pixels): inline depth-1 8.98 dB / 0.3581
+  (560,460,760,120); inline depth-0 8.72 / 0.3568 (560,440,800,140); page header 10.38 / 0.3543
+  (90,130,500,70); rule 1 band 12.36 / 0.5072 (0,185,1920,30); body 8.64 / 0.2662 (700,470,550,110);
+  rule 2 band 22.14 / 0.8509 (0,860,1920,30); hint 17.26 / 0.6979 (1100,865,300,60); clock 12.17 /
+  0.5220 (1300,55,600,110).
+- Named state: `bun work\ab-layers.ts --state continue-watching-empty --exe ...` - its assertions still
+  pass (depth 0, video, root, row `continue`), but its two pixel regions now FAIL against their stored
+  native reference (frame 14.27 dB / 0.7139, dialog 13.56 dB / 0.6785). That is the intended change:
+  those references are the old full-frame-dim modal, and the surface is now the inline line. The
+  harness was not edited and the references were not re-saved; re-baselining them is the owner's call.
+  No other named state draws a message, so no other state is affected.
+
+### 7.6 What remains
+
+- The modal box has no firmware reference: its rect, its title position and its hint baseline are
+  native fits (only the plate colours, the two 960 px bars and the hint x/baseline of the page kinds
+  are measured). A capture of any "Are you sure?" box on a console would close this.
+- Which `tex_notification_*` glyph a normal message box draws is still unproven, so the box draws no
+  icon rather than guessing between `_info` and `_caution`.
+- The error-code page has a real call site (a registered application whose executable the OS refuses)
+  and was rendered and inspected in this pass: header, both rules, `Possible Cause` + the OS error
+  string, `Suggested Actions` + this build's own action line, Enter/Back hints. It is **not in the
+  shipped capture set**: its recipe needs a vertical move (the app row is not the first row), and this
+  machine's controller currently emits a constant up direction that defeats every DOWN (measured: 188
+  `vertical(-1)` calls in a few seconds with no script key pressed). The recipe is in 7.7.
+- The page surface hides the category band entirely; on the 20.6 s frame the band is off-frame rather
+  than absent. That is the page-recession geometry (`childAmount` 262 px), a page-layout difference,
+  not a message one. The open-page chevron sits at x 423 natively and ~350 on that frame for the same
+  reason.
+- The inline message is drawn in the focused row's label slot when no page is open (depth 0), because
+  this build does not push an empty page for an empty list; the firmware frame is an open page, whose
+  chevron is present.
+- The wrapped-line pitch is 32 by construction (`View::wrapMessage` wraps, it does not delegate leading
+  to the layout engine); no captured message is longer than one line except the error page above.
+- D6-D8 (file delete/copy/publish progress and the busy indicator) remain unimplemented because this
+  build has no destructive file operation to show; the PS menu's "Turn Off the System?" keeps its
+  native wording (item 14).
+- The information page's "reference 92 s" claim is still unverifiable locally (the frame set ends at
+  64.6 s); its rows are now firmware-labelled but its geometry remains the D4 convention rather than a
+  measurement of that page.
+
+### 7.7 Reproduction
+
+Captures live under `out/native-dialogs/capture/` (git-ignored). Each run needs a fresh copy of
+`out/native-reference/store/video-data` as its data directory (the app migrates `preferences.json` to
+version 2 on first use, after which the profile-scoped library keys change how a scan is started; the
+ab-layers harness seeds a fresh temporary directory per capture for the same reason).
+
+```
+build   & C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-dialogs
+inline  --script "full,pause=4000,LEFT,wait,wait,LEFT,wait,wait,LEFT,wait,wait,LEFT,wait,wait,ENTER,wait,wait,wait,grab=inline.png,quit"
+        (photo column, its first row is the media library; the data dir's preferences point library/photo at an empty folder)
+page    --script "full,pause=4000,RIGHT,wait,wait,DOWN,wait,wait,ENTER,wait,wait,wait,grab=page.png,quit"
+        (Network, an unavailable row; a second run without ENTER gives the no-message pair)
+box     --script "full,pause=4000,LEFT,wait,wait,LEFT,wait,wait,ENTER,wait,wait,TRIANGLE,wait,wait,DOWN,wait,wait,DOWN,wait,wait,ENTER,wait,wait,wait,grab=box.png,quit"
+        (data dir's preferences carry one media/resume record, id = sha1(path.toUtf8()) first 24 hex)
+info    --script "full,pause=4000,TRIANGLE,wait,wait,DOWN,wait,wait,ENTER,wait,wait,wait,grab=info.png,quit"
+error   register an app whose executable exists but is not a valid image, then reach its row and press
+        Cross; the ErrorCode page reports QProcess::errorString() as the cause.
+```
