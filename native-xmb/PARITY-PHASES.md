@@ -226,7 +226,8 @@ unit. The realistic path is to close P0 + P1, then take P7 screen by screen with
 - Hardware-specific quirks with no PC equivalent (HDMI/audio handshakes, console power states).
 ## Dispatch queue (2026-10-27)
 
-Agents run against one shared tree, so each row names the files it may write and what it must not touch.
+Agents run against one shared tree today; `WORKSPACES.md` describes the split that removes the write collisions
+(this table is the same mapping expressed per agent). Each row names the files it may write and what it must not touch.
 Slots are limited (8 concurrent); this is the order they start as slots free.
 
 | Order | Agent | Phase items | Write fence | Prerequisites |
