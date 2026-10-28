@@ -20,6 +20,7 @@
 #include <QDateTime>
 #include <QVector>
 #include <QImage>
+#include <functional>
 #include <memory>
 #include <QPointer>
 #include <QProcess>
@@ -104,6 +105,20 @@ struct Notification {
     QString icon;    // a system_plugin texture name: tex_notification, tex_notification_<kind>
     qint64 expiresAt=0; // Shell's notification clock, milliseconds
 };
+// The surface a message is drawn on. The firmware assembles each of the five from a different set of
+// pieces (audit/DIALOGS-FIRMWARE.md section 2), so the kind is a decision the shell makes where it sets
+// the message, not something the view infers from the string:
+//   Inline     D3 - one line in the list's own label column. No plate, rules, hint or frame treatment
+//                   (measured, frame 14.4 s: "There are no content items." at x 630, centre y 504).
+//   Page       D4 - icon + left title above a flat rule at y 197, centred body at y 509, flat rule at
+//                   y 877, one Back hint at x 1155 (measured, frame 20.6 s). No dim.
+//   Box        D1 - the run-time message box: the RCO plate (tex_msgdialog_bg over tex_msgdialog_bg2),
+//                   exactly two tex_msgdialog_bar bars at the box's own width, and a two-button hint row
+//                   (Cross msg_ok / Circle msg_cancel). Spec-only: no local frame shows a modal.
+//   ErrorCode  D2 - the D4 frame around a scrollable Suggested Actions body with Enter/Back hints.
+//                   Spec-only: no local frame shows an error-code page.
+//   Info       D5 - the D4 frame with Key: value rows built from firmware strings.
+enum class MessageKind { None, Inline, Page, Box, ErrorCode, Info };
 class Shell final:public QObject {
     Q_OBJECT
 public:
@@ -118,6 +133,12 @@ public:
     int selectionAt(int depth) const;
     QString pageTitle() const { return pages_.isEmpty()?QString{}:pages_.last().title; }
     QString message() const { return message_; }
+    // Which surface the message is drawn on (see MessageKind). message() carries the text: for Inline the
+    // line itself, for the other kinds "Title\n\nbody" where a single first line is the header.
+    MessageKind messageKind() const { return messageKind_; }
+    // The Suggested Actions bullets of an ErrorCode page (the firmware's msg_errorcode_solution_* family;
+    // this build's actions are its own because no local firmware code produces a PS3 error code here).
+    const QStringList& messageActions() const { return messageActions_; }
     void setRenderer(const QString& renderer) { renderer_=renderer; }
     int theme() const { return preferences_.value("appearance/colour").toInt(); }
     QString fontFamily() const;
@@ -407,7 +428,19 @@ private:
     bool notificationLog_=false;
     void promoteNotification();
     void expireNotifications();
-    QString message_,mediaTitle_,renderer_;
+    // The one place a message is raised or dismissed. The kind decides the surface View draws
+    // (MessageKind); a Box also carries the action Cross accepts, so the confirm cue and the action are
+    // the box's own (TRACED 0x00341870: snd_decide on the box's confirm button).
+    void showMessage(const QString& text,MessageKind kind);
+    void showMessage(const QString& title,const QString& body,MessageKind kind);
+    void showConfirm(const QString& title,const QString& body,std::function<void()> accepted);
+    void showErrorPage(const QString& title,const QString& cause,const QStringList& actions);
+    void clearMessage();
+    QString message_;
+    MessageKind messageKind_=MessageKind::None;
+    QStringList messageActions_;
+    std::function<void()> messageAccept_;
+    QString mediaTitle_,renderer_;
     QDateTime clockOverride_;
     // Only the decoded pieces are kept (the .p3t itself is read again when the theme changes); nothing is written to disk.
     struct Theme { QString path,name; QImage background; QHash<QString,QImage> icons; };

@@ -378,7 +378,7 @@ void Shell::resolveNetworkColumn() {
 // idle auto-close is suppressed; on exit the library is rescanned and the column restored,
 // which is the return lifecycle a launched game needs (audit/FEATURE-COVERAGE.md, ISC-20).
 bool Shell::startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title) {
-    if(!game_.isNull()){message_=QObject::tr("A title is already running.");return false;}
+    if(!game_.isNull()){showMessage(QObject::tr("A title is already running."),MessageKind::Page);return false;}
     auto* process=new QProcess(this);
     process->setProgram(program);
     process->setArguments(arguments);
@@ -386,8 +386,15 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
     process->setProcessChannelMode(QProcess::ForwardedChannels);
     connect(process,&QProcess::errorOccurred,this,[this,process,title](QProcess::ProcessError error){
         if(error!=QProcess::FailedToStart)return;
+        const QString cause=QObject::tr("This title could not be started.")+
+            (process->errorString().isEmpty()?QString{}:QStringLiteral(" (")+process->errorString()+QStringLiteral(")"));
         process->deleteLater();game_.clear();
-        message_=title+"\n\n"+QObject::tr("This title could not be started.");emit changed();
+        // The firmware's error-code page (D2, spec-only) is the surface for a start failure: a title, a
+        // Possible Cause and Suggested Actions. The cause here is the OS's own report and the action is
+        // this build's wording - the firmware's own action bullets are network/PSN-specific.
+        showErrorPage(title,
+            cause,{QObject::tr("Check that the application is still installed, then try again.")});
+        emit changed();
     });
     connect(process,QOverload<int,QProcess::ExitStatus>::of(&QProcess::finished),this,
             [this,process,title](int code,QProcess::ExitStatus status){
@@ -396,7 +403,7 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
         // The return of a tracked title is a real event this build can report. The console itself has no
         // return pop-up (only launches), so this one is a native event, not a firmware one.
         if(status==QProcess::CrashExit) {
-            message_=title+"\n\n"+QObject::tr("This title ended unexpectedly.");
+            showMessage(title,QObject::tr("This title ended unexpectedly."),MessageKind::Page);
             notify(title,QObject::tr("This title ended unexpectedly."),"tex_notification_caution");
         }
         else notify(title,QObject::tr("Returned to the XMB"),"tex_notification_info");
@@ -405,8 +412,10 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
     });
     process->start();
     if(!process->waitForStarted(4000)){
+        const QString cause=QObject::tr("This title could not be started.")+
+            (process->errorString().isEmpty()?QString{}:QStringLiteral(" (")+process->errorString()+QStringLiteral(")"));
         process->deleteLater();
-        message_=title+"\n\n"+QObject::tr("This title could not be started.");
+        showErrorPage(title,cause,{QObject::tr("Check that the application is still installed, then try again.")});
         return false;
     }
     game_=QPointer<QProcess>(process);
@@ -425,7 +434,7 @@ bool Shell::gameRunning() const {
 bool Shell::startSteamTracked(const QString& appId,const QString& title) {
     const QString exe=QDir(steamRoot_).filePath("steam.exe");
     if(!QFileInfo(exe).isFile() || !QProcess::startDetached(exe,{"-applaunch",appId},steamRoot_)) {
-        message_=title+"\n\nSteam could not be started. Refresh the game library and check the Steam installation.";
+        showMessage(title,"Steam could not be started. Refresh the game library and check the Steam installation.",MessageKind::Page);
         return false;
     }
     steamGameId_=appId;gameTitle_=title;steamGameSeen_=false;steamGameClear_=0;
@@ -447,7 +456,7 @@ void Shell::pollSteamGame() {
     if(!steamGameSeen_) {
         if(steamWatchAge_.elapsed()<startTimeoutMs)return;
         steamWatch_.stop();const QString title=gameTitle_;steamGameId_.clear();gameTitle_.clear();
-        message_=title+"\n\nSteam did not report this title as running.";
+        showMessage(title,"Steam did not report this title as running.",MessageKind::Page);
         qWarning().noquote()<<"steam:"<<title<<"never reported running";
         emit changed();return;
     }
@@ -470,7 +479,7 @@ void Shell::restoreFocus() {
 void Shell::launch(const Entry& entry) {
     const QString emulator=emulatorPath();
     if(emulator.isEmpty() || !startTracked(emulator,{"--no-gui",entry.value},QFileInfo(emulator).absolutePath(),entry.title)) {
-        if(emulator.isEmpty())message_=entry.title+"\n\nRPCS3 could not be started.";
+        if(emulator.isEmpty())showMessage(entry.title,"RPCS3 could not be started.",MessageKind::Page);
         return;
     }
 }
@@ -660,7 +669,12 @@ void Shell::openSteamFolder(const QString& mode) {
         if(file.open(QIODevice::WriteOnly))file.write(QJsonDocument(QJsonObject{{"folder",mode},{"title",title},
             {"rows",rows},{"count",rows.size()}}).toJson());
     }
-    if(page.entries.isEmpty()){message_=title+"\n\n"+QObject::tr("This folder is empty.");return;}
+    // The firmware's own empty-list line (explore_plugin_full msg_error_no_content), drawn as a list row
+    // in the label column rather than as a dialog (audit/DIALOGS-FIRMWARE.md D3).
+    if(page.entries.isEmpty()){
+        showMessage(assets_.text("explore_plugin_full","msg_error_no_content","There are no content items."),MessageKind::Inline);
+        emit changed();return;
+    }
     pages_.push_back(std::move(page));
     emit changed();
 }
@@ -793,13 +807,13 @@ void Shell::openSteamDownloads() {
     const QString title=QObject::tr("Download Management");
     if(!error.isEmpty()) {
         qWarning().noquote()<<"steam downloads: page unavailable:"<<error;
-        message_=title+"\n\n"+error;
+        showMessage(title,error,MessageKind::Page);
         emit changed();
         return;
     }
     if(rows.isEmpty()) {
         qInfo().noquote()<<"steam downloads: page empty (nothing is downloading)";
-        message_=title+"\n\n"+QObject::tr("Nothing is downloading.");
+        showMessage(QObject::tr("Nothing is downloading."),MessageKind::Inline);
         emit changed();
         return;
     }
@@ -820,7 +834,8 @@ void Shell::reloadSteamDownloads() {
     // than leaving rows that no longer describe anything.
     if(!error.isEmpty() || rows.isEmpty()) {
         pages_.removeLast();
-        message_=title+"\n\n"+(error.isEmpty()?QObject::tr("Nothing is downloading."):error);
+        if(error.isEmpty())showMessage(QObject::tr("Nothing is downloading."),MessageKind::Inline);
+        else showMessage(title,error,MessageKind::Page);
         qInfo().noquote()<<"steam downloads: refresh emptied the page"
             <<(error.isEmpty()?QStringLiteral("(nothing is downloading)"):QStringLiteral("(error: ")+error+QStringLiteral(")"));
         emit changed();
@@ -848,7 +863,7 @@ void Shell::refreshContent() {
           if(!familyError.isEmpty())qWarning().noquote()<<"steam family:"<<familyError; }
         const bool accountChanged=steamId_!=result.steam.steamId;
         steamId_=result.steam.steamId;
-        if(!result.error.isEmpty()){message_="App Library\n\n"+result.error;result.apps=contentApps_;}
+        if(!result.error.isEmpty()){showMessage("App Library",result.error,MessageKind::Page);result.apps=contentApps_;}
         contentApps_=result.apps;
         for(int c=0;c<categories_.size();++c) {
             auto& category=categories_[c];
@@ -952,7 +967,7 @@ void Shell::refreshContent() {
 void Shell::importApps(const QString& file) {
     if(file.isEmpty())return;
     QString error;
-    if(!ContentRegistry::importFile(file,QDir(dataDirectory_).filePath("apps.json"),error))message_="Import Games and Apps\n\n"+error;
+    if(!ContentRegistry::importFile(file,QDir(dataDirectory_).filePath("apps.json"),error))showMessage("Import Games and Apps",error,MessageKind::Page);
     else refreshContent();
     emit changed();
 }
@@ -1096,7 +1111,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     connect(&steamFriends_,&SteamFriends::loaded,this,[this](const SteamFriendList& friends,const QString& error){
         steamFriendList_=friends;steamFriendsError_=error;friendsRefreshing_=false;rebuildFriends();emit changed();
         if(error.isEmpty())friendsAge_.restart();
-        if(showFriendsErrors_ && !error.isEmpty()){message_="Steam Friends\n\n"+error;emit changed();}
+        if(showFriendsErrors_ && !error.isEmpty()){showMessage("Steam Friends",error,MessageKind::Page);emit changed();}
         showFriendsErrors_=false;
     });
     connect(&steamOwned_,&SteamOwned::loaded,this,[this](const OwnedGameList& games,const QString& error,bool needsKey){
@@ -1127,7 +1142,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     // Steam Store: the browse page is an ordinary XMB page, and every row hands off to Steam for
     // the actual purchase/install. No store page is fabricated while a request is in flight.
     connect(&steamStore_,&SteamStore::loaded,this,[this](const StoreItemList& items,const QString& query,const QString& error){
-        if(!error.isEmpty()){message_=QObject::tr("Steam Store")+"\n\n"+error;emit changed();return;}
+        if(!error.isEmpty()){showMessage(QObject::tr("Steam Store"),error,MessageKind::Page);emit changed();return;}
         Page page;page.title=query.isEmpty()?QObject::tr("Steam Store"):query;
         for(const auto& row:items) {
             auto e=item("store:"+row.appId,row.title,"game_tex_default_ps3","explore_plugin_full",
@@ -1136,7 +1151,10 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             e.detail=price.isEmpty()?QObject::tr("Open in Steam"):price;
             page.entries.push_back(std::move(e));
         }
-        if(page.entries.isEmpty()){message_=QObject::tr("Steam Store")+"\n\n"+QObject::tr("The store listed nothing.");emit changed();return;}
+        if(page.entries.isEmpty()){
+            showMessage(assets_.text("explore_plugin_full","msg_error_no_content","There are no content items."),MessageKind::Inline);
+            emit changed();return;
+        }
         // Verification hook: the store page is dumped next to the catalogue for scripted checks.
         if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
             QJsonArray rows;
@@ -1167,9 +1185,9 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     }
     QTimer::singleShot(0,this,&Shell::refreshContent);
     connect(&profiles_,&Profiles::changed,this,[this]{rebuildUsers();emit changed();});
-    connect(&profiles_,&Profiles::failed,this,[this](const QString& error){message_=error;emit changed();});
+    connect(&profiles_,&Profiles::failed,this,[this](const QString& error){showMessage(error,MessageKind::Page);emit changed();});
     player_->setAudioOutput(audio_.get());player_->setVideoSink(video_.get());
-    connect(&preferences_,&Preferences::failed,this,[this](const QString& error){message_=error;emit changed();});
+    connect(&preferences_,&Preferences::failed,this,[this](const QString& error){showMessage(error,MessageKind::Page);emit changed();});
     connect(&preferences_,&Preferences::changed,this,[this]{applyPreferences();emit changed();});
     connect(&library_,&MediaLibrary::loaded,this,[this](quint64 request,const QString& path,const MediaEntries& files,const QString& error,bool truncated){
         const bool refreshed=directoryRefresh_;directoryRefresh_=false;
@@ -1185,8 +1203,13 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             entry.detail=file.isDirectory?QString{}:QString::number(file.size/1024)+" KB  Â·  "+file.modified.toString("yyyy/MM/dd");
             if(entry.id==previous)page.selection=int(page.entries.size())-1;
         }
-        status_=truncated?"Showing the first 5,000 matching items.":page.entries.isEmpty()?"There are no supported files.":QString{};
-        if(!error.isEmpty())message_=error;
+        // An open page with no rows is the firmware's inline empty state: the line sits in the list's own
+        // label column, not in a dialog and not in a status line under the page (D3, frame 14.4 s).
+        status_=truncated?"Showing the first 5,000 matching items.":QString{};
+        if(!error.isEmpty())showMessage(error,MessageKind::Page);
+        else if(page.entries.isEmpty())
+            showMessage(assets_.text("explore_plugin_full","msg_error_no_content","There are no content items."),MessageKind::Inline);
+        else clearMessage();
         qInfo()<<"media: directory result"<<files.size()<<"entries; truncated"<<truncated<<"error"<<!error.isEmpty();
         // A rescan of an open media library (F5 / Refresh Directory) is a real library event: the console
         // reports finished library work in the notification pop-up.
@@ -1247,8 +1270,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         if(minutes && !mediaOpen_ && !gameRunning() && !QApplication::activeModalWidget() && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
     });
     activity_.start();idle_.start(1000);applyPreferences();
-    if(!preferences_.error().isEmpty())message_=preferences_.error();
-    if(!profiles_.error().isEmpty())message_=profiles_.error();
+    if(!preferences_.error().isEmpty())showMessage(preferences_.error(),MessageKind::Page);
+    if(!profiles_.error().isEmpty())showMessage(profiles_.error(),MessageKind::Page);
     connect(video_.get(),&QVideoSink::videoFrameChanged,this,[this](const QVideoFrame& frame){emit mediaFrame(frame.toImage());});
     connect(player_.get(),&QMediaPlayer::positionChanged,this,[this](qint64 at){if(at>0)mediaFailures_=0;});
     connect(player_.get(),&QMediaPlayer::errorOccurred,this,[this](QMediaPlayer::Error,const QString& error){
@@ -1342,6 +1365,29 @@ qint64 Shell::notificationRemainingMs() const {
 const QVector<Entry>& Shell::entries()const {return pages_.isEmpty()?categories_[category_].entries:pages_.last().entries;}
 const QVector<Entry>& Shell::entriesAt(int depth)const {return depth==0?categories_[category_].entries:pages_.at(depth-1).entries;}
 int Shell::selectionAt(int depth)const {return depth==0?selections_[category_]:pages_.at(depth-1).selection;}
+// --- Message surfaces ------------------------------------------------------------------------------
+// There is no dialog RCO to read a layout from (audit/DIALOGS-FIRMWARE.md section 1): msgdialog_plugin
+// holds two objects and every plane, label and button of a message box is created by vsh.elf. So the
+// shell owns the *kind* of surface and its text, and View draws the measured layout for that kind.
+// The firmware strings for an empty list come from explore_plugin_full's own msg_error_* family; the
+// English text is only the fallback for a dev_flash that cannot be read.
+void Shell::showMessage(const QString& text,MessageKind kind) {
+    message_=text;messageKind_=kind;messageActions_.clear();messageAccept_=nullptr;
+}
+void Shell::showMessage(const QString& title,const QString& body,MessageKind kind) {
+    showMessage(body.isEmpty()?title:title+"\n\n"+body,kind);
+}
+void Shell::showConfirm(const QString& title,const QString& body,std::function<void()> accepted) {
+    showMessage(title,body,MessageKind::Box);
+    messageAccept_=std::move(accepted);
+}
+void Shell::showErrorPage(const QString& title,const QString& cause,const QStringList& actions) {
+    showMessage(title,cause,MessageKind::ErrorCode);
+    messageActions_=actions;
+}
+void Shell::clearMessage() {
+    message_.clear();messageKind_=MessageKind::None;messageActions_.clear();messageAccept_=nullptr;
+}
 void Shell::horizontal(int delta) {
     touch();if(!delta)return;
     if(!message_.isEmpty())return;
@@ -1361,13 +1407,27 @@ void Shell::horizontal(int delta) {
 void Shell::vertical(int delta) {
     touch();
     if(mediaOpen_){if(photoOpen() && !photo_.isNull()){photoRotation_=(photoRotation_+delta*90+360)%360;showPhoto();}return;}
+    qWarning() << "DIAG vertical" << delta << "message" << !message_.isEmpty() << "kind" << int(messageKind_) << "loading" << loading_ << "sel" << selection() << "entries" << entries().size() << "cat" << category_;
     if(!message_.isEmpty() || loading_)return;
     const int previous=selection();currentSelection()=std::clamp(selection()+delta,0,std::max(0,int(entries().size())-1));
+    qWarning() << "DIAG vertical after" << selection();
     if(previous!=selection())interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
 }
 void Shell::activate() {
     touch();
-    if(!message_.isEmpty()){interactionAudio_.play(InteractionAudio::Cue::Accept);message_.clear();emit changed();return;}
+    // A modal box's confirm is its own path: TRACED 0x00341870 plays snd_decide (Cue::Confirm) when the
+    // box's confirm button is pressed and then hides the label and the button. The other four kinds are
+    // dismissed, not confirmed; the firmware cue for that is UNPROVEN, so they keep this build's
+    // snd_system_ok acknowledgement (Cue::Accept).
+    if(messageKind_==MessageKind::Box) {
+        auto accepted=std::move(messageAccept_);
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        clearMessage();
+        if(accepted)accepted();
+        emit changed();
+        return;
+    }
+    if(!message_.isEmpty()){interactionAudio_.play(InteractionAudio::Cue::Accept);clearMessage();emit changed();return;}
     if(mediaOpen_){togglePlayback();return;}
     if(entries().isEmpty() || loading_)return;
     const auto entry=entries()[selection()];
@@ -1385,7 +1445,7 @@ void Shell::activate() {
         }
         if(entry.setting.startsWith("host/")) { // the computer's own settings, written straight to the host
             const bool ok=entry.setting=="host/volume"?host::setMasterVolume(entry.option.toInt()):host::setMasterMuted(entry.option.toBool());
-            if(!ok)message_="The system volume could not be changed.";else if(!pages_.isEmpty())pages_.removeLast();
+            if(!ok)showMessage("The system volume could not be changed.",MessageKind::Page);else if(!pages_.isEmpty())pages_.removeLast();
             break;
         }
         if(preferences_.setValue(entry.setting,entry.option) && !pages_.isEmpty())pages_.removeLast();break;
@@ -1395,9 +1455,11 @@ void Shell::activate() {
     case Action::Wallpaper:emit requestWallpaper();break;
     case Action::Theme:emit requestTheme();break;
     case Action::Information: {
+        // System Information, the connection status list and the output pages are D5 information pages:
+        // the same titled frame with Key: value rows, no dialog chrome (audit/DIALOGS-FIRMWARE.md 2.5).
         const host::Label label=[this](const QString& id,const QString& fallback){return assets_.text("sysconf_plugin",id,fallback);};
-        message_=entry.value=="host:network"?host::networkStatus(label):entry.value=="host:display"?host::displayOutput():entry.value=="host:audio"?host::audioOutput():
-            entry.value.isEmpty()?host::systemInformation(renderer_,label,preferences_.value("system/name").toString()):entry.value;break;
+        showMessage(entry.value=="host:network"?host::networkStatus(label):entry.value=="host:display"?host::displayOutput():entry.value=="host:audio"?host::audioOutput():
+            entry.value.isEmpty()?host::systemInformation(renderer_,label,preferences_.value("system/name").toString()):entry.value,MessageKind::Info);break;
     }
     case Action::Library: {
         // The Video column's Continue Watching row: a page built from this shell's own resume points, not a
@@ -1433,7 +1495,7 @@ void Shell::activate() {
     case Action::InstallSteam: {
         // Steam owns the download: opening steam://install/<id> asks the client to install it.
         if(!QDesktopServices::openUrl(QUrl(SteamOwned::installUrl(entry.value))))
-            message_=entry.title+"\n\nSteam could not be asked to install this game.";
+            showMessage(entry.title,"Steam could not be asked to install this game.",MessageKind::Page);
         else {
             // Picking up a finished download: rescan once after a while so the row moves from the
             // Not Installed folder to a launchable inline title without a manual F5. The delay can
@@ -1446,14 +1508,16 @@ void Shell::activate() {
     }
     case Action::LaunchApp: {
         const auto app=std::find_if(contentApps_.cbegin(),contentApps_.cend(),[&](const auto& a){return a.id==entry.value;});
+        // A registration this build cannot resolve is its own guard, with no OS error to report, so it
+        // stays the plain titled page. A launch that fails after that has already raised startTracked's
+        // error-code page carrying the OS's own reason; overwriting it here would throw that away.
         if(app==contentApps_.cend() || !QFileInfo(app->executable).isFile())
-            message_=entry.title+"\n\nThis application could not be started.";
-        else if(!startTracked(app->executable,app->arguments,app->workingDirectory,entry.title))
-            message_=entry.title+"\n\nThis application could not be started.";
+            showMessage(entry.title,"This application could not be started.",MessageKind::Page);
+        else startTracked(app->executable,app->arguments,app->workingDirectory,entry.title);
         break;
     }
     case Action::OpenUrl:
-        if(!QDesktopServices::openUrl(QUrl(entry.value)))message_=entry.title+"\n\nThe application could not be opened.";
+        if(!QDesktopServices::openUrl(QUrl(entry.value)))showMessage(entry.title,"The application could not be opened.",MessageKind::Page);
         break;
     case Action::RefreshContent:refreshContent();break;
     case Action::RefreshFriends:refreshSteamFriends(true);break;
@@ -1496,9 +1560,9 @@ void Shell::activate() {
     case Action::Unavailable:
         // A Continue Watching row whose file has gone says why, instead of the generic line, which would be
         // false: the feature exists, the file does not.
-        message_=entry.id.startsWith("continue:") && !entry.detail.isEmpty()
-            ?entry.title+"\n\n"+entry.detail
-            :entry.title+"\n\nThis feature is not available in the native recreation yet.";
+        showMessage(entry.title,entry.id.startsWith("continue:") && !entry.detail.isEmpty()
+            ?entry.detail
+            :QObject::tr("This feature is not available in the native recreation yet."),MessageKind::Page);
         break;
     }
     emit changed();
@@ -1510,7 +1574,7 @@ void Shell::activate() {
 void Shell::psTapped() {
     if(psMenu_) { psMenuClose(); return; }
     // Bring the XMB back over whatever the user was doing; the indicator itself is drawn by the view.
-    message_.clear();status_.clear();
+    clearMessage();status_.clear();
     emit psTapIndicator();
     emit changed();
 }
@@ -1556,14 +1620,14 @@ void Shell::psMenuActivate() {
             if(!game_->waitForFinished(3000))game_->kill();
             qInfo().noquote()<<"shell: quit game requested from the PS menu";
         }
-        message_=gameTitle_+"\n\n"+QObject::tr("The game was closed.");
+        showMessage(gameTitle_,QObject::tr("The game was closed."),MessageKind::Page);
         psMenu_=false;
         emit changed();
         return;
     }
     // The console powers the controller off itself; a Bluetooth/USB pad on a PC is owned by Windows, so
     // say so instead of pretending.
-    message_=QObject::tr("Turn Off the Controller")+"\n\n"+QObject::tr("A controller connected to this PC is managed by Windows and stays on. Disconnect or power it off from the system.");
+    showMessage(QObject::tr("Turn Off the Controller"),QObject::tr("A controller connected to this PC is managed by Windows and stays on. Disconnect or power it off from the system."),MessageKind::Page);
     psMenu_=false;
     emit changed();
 }
@@ -1733,12 +1797,17 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     }
-    // Forget this row's remembered position and rebuild the page it was listed on. The entry itself is a
-    // copy taken above, so it stays valid across the reset and the rebuild.
+    // Forget this row's remembered position and rebuild the page it was listed on. Removing is a
+    // destructive change to this build's own state, so it asks first with the firmware's two-button box:
+    // buttons msg_ok/msg_cancel on Cross/Circle, snd_decide only when Cross accepts (TRACED 0x00341870).
+    // The body is this build's wording - no firmware string covers removing a resume point.
     case OptionCommand::RemoveResume: {
         resetOptions();
-        removeContinueEntry(entry.id.mid(QStringLiteral("continue:").size()),entry.title);
-        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        const auto id=entry.id,title=entry.title;
+        showConfirm(QObject::tr("Continue Watching"),
+            QObject::tr("Do you want to remove this title from Continue Watching?"),
+            [this,id,title]{removeContinueEntry(id.mid(QStringLiteral("continue:").size()),title);});
+        interactionAudio_.play(InteractionAudio::Cue::Options);
         emit changed();
         break;
     }
@@ -2045,10 +2114,18 @@ void Shell::chooseAudioTrack(int index) {
     emit changed();
 }
 void Shell::showEntryInformation(const Entry& entry) {
+    // The firmware's information page (D5; audit/DIALOGS-FIRMWARE.md 2.5) labels its rows with its own
+    // strings from explore_plugin_full: Format, Size, Created, Filmed, Resolution, Details, plus Unknown
+    // and "-" for values the system does not have. There is no firmware string for a filesystem path or
+    // for a "Kind", so the type goes in the Format row and the path is the one row marked native.
+    const auto label=[this](const char* key,const char* fallback){return assets_.text("explore_plugin_full",key,fallback);};
+    const QString unknown=label("msg_info_unknown","Unknown");
+    const auto row=[&label](const char* key,const char* fallback,const QString& value){
+        return label(key,fallback)+": "+value;};
     // A Download Management row already carries its own information page (State, Progress, the pause/
-    // resume note), so the panel shows that page rather than wrapping it in Kind/Detail/Value rows.
+    // resume note), so the panel shows that page rather than wrapping it in the generic rows.
     if(entry.id.startsWith("download:")) {
-        message_=entry.value;
+        showMessage(entry.value,MessageKind::Info);
         qInfo().noquote()<<"shell: options information title="<<entry.title<<"(download page)";
         return;
     }
@@ -2056,12 +2133,12 @@ void Shell::showEntryInformation(const Entry& entry) {
     // written, how long the title is, and - for a row whose file is gone - why it cannot be played.
     if(entry.id=="continue" || entry.id.startsWith("continue:")) {
         QStringList rows;
-        rows<<QObject::tr("Kind: ")+entryKind(entry);
+        rows<<row("msg_format","Format",entryKind(entry));
         if(entry.id=="continue") {
             rows<<QObject::tr("Items: %1").arg(rememberedResumeCount());
             rows<<QObject::tr("Note: a position is kept only while a title is half-watched, and a finished title is removed.");
         } else {
-            if(!entry.value.isEmpty())rows<<QObject::tr("Path: ")+QDir::toNativeSeparators(entry.value);
+            if(!entry.value.isEmpty())rows<<QStringLiteral("Path (native): ")+QDir::toNativeSeparators(entry.value);
             const auto record=resumeMap(preferences_.value("media/resume").toString())
                 .value(entry.id.mid(QStringLiteral("continue:").size())).toObject();
             if(!record.isEmpty()) {
@@ -2069,25 +2146,41 @@ void Shell::showEntryInformation(const Entry& entry) {
                 if(record.value("dur").toDouble(0)>0)
                     rows<<QObject::tr("Duration: %1").arg(MediaControls::formatTime(qint64(record.value("dur").toDouble(0))));
                 const auto at=QDateTime::fromSecsSinceEpoch(qint64(record.value("at").toDouble(0)));
-                if(at.isValid())rows<<QObject::tr("Recorded: ")+at.toString("yyyy/MM/dd HH:mm");
+                if(at.isValid())rows<<row("msg_created_date_time","Created",at.toString("yyyy/MM/dd HH:mm"));
                 rows<<QObject::tr("Remembered as: %1").arg(entry.id.mid(QStringLiteral("continue:").size()));
             }
             rows<<QObject::tr("State: ")+(QFileInfo::exists(entry.value)
                 ?QObject::tr("the file is on disk and resumes at this position")
                 :QObject::tr("the file is no longer on disk; Triangle removes this row"));
         }
-        message_=entry.title+"\n\n"+rows.join('\n');
+        showMessage(entry.title,rows.join('\n'),MessageKind::Info);
         qInfo().noquote()<<"shell: options information title="<<entry.title<<"rows="<<rows.size()<<"(continue watching)";
         return;
     }
     QStringList rows;
-    rows<<QObject::tr("Kind: ")+entryKind(entry);
-    if(!entry.detail.isEmpty())rows<<QObject::tr("Detail: ")+entry.detail;
+    rows<<row("msg_format","Format",entryKind(entry));
+    // A file's own facts come from the filesystem, which is the same source the console reads a Size and
+    // a Created from. Anything this build cannot know stays Unknown rather than being left out, which is
+    // what the firmware's own msg_info_unknown is for.
+    const QFileInfo file(entry.value);
+    const bool onDisk=entry.action==Action::File && !entry.value.isEmpty() && file.isFile();
+    rows<<row("msg_size","Size",onDisk?downloadSize(file.size()):unknown);
+    rows<<row("msg_created_date_time","Created",onDisk?file.lastModified().toString("yyyy/MM/dd HH:mm"):unknown);
+    if(entry.action==Action::File) {
+        // Resolution belongs to the media the console reads it from. A still image's size is in its header,
+        // so it is read without decoding the picture; a video's is not available to this build.
+        QString resolution=unknown;
+        if(categories_[category_].id=="photo") {
+            QImageReader reader(entry.value);
+            if(reader.canRead()){const auto size=reader.size();if(size.isValid())resolution=QStringLiteral("%1 x %2").arg(size.width()).arg(size.height());}
+        }
+        rows<<row("msg_resolution","Resolution",resolution);
+    }
+    if(!entry.detail.isEmpty())rows<<row("msg_info_detail","Details",entry.detail);
     if(entry.action==Action::Folder || entry.action==Action::File || entry.action==Action::Library)
-        rows<<QObject::tr("Path: ")+QDir::toNativeSeparators(entry.value);
-    else if(!entry.value.isEmpty())rows<<QObject::tr("Value: ")+entry.value;
-    // Title, blank line, then "Key: value" rows: the existing information-page layout detects this shape.
-    message_=entry.title+"\n\n"+rows.join('\n');
+        rows<<QStringLiteral("Path (native): ")+QDir::toNativeSeparators(entry.value);
+    // Title, blank line, then "Key: value" rows: the information page's own shape.
+    showMessage(entry.title,rows.join('\n'),MessageKind::Info);
     qInfo().noquote()<<"shell: options information title="<<entry.title<<"rows="<<rows.size();
 }
 void Shell::sortPageByName(bool ascending) {
@@ -2108,7 +2201,10 @@ void Shell::sortPageByName(bool ascending) {
 void Shell::back() {
     touch();
     if(!message_.isEmpty() || mediaOpen_ || !pages_.isEmpty())interactionAudio_.play(InteractionAudio::Cue::Back);
-    if(!message_.isEmpty())message_.clear();
+    // Circle dismisses any surface; on a box it is the cancel button, so the accepted action is dropped
+    // with the message (clearMessage forgets it). snd_cancel (Cue::Back) is the obvious cancel cue but is
+    // UNPROVEN for a dialog - nothing local ties it to one.
+    if(!message_.isEmpty())clearMessage();
     else if(mediaOpen_){
         // Leaving playback remembers where it was, so reopening resumes there. Ten seconds in and
         // fifteen from the end are not worth remembering on long media; short clips use a tenth.
@@ -2134,7 +2230,7 @@ void Shell::chooseLibrary(const QString& folder) {
     if(preferences_.setValue("library/"+categories_[category_].id,folder)){openDirectory(folder);emit changed();}
 }
 void Shell::openDirectory(const QString& path) {
-    if(pages_.size()>=32){message_="The maximum folder depth has been reached.";return;}
+    if(pages_.size()>=32){showMessage("The maximum folder depth has been reached.",MessageKind::Page);return;}
     Page page;page.title=QFileInfo(path).fileName();page.directory=path;
     const QString kind=categories_[category_].id;
     pages_.push_back(std::move(page));
@@ -2149,7 +2245,7 @@ void Shell::openFile(const Entry& entry) {
         connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,request]{
             watcher->deleteLater();if(request!=photoRequest_ || !mediaOpen_)return;
             loading_=false;photo_=watcher->result();
-            if(photo_.isNull()){slideshow_.stop();mediaOpen_=false;message_="This image could not be opened.";}else showPhoto();
+            if(photo_.isNull()){slideshow_.stop();mediaOpen_=false;showMessage("This image could not be opened.",MessageKind::Page);}else showPhoto();
             emit changed();
         });
         watcher->setFuture(QtConcurrent::run([path=entry.value]{
@@ -2325,12 +2421,14 @@ QVector<Entry> Shell::continueWatchingRows() const {
     return rows;
 }
 void Shell::openContinueWatching() {
-    if(pages_.size()>=32){message_=QObject::tr("The maximum folder depth has been reached.");return;}
+    if(pages_.size()>=32){showMessage(QObject::tr("The maximum folder depth has been reached."),MessageKind::Page);return;}
     auto rows=continueWatchingRows();
     const QString title=QObject::tr("Continue Watching");
     if(rows.isEmpty()) {
         qInfo().noquote()<<"continue watching: nothing to continue";
-        message_=title+"\n\n"+QObject::tr("Nothing to continue.");
+        // The firmware's empty-list line, drawn as a list row rather than as a dialog (D3).
+        showMessage(assets_.text("explore_plugin_full","msg_error_no_content","There are no content items."),MessageKind::Inline);
+        emit changed();
         return;
     }
     qInfo().noquote()<<QString("continue watching: page opened with %1 row(s)").arg(rows.size());
@@ -2345,7 +2443,8 @@ void Shell::reloadContinueWatching() {
     if(rows.isEmpty()) {
         pages_.removeLast();
         qInfo().noquote()<<"continue watching: the list is empty; the page closed";
-        message_=QObject::tr("Continue Watching")+"\n\n"+QObject::tr("Nothing to continue.");
+        showMessage(assets_.text("explore_plugin_full","msg_error_no_content","There are no content items."),MessageKind::Inline);
+        emit changed();
         return;
     }
     auto& page=pages_.last();
@@ -2388,21 +2487,21 @@ void Shell::startQueuedMedia() {
 void Shell::advanceMedia(bool failed,const QString& error) {
     if(jellyfinQueue_) {
         finishJellyfinPlayback(!failed);
-        if(failed){++mediaRequest_;jellyfinRequest_=0;loading_=false;player_->stop();status_="Playback stopped";message_="Jellyfin\n\nThis media could not be played. Check the server and its transcoding support.";emit changed();return;}
+        if(failed){++mediaRequest_;jellyfinRequest_=0;loading_=false;player_->stop();status_="Playback stopped";showMessage("Jellyfin","This media could not be played. Check the server and its transcoding support.",MessageKind::Page);emit changed();return;}
     }
     if(mediaQueue_.empty())return;
     if(failed) {
         if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: rejected"<<mediaTitle_<<error;
         if(++mediaFailures_>=mediaQueue_.items().size()) {
             ++mediaRequest_;loading_=false;player_->stop();
-            message_="No playable files remain in this queue.\n\n"+error;status_="Playback stopped";emit changed();return;
+            showMessage("No playable files remain in this queue.",error,MessageKind::Page);status_="Playback stopped";emit changed();return;
         }
     } else mediaFailures_=0;
     // Errors skip Repeat One; otherwise a broken file could retry forever.
     const int next=mediaQueue_.next(!failed);
     if(next<0) {
         ++mediaRequest_;loading_=false;player_->stop();status_="End of queue";
-        if(failed)message_="This file could not be played.\n\n"+error;
+        if(failed)showMessage("This file could not be played.",error,MessageKind::Page);
         if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: stopped at end";
         emit changed();return;
     }
@@ -2471,7 +2570,7 @@ void Shell::loadTheme() {
     interactionAudio_.setThemeSounds({}); // switching to Original or a failed theme clears previous overrides
     if(path.isEmpty())return;
     QString error;const auto p3t=P3t::load(path,&error);
-    if(p3t.isNull()){message_=QFileInfo(path).fileName()+"\n\n"+error;qWarning().noquote()<<"theme:"<<path<<error;return;}
+    if(p3t.isNull()){showMessage(QFileInfo(path).fileName(),error,MessageKind::Page);qWarning().noquote()<<"theme:"<<path<<error;return;}
     theme_.name=p3t.name().isEmpty()?QFileInfo(path).completeBaseName():p3t.name();
     theme_.background=p3t.background();theme_.icons=p3t.icons();
     interactionAudio_.setThemeSounds(p3t.sounds());
