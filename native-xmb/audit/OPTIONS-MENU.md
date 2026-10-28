@@ -245,3 +245,272 @@ Not touched: `settings_menu.cpp`, `preferences.cpp`, `INFO-BAR.md` (another agen
 verification harness.
 
 **Note (2026-10-27):** Continue Watching is now the first row of the Video column, so the repro scripts that say 9 LEFT, 4 RIGHT, ENTER reach Video Library only with one extra DOWN before ENTER. Those runs were captured before the row existed; the evidence in this file is otherwise unchanged.
+
+---
+
+## 10. Phase 3.2 design - Display All, Copy/Move, Delete
+
+Status: **design only**, 2026-10-27. No code from this section is in the tree: the panel lives in
+`shell.cpp`, which the Phase 1 (Jellyfin) session owns during this pass. Everything below is written so
+it can be applied as a hunk; the parts that touch `shell.h` are listed as declarations in 10.5.
+
+Where this section disagrees with section 3's "deliberately absent" bullets, this section wins:
+Display All becomes a *conditional* row (never present on today's pages), and Copy/Move/Delete become
+real actions on the configured local libraries. Everything else in that list stays absent (10.7).
+
+### 10.1 Shape: the panel, not a modal, not a new surface
+
+The firmware shows Delete's confirmation as a dialog. This build has no modal widget by design (a
+modal would stop `pollController` and the XMB behind it), so the confirmation is a **second level of
+the existing options panel** - the same mechanism `Sort By` already uses: push the current list onto
+`optionsParent_`, set `optionsNested_` and `optionsTitle_`, and Circle steps back to the item list.
+Nothing in `view.cpp` changes; the panel already draws a heading and a note line.
+
+The transfer itself needs a surface that survives the panel closing and blocks a second transfer. It
+gets a **page** (`Page::transfer`), like the Jellyfin sign-in and the download queue: rows are
+ordinary `Entry`s, Cross/Circle work through the normal path, and the capture sidecar can assert on
+`pageKind() == "transfer"`. The page repaints from a 100 ms `QTimer` that reads the transfer state; no
+signal flood from the worker.
+
+### 10.2 Display All
+
+The firmware's `Display All` toggles a list between "grouped" and "every row". It is honest only when
+something is actually grouped or hidden. This build never groups or hides rows on a folder page: a
+page is the folder's entries plus nothing else (`openDirectory()` -> `MediaLibrary::scan()` ->
+`Page::entries`).
+
+Design: **no Display All row on a folder page today.** The row is added only when a page carries a
+group/filter state, and then it does exactly one thing: rebuild `Page::entries` from the unfiltered
+scan (`refreshDirectory()` with a cleared filter) and put the previously selected row back under the
+cursor. The rule for the row:
+
+```
+shown only when pages_.last().filtered is true     (new Page field, default false)
+label "Display All"
+Cross -> pages_.last().filtered = false; refreshDirectory(); restore selection by id
+```
+
+Until a surface sets `filtered` (a future Group Content / by-collection view), the row must not be
+offered: a no-op menu entry is worse than an absent one, and the section 3 note already says why.
+
+### 10.3 Copy and Move
+
+**Scope (the whole honesty of these two rows).** Both act on rows of a page whose `Page::directory` is
+non-empty and whose canonical path is inside one of the three configured media libraries
+(`library/photo`, `library/music`, `library/video`). Nothing else can carry them:
+
+- a Jellyfin page, Steam folder, Steam Store page, download page and Continue Watching page have no
+  `Page::directory`, so they inherit no Copy/Move/Delete row;
+- a row whose file has gone since the page was scanned (a stale page) is refused by the pre-flight
+  below, not attempted;
+- a path outside the libraries (a hand-edited library entry, a symlink pointing out) is refused.
+
+Copy copies a file or a folder; Move renames in place when source and destination are on the same
+volume and falls back to copy-then-delete when they are not. A folder copy is recursive with the
+bounds in 10.6; a folder move on one volume is one `QFile::rename`.
+
+**Destination.** After Cross on `Copy`/`Move`, the panel becomes a destination list (`optionsNested_`,
+heading `Copy "<name>" to` / `Move "<name>" to`):
+
+| row | destination |
+|---|---|
+| `<parent folder name>` | the page's own parent folder (the "here" option; refuses when the row is already in it) |
+| `Photo Library` / `Music Library` / `Video Library` | each *configured* library root for this column's media kind, labelled with its folder name |
+| `Choose Folder...` | the existing native folder dialog (`emit requestLibrary()`, main.cpp's QFileDialog), then start |
+| `Cancel` | closes the submenu |
+
+A destination is refused (disabled row with `note`) when: it does not exist; it is the source; it is
+inside the source; the destination path already exists; free space is below the plan's total + 5%.
+
+**Transfer page.** `Page{title = "Copying \"<name>\"", transfer = true, entries = {progress, current, cancel}}`:
+
+```
+row 0  title "42%  of 1.2 GB"          (updated by the timer)
+row 1  title "<current file name>"     (detail = destination folder)
+row 2  title "Cancel"                  (Cross sets the cancel flag; row 1 shows "Cancelling...")
+```
+
+The worker is `QtConcurrent::run` (Qt6::Concurrent is already linked and used by `MediaLibrary`) over a
+plan built on the UI thread. It copies in 1 MiB blocks so Cancel is honoured inside a large file, not
+only between files. Progress is published through atomics (`bytesDone`, `filesDone`, `filesTotal`,
+`currentFile`) that the timer reads; the page's title is regenerated from them and `touch()` repaints.
+
+On completion the page closes (pop), `refreshDirectory()` runs, and a notification reports
+`Copied <name>` / `Moved <name>` with the file count. On failure the page closes with the panel's
+`message_`-style information page naming the step and the path that failed, and the destination tree
+the operation created is removed (10.6 rule 8).
+
+On cancel: the worker stops at the next 1 MiB boundary, removes the destination file it was writing,
+removes the destination tree it created, then the page closes with `Copy cancelled` and a log line
+listing what was removed. A move never deletes a source file before its destination copy exists and
+matches in size, so a cancelled move leaves the source complete.
+
+### 10.4 Delete
+
+Delete is offered on the same scope as Copy/Move (10.3), and refuses rather than guesses:
+
+- a **file**: deleted with `QFile::remove()` after the confirmation;
+- a **folder**: deleted only when it is empty (`QDir::removeRecursively()` on an empty directory, or
+  `QDir::rmdir`), otherwise the row is listed disabled with the note "This folder is not empty." - no
+  recursive delete from a couch remote in this pass (10.7);
+- a row with no path, or a path outside the libraries: no Delete row at all.
+
+Confirmation is the panel's second level (10.1):
+
+```
+heading  Delete "<name>"?
+row 0    Delete
+row 1    Cancel
+note     "This deletes the file from the disk. It cannot be undone."
+```
+
+Cross on `Delete` closes the panel, performs the removal, clears the file's resume point
+(`clearResumePosition(path)` so Continue Watching cannot point at a ghost), rescans the page, and
+notifies `Deleted <name>`. A failure keeps the row, reports the OS reason (`QFile::errorString`) and
+does not rescan. Cancel returns to the item list, then Circle closes.
+
+### 10.5 Data model and state (all in `shell.h` / `shell.cpp`)
+
+`shell.h`:
+
+```cpp
+enum class OptionCommand { /* existing */ ...,
+    // A folder page that hides nothing gets no Display All row; the command exists for the page that
+    // eventually groups rows (10.2). Copy/Move/Delete are per-row; the *Confirm/Sort* pattern is reused.
+    DisplayAll, CopyMenu, MoveMenu, DeleteMenu,
+    CopyTo, MoveTo,           // rows on the destination submenu; `MenuOption::value` = destination path
+    CopyCancel,               // the transfer page's Cancel row
+    DeleteConfirm };
+
+struct MenuOption { /* existing fields */ QString value; };  // one added field: the destination path
+
+enum class TransferMode { Copy, Move };
+struct TransferPlan {
+    QString source, destination;                 // absolute, canonical, both inside a library
+    QVector<QPair<QString,QString>> files;       // source -> destination, in walk order
+    quint64 totalBytes = 0;
+    TransferMode mode = TransferMode::Copy;
+    bool sameVolume = false;
+};
+struct TransferState {
+    TransferPlan plan;
+    quint64 bytesDone = 0;
+    int filesDone = 0, filesFailed = 0;
+    QString currentFile, error;
+    bool running = false, cancelled = false, move = false;
+    std::shared_ptr<std::atomic_bool> cancel;    // the worker's only way to be stopped
+};
+```
+
+`shell.h` private additions:
+
+```cpp
+    // ---- Options: list actions (Phase 3.2, audit/OPTIONS-MENU.md section 10) ----
+    void buildCopyMoveMenu(bool move);      // the destination submenu
+    void startTransfer(const QString& destination, bool move);
+    void cancelTransfer();
+    bool transferPageOpen() const;
+    void refreshTransferPage();             // the 100 ms timer body
+    bool libraryScopeFor(const QString& path, QString* root) const;  // 10.6 rule 1
+    bool planTransfer(const QString& source, const QString& destination, bool move,
+                      TransferPlan& plan, QString& reason) const;
+    void finishTransfer(bool ok);
+    void deleteEntry(const Entry& entry, bool confirmed);
+    Page* transferPage_ = nullptr;          // points into pages_ while the page is up
+    TransferState transfer_;
+    QTimer transferTimer_;
+```
+
+`Page` gains `bool transfer = false;` and `bool filtered = false;` (the latter reserved for 10.2).
+
+No new signals. `pageKind()` gains `if (page.transfer) return "transfer";` so the capture sidecar can
+assert the transfer state without reading pixels.
+
+### 10.6 Writes-on-disk safety rules
+
+These are the rules the implementation must satisfy, in the order they are checked. They are the
+reason several firmware rows stay absent rather than being approximated.
+
+1. **Scope by configuration.** A path is actionable only when `QFileInfo(path).canonicalFilePath()`
+   is a strict prefix-match of one of the configured `library/<kind>` roots (compared after
+   `QDir::cleanPath`, case-insensitively on Windows, with a separator boundary so `C:\media2` is not
+   inside `C:\media`). A stale page or a hand-edited library therefore cannot widen the scope.
+2. **Never follow a link.** Refuse a source or destination that is a symlink or a Windows reparse
+   point (`FILE_ATTRIBUTE_REPARSE_POINT`), and refuse to delete a directory that is a mount point
+   (`QStorageInfo::root()`). Links are how a "copy" turns into a write outside the library.
+3. **Never overwrite.** The destination must not exist for a copy or a move. There is no merge and no
+   replace in this pass; the firmware's own copy dialog also refuses an existing target.
+4. **Never write outside the libraries.** The destination must satisfy rule 1 as well - Copy/Move is
+   a library-to-library action, not a file manager.
+5. **Refuse degenerate pairs.** source == destination, destination inside source (folder), source
+   inside destination.
+6. **Bound before writing.** At most 5000 files, at most 8 levels below the source, a known total size
+   (every file's size readable), and `QStorageInfo(destination).bytesAvailable()` at least the total
+   plus 5%. A plan that fails a bound is refused before anything is created.
+7. **The source is sacred until the destination is complete.** A copy writes only the destination. A
+   move renames on one volume; across volumes it copies each file, verifies the byte size, and only
+   then removes that source file. The source tree is removed bottom-up, empty-directory only.
+8. **Cancel removes what this operation created.** The destination file in flight and the destination
+   tree are removed; the source is untouched. A cleanup that fails is logged with the exact path, so
+   an orphan is never silent.
+9. **No recursive delete** (10.4): an empty folder only. Deleting a media tree from a TV remote needs a
+   stronger confirmation model than the panel has today, and a mistake is unrecoverable.
+10. **State follows the disk.** After any successful write: `refreshDirectory()`, and for a delete or a
+    move-away, `clearResumePosition(source)` so Continue Watching cannot offer a file that is gone.
+11. **Only Qt file APIs, no shell.** `QFile`, `QDir`, `QFileInfo`, `QStorageInfo`; no `cmd`, no
+    `system()`, no string-built command line. Paths are logged; file contents never are.
+12. **One transfer at a time.** `transfer_.running` guards the entry point; a second Copy/Move while
+    one runs is refused with "A transfer is already running."
+
+### 10.7 Firmware rows that must stay absent
+
+| row | why it is not offered |
+|---|---|
+| `Display All` | nothing on a folder page is grouped or hidden (10.2); it returns only with a grouping view |
+| `Copy Multiple`, `Delete Multiple` | there is no multi-select model in the XMB (one focused row), and inventing one is a new input surface |
+| `Group Content` | no groups exist; the firmware's grouping is a plugin feature with no native store |
+| `Add to Playlist` | no playlist store exists (the definition's playlist views carry no titles and this build has no playlist index) |
+| `Eject Disc` | no optical drive integration, and none is planned (PHASES section 6.5) |
+| `Copy to USB Device` / device rows | no removable-device enumeration; the destination list is limited to configured library folders and the native folder dialog |
+| `Rename` / `Properties` | the firmware's item actions do not include them; `Information` already shows the path and kind |
+| `Upload` (photo) / `Register` / `Publish` | no service backend; the Network column's honesty rule applies |
+
+Each absent row is documented here rather than rendered inert, because a disabled menu row that can
+never become enabled is noise. (The panel does list disabled rows where the reason is *temporary* -
+e.g. "This folder is not empty" - which is a different case.)
+
+### 10.8 Verification plan for the hunk (not run - no code)
+
+Fixture: a scratch copy of the existing video library (`out/native-reference/video-library`) with
+`Movies`, `Shows`, `Top Level Clip.mp4`, plus a 200 MB synthetic file so Cancel is observable.
+
+| check | script | assertion |
+|---|---|---|
+| panel on a file row | open Video Library, Triangle | rows `Play | Information | Sort By | Copy | Move | Delete | Close` |
+| no rows off a library page | Game column root, Triangle | no Copy/Move/Delete |
+| delete confirms, cancels | Triangle, Delete, Cancel | the panel returns to the item list; file still on disk |
+| delete removes | Triangle, Delete, Delete | file gone, page rescanned, notification, resume point cleared |
+| copy same volume | Triangle, Copy, choose parent/library | file at destination, source intact, notification, page rescanned |
+| copy cancel | Triangle, Copy, start, Cancel after 10% | destination tree removed, source intact, log says what was removed |
+| move across volumes | Triangle, Move, other library on another drive | source gone only after the copy completes; byte sizes equal |
+| destination exists | copy onto an existing name | row disabled with the reason; nothing written |
+| outside scope | a page whose library points at a junction | no Copy/Move/Delete rows; log line names the refusal |
+| one at a time | start a copy, Triangle again | "A transfer is already running." |
+
+Named states to add afterwards (Phase 5.1): `transfer-running`, `transfer-cancelled`,
+`delete-confirm`, with `pageKind` assertions and the existing PSNR self-baseline.
+
+### 10.9 Files this design would touch
+
+- `native-xmb/src/shell.h`: `OptionCommand` additions, `MenuOption::value`, `TransferMode`,
+  `TransferPlan`, `TransferState`, `Page::transfer`/`Page::filtered`, the private helpers and the timer.
+- `native-xmb/src/shell.cpp`: `buildOptions` (the new rows under their conditions),
+  `optionsActivate` (the new commands), `buildCopyMoveMenu`, `startTransfer`, `cancelTransfer`,
+  `refreshTransferPage`, `finishTransfer`, `planTransfer`, `libraryScopeFor`, `deleteEntry`,
+  `pageKind`/`valueText`/`subtitleText` for the transfer page, and the pre-flight/safety helpers.
+- `native-xmb/audit/OPTIONS-MENU.md`: this section.
+
+Not touched: `view.cpp`/`view.h` (the panel already draws headings and notes; the transfer page is an
+ordinary page), `main.cpp` (the existing `requestLibrary` dialog is the folder picker), the harness,
+`preferences.cpp` (a delete clears a resume point through the existing public API), and
+`CMakeLists.txt` (Qt6::Concurrent is already linked).
