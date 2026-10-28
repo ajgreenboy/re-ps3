@@ -819,3 +819,219 @@ measured.
 
 Not touched: any `native-xmb/src` file, `out/`, the verification harness, its thresholds or its
 references, and any git state.
+
+---
+
+# 11. Implementation pass, 2026-10-28 (appended)
+
+This section records what the native build now draws for the volume display (section 5), the video player
+control surface (section 3) and the XMB music control panel (section 4.2), every number that is still a
+**fit**, and the measurements taken from the built artefact. It was written from the code and the captures,
+after the code.
+
+Files touched: `native-xmb/src/view.cpp`, `native-xmb/src/view.h`, and this appendix. Nothing else -
+`shell.*`, `main.cpp`, `assets.*`, `dialogs.cpp`, `media_controls.*`, the harness, its thresholds and its
+stored references are unchanged. The build is `C:\dev\out\native-media\re-ps3-native.exe`.
+
+## 11.1 Surface C - the volume display
+
+`View::drawVolumeHud` (`view.h`: `volumeMeterSegments`, `volumeMeterFadeMs`). Firmware: one page, one paf
+`PhLevelMeter`, segment art `system_plugin:tex_default_lvmeter_on` / `_off` / `_focus` (20x40 each) over
+`tex_default_lvmeter_bg` (48x48), no caption, no percentage, no plate of its own, no border, fade 150 / delay
+0 (5.2-5.4).
+
+Implemented:
+
+- a row of ten 20x40 segments; lit = on, unlit = off, and the boundary segment (the one at the level) is the
+  one drawn with `_focus`;
+- the backing is `tex_default_lvmeter_bg`, nine-sliced at a 16 px inset, drawn over the segment row inflated
+  by 8 px;
+- everything the old HUD invented is gone: no `tex_infobar` at 0.12, no `QColor(0,0,0,20)` rounded plate, no
+  1 px `(255,255,255,90)` border, no `msg_volume_control` caption at 15 px, no `"%1%"` value at 19 px, no
+  196x6 track;
+- the fade-in is 150 ms with 0 delay (0x270a00 / 0x270a04), computed in `drawScene` from the change
+  timestamp; `MediaControls` still owns the visible window under it. That is the "150 ms fade on every
+  change; keep the current visible time" reading of 7.3, not a new timing scheme;
+- mute is a native-only state (the volume page has none, 5.3): the reported level is kept but no segment is
+  lit, so silence is drawn as silence instead of a second material;
+- if `tex_default_lvmeter_on` / `_off` / `_focus` / `_bg` do not decode, the exact pre-change 222x58 HUD is
+  drawn with one `qWarning`.
+
+Measured on `hud25.png` / `hud50.png` / `hud100.png`: lit segments **3 / 5 / 10** at 25 / 50 / 100 %; ten
+cells on a 20 px pitch at x 860..1060, ink rows 1011..1044 inside the 40 px band 1008..1048; backing
+footprint 853..1067 x 1001..1053 (the 48x48 tile nine-sliced; the code's rect is 852..1068 x 1000..1056).
+Diffed against the old reference, the meter band changes by 11,366 px and the old plate's band
+(1001..1221 x 76..131) changes by exactly 3,178 px - i.e. the invented plate is gone where it was.
+
+## 11.2 Surface A - the video player control surface
+
+`View::drawVideoTimeBar`, `View::drawTimeCells`, `View::drawVideoHelpStrip`.
+
+- progress: `tex_progress_bar` (30x20) nine-sliced as the track and `tex_progress_bar_in` as the played
+  portion, in `videoplayer_display_time_bar`'s rect, plus `tex_progress_bar_jump_indi` (20x12);
+- time: two groups of 16x16 cells (`videoplayer_display_playing_time_h1..c2` and `play_time_h1..c2`), one
+  glyph per cell, digits from `MediaControls::formatTime`; the playing group starts at the bar's left edge,
+  the duration group is right-aligned on the bar's right edge;
+- hint strip: six pairs, each an 86x30 `tex_cp_help_*` key icon plus the container's own string -
+  `msg_quit_playback`, `msg_play_with_icon` / `msg_pause_with_icon` (state), `msg_fast_r_with_icon`,
+  `msg_fast_f_with_icon`, `msg_prev_with_icon`, `msg_next_with_icon`;
+- the ASCII advice sentence no longer draws on the video player. It survives verbatim on the photo viewer
+  (surface D is out of this change) and on the audio player, whose 4 px bar and single time string are also
+  unchanged;
+- falling back, one logged line each: `tex_progress_bar`/`_in` missing -> the old flat 4 px bar plus the
+  single 23 px `MM:SS / MM:SS`; `tex_cp_help_*` missing -> the old sentence.
+
+Three fidelity facts found while wiring it:
+
+1. the three Progress objects (`..._bar_base`, `..._bar_playable_time`, `..._bar`) carry **no** image refs
+   (`unknownRef25/27/29 = 0xffff0000ffffffff`); `tex_progress_bar`/`_in` are container art the plugin
+   publishes at run time, so 3.4's mapping to those objects is the audit's CR reading, not an object field.
+2. the `_with_icon` strings end in a private-use gaiji after a space (`msg_play_with_icon` = "Play " U+F88F,
+   `msg_fast_r_with_icon` = "Fast Reverse " U+F893, `msg_next_with_icon` = "Next " U+F88B, ...). The strip
+   draws the key icon itself, so the trailing gaiji and space are stripped; drawn as-is they render as a
+   missing-glyph box.
+3. this container has no Back/Cancel string (3.6), so Circle's label is `msg_quit_playback` - which is what
+   Circle does on this player (it leaves playback).
+
+Measured on `player-chrome.png`: bar ink rows 944..956 across x 110..1809 (the 20 px band is 941..961);
+playing-time glyph cells at x 110/126/142/158/174 (16 px pitch) and the duration group's cells ending on
+1810 (ink 1732..1806); hint icons on rows 1026..1055, six slots at a 283.33 px pitch from x 110. Diffed
+against the stored (text-free) reference, the whole change is confined to y 815..1056; the band 500..640 is
+pixel-identical, so the video frame and the rest of the screen are untouched.
+
+## 11.3 Surface B2 - the XMB music control panel
+
+`View::drawMusicPanel` plus the panel state in `view.h` (`musicPanelOpen_`, `musicPanelFocus_`,
+`musicPanelEase_`, `musicPanelButtons`, `musicPanelFadeMs`, `musicPanelScale`).
+
+- plate: `tex_cp_panel` 72x72 nine-sliced at a 20 px inset, sized from the content box and scaled **1.3**
+  (0x270a54);
+- status planes (`control_play_status_group`): `tex_play_status` / `tex_pause_status` for the transport and
+  `tex_repeat_status` / `tex_1repeat_status` for repeat mode 2 / 1, `tex_shuffle_status` for shuffle. The
+  transport planes the shell has no state for (prev, next, searchb, searchf, stop) are not drawn rather than
+  fabricated - the template itself keeps all ten at `alphaScale=0` until the plugin publishes one (3.7);
+- `progress_bar_playing_time` 200x6, and `label_playing_time` at the size-10 fit, showing position /
+  duration;
+- seven buttons at 90x60 in the firmware's table order (`prev`, `next`, `pause`, `stop`, `repeat`, `shuffle`,
+  `volume`), each icon from `explore_plugin_full`, with the shared `tex_cp_focus` under the focused button;
+- open on Triangle over a local audio item; fade **150 ms, delay 0**; the close uses the same 150 because the
+  container carries no animation at all (4.5);
+- the traced 150/100 move/size animation on the base (0x270a58 / 0x270a5c, alpha 1 at 0x270a50) is drawn as
+  the plate growing from its own size to 1.3x, upward from its resting bottom edge. The 100-unit delay is
+  dropped: `PafEase` has no delay parameter and the unit is unproven (9.4);
+- while the panel is up, the audio player's own chrome (queue line, title, sentence, 4 px bar, time string)
+  fades out on the same ease, so the panel is not read through another surface's progress bar;
+- if the plate or any of the seven icons does not decode, the panel is not drawn and one `qWarning` says so.
+
+Measured on `music-panel.png` / `music-closed.png`: plate footprint 534..1384 x 774..999 (851x226; the code's
+rect is 850.2x226.2 at 534.9, 773.8); the status plane's rows 834..866; `label_playing_time` ink right-aligned
+to x 1275 on rows 838..860; the 200x6 bar on rows 868..874; the button row 901..961 with a 90 px pitch (the
+edge period). The fade trace (`XMB_MEDIA_TRACE=1`) runs 0.065 ... 0.949 over its 150 ms.
+
+## 11.4 Input changes (chrome only; behaviour kept)
+
+- **Triangle on a local audio item now opens/closes the panel** instead of cycling Repeat. This is the change
+  7.2 lists; Repeat keeps `R` and gains the panel's own Repeat button, so no binding was lost. Photo keeps
+  the old Triangle binding (it did nothing), video keeps the in-player options panel.
+- while open: Left/Right walk the seven buttons (pad and keyboard), Cross/Enter runs the focused one,
+  Circle/Escape and Triangle close it;
+- the buttons run the bindings the player already had: prev/next = `Shell::skipMedia`, pause =
+  `Shell::togglePlayback`, stop = `Shell::back()` (ends the session, which is what Stop does at the player
+  level), repeat = `Shell::cycleMediaRepeat`, shuffle = `Shell::toggleMediaShuffle`, volume = raise the
+  volume meter at the current level (no level change).
+
+## 11.5 Every number that is still a fit, and why
+
+| # | fitted value | firmware status | why it cannot be traced |
+|---|---|---|---|
+| 1 | volume meter rect: ten segments, 20 px pitch, x 860..1060, y 1008..1048 | rect and count are runtime (5.4) | the page is a single meter with zero geometry; paf's `PhLevelMeter` layout is in `vsh.elf` and not in the local decompile range (9.3) |
+| 2 | volume segment count **10** | not in the container; only `unknown24 = 4` is a candidate | 5.4, spec-only |
+| 3 | `_focus` = the boundary segment | which segment paf focuses is untraced | 5.4; the art set exists but the state assignment does not |
+| 4 | mute = no lit segment | the volume page has no mute state (5.3) | native-only state; drawn as silence, no new material |
+| 5 | video time-bar rect (110, 941, 1700, 20) | the Progress objects are zero-rect; 750x64 at x=250 is group-local | 3.5, 9.1; keeps this build's band at the texture's own 20 px height |
+| 6 | time digit size **19 px** inside the 16x16 cell | RCO `size=10` has no established px equivalent | 9.5; 19 px keeps the digit cap (about 0.82 x size - the 27 px clock measures a 22 px cap) inside a 16 px cell |
+| 7 | jump indicator at the played position | the object marks a jump/seek target | this build seeks instantaneously and has no scrub state, so the played position is the only position the bar can mark (3.5) |
+| 8 | hint strip: six 283.33 px slots from x 110, labels 19 px | object sizes and strings are FC, positions runtime | 3.2/3.4; the panel's own hint is one icon + the focused control's name |
+| 9 | L2/R2 icons carry the Left/Right seek bindings; Circle carries `msg_quit_playback` | the firmware seeks with L2/R2 and this container has no Back string | 3.4/3.6; the video container has no d-pad hint art |
+| 10 | music plate: content 630x150 + 12 px padding, x1.3, centred on x 960, bottom edge y 1000, content centred in the plate | plate/base size is runtime (4.2, 9.2) | paf sizes the base from its 72x72 image and the plugin scales it 1.3; neither the base size nor the anchor is in the container |
+| 11 | music panel internal layout: status left, label + bar right, buttons below | the tree gives sizes and cells, no positions | 4.2; the button cells are indices, the pixel pitch is the plugin's |
+| 12 | music panel's 100-unit move delay dropped | 0x270a5c = 100 | `PafEase` has no delay parameter and the unit is unproven (9.4) |
+| 13 | music progress art = `system_plugin:tex_default_progress_base` / `_slider` (24x20) | `progress_bar_playing_time` declares no image | same "paf's defaults live in system_plugin" rule as the level meter (5.2) |
+| 14 | shuffle badge derived from `Shell::mediaQueueSummary().contains("Shuffle")` | Shell state | `Shell` has no shuffle accessor and `shell.*` is outside this change's write fence |
+| 15 | music panel close fade 150 ms | the container has no animations (4.5) | no close time exists to trace |
+
+## 11.6 Verification
+
+Build: `native-xmb/build.ps1 -OutputDirectory C:\dev\out\native-media` - exit 0, no new warnings (the three
+C4996/C4189/C4456 warnings are pre-existing, at untouched lines 349/489/624).
+
+Canonical gate, run twice:
+
+    bun work/ab-layers.ts --capture --exe C:/dev/out/native-media/re-ps3-native.exe
+    frame 18.29/0.8342, top background 20.25/0.9363, category icon row 20.93/0.8990,
+    item label row 11.95/0.3925, clock text 11.39/0.4500, info bar 14.98/0.7639
+    PASS: 6/6 layers within budget   (every delta +0.00, both runs)
+
+Captures (pinned clocks, one token per 300 ms; data dirs under `C:\dev\out`):
+
+    volume  --script full,wait,wait,wait,VOLSET=25,wait,wait,grab=hud25.png,VOLSET=50,...  (25/50/100)
+    video   --data-dir <phase5/subtitle-data> --script full,wait x10,LEFT,LEFT,wait,wait,UP x18,wait,
+            DOWN,ENTER,wait,wait,ENTER,wait x6,ENTER,wait,LEFT,wait,wait,[TRIANGLE,wait,wait,]grab=...
+    music   --data-dir <library/music seed> --script full,wait x6,LEFT,wait,LEFT,wait,LEFT,wait,wait,
+            ENTER,wait x4,ENTER,wait x8,[TRIANGLE,wait,wait,]grab=...
+
+The video capture is paused at 0 ms of 20000 with sidecar cue 1 (`subtitleCue=1`,
+`subtitleFile=Cue Test.srt`); the music capture plays a 6000 ms local WAV at 3622 ms with the panel open
+(`shell: playback` / `media: music control panel opened`).
+
+Media-panel spec checks (geometry / size table above, measured on those frames):
+
+| surface | expected (firmware / code) | measured |
+|---|---|---|
+| volume segments | 10 x 20x40, lit 3/5/10 at 25/50/100 | 10 cells, 20 px pitch, lit 3 / 5 / 10 |
+| volume backing | 48x48 tile nine-sliced to 216x56 | 853..1067 x 1001..1053 |
+| volume caption/value/border/plate | none (5.3) | none; old plate band now empty |
+| video bar | 30x20 art in a 1700x20 band at 110,941 | ink 110..1809 x 944..956 |
+| video digit cells | 16x16 pitch, 5 glyphs per group | x 110/126/142/158/174 and 1732/1748/1764/1781/1796 |
+| video hint strip | 6 x 86x30 icons + labels, 283.33 pitch | icons on rows 1026..1055, ink from x 138 |
+| music plate | 850.2 x 226.2 at 534.9, 773.8 (1.3 scale) | 534..1384 x 774..999 |
+| music bar | 200x6 | rows 868..874, x 1075..1275 |
+| music buttons | 7 x 90x60, 90 px pitch | row 901..961, 90 px pitch |
+| music label | size-10 fit, right-aligned on the bar | ink 1135..1273 on rows 838..860 |
+
+Named states, `bun work/ab-layers.ts --states --exe C:/dev/out/native-media/re-ps3-native.exe`:
+**0/12 pass**, and that is not this change. A shared text-renderer change (src/text_renderer.cpp and
+src/font_raster.cpp, 2026-10-28 00:42) makes captures contain glyphs again, while every stored state
+reference under `out/native-reference/layers/` was saved between 00:03 and 00:06, i.e. text-free. The
+proof is `steam-game-root`, a state with no media surface: it now fails its frame at 27.59/0.9758 and its
+item column at 24.41/0.9581, and the 19,582 changed pixels sit on the clock and the label rows (630 touched
+columns, no other region). Before that text change the same suite scored **9/12**, and the three failures
+were: `xmb-volume-hud` (this surface: frame 33.64/0.9931, hud region 20.84/0.6585 - the reference holds the
+222x58 plate), `subtitle-cue` (chrome only: frame 28.83/0.9820, cue band inf/1.0000 - the subtitle drawing
+itself is untouched), and `video-options-panel`, which fails its own assertions on the two older builds as
+well (pre-existing: on `out/native-all` its panel log line never appears; on `out/native-phase3` it reaches
+depth 0 instead of 1 and expects the row order 'Sort By|Open|Copy|Delete|Information'). After the text change
+`subtitle-cue`'s cue band also differs (17.93/0.9321) because the reference contains no cue glyphs.
+
+The two media states' references therefore need the deliberate refresh the thresholds file describes
+(`--states --save-reference`), together with the other ten that the text change moved. **No reference was
+edited here**, as instructed.
+
+## 11.7 Not done, and why
+
+- **The panel-open cue.** 7.2 wants `Cue::Confirm` on open (firmware: `snd_system_ok`,
+  `explore_plugin_all.c:38936`). Two obstacles, both outside this change's write fence:
+  `InteractionAudio` is a private member of `Shell` with no cue entry point, and the mission's cue table maps
+  `Cue::Confirm` to `snd_decide` while `snd_system_ok` is `Cue::Accept` (`interaction_audio.h:12-15`), so
+  7.2's parenthetical "(= snd_system_ok in the native cue table)" is wrong. The one-line patch is a public
+  `void Shell::playCue(InteractionAudio::Cue cue) { interactionAudio_.play(cue); }` plus
+  `if(shell_.mediaAudioOnly()) shell_.playCue(InteractionAudio::Cue::Accept);` in `View::toggleMusicPanel()`.
+  The panel opens silently today and says so in its log line.
+- Surface D (photo viewer chrome), audio player B1 and the video control panel's 25-button matrix are not
+  part of this pass; the video player keeps the existing Triangle options panel for subtitles, audio tracks,
+  repeat and shuffle.
+- The audio player's own chrome (4 px bar, single time string, ASCII sentence) is deliberately unchanged, so
+  the only audio progress display the firmware provides here is the panel's `progress_bar_playing_time`.
+- Pre-existing, untouched: `Shell::mediaQueueSummary()` writes its separators as "A-circumflex middot"
+  (mojibake) - visible in the queue line of the video capture; and white hint labels over a bright video
+  frame have only the firmware's shadow to separate them from the picture.

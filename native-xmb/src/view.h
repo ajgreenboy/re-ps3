@@ -172,10 +172,15 @@ private:
     // ---- Couch volume: the PC's master volume, the pad's L2/R2, the Windows media keys, and the HUD ----
     // The firmware's own volume display is one page holding a single level meter (videoplayer_plugin.rco
     // videoplayer_volume_page / videoplayer_volume_level_meter, and the same pair in audioplayer_plugin.rco
-    // and explore_plugin_full.rco volume_page / volume_level_meter). Its paf projection is not recovered,
-    // so the native HUD's rect is fitted and borrows the information bar's material; the visibility clock is
-    // the MediaControls model (3 s visible, 250 ms fade) rather than a second timing scheme.
+    // and explore_plugin_full.rco volume_page / volume_level_meter). The meter is paf's PhLevelMeter, drawn
+    // from system_plugin.rco's default level-meter art - tex_default_lvmeter_on/_off/_focus, 20x40 segments,
+    // over tex_default_lvmeter_bg 48x48 - with no caption, no percentage, no plate and no border
+    // (audit/MEDIA-PANELS-FIRMWARE.md 5.2-5.4). The widget's rect and its segment count are NOT in any
+    // container, so both are FITS here; the fade is the traced 150 ms / 0 delay (explore_plugin.prx
+    // 0x270a00 / 0x270a04). MediaControls still owns the visible window.
     MediaControls volumeHud_;
+    static constexpr int volumeMeterSegments=10;              // FIT: audit 5.4, the count is spec-only
+    static constexpr double volumeMeterFadeMs=150.;           // FD: 0x270a00, delay 0 at 0x270a04
     int volumeLevel_=-1;             // last level Windows reported; -1 when the endpoint is unavailable
     bool volumeMuted_=false;         // Windows' endpoint mute state as last read
     int volumeStart_=-1;             // start-up level and mute state, put back by restoreMasterVolume()
@@ -193,6 +198,38 @@ private:
     void volumeApply(int percent,const QString& source);   // set, read back, log, show the HUD
     void pollVolumeRamp(float down,float up,qint64 now);   // held L2/R2 repeat, called from pollController
     void drawVolumeHud(QPainter& painter,double opacity);
+    // ---- Media panels, surfaces A and B (audit/MEDIA-PANELS-FIRMWARE.md) ------------------------------
+    // The firmware's player chrome, drawn from the containers' own objects. Every screen rect below is a
+    // FIT and is labelled as one in the code: the paf projection for these pages is a runtime value that
+    // no local container holds (audit 9.1, 9.2, 9.4), so only the object sizes, the texture sizes and the
+    // cell units are firmware facts.
+    // Surface A, the time bar: videoplayer_display_time_bar's Progress stack drawn with the container's
+    // progression pair tex_progress_bar / tex_progress_bar_in (30x20) plus the tex_progress_bar_jump_indi
+    // marker (20x12), and the 16x16 time-digit cells with the digits from MediaControls::formatTime.
+    void drawVideoTimeBar(QPainter& painter,qint64 position,qint64 duration);
+    void drawTimeCells(QPainter& painter,const QString& value,qreal edge,qreal top,bool rightAligned);
+    // Surface A, the direct-key hint: the eight tex_cp_help_* 86x30 icons paired with the container's own
+    // msg_*_with_icon strings, in place of the advice sentence this build wrote out in ASCII.
+    void drawVideoHelpStrip(QPainter& painter);
+    // Surface B2, the XMB music control panel (explore_plugin_full control_panel_page): tex_cp_panel 72x72
+    // scaled 1.3 (0x270a54), the 10 status planes, progress_bar_playing_time 200x6 with label_playing_time,
+    // and the 7-button group at 90x60 over the shared tex_cp_focus. Triangle opens it (audit 7.2); R keeps
+    // the Repeat binding. Fade in 150 ms with 0 delay; the traced 150/100 base move is the 1.0->1.3 scale.
+    void drawMusicPanel(QPainter& painter,double opacity);
+    bool mediaAudioOnly() const;          // a local audio item is playing: no video track, not a photo
+    void toggleMusicPanel();
+    void closeMusicPanel();
+    void musicPanelMove(int delta);
+    void musicPanelActivate();
+    static constexpr int musicPanelButtons=7;
+    static constexpr double musicPanelFadeMs=150.;    // FD: 0x270a00 (fade) / 0x270a04 (delay 0)
+    static constexpr double musicPanelScale=1.3;      // FD: 0x270a54
+    bool musicPanelOpen_=false;
+    int musicPanelFocus_=0;
+    PafEase musicPanelEase_;
+    // The shared label path for the three media panels: the same GL glyph atlas as the XMB, at the size the
+    // call site fits (RCO size=10 has no established pixel equivalent, audit 9.5).
+    void mediaPanelText(QPainter& painter,const QRectF& rect,const QString& value,int size,const QColor& colour,int flags);
     void zoomPhoto(int direction);
     void resetPhotoView();
     void panPhoto(int dx,int dy);
