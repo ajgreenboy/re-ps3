@@ -1373,3 +1373,177 @@ env     XMB_LOG=<run>\native.log XMB_DIALOG_LOG=1   (add XMB_AUDIO_LOG=1 for the
 runner  C:\dev\out\native-boxchoice\proofs.ps1
 ```
 
+---
+
+## 12. The depth-2 read-only table page (2026-10-28)
+
+Status: implemented in `src/dialogs.cpp` (a new draw path, its measured constants and a page-surface
+predicate) and one declaration in `src/view.h`. No other source file was edited. The page class is
+SETTINGS-FIRMWARE 12.2's: a title above a rule, a two-column table, a lower rule and the Back hint, with
+no focusable row, no info bar and no dim. Reference:
+`out/parity-references/page-network-status-list__original__day__1080p.png` (RPCS3 4.93, 1920x1080, one
+day pin), re-measured for this section. Route: Settings column, `Network Settings`, `Settings and
+Connection Status List`.
+
+### 12.1 Why this is a variant of Info and not a seventh MessageKind
+
+`MessageKind` is declared in `shell.h`, which this pass may not edit, so a new enum value was not
+available. The Info family already is the home for label/value lists (the D5 page), and the two share a
+frame: title, rule pair, rows, Back hint. The class is therefore **the Info family's second shape**,
+chosen in `dialogs.cpp` from the row that raised the message: the three host reports are
+`Action::Information` rows whose `Entry::value` is `host:network`, `host:display` or `host:audio`
+(`Shell::activate`, `shell.cpp`). The message text *is* the report, so keying on the row's own payload is
+not an inference from string content, and a fourth host payload would have to be added in two places
+(`shell.cpp`'s builder and the `hostReportTable` predicate) - stated as the residual in 12.6. Every other
+Information message - System Information, a download's info page, Continue Watching's - keeps the D5
+draw path unchanged, verified by capture (12.5).
+
+If the class must become an explicit kind later, the hunk is small but touches the shell: add `Table` to
+`enum class MessageKind` in `shell.h`, and in `Shell::activate`'s `Action::Information` branch pass
+`MessageKind::Table` (instead of `Info`) for the three `host:*` payloads; `drawMessageSurface` then routes
+`Table` to `drawMessageTablePage` and `hostReportTable` is deleted. That is not needed for the page to
+draw or to be scored.
+
+### 12.2 Measured geometry: the frame and the native page
+
+Method, the same the audit used: RGB -> Rec.709 luma; the rules as isolated full-width bright rows in
+the row profile; rows as ink runs (luma >= local background + 35..45) in the label and value windows;
+columns as the first/last ink column of each row's band. Native numbers are from the final build's
+capture, `out/parity/run-20261028-162332`, cross-checked by differencing the page against the identical
+frame with the page dismissed (the wallpaper wave cancels, so only the surface remains).
+
+| quantity | firmware frame | native page | delta |
+|---|---|---|---|
+| rule 1 | y 199, 1 px, flat (core 140.0 over 75.6 = white at 0.36) | y 199, 1 px, flat (151.4 over 93.2 = 0.359) | 0 px, alpha 0.00 |
+| rule 2 | y 879, 1 px, flat (134.6 over 64.7 = 0.365) | y 879, 1 px (138.5 over 72.6 = 0.362) | 0 px |
+| row 1 ink top | **291** | **291** | 0 |
+| row pitch | **40** exactly, 13 rows (291 -> 771) | **40** exactly, 9 rows (291 -> 611) | 0, count 9 vs 13 |
+| cap height | 18 px (descender rows 23-24) | 17-18 px | -1..0 |
+| label ink right | 938..940 (mode 939) | 937..941 (mode 939) | +-1 |
+| value ink left | 978..980 | 978..982 (digit/letter bearings) | +0..2 |
+| icon ink | x 109..149, y 154..189 (41 x 36) | x 109..149, y 154..188 | 0, -1 at the bottom |
+| title ink | x 164..574, y 167..190 | x 164..574, y 167..190 | **0** |
+| Back hint ink | x 1155..1240, y 897..916 | x 1155..1235, y 897..918 | x 0, +2 at the bottom |
+| focusable row / info bar / dim | none / absent (luma 0 at x 1300/1340/1700/1900 on y 100) / none | none / absent / none (page-dismissed difference: 0.00 mean on the background bands) | same |
+
+The constants are `kTable*` in `dialogs.cpp`; the comment there names the rect-to-ink arithmetic (the
+41 px icon rect puts the globe's 41 x 35 alpha bounds at 109..149 / 154..189; a VCenter row rect begins
+its cap ink 11 px below its top, so the first row's rect top is 280 for ink 291).
+
+Two numbers deserve their own note:
+
+- **The rule alpha is this page's own measurement (0.36), not the D4 page's 0.22.** The D4 value comes
+  from a 1262x800 window capture whose 1 px line lands on 0.66 of a pixel; the native-1080p frames of the
+  same family read 0.36 here and about 0.69 on the message page (`page-network-test-error`, 193 over 53
+  on the same boot). So the rule is not one alpha across the family: the table page carries the value its
+  own frame measures and the D4/D5 chrome keeps its 56/51.
+- **The table page keeps no analog clock.** The D4/D5 pages draw the clock face while the info bar's
+  plate is hidden; this page's frame has an empty top-right corner and the audit's 12.2 records luma 0
+  across the bar, so `drawMessageTablePage` draws its own header and rules and does not call
+  `drawPageChrome`.
+
+### 12.3 What the native draws, row by row
+
+The title is the report's own heading, taken as the first line. For the status list that is the
+firmware's `msg_netlist_current` ("Settings and Connection Status List"), resolved by
+`host::networkStatus` through the RCO - the same string the row carries. Each remaining line is a row:
+split at the first `": "` into label and value; a line with no `": "` (the adapter's own name, the audio
+endpoint's) starts at the value column, because the label column is labels only. Empty lines are the
+report's adapter separator and are not rows, so the grid stays unbroken. The grid is fixed from ink 291,
+never centred, and stops at the last row that fits above the 879 rule (15 rows: 291 + 14 x 40 = 851,
+ink bottom 868); the console's table is a fixed 13 rows and does not scroll. Rows are 22 px (the D5 row
+size) and the label/value rects are 3 px right and 1 px left of the measured ink edges, which is where
+the face's side bearings put them.
+
+The three host reports all take the class, which is what makes the display and audio pages share it at
+no extra cost: `Video Output Settings` becomes monitor rows (`<monitor>: 1920 x 1080, 240 Hz (primary)`)
+and `Audio Output Settings` an endpoint line plus `Volume: 25%` (both captured,
+`out/native-depth2/after-display.png` / `after-audio.png`). Their titles are host.cpp's own literals
+("Video Output", "Audio Output") rather than the firmware row titles - a host.cpp change, outside this
+pass (12.6).
+
+### 12.4 Region scores, gate and determinism
+
+Parity, `work/parity.ts --capture --score --state page-network-status-list`, same pins; before is the
+D5 info page (run `20261028-155145`, the pre-change build), after is the table page (run
+`20261028-162332`, the final build). `status rows` is content-different by construction and stays
+informative:
+
+| region | crop | before | after |
+|---|---|---|---|
+| frame | 0,0,1920,1080 | 16.84 dB / 0.8335 | **17.47 dB / 0.8641** |
+| status rows | 400,280,800,500 | 12.02 dB / 0.5804 | **12.52 dB / 0.6277** |
+| title rule | 80,150,1520,60 | 16.22 dB / 0.6867 | **22.16 dB / 0.9538** (budget 18.00 / 0.85, **PASS**) |
+
+`work/ab-compare.ts` on the same crops reproduces these numbers exactly. Tier A stays page-scoped
+(`depth 1`, row `net_netlist`), as the catalogue states; the region scores are the page evidence.
+
+The residual on `status rows` is the content: the console's 13 fixed rows (Internet Connection ... UPnP)
+against the host report's nine (Connection Method ... MTU). That difference is the data source's, is
+already annotated `contentDiffers`, and cannot be closed without rewriting `host::networkStatus` in
+`host.cpp`, outside this pass.
+
+Canonical gate: `bun work/ab-layers.ts --capture --exe C:/dev/out/native-depth2/re-ps3-native.exe` -
+**PASS 6/6 layers within budget**, `text presence: 1668 bright pixels in the clock crop (minimum 900)
+PASS` (frame 18.76 / 0.8360, top background 21.06 / 0.9434, category icon row 21.62 / 0.9062, item label
+row 11.99 / 0.3895, clock text 11.41 / 0.4528, info bar 15.05 / 0.7667 - every layer at its recorded
+baseline, +0.00).
+
+Determinism: two `--render-clock 20` captures of the page (fresh seed each) are byte-identical,
+SHA256 `2866523FA0EA9166C8AF73E2AE63F4259C7BB1668D7D4AA324C9D9F23DAF8DE7` twice; a third capture with
+`DOWN, DOWN, UP` after the page is up hashes to the same value, which is the no-focus claim measured
+rather than asserted (the shell blocks vertical input while a message is up, and the table draws no
+focus mark).
+
+Named states, for the record and not edited: `--states` reports **5/12** on this build. The seven
+failures are whole-frame differences of 49.73-53.86 dB / 0.9984-0.9995 against the 55 dB / 0.9995
+self-baseline (`steam-all-games`, `steam-store-sections`, `steam-not-installed`,
+`video-options-panel`, `continue-watching`, `jellyfin-signin`, `steam-download-page`); no region other
+than `frame` fails except jellyfin-signin's `rows` (50.21 / 0.9987), and the five that pass include
+`steam-game-root`, `xmb-notification`, `xmb-volume-hud`, `continue-watching-empty` and `subtitle-cue`.
+The count moved 12/12 -> 1/12 -> 5/12 across rebuilds of this same page code while the concurrent
+view/ribbon/icon pass was landing (the inspected failure's difference is confined to the category icon
+row: 15,605 pixels above 8 luma, max 42, with the item column, labels, background, ribbon, clock and
+info bar byte-identical). No named state draws a host report - the only message any of them shows is
+the inline line - so none of this drift is this page's surface. Nothing was re-baselined.
+
+### 12.5 Information pages kept working
+
+`System Information` (an `Action::Information` row with an empty payload) still draws the D5 page:
+verified by capture (`out/native-depth2/after-systeminfo.png`) - labels right-aligned at 925, values from
+961, the centred block and the clock face, i.e. the geometry 8.1 measured and 7.2 describes. The
+Continue Watching and download information pages take the same path because their payloads are text,
+not `host:*`. Only the three host reports changed surface.
+
+### 12.6 What remains open
+
+- **Row count and rows.** The host report produces nine rows for one adapter; the console's thirteen are
+  built in `host.cpp`, which this pass may not edit. The parity state's `contentDiffers` annotation is
+  the honest disposition, not a hidden delta.
+- **The adapter-name line** has no label and no firmware analogue; it is drawn at the value column so
+  the label column stays labels-only. Two adapters would make 18 lines and the 15-row cap would clip the
+  tail; the console's page does not scroll either, and no capture of a multi-adapter console page exists.
+- **Display / audio titles.** `host::displayOutput` / `host::audioOutput` title their pages "Video
+  Output" / "Audio Output"; the firmware rows are `msg_display_output_setting` / `msg_sound_output_setting`
+  ("Video Output Settings" / "Audio Output Settings"). The page class is right; the title is host.cpp's.
+- **The rule alpha is per page class** (0.36 here, ~0.69 on the message page, 0.22 on the D4 window
+  capture). This page uses its own; unifying the family needs a second 1080p frame of each class.
+- **The fixed row origin** (291, not centred) is the only measured placement of a table; a shorter list
+  on the console might be centred and there is no frame of one.
+- **The 2 px hint height** (+2 at the bottom, the family's known glyph size 22 vs the frame's ~20)
+  is inherited, not new.
+
+### 12.7 Reproduction
+
+```
+build   & C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-depth2
+state   bun work\parity.ts --capture --score --state page-network-status-list --exe C:/dev/out/native-depth2/re-ps3-native.exe
+rows    bun work\ab-compare.ts out/parity-references/page-network-status-list__original__day__1080p.png <frame.png> 400,280,800,500
+rule    bun work\ab-compare.ts out/parity-references/page-network-status-list__original__day__1080p.png <frame.png> 80,150,1520,60
+gate    bun work\ab-layers.ts --capture --exe C:/dev/out/native-depth2/re-ps3-native.exe
+manual  full,<10 waits>,LEFT,wait x5,<10 waits>,DOWN,wait x15,<10 waits>,ENTER,<10 waits>,ENTER,<10 waits>,grab=<png>,quit
+        pins --render-clock 20 --background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00
+        --focus-time 2000 --no-intro; seed = one parity cell's data/ directory
+```
+
+

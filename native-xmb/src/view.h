@@ -312,6 +312,12 @@ private:
     void drawMessageBox(QPainter& painter);          // D1 modal box: plate, two bars, two hints
     void drawErrorMessagePage(QPainter& painter);    // D2 error-code page
     void drawMessageInfoPage(QPainter& painter);     // D5 information page
+    // The Info family's second shape (SETTINGS-FIRMWARE.md 12.2): the depth-2 read-only table. It is a
+    // variant of Info rather than a new MessageKind because the kind enum lives in Shell; the draw path
+    // is chosen from the row that raised the message (Action::Information with a host:* payload), so the
+    // D5 page keeps every other Information message unchanged. Measured: rules 199/879, rows on the
+    // 40 px pitch from ink 291, labels right at 939, values left at 979, Back hint ink 897, no clock.
+    void drawMessageTablePage(QPainter& painter);    // depth-2 read-only table page
     // The D4 chrome: icon + left title above rule 1 at the measured ink y 154..188, the two flat rules
     // (alpha ~0.22 at y 197, ~0.15 at y 877, uniform across x - not tex_msgdialog_bar, which is
     // centre-bright), and the analog clock face these pages keep while the info bar's plate is hidden.
