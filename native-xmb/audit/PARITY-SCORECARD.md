@@ -5,12 +5,17 @@ Method, threshold policy and the first measured scorecard for the 1:1 fidelity t
 
 **Status: infrastructure complete, no screen at parity.** The catalogue covers 25 capturable states and
 3 honestly-uncapturable ones; every capturable state was captured on 2026-10-27 and gated on Tier A
-(dumps) and Tier C (input traces), with 19 passing Tier A. Since the import in section 10 (2026-10-27),
-**9 of 25** canonical cells have a real RPCS3 reference - the one pre-contract frame plus eight frames
-imported from the `rpcs3-ref-2026-10-28` batch - and every imported one is labelled
-mismatch-by-construction on its theme assumption, its background pin or its console clock. The other 16
-cells have no reference at all, and 5 of those 16 states have no firmware view to capture. That is the
-honest state of the corpus, and it is what P0 exists to make visible.
+(dumps) and Tier C (input traces), with 19 passing Tier A. Since the two imports in sections 10 and 11
+(2026-10-27), **9 of 25** canonical cells and **14 of 600** matrix cells have a real RPCS3 reference: the
+one pre-contract frame, eight frames from the `rpcs3-ref-2026-10-28` batch, and four night cells from
+`rpcs3-ref2-2026-10-28`. The second batch moved the matrix (10 -> 14) but not the canonical count, because
+every frame in it is a night frame; it does give three states (`column-network`, `column-psn`,
+`column-friends`) their first reference of any kind, at night. Every imported canonical reference is
+labelled mismatch-by-construction on its background pin, its console clock, its theme assumption or its
+page beneath; the four night cells are the first cells where the pin and the state agree, and they are
+measured in 11.4. The other 16 canonical cells have no reference, and 5 of those 16 states have no
+firmware view to capture. That is the honest state of the corpus, and it is what P0 exists to make
+visible.
 
 Nothing here is a visual-parity claim. A screen is 1:1 only when Tier A, Tier B and Tier C all pass for
 it ([PARITY-PHASES.md](../PARITY-PHASES.md), "What 1:1 means here").
@@ -361,6 +366,11 @@ reported as "no reference yet".
 > canonical cells and **10 of 600** matrix cells. The numbers above are the measurement this section was
 > written from and are kept as the dated record; section 10 carries the new state.
 
+> **Updated 2026-10-27 (section 11):** the second import adds four night cells and leaves the canonical
+> list at **9 of 25**; over the matrix it is now **14 of 600**. The three states that batch newly
+> references (`column-network`, `column-psn`, `column-friends`) are still listed here because their
+> canonical (day) cell is empty - the report counts cells, not states with a reference somewhere.
+
 > **Measured result, not a placeholder.** This section carries no unfilled template block: the results
 > are the filled tables in section 6 and the header above. For run `run-20261027-222734` /
 > `scorecard-20261027-223917`: **Tier A 19/25, Tier B 0/25, Tier C 6/25, A+B+C 0/25.** The six Tier A
@@ -457,6 +467,18 @@ composite surfaces, then the 4 background presets and 720p.
   clock (10.5). The second batch `rpcs3-ref2-2026-10-28` was refused by the importer: no `MANIFEST.md`
   while it was still being written. The registered-root contract conflict is recorded in 10.7 and not
   worked around. No budget, matrix axis or catalogue entry changed.
+- **2026-10-27 (second reference corpus import)** - four night cells from `rpcs3-ref2-2026-10-28` added
+  (`column-network`, `column-psn`, `column-friends`, `page-settings-system`), imported through a disclosed
+  byte-faithful import-copy manifest because the batch manifest carries no `- Session:` line (11.1).
+  `--references-missing` stays **9/25** canonical and moves **10 -> 14 of 600** matrix cells: every frame
+  in the batch is a night frame, so nothing could fill a canonical day cell. A night capture
+  (`run-20261027-233820`) measures the new cells at their own pin for the first time: 16.17-16.89 dB /
+  0.37-0.39 whole frame, all FAIL against 20 dB / 0.90, and the System-page cell's capture failed its
+  route (Tier A), so its 17.63 / 0.3790 is not a surface comparison. Canonical re-score unchanged:
+  `scorecard-20261027-233626`, Tier A 19/25, Tier B 0/25 (9 measured), Tier C 6/25, A+B+C 0/25. The
+  batch's other stills are refused in 11.5 (bursts are crops, the update frames are a host overlay, and
+  about 100 frames show surfaces no catalogue state names). No budget, matrix axis or catalogue entry
+  changed.
 
 ## 10. Reference corpus import - 2026-10-27 (batch `rpcs3-ref-2026-10-28`)
 
@@ -685,3 +707,325 @@ supersede a registered one without deleting the history. **Not done here** - the
 edits, and the ledger should record that decision with whoever owns `work/parity-reference.json`.
 
 No budget, matrix axis, catalogue state or scorecard threshold was changed by this import.
+
+## 11. Second corpus import - 2026-10-27 (batch `rpcs3-ref2-2026-10-28`)
+
+Section 10 refused the second batch because it had no manifest while it was being written. The manifest
+landed at 23:25 local, and this section is the import that followed, the night run that measures the new
+cells, and the list of what the batch offered that the corpus still cannot take.
+
+The batch is 22,400 PNGs: **251 stills + 22,149 burst frames in 19 bursts**, one session in two RPCS3
+boots (boot 1 22:39:07-22:47, ended by an emulator fault on the System Update path; boot 2 22:50:31-23:52),
+4.93, same RPCS3 build as batch 1, all stills 1920x1080. **The console clock was left at its night time and
+nothing was committed** (manifest section 8), and the theme is Original. Those two facts decide the whole
+mapping: every still in this batch is a night frame, so every cell it can fill is a `night` cell.
+
+### 11.1 The import run
+
+```powershell
+bun work/parity-import.ts --map work/parity-references-map.json `
+  --manifest C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md `
+  --manifest C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md `
+  --replace
+```
+
+Result: 13 cells imported, 0 skipped, exit 0 - the nine batch-1 cells re-validated and re-copied
+byte-identically (source and destination sha256 compare equal; only the `applied` blocks moved), plus four
+new cells. `--replace` is needed because the batch-1 cells are occupied and the importer refuses an
+occupied cell without it; nothing is converted, and a differing hash is a refusal, so the nine are
+untouched pixels.
+
+**Why an import-copy manifest, and why that is reported rather than fixed.** The batch manifest does not
+carry the `- Session: <YYYY-MM-DD> <HH:MM>` line that `work/parity-import.ts` reads the capture date from.
+It says `One capture session, **two RPCS3 boots**: boot 1 22:39:07 ...` with no date on that line, so the
+importer refused the batch as incomplete (`exit 2`, `manifest incomplete: ... has no capture date`). Two
+things were not done: the tool was not edited (the brief fences it), and the rig's manifest was not
+edited (a capture record is evidence; adding a date to it after the fact is worse than refusing it). The
+import instead ran against a byte-faithful copy under the gitignored `out/`:
+
+- original `C:/dev/out/rpcs3-ref2-2026-10-28/MANIFEST.md`, 30,006 bytes, sha256 `9e0d66e5...f1ec372c`;
+- import copy `out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md`, 30,599 bytes, sha256
+  `218c4aad...9de7d80d0` - the original bytes plus **exactly one inserted bullet** (verified by rebuilding
+  the original from the copy by deleting the inserted bytes and reproducing the original hash);
+- the inserted bullet's date, 2026-10-27 local, is read from the batch's own `logs/refcap-*.log` stamps
+  (2026-10-27T22:39 to 23:21) and the section 8 restore audit, not chosen. 2026-10-27 local is
+  2026-10-28 UTC, which is the folder name.
+
+The provenance chain is therefore explicit: the map's batch block records both hashes, every sidecar's
+`source.manifest` names the copy, and re-running the same command against a rig manifest that carries the
+line replaces that field with the primary file and changes nothing else. **The rig should add the line**;
+that is the one defect this import had to route around.
+
+Two smaller readings of the same manifest, also reported and not fixed, both cosmetic in the sidecars:
+`config` ends with `capture Route | Purpose | Kind` because the tool's `| Capture |` row match hits the
+section 4.1 table header (this manifest labels the capture method `Stills`, so the real method is not
+read), and `rpcs3Build` ends `(git 0b0fa082?)` because the manifest abbreviates the hash with an ellipsis
+and the tool transliterates non-ASCII to `?`. Neither touches a cell, a hash or a number.
+
+One reading of the batch worth stating because it is the opposite of batch 1's: the theme token is
+**evidence, not assumption**. Batch 1 could only assume `original`; batch 2 has
+`lists/theme-page-rest.png` showing `Theme`, `Color`, `Background` and `Font` all reading `Original` at
+22:52, and section 8 records that every list was opened and cancelled. The batch-1 rows keep their
+assumption and their `note` says so; the new rows cite the frame.
+
+### 11.2 The mapping that was applied
+
+| Cell | Source frame | Manifest names it | Native state | Caveat class |
+|---|---|---|---|---|
+| `column-network__original__night__1080p` | `nav/col-01.png` | group (4.7 `nav/`, 41 stills) | Network column | pin nearest (22:45) + clock format/time + row layout |
+| `column-psn__original__night__1080p` | `nav/col-02.png` | group (4.7 `nav/`) | PlayStation Network column | pin nearest (22:45) + clock format/time + signed-out content |
+| `column-friends__original__night__1080p` | `nav/col-03.png` | group (4.7 `nav/`) | Friends column | pin nearest (22:45) + clock format/time + empty column |
+| `page-settings-system__original__night__1080p` | `tails/system-page-top.png` | exact (4.6) | Settings > System Settings page | clock format/time + row values; pin inside the night window |
+
+Each row's `note` in `work/parity-references-map.json` cites the manifest section it was authored from and
+names its caveats; the sidecar `clock` field carries the frame's own clock (27/10 22:45 for the three
+columns, 27/10 23:05 for the System page) so a reader of the JSON does not need this table.
+
+Why these four and no more:
+
+- **The three columns have no reference at all**, not at the canonical cell and not anywhere. That is new
+  coverage of a state, which is what the corpus is short of.
+- **The System page tail is this batch's own documented capture target** (manifest 4.6 lists all 25 rows
+  and the last row), it reaches the page by the catalogue's own route (Settings column, row 6, Cross), and
+  the state's only existing reference is a night frame filed at a day cell - so this is the first
+  correctly labelled reference for that state. It is a second cell, not a replacement: the canonical day
+  cell keeps the batch-1 frame.
+- **Nothing was filed at a day cell.** Every frame here is 22:39-23:21 with a DD/MM 24-hour clock, and only
+  the 23:05 frame is inside the contract's night window (23:00-01:00); the 22:45 column frames are 15
+  minutes before it. `night` is the cell the clock supports; `day` would be the batch-1 mistake repeated,
+  and a cell token a frame contradicts is exactly what this corpus must not add.
+- **The `nav/colL-*.png` left-walk was not imported.** It is PSN, Network, Game, Video, Music, Photo,
+  Settings, Users, Users at 22:46 (verified frame by frame). The PSN/Network frames duplicate the cells
+  above; the other five are night twins of states that already have a batch-1 reference, and their focused
+  row differs from the canonical route's row 0, so each would be a second reference for a state that
+  already has one. They are available (section 11.7, item 7) if the corpus decides it wants a night
+  reference for every column.
+
+### 11.3 Coverage after the import
+
+```powershell
+bun work/parity.ts --references-missing          # 9/25 canonical cells present (unchanged)
+bun work/parity.ts --references-missing --matrix # 14/600 matrix cells present (was 10/600)
+bun work/parity.ts --score --run out/parity/run-20261027-222734
+```
+
+| Measure | Before section 11 | After |
+|---|---:|---:|
+| canonical (`original/day/1080p`) cells with a reference | 9 / 25 | **9 / 25** |
+| matrix cells with a reference | 10 / 600 | **14 / 600** |
+
+The canonical count does not move, and that is the correct reading rather than a failure of the import:
+the canonical cell is `original/day/1080p`, no frame in this batch is a day frame, and filing a night frame
+there would buy a number at the price of a false label. What moved is the matrix (four night cells) and
+what states have a reference at all (three: `column-network`, `column-psn`, `column-friends`).
+
+`--references-missing` still lists those three states, because it asks for their canonical cell. That is
+the same limitation section 10.6 names from the other side: the report counts cells, not "does this state
+have a reference anywhere". It is worth fixing in the tool, and it is not fixed here.
+
+### 11.4 The Tier B numbers for the new cells
+
+The existing run is a day run (`run-20261027-222734`, 25 canonical cells), and the scorer pairs a capture
+with the reference whose basename equals the cell id, so it cannot pair the new night references with it -
+there is no cell to pair. The night cells were therefore captured at their own pin, which is the only
+honest way to measure them:
+
+```powershell
+bun work/parity.ts --capture --score --background night `
+  --state column-network,column-psn,column-friends,page-settings-system
+```
+
+Run `out/parity/run-20261027-233820`, scorecard `out/parity/scorecards/scorecard-20261027-234027.{json,md}`;
+build `0a82595e...347a2` (the same 20:47 snapshot); pins unchanged - render clock 30 s, UI clock
+`2026-10-25T12:32:00`, focus 2000 ms - and the only axis that changed is the background (night,
+`2026-10-25T00:00:00`). A first 3-cell run (`run-20261027-233653`, scorecard `...233755`) produced the
+same numbers for the three columns, digit for digit, so the new cells are as repeatable as the old ones.
+
+| Cell | Tier A | Frame | Gating region 1 | Gating region 2 |
+|---|---|---|---|---|
+| `column-network` night | **PASS** (category network, 5 rows, row "Online Instruction Manuals") | 16.89 dB / 0.3883 | category icon row 19.47 / 0.1365 FAIL | item label row 9.27 / 0.0883 FAIL |
+| `column-psn` night | **PASS** (category psn, 3 rows, row "Sign In") | 16.17 / 0.3767 | category icon row 17.90 / 0.1158 FAIL | item label row 8.73 / 0.0797 FAIL |
+| `column-friends` night | **PASS** (category friends, 3 rows, row "Open Steam Friends") | 16.17 / 0.3704 | category icon row 21.22 / 0.1296 FAIL | item label row 8.50 / 0.0577 FAIL |
+| `page-settings-system` night | **FAIL** (route; landed on the System Update page, 2 rows, "Update via Internet") | 17.63 / 0.3790 | page rows 15.00 / 0.4745 FAIL | category icon row 22.01 / 0.0778 (not gating) |
+
+Budgets are the class budgets from `work/parity-reference.json` (`icon-heavy` 20 dB / 0.90,
+`text-heavy` 18 dB / 0.85); no budget changed.
+
+**What is genuine in those numbers.** For the three columns, this is the first Tier B measurement in the
+corpus where the reference and the capture agree on the cell rather than only on the state: same state
+(Tier A PASS), same theme (`original`; the console side evidenced by the Theme page frame), same
+background token (`night`), same resolution (1920x1080), same build, firmware and rig. The numbers are
+perceptual distances between two frames of the same screen, which is what Tier B is for. The row sets
+partly agree and partly do not, and that is itself part of the measurement: the console's Network column
+shows the firmware's own items (`Online Instruction Manuals`, `Remote Play`, `Internet Browser`,
+`Internet Search`, in the console's around-the-band layout) over the native column's five rows ending
+`Online Instruction Manuals`, while the console's signed-out PSN column lists `Sign Up`, `What's New`,
+`Trophy Collection`, `PlayStation Plus`, `PlayStation Store` against the native column's three rows, and
+the console's Friends column is empty against the native column's three Steam rows. The last two are a
+**content difference by construction** (signed out, no PSN account, no friends - manifest section 5
+item 10), not a defect the number can attribute.
+
+**What is mismatch-by-construction, and must not be read as fidelity.**
+
+- **The clock string.** The console renders `27/10 22:45` (DD/MM, 24-hour); the app renders
+  `10/25 12:32 PM` at its pinned UI clock. That is a content difference on the clock band, and for the
+  column states the clock is not a required region, so it does not gate; it still contributes to the frame
+  number.
+- **The wave's animation phase.** The console frame freezes the wave wherever it was at the grab; the app
+  is pinned at render clock 30 s. Two stills of an animated wave at different phases differ structurally,
+  and no capture recipe removes that. It is part of the SSIM, and it is why an SSIM of 0.37-0.39 on a
+  matched cell is not by itself a rendering verdict.
+- **The pin is nearest, not exact, for the three columns.** The 22:45 frames are 15 minutes before the
+  contract's night window (23:00-01:00, held at 00:00), so the console's wave is its own evening
+  interpolation and the app's is the 00:00 night preset. The token is right and the wave is not bit-equal;
+  the System page frame at 23:05 is inside the window and does not carry that caveat.
+- **The `page-settings-system` number is not a surface comparison at all.** The reference is the System
+  Settings page; the capture landed on the System Update page after three attempts (the DOWN-route defect
+  in 1.4, still present on this pre-fix build), so 17.63 dB / 0.3790 compares two screens. It is in the
+  table because a recorded number with a stated caveat beats a blank, and because it is the second
+  demonstration of the trap 10.4 named: PSNR nearly clears the 18 dB text budget while SSIM is 0.38, so a
+  PSNR-only gate would call a wrong page nearly matched. It must be retired by a capture on a build whose
+  DOWN route works, not by a budget change.
+- **Not by construction, and the interesting residue.** The item-label regions are 8.5-9.3 dB with SSIM
+  0.06-0.09. For PSN and Friends part of that is content (the row sets above); for Network the rows are
+  the same and the residue is geometry: the console's items sit around the category icon row (the focused
+  item's neighbours above and below the band) while the native column stacks them below the band. That is
+  a real layout difference this reference is meant to expose, and it is the harshest number in the table.
+
+**What the night numbers say about the day-cell numbers.** The batch-1 day-cell column references score
+10.45-10.74 dB on the frame; the new night-cell columns score 16.17-16.89 dB. The states and the console
+frames differ, so this is not a controlled experiment and is not offered as one - but it is consistent
+with 10.4's reading that the day/night pin dominated those 10-11 dB numbers, and it says the first thing
+to remove from the column pairs is the pin, not the icon art. The one same-state pair available
+(`page-settings-system`) moves 10.57 -> 17.63 dB when only the native pin changes (day run vs night run,
+same reference page content, both captures on the same wrong page), which points the same way while
+remaining a PSNR-only observation.
+
+**The canonical number set did not move.** Rescoring `run-20261027-222734` after the import wrote
+`scorecard-20261027-233626.{json,md}`: Tier A 19/25, Tier B 0/25 pass with 9/25 measured, Tier C 6/25,
+A+B+C 0/25 - identical to `scorecard-20261027-230329`. Nothing was re-captured on the canonical side, no
+canonical cell gained a reference, and every re-imported batch-1 file is byte-identical, so an unchanged
+number is the expected result.
+
+### 11.5 What the batch offered that the corpus cannot take, and why
+
+Refusals are grouped by the reason, because the reasons are different problems with different owners.
+
+| Item | Frames | Why refused | Owner |
+|---|---:|---|---|
+| The bursts | 19 bursts, 22,149 frames | A burst is not a still, and every burst is either a full-frame series of one animation or a **1:1 crop** of an animated region (`rect.txt`); a crop is not a full frame and cannot be a cell. Never usable as a state reference. | nobody - correct by design |
+| `error/update2-settle-01..04.png`, `error/update-settle-*.png` | 8 | The frame is a **frozen firmware surface with the RPCS3 host overlay** `The PS3 application has likely crashed, you can close it.` (vsh died on the update path). A host overlay is not the console's UI. | nobody - the path is blocked in the emulator |
+| `error/page-at-rest.png`, `error/ictest*`, `error/icp-page-rest.png`, `error/retry-t0*.png`, `error/page-after-*.png`, `error/page-dismissed.png`, `error/back-to-xmb.png`, `error/column-corrupted-focused.png` | ~45 | Real firmware surfaces (Internet Connection Test with `An Ethernet cable is not connected.`; the `Internet Connection Settings` message page; the Game column with `Corrupted Data` focused), but **no state in `work/parity-catalogue.json`** matches them. The importer refuses a state id the catalogue does not define, and inventing a state is a catalogue change, which is fenced here. | catalogue owner |
+| `depth2/*` (16) | 16 | `Settings > Network Settings` (depth 1), `Settings and Connection Status List` (depth 2) and the `Internet Connection Settings` message page. No catalogue state, and the route is Settings row 16, **not** Network > Download Management - so they cannot stand in for `page-download-management`; that would be a page reached through a different route. | catalogue owner |
+| `lists/*` (47, incl. 3 contact sheets) | 47 | The Theme/Color/Background/Font lists and the Theme Settings page. No catalogue state (the catalogue's only settings page is Settings > System Settings), and the frame is not that page. The one piece of evidence this import *did* use from this group is `lists/theme-page-rest.png`, cited for the theme token. | catalogue owner |
+| `tails/video-page-top.png`, `tails/video-down1..22.png` | 23 | The Video Settings page (19 rows documented in 4.6). No catalogue state. The manifest's row list is the real asset here; there is no cell to file the frame under. | catalogue owner |
+| `tails/system-down1..20.png` | 20 | The same state as the imported top-of-page frame. **One cell is one file**, so only the frame that shows the page at rest is used; the scroll series is the same cell twenty times. | mapping decision |
+| `nav/col-04.png` .. `col-06.png` | 3 | The Friends clamp repeated (manifest 4.7: Friends is the right-hand edge). Duplicates of `column-friends`. | mapping decision |
+| `nav/colL-1..9.png` | 9 | PSN, Network, Game, Video, Music, Photo, Settings, Users, Users at 22:46 (checked on every frame). The first two duplicate the imported cells; the other seven are night twins of states that already have a reference, and their focused row differs from the canonical route's row 0. | mapping decision |
+| `menus/*` | 13 (4 bursts excluded) | Options-menu open/closed checks over the Game column at night. `options-panel` already has a reference and its state is the menu over the **Video Library** page, not over the Game column. The bursts are crops. | mapping decision + catalogue |
+| `bands/*` | 14 (5 bursts excluded) | Theme and Screensaver choice bands at rest and after close - timing evidence for `audit/THEMES.md`, not a catalogue state. | catalogue owner |
+| `nav/boot-*.png`, `nav/keytest-*.png`, `nav/recover-*.png`, `nav/game-0*.png`, `nav2/boot-01.png`, `nav2/settings-*.png` | ~25 | Boot frames, key-map probes and route state checks. `nav2/settings-column-*` is the Settings column at 23:0x and is the one genuine column state in that group, but `column-settings` already has a reference (the same night-twin argument). | mapping decision |
+| `column-tv` | 0 | **The console has no TV/Video Services column on this rig**: the column map is Users, Settings, Photo, Music, Video, Game, Network, PlayStation Network, Friends (manifest 4.7, checked on the frames). There is nothing to file. | rig state |
+
+The count that matters: of 251 stills, **four** back a cell. The rest are either evidence for an analysis
+(the bands, the timing bursts, the error pages), duplicates of cells, or material the catalogue cannot name
+yet. The bottleneck has moved from the rig to the catalogue, which is the finding of this section.
+
+### 11.6 Which states still cannot pass Tier B, and what a matched capture needs
+
+Nothing in this batch is a day frame, so no canonical cell changed. Every canonical cell that is still not
+a matched reference, plus the night-only references this batch added, splits like this:
+
+| State | Canonical day cell | New night cell | Why it still cannot pass Tier B |
+|---|---|---|---|
+| `root` | registered legacy frame (2026-10-25, DD/MM 24-hour, Corrupted Data content) | batch-1 frame | **mismatch by construction**: content, clock format and time; theme assumed. The registered entry cannot be superseded without a contract change (10.7). |
+| `column-user`, `column-settings`, `column-photo`, `column-music`, `column-video` | batch-1 **night** frames | none | **day-vs-night mismatch by construction** on the background, plus the DD/MM 24-hour clock and content rows. The reference is a night frame wearing a day label. |
+| `column-network`, `column-psn`, `column-friends` | **no reference** | new, measured | the canonical cell is empty. The night cell is a genuine cell comparison (11.4): Network fails on layout, PSN and Friends on layout plus their signed-out row sets; none fails on the pin. |
+| `page-settings-system` | batch-1 night frame | new, measured | the night cell is pinned correctly, but the native capture landed on the System Update page (route defect), so the number is not a surface comparison. |
+| `osk`, `options-panel` | batch-1 night frames | none | **day-vs-night mismatch**, plus a different page under the overlay in both frames. |
+| `dialog`, `notification`, `volume-hud`, `info-indicator`, `ps-menu`, `media-player-panel` | none | none | no capture: the rig had no event/input path (1.4, 10.6). |
+| `page-download-management` | none | none | no capture: the route needs a DOWN move the build cancels, and the batch's Network Settings page is a different route. |
+| `page-game-all-games`, `page-video-library`, `page-steam-store-sections`, `page-jellyfin-signin`, `continue-watching` | none | none | **no firmware view** (`xmbml: null` or a native page body); no reference by design. |
+
+**Theme.** No cell in the corpus is theme-mismatched today: the app's canonical capture is `original`, and
+every imported frame is `original` too. But the console side is *evidenced* only for batch 2 (the Theme
+page shows `Original`) and *assumed* for batch 1. A capture taken after a theme change would be
+mismatch-by-construction on the theme axis; none exists yet, and the `classic` and `p3t-01` theme cells
+have no reference at all (0 of 200 each, 400 cells between them).
+
+**What a matched capture needs, exactly.** For any canonical cell:
+
+1. **Console clock inside the day window.** The contract's `day` pin is 10:00 (the traced daylight key,
+   `work/parity-reference.json` matrix). Set the console clock to about 10:00 local and leave it there for
+   the grab; a 21:xx or 22:xx frame is a night wave and belongs at a night cell, however convenient it is.
+2. **Clock format the app renders.** `Date Format = MM/DD/YYYY`, `Time Format = 12-Hour Clock` on the
+   console (batch 1 set it temporarily and restored it at 21:58; batch 2 ran at DD/MM 24-hour). Without
+   this the clock band is a content difference by construction even when the time of day matches, and the
+   app has no DD/MM 24-hour renderer to compare against.
+3. **Theme confirmed on the frame.** One frame per session of `Settings > Theme Settings` showing
+   `Theme = Original`, `Color = Original`, `Background = Original`, `Font = Original`, so the sidecar's
+   theme token is evidence and not an assumption. Batch 2's `lists/theme-page-rest.png` is the pattern.
+4. **The cell's preset, not an approximation.** Background preset = the cell's clock (day = 10:00, not
+   22:45); resolution 1920x1080 for a 1080p cell (1280x720 windowed for 720p, which no console session has
+   produced); Vulkan, exclusive fullscreen disabled, borderless client area exactly 1920x1080, clock scale
+   100, settled two seconds after the last key.
+5. **The same state by the catalogue route.** The route in `work/parity-catalogue.json`, key for key, so
+   Tier A can pass - the System page by Settings row 6, the download page by Network > Download
+   Management, not by whatever page happens to be nearby.
+6. **A profile/content set that is either the same as the native seed or documented.** The console's empty
+   media columns and the host's photo/music/video folders are a content difference by construction, and
+   the sidecar note must say so.
+
+For the six event-dependent composites (`dialog`, `notification`, `volume-hud`, `info-indicator`,
+`ps-menu`, `media-player-panel`) the missing piece is the event, not the pin: a message dialog with an OK
+action, a notification event, hardware/remote volume keys or BD-remote HID, a PS tap with the controller
+indicator, and a playing local file. Those are harness gaps on the native side as much as on the rig's.
+
+### 11.7 Next capture, in the order that buys the most (supersedes 10.6)
+
+1. **One day-window session, 10:00 local, MM/DD + 12-hour, theme confirmed, for the nine canonical cells
+   that currently hold night frames**: `root` (which also needs the registered-entry decision in 10.7),
+   `column-user`, `column-settings`, `column-photo`, `column-music`, `column-video`, `page-settings-system`,
+   `osk`, `options-panel`. This is the highest-value re-run in the corpus: it turns nine
+   mismatch-by-construction references into matched ones and is the only way any of them can pass Tier B.
+2. **The same session, three more canonical cells**: `column-network`, `column-psn`, `column-friends` -
+   the day counterparts of the new night cells. Their night cells now exist, so this closes the day side.
+3. **`column-tv`** needs a console state that has a TV/Video Services column (a registered service); this
+   rig does not produce one. Until then, no reference.
+4. **The six event-dependent composites** - harness work first (a dialog, a notification, a pad hold, a
+   volume key path, a playing file), then one frame each at a pinned cell. Not a rig-priority item.
+5. **The five native-only pages** (`page-game-all-games`, `page-video-library`,
+   `page-steam-store-sections`, `page-jellyfin-signin`, `continue-watching`): no firmware reference exists
+   or should; the catalogue needs a `noFirmwareReference` marker so `--references-missing` stops counting
+   them as owed (10.6).
+6. **A catalogue extension, before any further rig work.** Batch 2 captured ten surfaces the catalogue
+   cannot name: Settings > Network Settings (depth 1), Settings and Connection Status List (depth 2), the
+   `Internet Connection Settings` message page, the Internet Connection Test error page, the Theme Settings
+   page, the Theme list, the Color list, the Background list, the Font list, and the Video Settings page.
+   Adding them as states (with the batches' geometries and the manifest's row lists) would let most of
+   batch 2's stills - the `error/`, `depth2/`, `lists/`, `bands/` and `tails/` groups - become references,
+   and would put the corpus's bottleneck back on the rig, where it can be fixed. That is a catalogue edit
+   and is not made here.
+7. **Night cells for the five columns that already have a reference** (from `nav/colL-4..8.png`, 22:46),
+   if the corpus wants a night reference for every column: five map rows and one `--capture --background
+   night` run, with the focused-row caveat recorded. Optional; it adds cells, not states.
+8. **720p cells**: 0 of 300 have a reference; the host has no 720p display mode, so this is P10's problem
+   before it is the rig's.
+
+### 11.8 Where the repository now differs
+
+- `work/parity-references-map.json`: 13 entries, 13 applied, 0 skipped; the batch-2 block is now
+  `status: imported` with both manifest hashes and the reason for the import copy; four new rows at the
+  end; the import re-ran `--replace` so every entry carries a fresh `applied` block.
+- `out/parity-references/`: +4 PNGs and +4 `.state.json` sidecars (`column-network`, `column-psn`,
+  `column-friends`, `page-settings-system`, all `original/night/1080p`), plus
+  `import/rpcs3-ref2-2026-10-28.MANIFEST.md` (the disclosed import copy). All gitignored.
+- `out/parity/`: `run-20261027-233820` (the night run, 4 cells) and its scorecard
+  `scorecard-20261027-234027`; the earlier 3-cell repeat `run-20261027-233653` / `scorecard-20261027-233755`;
+  and `scorecard-20261027-233626` (the canonical run rescored). All gitignored.
+- No change to `work/parity.ts`, `work/parity-catalogue.json`, `work/parity-reference.json`,
+  `work/parity-import.ts`, any budget, any matrix axis, or any catalogue state.
+
+**Not a parity claim.** Four cells gained a reference; none gained a pass. Tier B still passes nothing,
+and every number in 11.4 either carries a named mismatch-by-construction or, for the System page, compares
+the wrong page. The corpus is larger and better labelled, not closer to 1:1.

@@ -1,7 +1,7 @@
 {
   "schema": "xmb-parity-references-map/1",
   "updated": "2026-10-27",
-  "note": "The auditable record of which RPCS3 frame backs which Tier B cell. Authored from what each batch's MANIFEST.md says the frame shows (the manifest section is cited in every note), not from file names. `entries` is the input to work/parity-import.ts; the importer rewrites each entry's `applied` block with the cell, the destination reference and provenance paths, and the source and destination sha256 (identity: the importer copies or hard-links, it never converts). An entry's `replaced` field records a deliberate re-import of the same source into the same cell - here the batch was imported twice on 2026-10-27 because the first sidecars carried the manifest's typography and the corpus is ASCII; the source frame did not change. The images stay under out/parity-references/, which .gitignore excludes, so this file is the committed part: paths and hashes, never firmware pixels.",
+  "note": "The auditable record of which RPCS3 frame backs which Tier B cell. Authored from what each batch's MANIFEST.md says the frame shows (the manifest section is cited in every note), not from file names. `entries` is the input to work/parity-import.ts; the importer rewrites each entry's `applied` block with the cell, the destination reference and provenance paths, and the source and destination sha256 (identity: the importer copies or hard-links, it never converts). An entry's `replaced` field records a deliberate re-import of the same source into the same cell - the map has been imported three times: twice on 2026-10-27 (batch 1, the second run because the first sidecars carried the manifest's typography and the corpus is ASCII) and once on 2026-10-28 with batch 2 added (--replace re-validates and re-copies the nine batch-1 cells from the same sources, sha256 identical, so only the applied blocks move). Batch 2's frames are night frames, so they are filed at night cells and never at the canonical day cell; see native-xmb/audit/PARITY-SCORECARD.md section 11. The images stay under out/parity-references/, which .gitignore excludes, so this file is the committed part: paths and hashes, never firmware pixels.",
   "referenceRoot": "out/parity-references",
   "contract": "work/parity-reference.json",
   "catalogue": "work/parity-catalogue.json",
@@ -17,9 +17,15 @@
     },
     {
       "manifest": "C:/dev/out/rpcs3-ref2-2026-10-28/MANIFEST.md",
+      "manifestSha256": "9e0d66e5affd629b7d6971869e3570070658daa3d1ce6e62e68dcfe2f1ec372c",
+      "importManifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "importManifestSha256": "218c4aad1337030d4c0020899f3289b42b190201094fa3ebf7878099de7d80d0",
       "captureRoot": "C:/dev/out/rpcs3-ref2-2026-10-28",
-      "status": "refused",
-      "reason": "No MANIFEST.md at import time (2026-10-27 23:0x local). The directory existed and was still being written (menus/, lists/, depth2/, nav2/, bands/ and logs/ with mtimes at 22:5x-23:0x), but with no manifest there is no statement of what each frame shows, and frames are never mapped from file names alone. work/parity-import.ts refuses a batch with no manifest; re-run it when MANIFEST.md lands."
+      "status": "imported",
+      "session": "2026-10-27 22:39:07-23:52 local (America/Chicago), one session in two RPCS3 boots (boot 1 22:39-22:47 ended in an emulator fault; boot 2 22:50-23:52)",
+      "frames": "22,400 PNGs: 251 stills + 22,149 burst frames in 19 bursts; every still 1920x1080; burst frames are full-frame 1920x1080 or a documented 1:1 crop",
+      "imported": 4,
+      "reason": "The batch manifest does not state its capture date in the form work/parity-import.ts reads (it looks for a '- Session: <YYYY-MM-DD> <HH:MM>' line; this manifest says 'One capture session, two RPCS3 boots: boot 1 22:39:07 ...' with no date on that line), so the importer refused it as incomplete (exit 2, 'no capture date'). The rig manifest is not edited here. The frames are imported through importManifest, a byte-faithful copy of the batch manifest (same 30,006 bytes plus exactly one inserted '- Session:' bullet, sha256 above) whose date is the local capture date evidenced by the batch's own logs/refcap-*.log stamps (2026-10-27T22:39 to 23:21) and the section 8 restore audit - 2026-10-27 local is 2026-10-28 UTC, which is the folder name. If the rig adds that line to the real manifest, re-running the importer against it replaces the sidecars' source.manifest with the primary file and changes nothing else. Only stills are eligible: the bursts are crops of an animated region, not full frames. The console clock was left at its night time and nothing was committed (manifest 8), so every eligible frame is a night frame, filed at night cells and never at a canonical day cell; the theme is original on the strength of lists/theme-page-rest.png (Theme/Color/Background/Font all read Original), not assumed."
     }
   ],
   "entries": [
@@ -41,7 +47,7 @@
         "destinationSha256": "cf68d72202d09ae38418fa5403948385f9e655a38be289287a757d3b71bd9a6f",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:02:31.798Z",
+        "imported": "2026-10-28T04:36:09.783Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.state.json"
       },
       "skipped": null
@@ -64,7 +70,7 @@
         "destinationSha256": "0008bdabe7a7d259efd8c3d914c4cd939f18c563addae1917754ed3cc9f97f28",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T04:02:31.805Z",
+        "imported": "2026-10-28T04:36:09.789Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.state.json"
       },
       "skipped": null
@@ -87,7 +93,7 @@
         "destinationSha256": "69c3b5818c2b377cb80c33b416c8f4d0a7f436310780438dbb21d376468d43ad",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:02:31.812Z",
+        "imported": "2026-10-28T04:36:09.796Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.state.json"
       },
       "skipped": null
@@ -110,7 +116,7 @@
         "destinationSha256": "b7b26ec6eb9ba2f0fb164069c4034ab1afeecd08ff114808351bd7f8fc72efcc",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:02:31.820Z",
+        "imported": "2026-10-28T04:36:09.802Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.state.json"
       },
       "skipped": null
@@ -133,7 +139,7 @@
         "destinationSha256": "f0bac56f57cca70d6767077af647a4b626eb6fdbb1339c3e24702d8ba031af5c",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:02:31.827Z",
+        "imported": "2026-10-28T04:36:09.808Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.state.json"
       },
       "skipped": null
@@ -156,7 +162,7 @@
         "destinationSha256": "4f8270ee31ff89a64d46c9576732c80a0f0aa0af12a61277d0223ac1b9af8c2b",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:02:31.835Z",
+        "imported": "2026-10-28T04:36:09.814Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.state.json"
       },
       "skipped": null
@@ -179,7 +185,7 @@
         "destinationSha256": "bd2d220c2c712bb0c4dbf29f55b00a0a5c8554581bc4ba91bf7b9cef81253f62",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T04:02:31.842Z",
+        "imported": "2026-10-28T04:36:09.820Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.state.json"
       },
       "skipped": null
@@ -202,7 +208,7 @@
         "destinationSha256": "0a5fca6fa209da79fc268278eb34e460ddb0e19ce46390b16fe73985f1be3274",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:02:31.848Z",
+        "imported": "2026-10-28T04:36:09.825Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.state.json"
       },
       "skipped": null
@@ -225,15 +231,103 @@
         "destinationSha256": "dfc705fe3fd25ff02831748eae56b0364ae7ab4ea1ed1bc22cb43f590cb1777a",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:02:31.854Z",
+        "imported": "2026-10-28T04:36:09.831Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-network",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/nav/col-01.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "console 27/10 22:45 (DD/MM 24-hour), 2026-10-27 22:45 local - the firmware's evening/night wave, 15 min before the contract's 23:00-01:00 night window (the night preset is held at 00:00)",
+      "note": "Manifest 4.7: the top-level column map from the Game column, one RIGHT - one of the 41 nav/ state-check stills (the manifest names nav/ as a group, not this file, so manifestRef=group). The frame shows the Network column focused: the Network icon enlarged over its rows Internet Browser, Internet Search, Online Instruction Manuals, Remote Play, 900 ms after the move. Filed at the night cell because the console clock reads 27/10 22:45 (DD/MM 24-hour) and the frame is the night wave - not at a day cell, which would be a claim the frame does not support. Mismatch by construction, stated rather than averaged away: the clock is DD/MM 24-hour where the app renders MM/DD 12-hour, at 22:45 where the native canonical capture is pinned at 2026-10-25T12:32:00, and the console's Network rows are the firmware's own while the native column is generated from category_network.xml.",
+      "applied": {
+        "cell": "column-network__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-network__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-network__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\nav\\col-01.png",
+        "sourceSha256": "d5e772eb4001579d61bdd6b05f4b88f577bd5109f03f51ee759a1e55b8303a80",
+        "destinationSha256": "d5e772eb4001579d61bdd6b05f4b88f577bd5109f03f51ee759a1e55b8303a80",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "group",
+        "imported": "2026-10-28T04:36:09.837Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-psn",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/nav/col-02.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "console 27/10 22:45 (DD/MM 24-hour), 2026-10-27 22:45 local - the firmware's evening/night wave, 15 min before the contract's 23:00-01:00 night window (the night preset is held at 00:00)",
+      "note": "Manifest 4.7: the top-level column map, two RIGHTs from the Game column, part of the 62 nav/ + nav2/ state-check stills (the manifest names nav/ as a group, so manifestRef=group). The frame shows the PlayStation Network column focused: rows Sign Up, What's New, Trophy Collection, PlayStation Plus, PlayStation Store, the console's signed-out PSN column; the PSN icon is the coloured one, as on the console. Filed at the night cell: clock 27/10 22:45 (DD/MM 24-hour), night wave. Mismatch by construction: the clock format and time of day differ from the app's MM/DD 12-hour, 2026-10-25T12:32:00 pin, the console is signed out (no account, manifest 5 item 10) while the native column answers its rows with honest unavailable messages, and the row set is the firmware's category_psn list rather than the native projection.",
+      "applied": {
+        "cell": "column-psn__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-psn__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-psn__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\nav\\col-02.png",
+        "sourceSha256": "e06c8981a7a1e9733d0db0802b62974edb42753122a4e5932ada5ad3c9e142d9",
+        "destinationSha256": "e06c8981a7a1e9733d0db0802b62974edb42753122a4e5932ada5ad3c9e142d9",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "group",
+        "imported": "2026-10-28T04:36:09.842Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-friends",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/nav/col-03.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "console 27/10 22:45 (DD/MM 24-hour), 2026-10-27 22:45 local - the firmware's evening/night wave, 15 min before the contract's 23:00-01:00 night window (the night preset is held at 00:00)",
+      "note": "Manifest 4.7: the top-level column map, three RIGHTs from the Game column - the manifest says Friends is the right-hand clamp - part of the nav/ group, so manifestRef=group. The frame is the Friends column focused (smiley-pair icon enlarged, label Friends) with an empty row area: the console is signed out and has no friends, which is the column's honest content. This is the column state, not an empty error state, and the next three nav/ frames (col-04..06) are the same clamped column and were not mapped. Filed at the night cell: clock 27/10 22:45 (DD/MM 24-hour), night wave. Mismatch by construction: the clock format and time of day differ from the native pin, and the native column is rebuilt from the Steam friends surface (three steam-friends rows in work/parity-catalogue.json), so the item area differs by design rather than by defect.",
+      "applied": {
+        "cell": "column-friends__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-friends__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-friends__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\nav\\col-03.png",
+        "sourceSha256": "40d18eede723e893faaaf43c43fb115efc5619db12fa8960e2917775512a79a7",
+        "destinationSha256": "40d18eede723e893faaaf43c43fb115efc5619db12fa8960e2917775512a79a7",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "group",
+        "imported": "2026-10-28T04:36:09.848Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-settings-system",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/tails/system-page-top.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "console 27/10 23:05 (DD/MM 24-hour), 2026-10-27 23:05 local - inside the contract's 23:00-01:00 night window, so the background pin and the token agree",
+      "note": "Manifest 4.6: the System Settings page top, reached exactly the way the catalogue route reaches it (Settings column, row 6 System Settings, Cross), then 20 DOWNs to the tail. The frame shows the page the state names: Automatic Update focused (Off) with its two-line help block, then System Name (PS3-354), System Language (English (United States)), Character Set, Dictionary Type (English (UK)), Add/Edit Term, Delete Predictive Text Dictionary; the manifest lists all 25 rows and the last one, About PlayStation 3. The canonical day cell keeps the batch-1 frame of this page (settings/page-system-settings.png, 21:40); this night cell is a separate, correctly labelled cell for the same state - it does not replace it and does not compete with it. Mismatch by construction: the console clock is DD/MM 24-hour at 23:05 where the app renders MM/DD 12-hour at its pinned 2026-10-25T12:32:00, and the row values are the console's own (PS3-354, English (UK)) where the native page is built from sysconf_plugin RCO schemas and the host's strings.",
+      "applied": {
+        "cell": "page-settings-system__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\tails\\system-page-top.png",
+        "sourceSha256": "36f6bdf61288b0ca55d2e4875eaf26f5fcf6e32669fdb0cfa377beb6353f4902",
+        "destinationSha256": "36f6bdf61288b0ca55d2e4875eaf26f5fcf6e32669fdb0cfa377beb6353f4902",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T04:36:09.855Z"
       },
       "skipped": null
     }
   ],
   "summary": {
-    "entries": 9,
-    "applied": 9,
+    "entries": 13,
+    "applied": 13,
     "skipped": 0,
     "referenceRoot": "C:\\dev\\xmb\\out\\parity-references"
   }
