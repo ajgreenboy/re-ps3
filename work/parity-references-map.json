@@ -68,8 +68,8 @@
         "destinationSha256": "fdd4609008f2cd5d0823c119dfc00d18a05dbc1b98fd53dccc5d75e4456a6c1c",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.579Z",
-        "replaced": "C:\\dev\\xmb\\out\\parity-references\\root__original__day__1080p.state.json"
+        "imported": "2026-10-28T12:48:36.192Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\root__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\root__original__day__1080p.state.json"
       },
       "skipped": null
     },
@@ -91,7 +91,7 @@
         "destinationSha256": "cf68d72202d09ae38418fa5403948385f9e655a38be289287a757d3b71bd9a6f",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.586Z",
+        "imported": "2026-10-28T12:48:36.201Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.state.json"
       },
       "skipped": null
@@ -114,7 +114,7 @@
         "destinationSha256": "f8dc7fdcce1a76b749487b6232d284c454ff88c8e1c9a2b3b5e5247096a36cfc",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.594Z",
+        "imported": "2026-10-28T12:48:36.209Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.state.json"
       },
       "skipped": null
@@ -137,7 +137,7 @@
         "destinationSha256": "3ae594a78b5e39aef34082549b925157c5dad384468fd7edfc1c9ac3812dd172",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.602Z",
+        "imported": "2026-10-28T12:48:36.217Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.state.json"
       },
       "skipped": null
@@ -160,7 +160,7 @@
         "destinationSha256": "1f16a9edb7c590cb8da6d7dff0bc66af3963e32f75529cd6edab33f4d5504bec",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.610Z",
+        "imported": "2026-10-28T12:48:36.225Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.state.json"
       },
       "skipped": null
@@ -183,7 +183,7 @@
         "destinationSha256": "7800a0e85c92085d303a256216e08e12275f6ef9abb652c0eaac0e9e631c48fc",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.617Z",
+        "imported": "2026-10-28T12:48:36.234Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.state.json"
       },
       "skipped": null
@@ -206,7 +206,7 @@
         "destinationSha256": "6839413c4f34064fdf59398d4ba02d32688bfc6ed364e0a4bd3e6d3e8222f9c9",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.625Z",
+        "imported": "2026-10-28T12:48:36.242Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.state.json"
       },
       "skipped": null
@@ -229,7 +229,7 @@
         "destinationSha256": "fca31123c3a498c6999749e512e2a4c19ce8e5ec8c08d57c2144f2b5b9ac8ddf",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.632Z",
+        "imported": "2026-10-28T12:48:36.251Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.state.json"
       },
       "skipped": null
@@ -252,7 +252,7 @@
         "destinationSha256": "39dac674c1d3730c4ba617a40e850c78488a00559fb2b9adb5f1a595e23f254b",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.639Z",
+        "imported": "2026-10-28T12:48:36.260Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.state.json"
       },
       "skipped": null
@@ -275,7 +275,7 @@
         "destinationSha256": "a850b5b04f75a49a0f31b1a33e354b7bb74a4d41d31388f3911c788963e42c46",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.646Z",
+        "imported": "2026-10-28T12:48:36.269Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.state.json"
       },
       "skipped": null
@@ -298,7 +298,7 @@
         "destinationSha256": "d5e772eb4001579d61bdd6b05f4b88f577bd5109f03f51ee759a1e55b8303a80",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T05:50:19.653Z",
+        "imported": "2026-10-28T12:48:36.278Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-network__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-network__original__night__1080p.state.json"
       },
       "skipped": null
@@ -321,7 +321,7 @@
         "destinationSha256": "e06c8981a7a1e9733d0db0802b62974edb42753122a4e5932ada5ad3c9e142d9",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T05:50:19.661Z",
+        "imported": "2026-10-28T12:48:36.291Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-psn__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-psn__original__night__1080p.state.json"
       },
       "skipped": null
@@ -344,7 +344,7 @@
         "destinationSha256": "40d18eede723e893faaaf43c43fb115efc5619db12fa8960e2917775512a79a7",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T05:50:19.668Z",
+        "imported": "2026-10-28T12:48:36.300Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-friends__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-friends__original__night__1080p.state.json"
       },
       "skipped": null
@@ -367,7 +367,7 @@
         "destinationSha256": "36f6bdf61288b0ca55d2e4875eaf26f5fcf6e32669fdb0cfa377beb6353f4902",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.675Z",
+        "imported": "2026-10-28T12:48:36.309Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__night__1080p.state.json"
       },
       "skipped": null
@@ -390,7 +390,7 @@
         "destinationSha256": "d832210de929c50af4ad70c67692b9958b2d7b522a56e0d18534ffaa6f1f0afb",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.682Z",
+        "imported": "2026-10-28T12:48:36.319Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__night__1080p.state.json"
       },
       "skipped": null
@@ -413,7 +413,7 @@
         "destinationSha256": "dfc1c9502b26f02b383fc9d5c85da3a69ec985c612e6c84cf5bde8a2c332fab5",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.689Z",
+        "imported": "2026-10-28T12:48:36.330Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__night__1080p.state.json"
       },
       "skipped": null
@@ -436,7 +436,7 @@
         "destinationSha256": "9ca6b59d9f226d8948b0b8c9ef723820c3d8107af40ecca62221b39558da8824",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.697Z",
+        "imported": "2026-10-28T12:48:36.339Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__night__1080p.state.json"
       },
       "skipped": null
@@ -459,7 +459,7 @@
         "destinationSha256": "ba259a5849feb572148896e734d713869a0b83189960ea1748ed121b967d1332",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.703Z",
+        "imported": "2026-10-28T12:48:36.347Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__night__1080p.state.json"
       },
       "skipped": null
@@ -482,7 +482,7 @@
         "destinationSha256": "bf6c99e0c118a030e3a2c309f2607ec9be9b1cdd98139d1ab929d37a495945d0",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.710Z",
+        "imported": "2026-10-28T12:48:36.356Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__night__1080p.state.json"
       },
       "skipped": null
@@ -505,7 +505,7 @@
         "destinationSha256": "ea39764d7be891e40d31827ff8684f612f3206f60fc356af8df5fec116677085",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.717Z",
+        "imported": "2026-10-28T12:48:36.365Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\theme-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\theme-list__original__night__1080p.state.json"
       },
       "skipped": null
@@ -528,7 +528,7 @@
         "destinationSha256": "3b7a1f64bd8c3f7d572915c23bf6cc50946f902377b23fbe128331c659fbf42d",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.724Z",
+        "imported": "2026-10-28T12:48:36.375Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\color-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\color-list__original__night__1080p.state.json"
       },
       "skipped": null
@@ -551,7 +551,7 @@
         "destinationSha256": "8587582d89bb4f43efbda2ff0a380bb27d02b5035b0b96a096e4162b569e6d5f",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.730Z",
+        "imported": "2026-10-28T12:48:36.385Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\background-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\background-list__original__night__1080p.state.json"
       },
       "skipped": null
@@ -574,7 +574,7 @@
         "destinationSha256": "098dfba48532ea868395e3f15ac261e6db0c0313bfc04bc4ea69e60ea3240d4f",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.738Z",
+        "imported": "2026-10-28T12:48:36.394Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\font-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\font-list__original__night__1080p.state.json"
       },
       "skipped": null
@@ -597,7 +597,7 @@
         "destinationSha256": "d3ba675443042c39e2401462d86fa0931631834dcb76ed92b390976347b9dc7e",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.744Z",
+        "imported": "2026-10-28T12:48:36.402Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__night__1080p.state.json"
       },
       "skipped": null
@@ -620,7 +620,7 @@
         "destinationSha256": "4618d40aa30a7a078f36fc148457c6109ac31457c736177dedeef8ef8dba9f38",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.751Z",
+        "imported": "2026-10-28T12:48:36.410Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-network__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-network__original__day__1080p.state.json"
       },
       "skipped": null
@@ -643,7 +643,7 @@
         "destinationSha256": "54e159bb20b83c4c39dfa2cc915e7aa70889e9ff615c06ea44bd321c41d56686",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.759Z",
+        "imported": "2026-10-28T12:48:36.420Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-psn__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-psn__original__day__1080p.state.json"
       },
       "skipped": null
@@ -666,7 +666,7 @@
         "destinationSha256": "e7a81095f55301be5f696d06b6f25add7debf0ef9d52d82766bf925907522a7b",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.767Z",
+        "imported": "2026-10-28T12:48:36.428Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-friends__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-friends__original__day__1080p.state.json"
       },
       "skipped": null
@@ -689,7 +689,7 @@
         "destinationSha256": "a308056f1a767d10f0c11e75e546f28a970188423e3e70393162dfe93174aba8",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.774Z",
+        "imported": "2026-10-28T12:48:36.436Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__day__1080p.state.json"
       },
       "skipped": null
@@ -712,7 +712,7 @@
         "destinationSha256": "c6cf359dec60c02172061806b522573e3f5708a734bfefbf9aa217fbf132a1cc",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.782Z",
+        "imported": "2026-10-28T12:48:36.445Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__day__1080p.state.json"
       },
       "skipped": null
@@ -735,7 +735,7 @@
         "destinationSha256": "2cb71aa935fe2491d10df6f4f286bbfc3511ed4eb5c2d606003486b63315fa23",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.788Z",
+        "imported": "2026-10-28T12:48:36.453Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__day__1080p.state.json"
       },
       "skipped": null
@@ -758,7 +758,7 @@
         "destinationSha256": "c9842bcc20b074cdb3af4125b0fab40eda159730796f8b50d97e7872acc8fefc",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.794Z",
+        "imported": "2026-10-28T12:48:36.460Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__day__1080p.state.json"
       },
       "skipped": null
@@ -781,7 +781,7 @@
         "destinationSha256": "0a6e846afa74f24b47f47637e8a696a768f09f08747f9c2e74ac6b3036837e89",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.801Z",
+        "imported": "2026-10-28T12:48:36.470Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__day__1080p.state.json"
       },
       "skipped": null
@@ -804,7 +804,7 @@
         "destinationSha256": "9de56d39efa83694071367206af55d448db21b71f53c6b64fbfdc9c9ae6ef364",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.808Z",
+        "imported": "2026-10-28T12:48:36.479Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\theme-list__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\theme-list__original__day__1080p.state.json"
       },
       "skipped": null
@@ -827,7 +827,7 @@
         "destinationSha256": "d8b529ff79615c16f28b6f81bbb4c04e4151a1c528b6b114f76bd1c1710df46a",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.814Z",
+        "imported": "2026-10-28T12:48:36.487Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\color-list__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\color-list__original__day__1080p.state.json"
       },
       "skipped": null
@@ -850,7 +850,7 @@
         "destinationSha256": "531f2b533db6e53708a853751decd97d90198a0170f2d5fa6daab14e3840a545",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.821Z",
+        "imported": "2026-10-28T12:48:36.495Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\background-list__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\background-list__original__day__1080p.state.json"
       },
       "skipped": null
@@ -873,7 +873,7 @@
         "destinationSha256": "ec76343cf125c1aaf9236acc8928b98153049178aa39564933c2d72b623f8d07",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.827Z",
+        "imported": "2026-10-28T12:48:36.504Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\font-list__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\font-list__original__day__1080p.state.json"
       },
       "skipped": null
@@ -896,15 +896,81 @@
         "destinationSha256": "4891bf641345ce1a59baae858e8de16d359247dcc4d99161195c5041b02a1e73",
         "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:50:19.834Z",
+        "imported": "2026-10-28T12:48:36.512Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__day__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "info-indicator",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/info-indicator__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-gaps-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:01 AM",
+      "note": "Manifest 3 row 1: the controller indicator raised by a 60 ms PS tap (Backspace) at the Game column row 0, day pin, plate 10:01 AM. The pad glyph, the 1 and the - sit on their own dark plate at x 1185-1310, y 90-125. The flash is measured by the burst: full opacity 155 ms after the press, held about 2.0 s, gone by 2.39 s. The catalogue crop controller indicator 1200,80,340,60 misses the plate's left 15 px; recorded, not adjusted. No sidecar field reports this plate (tierANote), so the cell is a pixel claim over the root underneath.",
+      "applied": {
+        "cell": "info-indicator__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\info-indicator__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\info-indicator__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-gaps-2026-10-28\\stills\\info-indicator__original__day__1080p.png",
+        "sourceSha256": "e43fe338ec5e7918e7b09000f804c0039fc2a8ac041feec7fe2d205888a13d3b",
+        "destinationSha256": "e43fe338ec5e7918e7b09000f804c0039fc2a8ac041feec7fe2d205888a13d3b",
+        "manifest": "C:\\dev\\out\\rpcs3-gaps-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T12:48:36.521Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "ps-menu",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/ps-menu__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-gaps-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:02 AM",
+      "note": "Manifest 3 row 2: the system menu raised by a 1200 ms PS hold at the Game column row 0, day pin, plate 10:02 AM. Black frame; Turn Off the System (focused) and Turn Off the Controller centred at y 517 and 560; the 1-4 controller slots with slot 1 red, Controller 1 and Charge Level - at y 813-851; the X Enter / O Back legend at y 913. The burst measures the open: the frame goes fully black 1052 ms after the press and the entries settle by about 1970 ms. The frame is black below the clock, so a 24-cell sweep would file the same picture 23 more times; this is the only informative cell of the state. The catalogue crop ps menu footer 140,650,600,130 lands above the console's actual footer (y 813+).",
+      "applied": {
+        "cell": "ps-menu__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\ps-menu__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\ps-menu__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-gaps-2026-10-28\\stills\\ps-menu__original__day__1080p.png",
+        "sourceSha256": "07a2d6b114680e7ade5429198a923279384f228729651b521bc14b7ef5635819",
+        "destinationSha256": "07a2d6b114680e7ade5429198a923279384f228729651b521bc14b7ef5635819",
+        "manifest": "C:\\dev\\out\\rpcs3-gaps-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T12:48:36.528Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "dialog",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/dialog__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-gaps-2026-10-28/MANIFEST.md",
+      "clock": "not readable on the frame: the modal page replaces the info bar; the console plate read 10/28 10:03 AM on the frames immediately before and after (a31, a32)",
+      "note": "Manifest 3 row 3: the firmware delete-confirmation box, reached from Game column > Corrupted Data > Triangle > Down (Start -> Delete) > Cross, and cancelled with Circle - never confirmed. Body: The installed game will be deleted. / Are you sure you want to continue?, buttons Yes and No with No focused. Route-equivalent, not route-identical: the native body is the Video Continue Watching empty state and the console body is this delete confirmation, but it is the same firmware message-box plate the state names (DIALOGS-FIRMWARE 544/874/994), the precedent 13.2 set for osk and options-panel. First frame and first Tier B number for a two-button message box.",
+      "applied": {
+        "cell": "dialog__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\dialog__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\dialog__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-gaps-2026-10-28\\stills\\dialog__original__day__1080p.png",
+        "sourceSha256": "ea7d5a984516bf2ec28e9476a3c2bb976293f08a20b0916736f4a4902f0b0add",
+        "destinationSha256": "ea7d5a984516bf2ec28e9476a3c2bb976293f08a20b0916736f4a4902f0b0add",
+        "manifest": "C:\\dev\\out\\rpcs3-gaps-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T12:48:36.537Z"
       },
       "skipped": null
     }
   ],
   "summary": {
-    "entries": 37,
-    "applied": 37,
+    "entries": 40,
+    "applied": 40,
     "skipped": 0,
     "referenceRoot": "C:\\dev\\xmb\\out\\parity-references"
   }

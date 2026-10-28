@@ -1633,3 +1633,164 @@ Tier C is 9/35: the states whose route has no scripted transition are `n/a` by c
 
 Nothing was re-budgeted to make a cell pass: the provisional budgets of section 6 stand. The next fidelity work
 is the row/list geometry the region numbers point at, not a budget change.
+
+## 16. Three never-measured composites get their first frames and their first Tier B numbers (2026-10-28 07:56Z)
+
+Batch `rpcs3-gaps-2026-10-28`, two boots, one day pin, executed from the plan in
+`native-xmb/audit/REFERENCE-GAPS.md` section 5. Three of the eight reference-less states were captured and
+imported (`info-indicator`, `ps-menu`, `dialog`); the fourth (`media-player-panel`, the plan's one group (b)
+state) could not be produced, and the reason is a correction to the plan rather than a capture miss
+(16.6). This is the first time any of these three surfaces has been compared against firmware at all.
+
+### 16.1 Corpus movement
+
+| Measure | Before | After |
+|---|---:|---:|
+| canonical (`original/day/1080p`) cells with a reference | 22 / 30 | **25 / 30** |
+| matrix cells with a reference | 37 / 720 | **40 / 720** |
+| firmware-referenced states with a reference anywhere | 22 / 30 | **25 / 30** |
+| states the harness reports "without a reference" | 8 | **5** |
+| composite-class states ever measured on Tier B | 6 / 12 | **9 / 12** |
+
+Import: 3 new cells, 0 skipped, `--replace` over the 37 existing ones (the importer refuses to run otherwise,
+and the 37 PNGs are byte-identical after it - checked by hashing the reference directory before and after).
+Map: `work/parity-references-map.json` entries 37 -> 40. Manifests: `C:/dev/out/rpcs3-gaps-2026-10-28/MANIFEST.md`
+(batch A) and `MANIFEST-B.md` (batch B, no cell).
+
+### 16.2 What was captured, and the console state behind it
+
+One boot drove the day pin and the console's own UI, so every cell carries evidence rather than an assumption:
+
+- **Clock.** `| Console time offset (s): 8304` in the scratch config put the guest clock at 09:58:30 while the
+  host clock stayed put (`logs/preflight.txt`). The boot plate read `28/10 9:59`.
+- **Formats committed on the console.** The registry had been restored to DD/MM + 24-hour by the day batch, so
+  both formats were set again through Settings > Date and Time: Date Format `MM/DD/YYYY`
+  (`frames/a07-after-dateformat.png`, plate `10/28 10:00`), Time Format `12-Hour Clock`
+  (`frames/a11-after-timeformat.png`, plate `10/28 10:00 AM`).
+- **Theme Original evidenced, not assumed.** `frames/a14-theme-settings.png` shows Theme/Color/Background/Font
+  all `Original` at 10:01 AM in the same session; no theme list was committed.
+- **The three cells.** `ps-menu` from a 1200 ms PS hold at the Game column row 0 (plate `10/28 10:02 AM`);
+  `info-indicator` from a 60 ms PS tap at the same position (plate `10/28 10:01 AM`); `dialog` from
+  `Corrupted Data` > Triangle > Down > Cross, **cancelled with Circle, never confirmed** (the modal page
+  replaces the info bar, so its own frame carries no clock; 10:03 AM either side).
+- **The PS key never needed a map entry.** The installed map overrides only Cross/Circle/Triangle/Square, and
+  PS stays the keyboard handler's default Backspace (`keyboard_pad_handler.cpp:47`). REFERENCE-GAPS 2.1 was
+  right that the day manifest's claim of a PS line was wrong; the route needed nothing added.
+
+### 16.3 Two transitions measured for the first time
+
+Both bursts are 1:1 crops with per-frame timestamps, and both were measured rather than eyeballed
+(`tools/burst-luma.ps1`, CSVs beside the frames).
+
+- **PS-tap indicator, `burst/info-indicator-tap/`** (573 frames, 238.8 fps, crop 1160,60,760,120): the plate
+  fades in 155 ms after the press, reaches full opacity 66 ms later, **holds for about 2.0 s**, and is gone by
+  2.39 s. PS-BUTTON.md described "a flash" with no duration; this is the duration, and it is why the three
+  grabs at +0.3 s, +1.1 s and +1.8 s all caught the plate.
+- **PS-hold open, `burst/ps-menu-entries/`** (496 frames, 206.6 fps, crop 300,470,1320,240): the frame goes
+  **fully black 1052 ms after the press** (the console's hold threshold), and the entries fade in between
+  1202 ms and about 1970 ms. At rest the entries band averages 4.2 luma - two white lines on black.
+
+### 16.4 Tier B: the first numbers these surfaces have ever had
+
+Run `run-20261028-075444`, scorecard `scorecard-20261028-075620`, executable
+`C:/dev/out/native-text3/re-ps3-native.exe` sha256 `cff205dd...4164`, pins `uiClock 2026-10-25T12:32:00`
+(the corpus default, not the reference's 10:0x - see the residual below).
+
+| state | A | C | frame (budget 18.0 / 0.88) | gating region | region (budget) | verdict |
+|---|---|---|---|---|---|---|
+| `ps-menu` | PASS | PASS | **22.37 / 0.9583 PASS** | `ps menu entries` | **19.39 / 0.9396** (26.0 / 0.95) | **FAIL** |
+| | | | | `ps menu footer` | 18.54 / 0.8914 (18.0 / 0.88) | PASS |
+| `info-indicator` | PASS | n/a | 17.97 / 0.8243 **FAIL** | `controller indicator` | 16.83 / 0.7718 (18.0 / 0.88) | **FAIL** |
+| | | | | `info bar` (not gating) | 14.48 / 0.7644 | FAIL |
+| `dialog` | PASS | PASS | 18.08 / 0.8384 **FAIL** | `dialog` | 16.42 / 0.7576 (18.0 / 0.88) | **FAIL** |
+| `media-player-panel` | PASS | PASS | - | - | - | **no reference** (16.6) |
+
+**The `ps-menu` entries budget is not met.** The corpus's one hand-set region budget is 26 dB / 0.95; the first
+measurement is **19.39 dB / 0.9396** - 6.61 dB and 0.0104 SSIM short. The frame and footer pass, so this is a
+region-local gap, and the geometry says exactly where it is (16.5).
+
+### 16.5 Why each number is what it is (measured, not guessed)
+
+**`ps-menu` - the closest of the three, and the only one where both sides draw the same structure.** Row-band
+analysis of the entries crop: the console's two lines occupy y 511-537 and y 554-572 (a 43 px pitch) with 4,533
+bright pixels in the region; the native lines occupy y 508-525 and y 548-565 (a 40 px pitch) with 2,259. Three
+differences account for the 6.6 dB:
+
+1. **Pitch and placement.** The native block is 3-6 px high and its two rows are 40 px apart against the
+   console's 43 px, so both lines drift within the region.
+2. **The focused row's glow.** The console's selected entry is a 27 px tall band of 239 bright pixels in its
+   brightest row; the native selected entry is 18 px tall with 115. The native menu has no focus glow at all,
+   so it has roughly half the ink in a region whose entire content is ink.
+3. **The native footer intrudes into the region.** The native controller/charge panel sits at y 682-731, which
+   puts its first rows inside the bottom of the entries crop (470-710); the console's sits at y 813-851, 130 px
+   lower. That is also why `ps menu footer` (crop 140,650,600,130, i.e. y 650-780) passes at 18.54: it compares
+   native text against **console black**, because the console's actual footer is below the crop. The pass is a
+   coincidence of a mis-specified region and must not be read as agreement - section 16.8.
+
+**`info-indicator` - the native side draws no indicator at all.** In the 340x60 `controller indicator` crop the
+console frame has a mean luma of 72.34 with 592 bright and 297 dark pixels (the plate's dark box and its white
+`1 -`); the native frame has 96.78 mean, 190 bright and **0 dark** - there is no plate, only the left edge of
+the date plate. The catalogue lists the route as "root, then the `ps` script token", and the run's own frame
+proves the token did not leave a visible plate in the capture window. The 17.97 dB frame misses its 18.0 budget
+by 0.03 dB, which is the least interesting fact in this table: the state is a **missing surface**, not a
+misplaced one.
+
+**`dialog` - the native frame is not a dialog.** The console frame is the firmware message box (dimmed scene,
+plate, `The installed game will be deleted.` / `Are you sure you want to continue?`, `Yes`/`No` with `No`
+focused); the native frame for the same state is the Video column root with an inline row label
+`There are no content items.` In the 1440x700 region the console has 11,937 bright pixels over a mean luma of
+68.03; the native has 84,345 over 90.18 - a bright list page, no plate, no dim. Tier A and Tier C both PASS
+(the route and the `continue watching: nothing to continue` trace are right), so this is a **surface** gap in
+the build, and the first number for the corpus's oldest spec-only row is 16.42 / 0.7576 against a native
+render that does not attempt the plate.
+
+### 16.6 `media-player-panel` is still not capturable, and the plan's prerequisite is wrong
+
+REFERENCE-GAPS 3.1 says the prerequisite is "one playable video file in the emulated VFS" and calls it "one
+file copy away". That was tested and it is not sufficient. `MANIFEST-B.md` is the record: a 3,459,152 B
+H.264/AAC MP4 (`avc1` + `mp4a`, 20.00 s, read from its own boxes) was placed in `dev_hdd0/video` before a boot
+and the Video column drew only `BD Data Utility` / `Search for Media Servers` / `Video Editor & Uploader`; the
+same file copied to `dev_usb000/VIDEO` and a column re-entry changed nothing; a JPEG in `dev_hdd0/photo`
+behaved identically, and the Photo Gallery - opened for the first time in this corpus - showed its own
+first-run page and no file.
+
+The reason is in `bin/log/RPCS3.log` for that boot (47,749 lines): vsh opens `/dev_hdd0/mms/db/metadata_db_hdd`
+at 0:00:10 and reads its log/index files, and **`/dev_hdd0/video` appears in the log zero times**. The media
+columns are drawn from the MMS metadata database, not from a directory scan, and `/dev_usb000` appears only in
+the VFS mount dump - no enumeration, no hotplug. So the console's own importer has to write a metadata row, and
+its only sources are devices RPCS3 does not present here. On this rig `media-player-panel` is **group (c)**, not
+group (b); the copy-completion notification experiment of 4.3 was not attempted because it had no item to open
+an options menu on. The content was removed and both columns were re-grabbed empty
+(`frames/b11-video-after-removal.png`), and every hash is back to its pre-session value.
+
+### 16.7 Rig restoration
+
+| Item | Value |
+|---|---|
+| `dev_flash2/etc/xRegistry.sys` | 262,144 B, sha256 `4de4dcdcaecda324093a9246888cc337a5c872103b779047c2a52387fc57d80d` (both boots, restored byte-for-byte, mtime reset) |
+| global input config | 66 B, sha256 `e624da0d66a8e971173c39a69a1dc2c89ffe146d57bf2a03c2c8cfacb459ceee` = the required target |
+| live `config.yml` | sha256 `22d8ffe22461284c6756fc80ab0de2b7e76415981299fdcc6621a697971e4adb`, untouched |
+| `dev_hdd0/game/TEST12345` | backed up before batch A, restored byte-for-byte after it (0 files, empty `USRDIR`, as before) |
+| media content | removed; `dev_hdd0/video`, `dev_hdd0/photo` and `dev_usb000/VIDEO` empty again |
+| RPCS3 | only pid 4264 and pid 31300 (this batch's own boots) were stopped |
+
+### 16.8 What this changes for the next pass
+
+1. **`ps-menu` is a 6.6 dB region fix with a known shape**: match the 43 px pitch, draw the focus glow, and
+   move the controller/charge panel down ~130 px. Two of those three are also what makes the entries region
+   comparable at all.
+2. **The catalogue's `ps menu footer` crop does not contain the console's footer** (console y 813-851 vs crop
+   y 650-780) and its `controller indicator` crop starts 15 px right of the console's plate (x 1185 vs 1200).
+   Both were left alone - changing a region is a catalogue change and this batch's fence forbids it - but a
+   future pass should re-derive them, or the footer's 18.54 pass will keep reading as agreement when the two
+   sides are not even drawing in the same place.
+3. **The build owes two surfaces, not two numbers**: `info-indicator` needs the tap plate (the corpus's
+   `controllerIndicatorVisible` field, 1.1) and `dialog` needs an actual message box behind the Continue
+   Watching empty state. Until then their Tier B numbers measure absence.
+4. **`media-player-panel` moves out of the queue** on this rig (16.6) unless the MMS database can be written by
+   the console itself, which needs a device RPCS3 does not present.
+5. **Residual, stated:** the capture pins are the corpus default `uiClock 2026-10-25T12:32:00` while the
+   references' plates read `10/28 10:01-10:02 AM`. That depresses the `frame` and `info bar` numbers by the
+   clock string alone (three characters and the AM/PM); the region numbers that gate these three cells are not
+   clock-bearing. A future run that wants the plate to agree should pin the capture to the reference's own
+   clock, and say which pin it used.
