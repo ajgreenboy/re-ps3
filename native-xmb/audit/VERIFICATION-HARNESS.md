@@ -253,3 +253,24 @@ of writing); pass `--exe` when the integration build moves.
 6. The named-state references under `out/native-reference/layers/` are native self-baselines. Add a matched RPCS3
    reference for the Steam pages if one is ever captured, then replace the self-baseline gate with a fidelity gate
    instead of widening the budget.
+
+## RPCS3 timestamped band burst (added 2026-10-27)
+
+A new capture recipe for motion evidence, used by LAYOUT-TRACE phase 4c and PAGE-MOVE phase 4c. It is local
+scratch, not part of the committed harness:
+
+- Boot `C:\dev\rpcs3-cap\rpcs3.exe --no-gui --config <scratch yml> --fullscreen <dev_flash>\vsh\module\vsh.self`
+  with a scratch config outside the repo and RPCS3 folder: Vulkan, 1920x1080, exclusive fullscreen disabled.
+- vsh.self ignores `--input-config`; temporarily replace
+  `C:\dev\rpcs3-cap\config\input_configs\global\Default.yml` with a Keyboard handler (PS Button Backspace,
+  Cross PgDown, Circle PgUp), back it up first and restore it in the same run, checking SHA-256
+  `E624DA0D66A8E971173C39A69A1DC2C89FFE146D57BF2A03C2C8CFACB459CEEE` before and after.
+- `burst.ps1` copies a screen band (here 1920x180 at y 200..380) with BitBlt into a 32bpp DIB, writes a
+  Stopwatch timestamp per frame and the raw pixels to one file, and fires one key at a scheduled time. The
+  2026-10-27 run is 642 frames in 4,588.7 ms (139.7 fps); `raw2png.ps1` converts to `f_<ms>.png`.
+- Analyse with `template-track.ps1` (isolates the focused icon) and `pitch.ps1` / `diffpitch.ps1` (icon-row
+  pitch by autocorrelation). `work/motion-track.ts` and `work/region-luma.ts` still run on the same frames, but
+  the full-band tracker mixes the moving icon, the fading bar and the label, so it reports a compromise track
+  (201-223 px instead of 262 px). Use the template track for absolute distances and the project tools for the
+  independent start frames and brightness channel.
+- Scratch artifacts stay under `C:\dev\out\rpcs3-xmb-cap\`; only the results belong in the audit notes.

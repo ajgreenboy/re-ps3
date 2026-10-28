@@ -307,3 +307,100 @@ node work/item-icon-scan.js out/native-reference/fp-dump2           # grouped di
 ```
 
 Firmware-derived values stay in this audit note; no dump, module, capture or scratch script is committed.
+
+---
+
+# LAYOUT-TRACE phase 4c - 2026-10-27: the open-page faint columns measured in RPCS3
+
+Third pass over row 6, the 186 px faint-category pitch. Same fence: this file only, no source edit, no git
+command. The new evidence is a real 4.93 XMB capture at 1920x1080 with one category page open, plus the
+decoded `XMB_FP_DUMP` from the same run. Short version: **the faint neighbouring columns are 190.5 px apart,
+not 186**, they are only visible during the page transition, and the settled open page shows no neighbouring
+category icons at all.
+
+## 1. Capture and provenance
+
+- RPCS3 capture build `C:\dev\rpcs3-cap\rpcs3.exe` (the tree built from `rpcs3-rsx-capture.patch`), booted as
+  `rpcs3.exe --no-gui --config C:\dev\out\rpcs3-xmb-cap\capture.yml --fullscreen <dev_flash>\vsh\module\vsh.self`.
+- Scratch config (outside the repo and outside the RPCS3 folder): Vulkan, 1920x1080, 60 Hz, exclusive
+  fullscreen disabled. The global input config was temporarily replaced with a Keyboard handler (PS Button
+  Backspace, Cross PgDown, Circle PgUp, arrows unchanged) and restored in the same run. Original and restored
+  SHA-256 of `C:\dev\rpcs3-cap\config\input_configs\global\Default.yml`:
+  `E624DA0D66A8E971173C39A69A1DC2C89FFE146D57BF2A03C2C8CFACB459CEEE`.
+- Navigation: Game -> four LEFT to Settings -> the Game Settings row (already focused) -> Cross. The page that
+  opens is `PS - Upscaler` / `PS - Smoothing`.
+- Local artifacts under `C:\dev\out\rpcs3-xmb-cap\` (never committed): `settings-b.png` (root Settings),
+  `page-open.png` (settled page), `page-closed.png`, `crop-open-top2.png` (open-page top band at 4x contrast),
+  `fp-open/` (2,020 `.ucode` captures; 1,748 decoded to `.params.txt` with
+  `re-ps3-native --dev-flash C:\dev\rpcs3-cap\dev_flash --decode-fp icons:lib/icons/icons_no_ss_no_shad.fpo@fp-open`).
+
+## 2. Result: the faint pitch is 190.5 px, not 186
+
+- Settled open page (`page-open.png`): the only category icon is the open one, bbox x 249..360, centre x 304.5,
+  bbox y 238..318. The 4x contrast crop of x 300..1900, y 220..380 shows no neighbouring category icons.
+- During the transition (open and close) the other categories are visible faintly. Their spacing was measured
+  by the autocorrelation of the high-passed column-luma profile over the icon band (x 650..1900, y 240..330).
+  Four independent frames/pairs over the faint phase peak at **lag 190-191 px**, correlation 0.265-0.283:
+  f_001410 vs f_001443 (0.2725), f_002760 (0.2833), f_002760 vs f_002802 (0.2667), f_002794 vs f_002844
+  (0.2654). The lag-200 correlation on the same data is only 0.03-0.07.
+- An independent anchor agrees: the faint PS icon's blob centre in `f_002760` is x 1709.5, which is 6 steps of
+  190.8 from the focused column (`565 + 6 x 190.8 = 1709.8`); the root PS blob centre is x 1770.7. The whole
+  faint row fits `x = 565 + 190.5 n` to about 5 px. That is a 0.95 scale of the 200-unit root pitch about the
+  focused column.
+- The pitch is state-dependent, not a constant 186: 191 at the first close frame (`f_002760`), 194-196 once the
+  bar has brightened (`f_002802`..`f_002844`), and 199-200 at root (`settings-b.png`).
+- The row's y also moves as a receded row: the faint PS blob centre is (1709.5, 303.2) against (1770.7, 284.5)
+  at root; 303.2 matches the projection at camera distance 2857.2 (`540 - 250 x 2700/2857.2 = 303.7`), the
+  distance already recorded for the parent column in phase 4b.
+- Against the phase-4b prediction table: row 3 (recession) is the correct model in direction, and the measured
+  190.5 is the 200-unit pitch at distance 200 x 2700 / 190.5 = 2835, i.e. essentially the recorded 2857.2
+  (189.0), not the 2903.2 chosen to force exactly 186. Rows 1 (217 at 2483) and 2 (200 at 2700) are excluded.
+- The 186 value is 2.4% tighter than the measurement. It is not reproduced by this capture.
+
+## 3. Decoded `_Eye` values: what they settle and what is missing
+
+`node work/item-icon-eyes.js C:\dev\out\rpcs3-xmb-cap\fp-open` yields 88 distinct tuples. The
+`icons_no_ss_no_shad` category draws at the close start are:
+
+```
+n=1  eye=(1004.55, -250.00, 2483.53, 117.13) amb 0.067
+n=1  eye=( 804.55, -250.00, 2483.53, 117.13) amb 0.067
+n=1  eye=( 604.55, -250.00, 2483.53, 117.13) amb 0.067
+n=1  eye=( 404.55, -250.00, 2483.53, 117.13) amb 0.067
+n=1  eye=( 204.54, -250.00, 2483.53, 117.13) amb 0.067
+n=1  eye=(  -5.45, -260.00, 2483.53, 167.31) amb 0.094
+n=1  eye=(-215.45, -250.00, 2483.53, 117.13) amb 0.067
+n=1  eye=(-615.45, -250.00, 2483.53, 117.13) amb 0.067
+```
+
+The eye pitch is exactly 200.00. This layer is at distance 2483.53, which projects 200 eye units to 217.4 px,
+not the 190.5 px visible faint row. Therefore the visible faint row is **not** the category draw that the
+>=2000-byte `icons_no_ss_no_shad` dump captures; it is a different (cheaper or differently scaled) draw. The
+missing artifact is that layer's own fragment-program/vertex-constant dump. The pitch above was measured from
+the frame, not inferred from these eye values; the decoded category layer's 2483.53/200 values should not be
+used as the faint row's geometry.
+
+## 4. Corrections and claims to stop making
+
+- The 186 px faint pitch is contradicted: the measured faint-row pitch is 190.5 px (autocorrelation peaks at
+  lag 190-191; PS anchor 190.8), a 0.95 scale of the 200-unit bar, and it relaxes back to 200 as the bar
+  returns to the root state.
+- The phase-4b statement "there is not one category-size draw at any distance other than 2700 in any dump" is
+  contradicted by both `fpdump7` and this run: the close-start `icons_no_ss_no_shad` category layer is at
+  distance 2483.53 with 200.00 eye pitch (it is simply not the visible faint row).
+- The faint row is a transition state. The settled open page shows no neighbouring category icons at 4x
+  contrast; drawing them permanently is a second mismatch, independent of the pitch.
+- The measured faint geometry is `x = 565 + 190.5 n`, not `kColumnX - 40 + distance*186` (which starts 40 px
+  too far left and uses a 3% tight pitch). No source edit was made; this is recorded for the next source pass.
+
+## 5. Reproduction
+
+```
+node work/item-icon-eyes.js C:\dev\out\rpcs3-xmb-cap\fp-open
+# decode the category program (writes .params.txt beside the .ucode files):
+#   re-ps3-native.exe --dev-flash C:\dev\rpcs3-cap\dev_flash \
+#     --decode-fp icons:lib/icons/icons_no_ss_no_shad.fpo@C:\dev\out\rpcs3-xmb-cap\fp-open
+# pitch: powershell -File C:\dev\out\rpcs3-xmb-cap\pitch.ps1 / diffpitch.ps1 / blobs.ps1 on burst-png
+```
+
+Firmware-derived numbers stay in this audit note; no dump, module, capture or scratch script is committed.
