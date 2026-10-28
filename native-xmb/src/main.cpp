@@ -19,6 +19,8 @@
 #include "steam_collections.h"
 #include "steam_overrides.h"
 #include "steam_family.h"
+#include "host.h"
+#include "pad.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <algorithm>
@@ -93,6 +95,12 @@ int main(int argc,char** argv) {
     parser.addOption({"render-clock","Fix the background/ribbon/particles/icon animation time in seconds for deterministic A/B captures","seconds"});
     parser.addOption({"ui-clock","Fix the displayed UI date/time for local captures; never changes the host clock","date-time"});
     parser.addOption({"focus-time","Fix focused-label age in milliseconds for glow/idle-fade captures","milliseconds"});
+    // ---- Session and power (Phase 4, audit/SESSION-POWER.md) ----
+    parser.addOption({"kiosk","Appliance mode: frameless fullscreen on the chosen display, straight to the XMB (no cold-boot intro)"});
+    parser.addOption({"display","Screen index for --kiosk (0 = first screen; default: the primary screen)","index"});
+    parser.addOption({"start-windowed","Start in a window even when the stored preference is fullscreen (local testing)"});
+    parser.addOption({"pad-report","Write the attached PlayStation controller's kind, connection and battery as JSON, then exit","json-file"});
+    parser.addOption({"pad-check","Run documented synthetic DualSense/DualShock 4 input reports through the pad parser, write JSON, then exit","json-file"});
     parser.addOption({"motion-report","Write easing samples at different host frame rates without opening a window","json-file"});
     parser.addOption({"steam-root","Override the local Steam installation directory","directory"});
     parser.addOption({"steam-report","Write discovered installed Steam games and exit without launching them","json-file"});
@@ -145,6 +153,64 @@ int main(int argc,char** argv) {
         qInfo().noquote()<<"p3t:"<<theme.name()<<"by"<<theme.author()<<"-"<<theme.elements().size()<<"elements, background"<<background.size()
             <<(theme.dynamic()?"(dynamic)":"")<<","<<icons.size()<<"icons,"<<sounds.size()<<"sounds";
         return 0;
+    }
+    if(parser.isSet("pad-check")) {
+        // Local verification only (audit/SESSION-POWER.md): documented synthetic input reports through the exact
+        // parser the HID watcher uses. The battery byte sits at payload byte 52 on a DualSense and 29 on a
+        // DualShock 4, where the payload starts after the report id (and after the one/two extra Bluetooth bytes
+        // the DualSense 0x31 / DualShock 4 0x11 reports carry). The last case is deliberately too short to hold
+        // that byte: its buttons still parse, but batteryRead is false and the level stays unread (-1) instead of
+        // reading past the end of the report.
+        const auto report=[](int size,int id,std::initializer_list<std::pair<int,int>> fields){
+            QVector<quint8> bytes(size,0);bytes[0]=quint8(id);
+            for(const auto& [at,value]:fields)bytes[at]=quint8(value);
+            return bytes;
+        };
+        struct Case { QString name; xmb::pad::Kind kind; QVector<quint8> report; };
+        const QVector<Case> cases{
+            {QStringLiteral("dualsense-usb"),xmb::pad::Kind::DualSense,report(64,0x01,{{1+52,0x07}})},       // level 7, discharging
+            {QStringLiteral("dualsense-bluetooth"),xmb::pad::Kind::DualSense,report(78,0x31,{{2+52,0x20}})}, // level 0, full
+            {QStringLiteral("dualshock4-usb"),xmb::pad::Kind::Ds4,report(64,0x01,{{1+29,0x17}})},            // level 7 + cable
+            {QStringLiteral("dualshock4-bluetooth"),xmb::pad::Kind::Ds4,report(78,0x11,{{3+29,0x06}})},      // level 6, discharging
+            {QStringLiteral("dualsense-truncated"),xmb::pad::Kind::DualSense,report(40,0x01,{})}};
+        QJsonArray results;
+        for(const auto& entry:cases) {
+            xmb::pad::Info info;const bool parsed=xmb::pad::parseReport(entry.kind,entry.report,info);
+            results.push_back(QJsonObject{{"name",entry.name},{"bytes",entry.report.size()},{"parsed",parsed},
+                {"batteryRead",!info.charging.isEmpty()},
+                {"kind",xmb::pad::kindName(info.kind)},{"connection",xmb::pad::transportName(info.transport)},
+                {"batteryPercent",info.batteryPercent},{"charging",info.charging}});
+            qInfo().noquote()<<QString("pad-check: %1 %2 bytes -> %3, %4 over %5, battery %6%7")
+                .arg(entry.name).arg(entry.report.size()).arg(parsed?QStringLiteral("parsed"):QStringLiteral("rejected"))
+                .arg(xmb::pad::kindName(info.kind),xmb::pad::transportName(info.transport))
+                .arg(info.batteryPercent<0?QStringLiteral("not reported"):QString::number(info.batteryPercent))
+                .arg(info.charging.isEmpty()?QString():QString(" (")+info.charging+")");
+        }
+        QFile file(parser.value("pad-check"));
+        const auto bytes=QJsonDocument(QJsonObject{{"source","synthetic"},{"verifiedHardware",false},{"cases",results}}).toJson();
+        if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();return 2;}
+        return 0;
+    }
+    if(parser.isSet("pad-report")) {
+        // The physical path: the HID watcher opens the controller and the report it sends is the evidence. The
+        // wait covers the watcher's 2 s enumeration plus one report interval.
+        xmb::pad::start();
+        QTimer::singleShot(2500,&app,[&app,&parser]{
+            xmb::pad::Info info;const bool attached=xmb::pad::info(info);
+            QJsonObject out{{"source","hid"},{"verifiedHardware",attached},{"attached",attached},
+                {"kind",xmb::pad::kindName(info.kind)},{"connection",xmb::pad::transportName(info.transport)},
+                {"batteryPercent",info.batteryPercent},{"charging",info.charging}};
+            if(!attached)out.insert("note","no PlayStation controller reported in 2.5 s");
+            QFile file(parser.value("pad-report"));
+            const auto bytes=QJsonDocument(out).toJson();
+            if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();app.exit(2);return;}
+            qInfo().noquote()<<QString("pad-report: attached=%1, %2 over %3, battery %4%5")
+                .arg(attached?1:0).arg(xmb::pad::kindName(info.kind),xmb::pad::transportName(info.transport))
+                .arg(info.batteryPercent<0?QStringLiteral("not reported"):QString::number(info.batteryPercent))
+                .arg(info.charging.isEmpty()?QString():QString(" (")+info.charging+")");
+            app.exit(attached?0:1);
+        });
+        return app.exec();
     }
     const QString data=parser.isSet("data-dir")?parser.value("data-dir"):QDir(QCoreApplication::applicationDirPath()).filePath("data");
     if(parser.isSet("steam-root"))qputenv("XMB_STEAM_ROOT",parser.value("steam-root").toUtf8());
@@ -509,9 +575,30 @@ int main(int argc,char** argv) {
         return failures?1:0;
     }
     xmb::Shell shell(data,assets);
+    // ---- Kiosk / launcher mode (Phase 4.2) ----
+    // --kiosk is the appliance recipe: one frameless fullscreen window on one display, straight to the XMB. It
+    // writes no preference, so leaving the flag (or starting without it) restores the stored window state.
+    // --start-windowed is the local-testing counterpart: ignore a stored fullscreen preference for this run.
+    const bool kiosk=parser.isSet("kiosk"),startWindowed=parser.isSet("start-windowed");
+    if(kiosk && startWindowed){qCritical()<<"--kiosk and --start-windowed are mutually exclusive";return 2;}
+    QScreen* kioskScreen=nullptr;
+    if(parser.isSet("display")) {
+        if(!kiosk){qCritical()<<"--display selects the screen for --kiosk; pass --kiosk as well";return 2;}
+        bool ok=false;const int index=parser.value("display").toInt(&ok);
+        const auto screens=QGuiApplication::screens();
+        if(!ok || index<0 || index>=screens.size()) {
+            qCritical().noquote()<<QString("--display must be a screen index from 0 through %1").arg(screens.isEmpty()?QStringLiteral("0"):QString::number(screens.size()-1));
+            return 2;
+        }
+        kioskScreen=screens[index];
+    }
+    if(kiosk && !kioskScreen)kioskScreen=QGuiApplication::primaryScreen();
+    if(kiosk && !kioskScreen){qCritical()<<"kiosk: no screen is available";return 2;}
     QSettings windowSettings(QDir(data).filePath("settings.ini"),QSettings::IniFormat);
     QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);window.setCentralWidget(view);window.resize(960,540);
-    view->setIntroEnabled(!parser.isSet("no-intro") && !parser.isSet("script") && !parser.isSet("background-clock") && !parser.isSet("measure-reference"));
+    // Kiosk starts at the XMB like a console that is already on: the cold-boot intro is a boot animation, not a
+    // launcher screen, and an appliance should be usable the moment the window appears.
+    view->setIntroEnabled(!parser.isSet("no-intro") && !parser.isSet("script") && !parser.isSet("background-clock") && !parser.isSet("measure-reference") && !kiosk);
     if(parser.isSet("background-clock")) {
         const auto when=QDateTime::fromString(parser.value("background-clock"),Qt::ISODate);
         if(!when.isValid()){qCritical()<<"background-clock requires an ISO date/time";return 2;}
@@ -542,10 +629,41 @@ int main(int argc,char** argv) {
         return app.exec();
     }
     if(windowSettings.contains("window/geometry"))window.restoreGeometry(windowSettings.value("window/geometry").toByteArray());
-    QObject::connect(&app,&QApplication::aboutToQuit,&window,[&]{windowSettings.setValue("window/geometry",window.saveGeometry());windowSettings.sync();});
-    QObject::connect(&shell,&xmb::Shell::requestQuit,&app,&QApplication::quit);
-    QObject::connect(&shell,&xmb::Shell::changed,&window,[&]{if(shell.fullscreen()!=window.isFullScreen()){if(shell.fullscreen())window.showFullScreen();else window.showNormal();}});
-    if(shell.fullscreen())window.showFullScreen();else window.show();
+    // Kiosk does not write the window geometry back: the fullscreen rectangle would replace the stored window
+    // state, which is a preference change a launcher flag has no business making.
+    QObject::connect(&app,&QApplication::aboutToQuit,&window,[&]{if(kiosk)return;windowSettings.setValue("window/geometry",window.saveGeometry());windowSettings.sync();});
+    // ---- Auto-Off (Phase 4.1) ----
+    // Shell emits requestQuit from exactly two places today: the idle timer (power/idleMinutes) and the PS
+    // menu's confirmed "Turn Off the System". The confirmation emits while its own flag is still up, so the
+    // flag is the discriminator: a confirmed Turn Off quits, an idle Auto-Off goes dark and the XMB stays
+    // running. Once shell.cpp calls host::requestDisplayOff() from the idle timer (the hunk in
+    // audit/SESSION-POWER.md), this glue is unnecessary and should be deleted.
+    QObject::connect(&shell,&xmb::Shell::requestQuit,&app,[&app,&shell]{
+        if(shell.psMenuConfirmingOff()) {
+            qInfo()<<"power: Turn Off the System confirmed; the XMB quits";
+            app.quit();
+            return;
+        }
+        if(!xmb::host::displayOffRequested())
+            qInfo().noquote()<<QString("power: Auto-Off at idle %1 ms; the XMB stays running").arg(shell.idleMilliseconds());
+        xmb::host::requestDisplayOff();
+    });
+    // Auto-Off's only honest read-back: subscribe to the console display state before the first request.
+    xmb::host::observeDisplayState();
+    if(!startWindowed && !kiosk)
+        QObject::connect(&shell,&xmb::Shell::changed,&window,[&]{if(shell.fullscreen()!=window.isFullScreen()){if(shell.fullscreen())window.showFullScreen();else window.showNormal();}});
+    if(kiosk) {
+        // Frameless fullscreen on the chosen screen: showFullScreen() uses the screen the window is on, so the
+        // screen is set first, and the frame flag removes the title bar even if a window manager would add one.
+        window.setWindowFlag(Qt::FramelessWindowHint,true);
+        window.setScreen(kioskScreen);
+        window.setGeometry(kioskScreen->geometry());
+        window.showFullScreen();
+        qInfo().noquote()<<QString("kiosk: frameless fullscreen on display %1 (%2), %3x%4")
+            .arg(QGuiApplication::screens().indexOf(kioskScreen)).arg(kioskScreen->name())
+            .arg(kioskScreen->geometry().width()).arg(kioskScreen->geometry().height());
+    } else if(startWindowed)window.show();
+    else if(shell.fullscreen())window.showFullScreen();else window.show();
     if(window.screen())qInfo()<<"native display refresh:"<<window.screen()->refreshRate()<<"Hz";
     if(parser.isSet("script")) {
         // Local verification: replay key presses and save framebuffer grabs at the window's real resolution, e.g.
@@ -560,7 +678,7 @@ int main(int argc,char** argv) {
                 {"ENTER",Qt::Key_Return},{"ESC",Qt::Key_Escape},{"PGUP",Qt::Key_PageUp},{"PGDN",Qt::Key_PageDown},{"BACKSPACE",Qt::Key_Backspace},
                 {"PREV",Qt::Key_BracketLeft},{"NEXT",Qt::Key_BracketRight},{"SHUFFLE",Qt::Key_M},{"REPEAT",Qt::Key_R},
                 {"ZOOMIN",Qt::Key_Plus},{"ZOOMOUT",Qt::Key_Minus},{"RESETVIEW",Qt::Key_0},{"ROTATELEFT",Qt::Key_Q},{"ROTATERIGHT",Qt::Key_E},{"REFRESH",Qt::Key_F5},
-                {"TRIANGLE",Qt::Key_T}}; // Triangle: the selected entry's options panel (T is its keyboard binding)
+                {"F10",Qt::Key_F10},{"TRIANGLE",Qt::Key_T}}; // Triangle: the selected entry's options panel (T is its keyboard binding)
             if(token=="full")shell.setFullscreen(true);
             else if(token.startsWith("size=")) {
                 const auto dimensions=token.mid(5).split('x');bool widthOk=false,heightOk=false;
@@ -619,6 +737,14 @@ int main(int argc,char** argv) {
             }
             else if(token=="VOLRESTORE"){view->restoreMasterVolume();qInfo()<<"script: volume restore";}
             else if(token=="quit")app.quit();
+            else if(token.startsWith("pause=")) {
+                // Hold the script clock for N ms without consuming tokens, so real time (an idle Auto-Off, a media
+                // timeout) can pass inside a scripted run, e.g. "pause=65000,grab=...,quit" with a low
+                // power/idleMinutes. Bounded to ten minutes; the script resumes after it.
+                bool ok=false;const auto milliseconds=token.mid(6).toLongLong(&ok);
+                if(!ok || milliseconds<0 || milliseconds>600000)qWarning()<<"script: invalid pause token (whole milliseconds, 0-600000)";
+                else {qInfo()<<"script: pause"<<milliseconds;timer->stop();QTimer::singleShot(int(milliseconds),timer,[timer]{timer->start();});}
+            }
             else if(token.startsWith("grab=")) {
                 const auto image=view->grabFramebuffer();
                 qInfo().noquote()<<"script: grab"<<token.mid(5)<<image.size()<<(image.save(token.mid(5))?"saved":"FAILED");
@@ -629,6 +755,13 @@ int main(int argc,char** argv) {
                     {"entryTitle",shell.entries().isEmpty()?QString{}:shell.entries()[shell.selection()].title},
                     {"entryCount",shell.entries().size()},{"mediaOpen",shell.mediaOpen()},{"mediaPaused",shell.mediaPaused()},
                     {"mediaProvider",shell.mediaProvider()},{"playMethod",shell.mediaPlayMethod()},{"mediaPosition",shell.mediaPosition()},{"mediaDuration",shell.mediaDuration()},{"idleMilliseconds",shell.idleMilliseconds()},{"screensaverMinutes",shell.screensaverMinutes()},
+                    // Auto-Off (Phase 4.1): the display-off request this build made, and the last console display
+                    // state Windows reported (-1 = never observed). The capture cannot power a monitor, so these are
+                    // the sidecar's honest record; audit/SESSION-POWER.md.
+                    {"displayOffRequested",xmb::host::displayOffRequested()},{"displayState",xmb::host::displayState()},
+                    // Kiosk evidence (Phase 4.2): the window state at grab time. IsFullScreen is the widget's own
+                    // state; the no-title-bar proof is the window rect/style read by the test's own Win32 query.
+                    {"fullscreen",window.isFullScreen()},{"windowWidth",window.width()},{"windowHeight",window.height()},
                     {"notificationCount",shell.notificationCount()},{"notificationRemainingMs",double(shell.notificationRemainingMs())},
                     {"notificationTitle",shell.notification()?shell.notification()->title:QString{}},
                     {"notificationIcon",shell.notification()?shell.notification()->icon:QString{}},

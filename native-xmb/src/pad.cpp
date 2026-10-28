@@ -1,4 +1,5 @@
 #include "pad.h"
+#include <QDebug>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -8,6 +9,7 @@
 #include <thread>
 #include <vector>
 #ifdef Q_OS_WIN
+#define NOMINMAX
 #include <windows.h>
 #include <setupapi.h>
 extern "C" {
@@ -18,12 +20,17 @@ extern "C" {
 
 namespace xmb::pad {
 namespace {
-enum class Kind { Ds3, Ds4, DualSense };
 constexpr quint16 up=0x1,down=0x2,left=0x4,right=0x8,startButton=0x10,selectButton=0x20,l3=0x40,r3=0x80,l1=0x100,r1=0x200,ps=0x400,
     cross=0x1000,circle=0x2000,square=0x4000,triangle=0x8000;
+// Battery field offsets, relative to the payload after the report id (the same `d` pointer the button parser
+// uses). DualSense: byte 52 of the payload, low nibble = 0-10 capacity, high nibble = 0 discharging,
+// 1 charging, 2 full, 0xa/0xb/0xf error/out-of-range (SDL_hidapi_ps5.c and Linux hid-playstation). DualShock 4:
+// byte 29, low nibble = 0-11 level, bit 4 = cable connected (SDL_hidapi_ps4.c; Linux hid-sony).
+constexpr size_t kDualSenseBatteryByte=52, kDs4BatteryByte=29;
 
 std::mutex mutex;
 State newest;
+Info newestInfo;
 std::chrono::steady_clock::time_point newestAt{};
 
 float stick(quint8 v){return std::clamp((float(v)-128.f)/127.f,-1.f,1.f);}
@@ -34,36 +41,64 @@ quint16 hat(quint8 v) {
 struct Bit { int byte; quint8 mask; quint16 button; };
 void apply(const quint8* d,std::initializer_list<Bit> bits,State& s){for(const auto& b:bits)if(d[b.byte]&b.mask)s.buttons|=b.button;}
 
-// One input report (report id in byte 0, as Windows returns it).
-bool parse(Kind kind,const std::vector<quint8>& r,State& s) {
-    s=State();
+// One input report (report id in byte 0, as Windows returns it). `info` carries what the same report says about
+// the controller and its battery; a byte the layout does not reach is never read, and a field the layout does not
+// define (DualShock 3 has no battery in its input report) stays -1/empty rather than being invented.
+bool parse(Kind kind,const std::vector<quint8>& r,State& s,Info& info) {
+    s=State();info=Info();info.kind=kind;
     switch(kind) {
     case Kind::Ds3: {
         if(r.size()<20 || r[0]!=0x01)return false;
+        info.transport=Transport::Usb;
         apply(r.data(),{{2,0x01,selectButton},{2,0x02,l3},{2,0x04,r3},{2,0x08,startButton},{2,0x10,up},{2,0x20,right},{2,0x40,down},{2,0x80,left},
             {3,0x04,l1},{3,0x08,r1},{3,0x10,triangle},{3,0x20,circle},{3,0x40,cross},{3,0x80,square},{4,0x01,ps}},s);
         s.lx=stick(r[6]);s.ly=stick(r[7]);s.rx=stick(r[8]);s.ry=stick(r[9]);s.l2=r[18]/255.f;s.r2=r[19]/255.f;
-        return true;
+        return true;   // DS3 reports capacity in its 0xF2 status feature report, which this build does not read
     }
     case Kind::Ds4: { // USB report 0x01, Bluetooth 0x11 (two more bytes in front)
         const size_t base=r.empty()?0:r[0]==0x01?1:r[0]==0x11?3:0;
         if(!base || r.size()<base+9)return false;
+        info.transport=base==1?Transport::Usb:Transport::Bluetooth;
         const quint8* d=r.data()+base;
         s.lx=stick(d[0]);s.ly=stick(d[1]);s.rx=stick(d[2]);s.ry=stick(d[3]);s.buttons|=hat(d[4]);
         apply(d,{{4,0x10,square},{4,0x20,cross},{4,0x40,circle},{4,0x80,triangle},{5,0x01,l1},{5,0x02,r1},
             {5,0x10,selectButton},{5,0x20,startButton},{5,0x40,l3},{5,0x80,r3},{6,0x01,ps}},s);
         s.l2=d[7]/255.f;s.r2=d[8]/255.f;
+        if(r.size()>=base+kDs4BatteryByte+1) {
+            const quint8 battery=d[kDs4BatteryByte];
+            const int level=battery&0x0f;
+            if(battery&0x10) { // cabled: 0-10 charging, 11 charge complete
+                if(level>=11){info.batteryPercent=100;info.charging=QStringLiteral("full");}
+                else {info.batteryPercent=std::min(level*10+5,100);info.charging=QStringLiteral("charging");}
+            } else {
+                info.batteryPercent=std::min(level*10+5,100);
+                info.charging=QStringLiteral("discharging");
+            }
+        }
         return true;
     }
     case Kind::DualSense: { // USB report 0x01, Bluetooth 0x31 (one more byte in front)
         const size_t base=r.empty()?0:r[0]==0x01?1:r[0]==0x31?2:0;
         if(!base || r.size()<base+10)return false;
+        info.transport=base==1?Transport::Usb:Transport::Bluetooth;
         const quint8* d=r.data()+base;
         s.lx=stick(d[0]);s.ly=stick(d[1]);s.rx=stick(d[2]);s.ry=stick(d[3]);s.l2=d[4]/255.f;s.r2=d[5]/255.f;s.buttons|=hat(d[7]);
         apply(d,{{7,0x10,square},{7,0x20,cross},{7,0x40,circle},{7,0x80,triangle},{8,0x01,l1},{8,0x02,r1},
             {8,0x10,selectButton},{8,0x20,startButton},{8,0x40,l3},{8,0x80,r3},{9,0x01,ps}},s);
+        if(r.size()>=base+kDualSenseBatteryByte+1) {
+            const quint8 status=d[kDualSenseBatteryByte];
+            const int level=status&0x0f,charge=(status>>4)&0x0f;
+            switch(charge) {
+            case 0x0:info.batteryPercent=std::min(level*10+5,100);info.charging=QStringLiteral("discharging");break;
+            case 0x1:info.batteryPercent=std::min(level*10+5,100);info.charging=QStringLiteral("charging");break;
+            case 0x2:info.batteryPercent=100;info.charging=QStringLiteral("full");break;
+            case 0xb:info.batteryPercent=0;info.charging=QStringLiteral("not-charging");break; // temperature error
+            default:info.batteryPercent=-1;info.charging=QStringLiteral("unknown");break;       // 0xa or 0xf
+            }
+        }
         return true;
     }
+    case Kind::None:break;
     }
     return false;
 }
@@ -123,8 +158,23 @@ void read(std::wstring path,Kind kind,std::mutex* openMutex,std::set<std::wstrin
             DWORD got=0;
             if(!ReadFile(handle,report.data(),DWORD(report.size()),&got,nullptr) || got==0)break;
             State s;
-            if(!parse(kind,std::vector<quint8>(report.begin(),report.begin()+got),s))continue;
-            const std::lock_guard lock(mutex);newest=s;newestAt=std::chrono::steady_clock::now();
+            Info info;
+            if(!parse(kind,std::vector<quint8>(report.begin(),report.begin()+got),s,info))continue;
+            // One line when the attached pad's own report changes what the status page shows, so a physical
+            // controller proves its kind, transport and battery in the log without polling. The newest report
+            // wins, exactly as latest() already behaves with more than one controller attached.
+            QString line;
+            {
+                const std::lock_guard lock(mutex);
+                if(info.kind!=newestInfo.kind || info.transport!=newestInfo.transport ||
+                   info.batteryPercent!=newestInfo.batteryPercent || info.charging!=newestInfo.charging) {
+                    const QString battery=info.batteryPercent<0?QStringLiteral("not reported")
+                        :QString::number(info.batteryPercent)+"%"+(info.charging.isEmpty()?QString():QString(" (")+info.charging+")");
+                    line=QString("pad: %1 over %2, battery %3").arg(kindName(info.kind),transportName(info.transport),battery);
+                }
+                newest=s;newestInfo=info;newestAt=std::chrono::steady_clock::now();
+            }
+            if(!line.isEmpty())qInfo().noquote()<<line;
         }
         CloseHandle(handle);
     }
@@ -153,5 +203,32 @@ bool latest(State& out) {
     const std::lock_guard lock(mutex);
     if(newestAt==std::chrono::steady_clock::time_point{} || std::chrono::steady_clock::now()-newestAt>std::chrono::milliseconds(300))return false;
     out=newest;return true;
+}
+bool info(Info& out) {
+    const std::lock_guard lock(mutex);
+    if(newestAt==std::chrono::steady_clock::time_point{} || std::chrono::steady_clock::now()-newestAt>std::chrono::milliseconds(300))return false;
+    out=newestInfo;return true;
+}
+bool parseReport(Kind kind,const QVector<quint8>& report,Info& out) {
+    State state;
+    const std::vector<quint8> bytes(report.cbegin(),report.cend());
+    return parse(kind,bytes,state,out);
+}
+QString kindName(Kind kind) {
+    switch(kind) {
+    case Kind::Ds3:return QStringLiteral("DualShock 3");
+    case Kind::Ds4:return QStringLiteral("DualShock 4");
+    case Kind::DualSense:return QStringLiteral("DualSense");
+    case Kind::None:break;
+    }
+    return QStringLiteral("None");
+}
+QString transportName(Transport kind) {
+    switch(kind) {
+    case Transport::Usb:return QStringLiteral("USB");
+    case Transport::Bluetooth:return QStringLiteral("Bluetooth");
+    case Transport::Unknown:break;
+    }
+    return QStringLiteral("Unknown");
 }
 }
