@@ -40,7 +40,19 @@ constexpr size_t SystemCount = size_t(System::Count);
 constexpr std::array<const char*, SystemCount> Labels{
     "snd_cursor", "snd_decide", "snd_category_decide", "snd_cancel", "snd_option",
     "snd_error", "snd_system_ok", "snd_system_ng", "snd_trophy"};
-constexpr std::array<const char*, 6> CueNames{"Move", "Confirm", "Back", "Error", "Options", "Accept"};
+constexpr size_t CueCount = 7;
+constexpr std::array<const char*, CueCount> CueNames{
+    "Move", "Confirm", "Back", "Error", "Options", "Accept", "Trophy"};
+constexpr std::array<const char*, 7> DecisionNames{
+    "play", "retrigger-skip", "disabled", "silent", "source-unavailable", "output-unavailable", "rejected"};
+// Measured, not fitted: the firmware's playback wrapper takes one float gain
+// for every cue and it is 1.0 (0x3F800000) in the local 4.93 modules.
+//   explore_plugin.prx VA 0x272000: FUN_001fdf4c does
+//     lis r9, 0x27 / lfs f1, 0x2000(r9) / bl <paf sound play>
+//   sysconf_plugin.prx VA 0x14ab70: same 1.0 loaded by its own sound wrapper.
+// No RCO entry carries a per-cue gain or pan, so the cue mix is the PCM itself.
+// The XMB volume preference is a separate user scale on top of this constant.
+constexpr float kFirmwareCueGain = 1.0f;
 constexpr qsizetype MaximumFile = 64 * 1024 * 1024;
 constexpr quint32 MaximumTables = 8 * 1024 * 1024;
 
@@ -137,7 +149,9 @@ struct Clip {
     double rms = 0;
 
     qint64 milliseconds() const {
-        return format.sampleRate() > 0 ? frames * 1000 / format.sampleRate() : 0;
+        // Round up: a retrigger guard must never open before the decoded sample
+        // has actually finished (39.1 ms would otherwise round down to 39).
+        return format.sampleRate() > 0 ? (frames * 1000 + format.sampleRate() - 1) / format.sampleRate() : 0;
     }
 };
 
@@ -301,26 +315,34 @@ std::array<Clip, SystemCount> loadClips(const QString& flashRoot) {
 }
 
 bool loggingEnabled() {
-    return qEnvironmentVariable("XMB_AUDIO_LOG") == "1" || qEnvironmentVariableIsSet("XMB_AUDIO_TRACE");
+    // Both names accept only "1": XMB_AUDIO_TRACE=0 must not switch tracing on.
+    return qEnvironmentVariable("XMB_AUDIO_LOG") == "1" || qEnvironmentVariable("XMB_AUDIO_TRACE") == "1";
 }
 
 } // namespace
 
 struct InteractionAudio::Impl {
     std::array<Clip, SystemCount> clips;
-    std::array<Clip, 6> theme;
-    std::array<qint64, 6> lastPlay{{-1000000, -1000000, -1000000, -1000000, -1000000, -1000000}};
+    std::array<Clip, CueCount> theme;
+    std::array<qint64, CueCount> lastPlay = [] {
+        std::array<qint64, CueCount> history{};
+        history.fill(-1000000);
+        return history;
+    }();
     std::unique_ptr<QAudioSink> sink;
     QBuffer buffer;
     QElapsedTimer clock;
+    QString device;
     bool enabled = true;
     bool outputWarningLogged = false;
     bool trace = loggingEnabled();
     float volume = 0.6f;
 
+    float gain() const { return std::clamp(volume * kFirmwareCueGain, 0.0f, 1.0f); }
+
     // Cue-to-source map. snd_error is deliberately not used for Cue::Error: the
     // original entry is a 1.8 ms silent stub, while snd_system_ng is the
-    // negative cue in the same table. snd_trophy has no native action yet.
+    // negative cue in the same table.
     size_t slot(Cue cue) const {
         switch (cue) {
         case Cue::Move: return size_t(System::Cursor);
@@ -329,6 +351,7 @@ struct InteractionAudio::Impl {
         case Cue::Error: return size_t(System::SystemNg);
         case Cue::Options: return size_t(System::Option);
         case Cue::Accept: return size_t(System::SystemOk);
+        case Cue::Trophy: return size_t(System::Trophy);
         }
         return SystemCount;
     }
@@ -359,6 +382,9 @@ InteractionAudio::InteractionAudio(QString flashRoot, QObject* parent)
     try { impl_->clips = loadClips(flashRoot); }
     catch (const std::exception& error) { qWarning().noquote() << "interaction audio: original resources unavailable:" << error.what(); }
     impl_->clock.start();
+    qInfo().noquote() << "interaction audio: firmware cue gain" << QString::number(kFirmwareCueGain, 'f', 6)
+        << "(measured: explore_plugin.prx VA 0x272000, sysconf_plugin.prx VA 0x14ab70), user volume"
+        << QString::number(impl_->volume, 'f', 6) << "-> sink gain" << QString::number(impl_->gain(), 'f', 6);
 }
 
 InteractionAudio::~InteractionAudio() { impl_->stop(); }
@@ -373,7 +399,7 @@ int InteractionAudio::setThemeSounds(const QHash<QString,QByteArray>& sounds) {
     // and audio.js setThemeSounds (MIT); decoding/output remain native C++.
     constexpr std::array<std::pair<const char*,Cue>,5> roles{{{"se_cursor",Cue::Move},{"se_decide",Cue::Confirm},
         {"se_cancel",Cue::Back},{"se_optionmenu",Cue::Options},{"se_system_ok",Cue::Accept}}};
-    std::array<Clip,6> next;int count=0;
+    std::array<Clip,CueCount> next;int count=0;
     for(const auto& [id,cue]:roles) {
         const auto found=sounds.constFind(QString::fromLatin1(id));if(found==sounds.cend())continue;
         try {
@@ -399,63 +425,104 @@ void InteractionAudio::setEnabled(bool enabled) {
 void InteractionAudio::setVolume(float volume) {
     Q_ASSERT(QThread::currentThread() == thread());
     impl_->volume = std::isfinite(volume) ? std::clamp(volume, 0.0f, 1.0f) : 0.0f;
-    if (impl_->sink) impl_->sink->setVolume(impl_->volume);
+    if (impl_->sink) impl_->sink->setVolume(impl_->gain());
+}
+
+const char* InteractionAudio::cueName(Cue cue) {
+    const auto index = size_t(cue);
+    return index < CueCount ? CueNames[index] : "unknown";
+}
+
+const char* InteractionAudio::decisionName(Decision decision) {
+    const auto index = size_t(decision);
+    return index < DecisionNames.size() ? DecisionNames[index] : "unknown";
 }
 
 void InteractionAudio::play(Cue cue) {
+    playAt(cue, impl_->clock.elapsed());
+}
+
+InteractionAudio::Decision InteractionAudio::playAt(Cue cue, qint64 atMs) {
     Q_ASSERT(QThread::currentThread() == thread());
-    if (!impl_->enabled || impl_->volume <= 0 || !available(cue)) return;
-    const auto& clip = *impl_->selected(cue);
-    const qsizetype index = size_t(cue);
-    const auto now = impl_->clock.elapsed();
+    auto& state = *impl_;
+    const auto index = size_t(cue);
+    const char* name = cueName(cue);
+    const auto trace = [&](Decision decision, const QString& detail = QString()) {
+        if (!state.trace) return;
+        QString line = QStringLiteral("cue %1 t=%2ms decision=%3")
+                           .arg(QString::fromLatin1(name)).arg(atMs).arg(QString::fromLatin1(decisionName(decision)));
+        if (!detail.isEmpty()) line += QLatin1Char(' ') + detail;
+        qInfo().noquote() << "interaction audio:" << line;
+    };
+    // Bounded inputs only. An out-of-range timestamp or a cast made-up enum
+    // value is refused before it can touch the retrigger history.
+    if (index >= CueCount || atMs < 0 || atMs > kMaximumTimeMs) {
+        trace(Decision::Rejected, QStringLiteral("reason=%1")
+              .arg(index >= CueCount ? QStringLiteral("invalid-cue") : QStringLiteral("time-out-of-bounds")));
+        return Decision::Rejected;
+    }
+    if (!state.enabled) { trace(Decision::Disabled); return Decision::Disabled; }
+    if (state.gain() <= 0) {
+        trace(Decision::Silent, QStringLiteral("volume=%1").arg(QString::number(state.gain(), 'f', 6)));
+        return Decision::Silent;
+    }
+    const Clip* clip = state.selected(cue);
+    if (!clip) { trace(Decision::SourceUnavailable); return Decision::SourceUnavailable; }
     // The firmware does not stack a second copy of a cue on top of itself.
     // Until this cue's own sample has finished, retriggers are dropped; a
     // different cue still interrupts it. Move additionally has a 45 ms floor
     // because its 39 ms system sample is shorter than the 67 ms repeat interval.
-    const qint64 guard = cue == Cue::Move ? std::max<qint64>(45, clip.milliseconds())
-                                          : std::max<qint64>(1, clip.milliseconds());
-    if (now - impl_->lastPlay[size_t(index)] < guard) {
-        if (impl_->trace)
-            qInfo().noquote() << "interaction audio: skip" << CueNames[size_t(index)]
-                << (now - impl_->lastPlay[size_t(index)]) << "ms of" << guard
-                << "ms at" << now << "ms";
-        return;
+    // The floor is a fit: no firmware debounce value is traced.
+    const qint64 guard = cue == Cue::Move ? std::max<qint64>(45, clip->milliseconds())
+                                          : std::max<qint64>(1, clip->milliseconds());
+    // Time is monotonic; a backwards timestamp reads as age 0 so it can only be
+    // suppressed, never used to bypass the guard.
+    const qint64 age = std::max<qint64>(0, atMs - state.lastPlay[index]);
+    if (age < guard) {
+        trace(Decision::RetriggerSkipped,
+              QStringLiteral("age=%1ms guard=%2ms source=%3").arg(age).arg(guard).arg(clip->source));
+        return Decision::RetriggerSkipped;
     }
-    if (!impl_->sink || impl_->sink->format() != clip.format) {
-        impl_->stop();
-        impl_->sink.reset();
+    if (!state.sink || state.sink->format() != clip->format) {
+        state.stop();
+        state.sink.reset();
+        state.device.clear();
         const auto device = QMediaDevices::defaultAudioOutput();
-        if (device.isNull() || !device.isFormatSupported(clip.format)) {
-            if (!impl_->outputWarningLogged)
-                qWarning() << "interaction audio: output device cannot play original PCM format" << clip.format;
-            impl_->outputWarningLogged = true;
-            return;
+        if (device.isNull() || !device.isFormatSupported(clip->format)) {
+            if (!state.outputWarningLogged)
+                qWarning() << "interaction audio: output device cannot play original PCM format" << clip->format;
+            state.outputWarningLogged = true;
+            trace(Decision::OutputUnavailable,
+                  QStringLiteral("reason=%1").arg(device.isNull() ? QStringLiteral("no-device")
+                                                                  : QStringLiteral("unsupported-format")));
+            return Decision::OutputUnavailable;
         }
-        impl_->outputWarningLogged = false;
-        impl_->sink = std::make_unique<QAudioSink>(device, clip.format);
-        impl_->sink->setVolume(impl_->volume);
-        auto* sink = impl_->sink.get();
+        state.outputWarningLogged = false;
+        state.sink = std::make_unique<QAudioSink>(device, clip->format);
+        state.sink->setVolume(state.gain());
+        state.device = device.description();
+        auto* sink = state.sink.get();
         connect(sink, &QAudioSink::stateChanged, sink, [sink](QtAudio::State) {
             if (sink->error() != QtAudio::NoError && sink->error() != QtAudio::UnderrunError)
                 qWarning() << "interaction audio: output failure" << sink->error();
         });
     }
-    impl_->stop();
-    impl_->buffer.setData(clip.pcm);
-    if (!impl_->buffer.open(QIODevice::ReadOnly)) {
+    state.stop();
+    state.buffer.setData(clip->pcm);
+    if (!state.buffer.open(QIODevice::ReadOnly)) {
         qWarning() << "interaction audio: could not open decoded PCM buffer";
-        return;
+        trace(Decision::Rejected, QStringLiteral("reason=buffer"));
+        return Decision::Rejected;
     }
-    impl_->sink->start(&impl_->buffer);
-    impl_->lastPlay[size_t(index)] = now;
-    if (impl_->trace)
-        qInfo().noquote() << "interaction audio: play" << CueNames[size_t(index)]
-            << "source" << clip.source << clip.format.sampleRate() << "Hz"
-            << clip.format.channelCount() << "channels" << clip.pcm.size() << "bytes"
-            << "peak" << QString::number(clip.peak, 'f', 6)
-            << "rms" << QString::number(clip.rms, 'f', 6)
-            << "duration" << QString::number(clip.milliseconds() / 1000.0, 'f', 3) + "s"
-            << "at" << now << "ms";
+    state.sink->start(&state.buffer);
+    state.lastPlay[index] = atMs;
+    trace(Decision::Played,
+          QStringLiteral("source=%1 rate=%2 channels=%3 bytes=%4 peak=%5 rms=%6 duration=%7ms guard=%8ms output=%9")
+              .arg(clip->source).arg(clip->format.sampleRate()).arg(clip->format.channelCount())
+              .arg(clip->pcm.size()).arg(QString::number(clip->peak, 'f', 6))
+              .arg(QString::number(clip->rms, 'f', 6)).arg(clip->milliseconds()).arg(guard)
+              .arg(state.device.isEmpty() ? QStringLiteral("none") : state.device));
+    return Decision::Played;
 }
 
 }
