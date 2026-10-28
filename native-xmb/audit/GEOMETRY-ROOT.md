@@ -1099,3 +1099,246 @@ not a selection plate. Consequences:
 
 No other source file was edited; no RCO, threshold, budget or reference was touched.
 
+---
+
+## 13. Phase 13.1/13.3 applied - 2026-10-28: the transition model, the code, and the frames
+
+This is the first pass that applies the transition numbers 5.2/5.3 (the 262 shift's neighbour geometry
+and the incoming column's offset/scale). It edits `src/view.cpp` only. It also reports a measured
+disagreement between the decoded transition layer and the console's visible faint row (13.5) - the one
+finding here that changes what the next pass should do.
+
+Measurements below use: the decoded `fpdump7` transition draws (fp_0038..fp_0062, the close; and
+fp_0174..fp_0181, the incoming column), the 139.7 fps page open/close burst at
+`C:\dev\out\rpcs3-xmb-cap\burst-png\` (the Settings page, the two transitions phase 4c timed), and new
+native captures from the rebuilt `C:\dev\out\native-phase13\re-ps3-native.exe`
+(sha256 `2bfd4e0c...baab0e`; the tree kept moving under an in-flight pass, so the hash names the exact
+build gated here). Frame measurements use `C:\dev\work\m.py` plus two scratch scripts under
+`C:\dev\out\phase13-work\` (`peaks.py`, `blobs.py`, `track.py`, `focus.py`), read-only.
+
+### 13.1 The model: the firmware animates distance, so the screen is a 1/d projection
+
+The animated property is the **camera distance**, not a screen position. Evidence: the decoded close
+series is d = 2483.53, 2504.75, 2523.89, 2541.16, 2544.09, i.e. equal *retention* of the remaining
+distance to the 2700 target (0.902/frame, PAGE-MOVE 1.3). A screen-space lerp of the same endpoints
+cannot produce a geometric series in d. Therefore the interpolation is **linear in distance** and
+**hyperbolic in screen space**:
+
+```
+d(p)   = 2700 - (2700 - 2483.53) p = 2700 - 216.47 p
+k(p)   = 2700 / d(p)                       projection factor, 1 -> 1.087162
+screen = 960 + worldX * k                  (worldX from the depth-0 draw)
+```
+
+At p = 0, .25, .5, .75, 1 the category band is therefore:
+
+| quantity | p=0 | .25 | .50 | .75 | 1.00 |
+|---|---:|---:|---:|---:|---:|
+| distance d | 2700.00 | 2645.88 | 2591.77 | 2537.65 | 2483.53 |
+| projection k | 1.00000 | 1.02045 | 1.04176 | 1.06398 | 1.08716 |
+| neighbour pitch 200k | 200.00 | 204.09 | 208.35 | 212.80 | 217.43 |
+| focus padding 10k | 10.00 | 10.20 | 10.42 | 10.64 | 10.87 |
+| unfocused y `540-250k` | 290.00 | 284.89 | 279.56 | 273.51 | 268.21 |
+| bar focused y `540-260k` | 280.00 | 274.68 | 269.14 | 263.37 | 257.34 |
+| bar focus x `565-395(k-1)` | 565.00 | 556.92 | 548.50 | 539.73 | 530.57 |
+| bar neighbour n `barFocus+(200n+10sgn)k` | 565+(200n+10sgn) | ... | ... | ... | 530.57+(200n+10sgn) |
+
+Against the decoded draws at d 2483.53 this is exact to the frame's global offset, **+0.28 px**:
+bar focus 530.85 (5.2's value) vs 530.57, left neighbour 302.54 vs 302.27, right neighbour 759.15 vs
+758.88, n=+3 1194.01 vs 1193.60. y 257.34 / 268.21 are 5.2's. So the model in this section *is* 5.2's
+numbers, stated as an interpolation of the eased distance.
+
+**The visible focused icon is a different draw.** In the decoded close the bar's focused row keeps its
+root world x (`_Eye.x` -5.25/-5.12/-5.05), i.e. it only projects; the icon that travels 303 -> 565 in the
+captured frames is the page's own category draw (LAYOUT-TRACE 4c measured it moving 565 -> 303 with the
+visible label under it, and its y does not change). The native has one icon, so it draws that page draw:
+`x = 565 - 262p`, `y = 280`, quad 167.328. The ramp in the `bar focused y` row above belongs to the dim
+bar layer behind it and is not drawn separately.
+
+**The incoming column (13.3).** The decoded incoming item rows (fp_0174..fp_0177) sit at screen 564.09,
+i.e. 565 - 0.91 (the frame offset): the incoming column's *position* has already landed in the captured
+frame. Its quads are 85.554 = 77.616 x 1.10223 and 203.700 = 184.8 x 1.10227; its rows keep the 80 px
+grid (fp_0175/0176 at screen 120/40), so the 10.223% scale is on the icons, not on the row pitch or y.
+The *outgoing* item column is the one 210 px right in the same frame (fp_0178..fp_0180 at 774.09,
+`_Ambiant.w` 0.004), so `ahead*210` and `1 + .10223*ahead` are the two authored entry properties the
+native expresses about its own anchor; at `ahead=0` both are identity and the settled page is unchanged.
+
+**Two channels, one ease.** The 262 x move is the 18-frame / 0.774-retention channel; the distance and
+brightness are the 0.902-retention (~29-frame) channel (PAGE-MOVE 7 reading 1). This pass drives both
+from the existing depth `PafEase` because the phase owns the geometry, not the timing; that is labelled
+a FIT in the source. The alternative (a second, slower recede ease) would reproduce the composite the
+audits hypothesise but adds a duration the traces do not fix (PAGE-MOVE warns not to quote 483 ms).
+
+### 13.2 What changed (`src/view.cpp`, single writer)
+
+1. Category band (`drawScene`). Replaced the `level0X`, `kColumnX-40+distance*189` and `childAmount*262`
+   neighbours with the model above:
+   - `recedeDistance = 2700 - 216.47*childAmount`, `recede = 2700/recedeDistance`;
+   - focused page icon `x = 565 - 262*childAmount` at y 280 and quad 167.328;
+   - neighbours `x = (565-395*(recede-1)) + (200n + 10 sgn(n))*recede`, `y = 540 - 250*recede`,
+     quad `117.13+50.2*focus` scaled by `recede` (the glass renderer gets the real distance instead,
+     so its projection and `_Eye.z` are the firmware's; the themed and glyph paths scale in screen space);
+   - the neighbours' material brightness ramps `0.698 -> 0.067` and their presence `1 -> 0`, so at
+     `childAmount = 1` exactly one category icon is drawn (303) and no neighbour.
+   The two factors are kept separate on purpose: the glass renderer multiplies `_Ambiant.w` by the
+   layout opacity, and folding both into one produced a 0.698*0.698 double dim in the first build. The
+   canonical gate caught it (category icon row -0.37 dB); after the fix the root frame is exact again.
+2. Incoming column (13.3): `ahead*250` -> `ahead*210` at the row icon, label pen, value column and back
+   arrow, and `entryScale = 1 + .10223*ahead` on the item icon, the focused-row icon and the ICON0 card
+   in that column (not on row y or pitch, per the decoded rows).
+3. `XMB_DEPTH_PIN=<0..2>`: a capture-only switch in `paintGL` that holds the depth progress at a value,
+   so `--render-clock` grabs can measure a deterministic intermediate frame (the ease itself runs on the
+   real frame clock, which `--render-clock` does not pin). Unset it changes nothing; the canonical
+   capture is byte-identical with it off.
+
+Deliberately not changed: the 505/80 grid, the parent focused 262 / unfocused 109.46, the level-0 label
+113 and level-1 57, the Theme-band family, the info bar, and `itemIconSize`'s "no 1.1022x at rest" (the
+scale is an entry property, not a level class, so its comment stays true). The parent column's label
+(5.5) still has no `behind` term; it is visible mid-transition (the p=0.5 frame shows it overlapping the
+incoming row's label) and remains open.
+
+### 13.3 Capture method
+
+Pinned series (deterministic): pin the clocks as the canonical recipe does, navigate Game -> 5x LEFT
+(Settings), ENTER on `System Update` (a SettingsPage), then grab with `XMB_DEPTH_PIN` = 0, .25, .5,
+.75, 1. Burst: `burst=<prefix>@ENTER` on the same route with the pin unset, 12 frames per run (this
+machine: 25-158 ms after the key; the installed exe's run: 39-187 ms). The two RPCS3 transition frames
+used for the visual comparison are `f_001410` / `f_001443` (open) and `page-open.png` (settled); the
+before/after rest comparison uses the same route's settled grab from the pre-change installed exe
+(`C:\dev\xmb\out\native-xmb\re-ps3-native.exe`, 2026-10-28 07:08).
+
+### 13.4 Measured native geometry, before and after
+
+Category icon centres (glyph centroids; model in parentheses), pinned series on the rebuilt exe:
+
+| p | focused (page icon) | user n=-1 | photo n=+1 | music n=+2 | video n=+3 | tv n=+4 | game n=+5 | network n=+6 | neighbour glyph y (quad) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0.00 | 567 (565) | 354.6 (355) | - | - | - | - | - | - | 283 (290) |
+| 0.25 | 501 (499.5) | 342.1 (342.6) | 772.0 (771.3) | 980.0 (975.4) | 1179.3 (1179.5) | 1386.5 (1383.6) | 1589.1 (1587.7) | 1791.2 (1791.8) | 278 (284.9) |
+| 0.50 | 436 (434.0) | 329.4 (329.7) | 768.1 (767.3) | 980.3 (975.6) | 1184.1 (1184.0) | 1395.0 (1392.4) | 1602.3 (1600.8) | 1808.7 (1809.2) | 272 (279.6) |
+| 0.75 | 370 (368.5) | too faint to separate from the focused icon's window | 763.7 (763.2) | 979.3 (976.0) | 1188.3 (1188.8) | 1401.9 (1401.6) | 1614.5 (1614.4) | 1827.5 (1827.2) | 266 (273.5) |
+| 1.00 | 305 (303) | absent | absent | absent | absent | absent | absent | absent | - |
+
+The focused icon is exactly linear in p (567/501/436/370/305 = 565 + 2 - 262p, the +2 being the glyph
+centroid). Neighbours track the model to <= 2.6 px except the music note glyph, whose centroid sits 4.7 px
+right of its quad centre. The neighbour glyph centre moves 283 -> 278 -> 272 -> 266 while its quad moves
+290 -> 284.9 -> 279.6 -> 273.5 (the glyph centroid sits about 7 px above the quad centre). At p=1 the
+settled page's category icon bbox is 249..361, centre 305 - the console's `page-open.png` is 249..360,
+centre 304.5: within 1 px.
+
+The settled depth-1 rest frame changed as intended: the pre-change code drew the right-hand neighbours at
+`525 + 189n` with opacity 0.067; the rebuilt exe draws none. Measured on the two settled grabs, ROI
+x 690..740, y 240..320 (where the pre-change n=+1 neighbour sits at 714): mean luma 96.28 -> 90.88,
+max 104.4 -> 96.0. Over x 650..1000, y 235..330 the p99 falls 104.4 -> 96.1. The p=0 root frame is
+unchanged (13.6: every canonical layer delta is 0.00).
+
+Incoming column at p=0.5: the incoming focused row's icon is at 668 (565 at rest; model +105), and the
+level-1 label pen is at 727 (622 at rest; model +105). The 1.10223 scale is 1.0511 at that p (58.9 px on
+the 56 px focused-row glyph); that 2.9 px is below this glyph's measurement resolution, so the scale is
+reported from the decoded 85.554/203.700 rather than from a pixel fit.
+
+### 13.5 The frames and the decoded layer disagree - a transition-layer finding
+
+This is the one result that should change the next pass. The console's **visible** faint neighbour row in
+the open burst does *not* sit at the d 2483.53 geometry. Measured at the two frames where the focused
+icon has moved about as far as the native's p=0.38/0.64:
+
+| frame | focus x | user n=-1 | camera n=+1 (template) | game n=+5 | network n=+6 | neighbour glyph y | camera scale |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `f_001410` | 466.5 | 350.6 | 763.0 | 1546.2 | 1739.2 | 292 | 0.962 |
+| `f_001443` | 398.2 | - | 755.5 | 1536.8 | 1715.7 | 293 | 0.962 |
+
+At the matched focus progress (p = (565-466.5)/262 = 0.376) the two models give:
+
+| model | user | camera | game | network | neighbour y |
+|---|---:|---:|---:|---:|---:|
+| console frame (visible) | 350.6 | 763.0 | 1546.2 | 1739.2 | 292 |
+| native **after** (this pass) | 336.1 | 769.3 | 1594.4 | 1801.1 | 275 |
+| native **before** (old model) | 256.5 | 752.1 | 1535.5 | 1731.4 | 283 |
+| decoded d 2483.53 layer | 302.3 | 758.9 | 1628.6 | 1846.0 | 268 |
+
+So the change makes the *left* neighbour much better (-96 -> -15 px) and the near right neighbour better
+(-11 -> +6), but the far right neighbours are +48 / +62 px right of the visible row, where the old model
+was -11 / -8 px left; the visible y is +17 px high where the old was +9. The visible row's scale (0.962)
+and pitch (~200, not 217.4) match neither model exactly.
+
+The physically consistent reading is the one LAYOUT-TRACE 4c reached from the frames: the visible faint
+row is the category bar receding **toward the parent-column distance 2857.2** (k = 0.945, pitch 189.0,
+y 303.7). The captured frames show it part of the way there and the two estimators bracket the progress:
+the template scale is 0.962 (about two thirds of the 1.000 -> 0.945 range) while the neighbour x
+positions fit k about 0.98 (about a third); neither is the 1.087 the decoded layer would give. The
+d 2483.53 layer is a second, dimmer draw (its first captured `_Ambiant.w` is 0.067) that the frames
+alone cannot separate from it. That is why 5.2's "the correct target is the receding-bar model" and 4c's
+"the visible faint row is 190.5 px at y 303" are both true of different layers.
+
+**What this pass did with it:** implemented the decoded layer, because it is the only one with exact
+endpoints and the phase names it, and measured/reported the visible-row delta instead of blending the
+two. The next pass should either (a) take the burst that decodes both layers per frame (PAGE-MOVE's
+"open `XMB_FP_DUMP`, press Cross at 500 ms, full width" recipe), or (b) if frame fidelity wins, switch the
+neighbour ramp to d 2700 -> 2857.2 (pitch 189.0, y 290 -> 303.7, anchor 565, which is 4c's `565 + 190.5n`
+and not the deleted `525` anchor). The two are a one-constant difference in `recedeDistance`; the rest of
+13.2 stands either way.
+
+### 13.6 Gates and determinism
+
+- Canonical: `bun work/ab-layers.ts --capture --exe C:\dev\out\native-phase13\re-ps3-native.exe` ->
+  **PASS 6/6** with `text presence: 1668 bright pixels in the clock crop (minimum 900) PASS`.
+  frame 18.76 / 0.8360, top background 21.06 / 0.9434, category icon row 21.62 / 0.9062, item label row
+  11.99 / 0.3895, clock text 11.41 / 0.4528, info bar 15.05 / 0.7667 - every delta **0.00 / 0.0000**
+  against the stored baselines. The root frame is therefore unchanged by this pass; the first build's
+  double-dim regression (21.25 / 0.9073) is what that exactness checked.
+- Determinism: two `--render-clock 20` captures of the root are SHA-256
+  `37e2b590c42ef0e3f3601ca492221147c9874d2e3b1785e6237b616f2c0bbc14` both.
+- Named states (`--states --exe native-phase13`): **5/12 pass**. Passing: steam-game-root,
+  xmb-notification, xmb-volume-hud, continue-watching-empty (the depth-0 states, all inf / 1.0000) and
+  subtitle-cue (depth 1, but its frame is the media surface, which does not draw the category band).
+  The seven failures are depth-1/2 states whose *whole frame* moved while their own content regions
+  stayed identical: steam-all-games 52.15 / 0.9992 (rows inf), steam-store-sections 52.15,
+  steam-not-installed 52.15 (rows inf), video-options-panel 49.85 (panel inf), continue-watching 49.73,
+  steam-download-page 53.86 (rows inf). Their only changed region is the category band, where the rest
+  frame lost the 0.067 neighbour row - the intended 5.1 change; the 55.00 dB self-baseline is simply
+  tight enough to see five faint icons. jellyfin-signin is 50.66 and its rows region is also 50.21, so
+  part of that state's drift is outside this pass (rows untouched; the in-flight dialogs pass owns them).
+  No reference was edited.
+- Tree state during the pass: another pass modified `view.h` (`drawMessageTablePage`), `dialogs.cpp` and
+  `ribbon.cpp` concurrently. This pass edited `view.cpp` only; no edit of `view.h` was needed (the pin is
+  an environment read, not a member). Two builds were taken while the tree moved; the gated exe is the
+  hash in the header, built after `shell.cpp`/`shell.h` were restored to HEAD.
+
+### 13.7 What remains
+
+1. The visible-vs-decoded recede layer (13.5) - a burst that decodes both, or the 2857.2 switch.
+2. The recede timing: this pass keeps 300 ms mode 4 (FIT to the 18-frame burst) while PAGE-MOVE 14.1
+   traces the bar driver at 200 ms mode 5. The recede endpoints are independent of that; only its speed is.
+3. 5.5 / 13.2's parent-label transform: the parent column's label still has no `behind` term, so it
+   paints at 678 during the transition while its icons have moved left (visible in the p=0.5 grab).
+4. The incoming *label* scale: the pen gets the +210 offset but not the 1.10223 (the decoded incoming
+   text was not captured; the icon quads were).
+5. 13.5 provenance markers for the numbers not touched here, and the depth-2 grid (12.2 / 10.2), stay
+   with their owners.
+6. The named-state references need a deliberate `--states --save-reference` by whoever owns them: every
+   depth-1 state's rest frame legitimately lost five faint icons.
+
+### 13.8 Reproduction
+
+```
+# build
+C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-phase13
+
+# one pinned intermediate frame (repeat with 0 / 0.25 / 0.5 / 0.75 / 1)
+$env:XMB_DEPTH_PIN='0.5'
+re-ps3-native.exe --dev-flash C:/dev/rpcs3/bin/dev_flash --data-dir <scratch>/data ^
+  --render-clock 30 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00 ^
+  --focus-time 2000 --script "full,wait,wait,wait,LEFT,LEFT,LEFT,LEFT,LEFT,wait,wait,ENTER,wait,grab=<png>,quit"
+
+# a real burst (no pin): replace the grab token with burst=<prefix>@ENTER
+# decoded layer: node work/item-icon-eyes.js out/native-reference/fpdump7
+#                node work/item-icon-vc.js out/native-reference/fpdump7/<fp>.vc 256 257 259 467
+# console frames: C:\dev\out\rpcs3-xmb-cap\burst-png\f_001402/1410/1443/1498/1643.png, page-open.png
+# gates: bun work/ab-layers.ts --capture --exe C:\dev\out\native-phase13\re-ps3-native.exe
+#        bun work/ab-layers.ts --states  --exe C:\dev\out\native-phase13\re-ps3-native.exe
+```
+
+No source outside `native-xmb/src/view.cpp` was edited by this section; no RCO, threshold, budget,
+reference, harness, CMake or asset file was touched.
+
