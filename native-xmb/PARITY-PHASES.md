@@ -224,3 +224,29 @@ unit. The realistic path is to close P0 + P1, then take P7 screen by screen with
 - Disc, PSN, online services: no backend; they stay honest "unavailable" screens.
 - Dynamic theme scenes unless P9.3 is funded as its own project.
 - Hardware-specific quirks with no PC equivalent (HDMI/audio handshakes, console power states).
+## Dispatch queue (2026-10-27)
+
+Agents run against one shared tree, so each row names the files it may write and what it must not touch.
+Slots are limited (8 concurrent); this is the order they start as slots free.
+
+| Order | Agent | Phase items | Write fence | Prerequisites |
+|---|---|---|---|---|
+| 1 | analysis: item options menu + information panel | P2 groundwork for those surfaces | new `audit/ITEM-MENU-INFO-FIRMWARE.md`, `work/` | none (docs/analysis) |
+| 2 | analysis: media panels + volume display | P2/P5 groundwork for the player surfaces | new `audit/MEDIA-PANELS-FIRMWARE.md`, `work/` | none |
+| 3 | **P0** parity infrastructure | P0.1-P0.5 | new `work/parity.ts`, new `work/parity-catalogue.json`, `audit/PARITY-SCORECARD.md`; NOT `work/ab-layers.ts` | none (but reads the harness) |
+| 4 | **P1** resource/object model | P1.1-P1.5 | new `src/rco_objects.{h,cpp}` (+ CMake entry), new `audit/RCO-OBJECT-MODEL.md`; no shell/view edits | P0 catalogue (for what to dump) |
+| 5 | **P2** geometry | P2.1-P2.4, one screen family at a time | `src/view.cpp`/`view.h` + new `audit/GEOMETRY-<screen>.md` | P1, OSK/dialog/item-menu/media specs |
+| 6 | **P3** text exactness | P3.1-P3.5 | `src/text_renderer.*`, `src/font_raster.*`, `audit/TEXT-RENDERER.md` | P1 fonts |
+| 7 | **P4** icon materials exactness | P4.1-P4.4 | `src/icons.*`, `audit/ICON-MATERIAL-CLOCK.md`, `audit/ITEM-ICONS.md` | P1 materials, P5 scene input |
+| 8 | **P5** background/wave/HDR/particles | P5.1-P5.5 | `src/hdr.cpp`, `src/ribbon.cpp`, `src/particles.*`, `audit/PARTICLES.md` | P1 materials |
+| 9 | **P6** motion traces | P6.1-P6.4 | `audit/PAGE-MOVE.md`, `audit/ANIMATION-SMOOTHNESS.md`, `src/view.cpp` (easing only) | RPCS3 capture rig free |
+| 10 | **P7** screens and behaviour | P7.1-P7.4, one column at a time | `src/shell.cpp`/`shell.h` + new per-screen audits | P2, P3, P6 |
+| 11 | **P8** audio | P8.1-P8.4 | `src/interaction_audio.*`, `audit/INTERACTION-AUDIO.md` | P7 call sites |
+| 12 | **P9** themes | P9.2-P9.4 (P9.3 is a separate funded project) | `src/p3t.*`, `audit/THEMES.md`, theme browser in shell | P4, P7 |
+| 13 | **P10** display/resolution | P10.1-P10.4 | `src/view.cpp`, `src/main.cpp`, `audit/` note | P2 |
+| 14 | **P11** closure | P11.1-P11.4 | `audit/PARITY-SCORECARD.md`, `audit/FIRMWARE-PARITY-GAPS.md` | all |
+
+Rules for every parity agent: an RCO value must be **read at runtime** or generated from a documented extraction with
+its provenance; a fitted constant must be labelled `fit` and carry the measurement that bounds it; a screen is only
+"parity" when Tier A dump, Tier B score and Tier C input trace all pass. No agent may edit another's fence; new
+source files need a CMake entry owned by that agent only.
