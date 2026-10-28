@@ -1273,3 +1273,385 @@ bun work/ab-layers.ts --capture --exe C:\dev\out\native-navfeel\re-ps3-native.ex
 Artifacts (never committed, this machine): `C:\dev\out\navfeel\` - `navmove\right1|left1|right2step\`
 (console frames + `frames.csv` + `rect.txt`), `navprobe\`, `bef-right_*`, `aft-right_*`, `dbg-right_*`,
 `aft-settled.png`, `aft-after.png`, `navfeel-strip.png`, `logs-input-hash.txt`, `plans\`.
+
+---
+
+# PAGE-MOVE Phase 15 - 2026-10-28: the transitions pass
+
+Five transitions, each measured on console frames and on a native before/after build. Source writes:
+`native-xmb/src/view.cpp` and `native-xmb/src/view.h` only (plus this section). No capture tool, budget,
+reference or other audit was edited; `BEHAVIOUR-GAP-AUDIT` gets two cross-links where its claims needed
+correcting (B1, C7). Every number below is either **TRACED** (a call, constant or decoded value establishes it),
+**FIT** (this build's curve to a measured endpoint) or **NOT MEASURABLE** (the local frames cannot settle it),
+and each is labelled where it is used.
+
+Capture grammar (`src/main.cpp`): `burst=<prefix>@KEY` presses a key and grabs consecutive frames at 12 ms
+(the saved name carries the real elapsed ms), so one process run gives one ~130-230 ms window; the frames
+are full 1920x1080 grabs. The console runs are the existing ones: the 642-frame page open/close burst at
+`C:\dev\out\rpcs3-xmb-cap\burst-png\` (139.7 fps, band y 200..380), the `navfeel\navmove\` category-move
+bursts (83.6 fps, 1:1 crop y 180), and the PS-hold burst at
+`C:\dev\out\rpcs3-gaps-2026-10-28\burst\ps-menu-entries\` (206.6 fps, 1:1 crop 300,470,1320,240). Native
+captures: `C:\dev\out\transitions\cap-before\` and `cap-after\` (same script, same pinned clocks).
+
+## 0. Summary of what changed
+
+| # | transition | was | is | evidence |
+|---|---|---|---|---|
+| 1 | page (depth) move | one ease: 300 ms mode 4 | **two eases**: bar layer 200 ms mode 5 (TRACED, 14.1) + page content 300 ms mode 4 (FIT to the 18-frame burst) | 15.1 |
+| 2 | selected category icon on a category move | pinned at x 565 from the first frame | **slides from +200 px** (one bar step) on the category ease | 15.2, TRACED |
+| 3 | departed category bar label | not drawn | **drawn under its own icon, alpha = categoryFade_**, entering label = 1 - categoryFade_, both riding their icons | 15.3, TRACED |
+| 4 | options panel entrance | 200 ms from the key, no delay | **130 ms delay + 250 ms ramp** (rest at 380 ms); close keeps a 9 ms delay but still cuts | 15.4 |
+| 5 | PS-hold menu | full menu on the frame after the 1000 ms rule | **black at press+1052, text 1279..1326, selected row's bloom 1326..1840** | 15.5, TRACED (endpoints) |
+
+## 1. The page (depth) move: the trace and the burst disagree, so the channels are split
+
+### 1.1 What each evidence set says
+
+- **TRACED (14.1):** the firmware's own bar re-layout on an XMB page change is **200 ms, mode 5** -
+  `xmb_plugin` `state+0x520` = 200.0, written by the transition-refcount path, and every one of the nine bar
+  animator sites passes the mode-5 literal. There is no 300 ms duration and no mode-4 call in the bar path.
+- **The burst's frame count (4c, re-measured here):** the visible page channel is **18 rendered frames**
+  at 0.762/frame, i.e. 300 ms at the shape mode 4 / 300 ms predicts (0.7741).
+
+Both are correct about different channels, and this pass measured the discriminator that 14.1 said was
+missing: **whether the console's visible channel snaps at 200 ms.** It does not.
+
+### 1.2 The console page open, re-measured frame by frame
+
+Template track of the page's own category icon (template = the settled icon of `page-open.png` at
+x 246..366, y 236..332; the tracked value is the icon's left edge, 507.9 at rest, 246.3 settled, so
+**261.6 px** of travel), key at 701.266 ms:
+
+| t after key | icon left edge | progress p | 1 - p |
+|---:|---:|---:|---:|
+| +709 | 407.9 | 0.382 | 0.618 |
+| +726 | 369.2 | 0.530 | 0.470 |
+| +742 | 339.9 | 0.642 | 0.358 |
+| +759 | 317.6 | 0.727 | 0.273 |
+| +775 | 300.5 | 0.793 | 0.207 |
+| +788 | 287.5 | 0.842 | 0.158 |
+| +805 | 277.7 | 0.880 | 0.120 |
+| +822 | 270.1 | 0.909 | 0.091 |
+| +839 | 264.3 | 0.931 | 0.069 |
+| +856 | 260.0 | 0.947 | 0.053 |
+| +872 | 256.7 | 0.960 | 0.040 |
+| +892 | 254.1 | 0.970 | 0.030 |
+| +909 | 252.2 | 0.977 | 0.023 |
+| +926 | 250.8 | 0.983 | 0.017 |
+| +942 | 249.6 | 0.987 | 0.013 |
+| +973 | 248.1 | 0.993 | 0.007 |
+| +1005 | 247.2 | 0.996 | 0.004 |
+| +1063 | 246.6 | 0.998 | 0.002 |
+
+Per-frame retention over the distinct frames is **0.761 +/- 0.004** (4c's 0.7623 reproduced), which with the
+documented -0.014 tracker bias is 0.775: mode 4/300 = 0.7741 and mode 5/200 = 0.7794 sit 0.6% apart and the
+shape cannot separate them. The duration can, and **neither candidate snaps**: at the mode-5 end (+200) the
+channel is at p = 0.974 and still moving; at the mode-4 end (+300) it is at 0.996, and it keeps decaying to
+0.998 by +362 (a further 100-200 ms of 1-2 px tail). The page **close** (key at 2702.865) mirrors it: first
+motion +57 ms, retention 0.762/frame, p = 0.237/0.419/0.557/0.663/0.759/0.827/0.875/0.909/0.934/0.952 at
++57/+74/+91/+126/+141/+158/+174/+191/+207/+224.
+
+So the visible channel is a slower, non-snapping composite, exactly reading 1 of 14.1 section 7: the 12-frame
+(200 ms) bar move plus the ~29-frame distance/brightness channel 4b 1.3 decoded at 0.902/frame. The burst
+alone cannot separate them.
+
+### 1.3 What the native does now
+
+`view.h` now has two constants and two eases, each labelled:
+
+```
+pageMilliseconds = 300, mode 4   // FIT: the page content channel (262 px icon travel, item column entry,
+                                 //      label fade). The burst's 18-frame count is the only direct evidence
+                                 //      for this channel.
+barMilliseconds  = 200, mode 5   // TRACED: the bar layer (recede distance/projection, the bar's own focus
+                                 //      row, the neighbours' brightness/presence). PAGE-MOVE 14.1.
+```
+
+Both start on the same frame. `barDepthPosition_` reaches 1.0 at **+202 ms**, `depthPosition_` at
+**+300 ms** (measured from the `XMB_MOTION_LOG` trace of the rebuilt exe: `depth: 7238 ms position 0.2712
+bar 0.2651` ... `7419 ms position 0.9552 bar 1.0000` ... `7516 ms position 0.9903 bar 1.0000`). The rest
+frame is untouched because both land on `shell_.depth()`.
+
+Why this is not "splitting to avoid the trace": the **trace governs the channel it describes** - the bar
+re-layout - and it is now what drives the recede and the neighbours. The 262 px icon travel is a *different
+draw* (GEOMETRY-ROOT 13.1: the page's own category draw, not the bar's focused row), and its only evidence is
+the burst's 18 frames. Landing 200 ms on both would put the visible icon 6 frames and ~2.5% ahead of the
+console at the 200 ms mark, which is the one measurement 4c made three times.
+
+Measured native page-open series (template = the settled icon of that build's own `po-settled.png`, which is
+byte-identical across the two builds; the template origin is 240, the rest edge 502, so the travel is
+262 px; `t` is ms after the ENTER token; both builds run the same 300 ms mode-4 content ease, so the two
+columns are the same channel measured twice):
+
+| t | before: icon x | before: p | after: icon x | after: p |
+|---:|---:|---:|---:|---:|
+| +28 | - | - | 391.4 | 0.422 |
+| +38 | - | - | 371.5 | 0.498 |
+| +50 | - | - | 349.8 | 0.581 |
+| +52 | 346.1 | 0.595 | - | - |
+| +63 | - | - | 329.7 | 0.658 |
+| +71 | 318.2 | 0.701 | - | - |
+| +75 | - | - | 313.9 | 0.718 |
+| +86 | - | - | 302.6 | 0.761 |
+| +97 | - | - | 292.8 | 0.799 |
+| +101 | 289.8 | 0.810 | - | - |
+| +111 | - | - | 282.2 | 0.839 |
+| +127 | 273.1 | 0.874 | - | - |
+| +135 | - | - | 269.3 | 0.888 |
+| +146 | - | - | 264.8 | 0.905 |
+| +156 | 260.9 | 0.920 | - | - |
+| +157 | - | - | 260.9 | 0.920 |
+| +204 | 250.0 | 0.962 | - | - |
+| +299 | 240.0 | 1.000 | - | - |
+
+The two columns agree wherever they overlap (+156/+157 both 0.920), and the differences elsewhere are
+one-frame real-clock lead (the ease advances by the frame interval, not by the time since the key) plus the
+shorter after-burst window. **The page content channel did not change**, by design: what changed is the bar
+layer underneath it.
+
+The **bar layer** is what moved. Its brightness channel is visible in the neighbour's peak luma (window
+x 690..840, y 235..335, page background 90): before 153 at +52, 138 at +71, 121 at +104, 110 at +139,
+104 at +175, 99 at +241, 97 at +299; after 171 at +28, 155 at +50, 138 at +75, 126 at +97, 115 at +123,
+107 at +157. The after series is the same curve sampled earlier, and its landing is at +200 by the log.
+
+**NOT MEASURABLE here:** the console's own bar-layer duration. Its neighbours are already at the 0.067
+brightness end-state in the first visible frame (+709): the column profile of `f_001410` in the bar band has
+no run above luma 95 at the n=+1/n=+2 slots, while the root frame `f_001402` still has them at 104-115. The
+~700 ms page load outlasts the whole 200-300 ms recede, so the burst cannot time it. That is why the bar
+layer takes its duration from the instruction-level trace and the icon channel from the frame count, and it
+is the same reason GEOMETRY-ROOT 13.2 already labels the recede's driving ease a FIT.
+
+## 2. The selected category icon slides in on a category move
+
+Console `navmove\right1` (Network -> PlayStation Network, key at 540.4 ms): the entering category icon
+arrives **632 -> 592 -> 575 -> 567 -> 561** at +65/+113/+163/+214/settled (14.2 section 2), and its label
+follows it: label ink centre **725 -> 687 -> 658 -> 636 -> 619 -> 606 -> 596 -> 589 -> 579 -> 565.5** at
++26/+42/+54/+65/+89/+102/+113/+140/+163/settled. The offset from the settled slot is **+159.5 at +26 ms,
++70.5 at +65, +30.5 at +113, +13.5 at +163**, i.e. it starts at one whole bar step (**200 px**, not the
+125 px the item rows travel) and decays on the same 200 ms mode-5 curve.
+
+The native pinned it: the open icon's x was `pageX` (565 at depth 0) from the first frame, so a RIGHT move
+teleported the incoming icon to the focus slot while the old one slid away. Now:
+
+```cpp
+x = open ? pageX + 200.*distance*recede : barFocusX + (200.*distance + 10.*sign)*recede;
+```
+
+`distance = i - categoryPosition_` is +1 at the key and 0 at rest, so the open icon starts exactly one bar
+step right (or left) and rides the category ease; at rest `distance` is 0 and the expression is `pageX`, so
+the canonical frame is unchanged.
+
+Measured (native, template = the settled icon of `cat-settled.png`, origin 480; and the departing icon from
+`cat-root.png`, origin 480):
+
+| t | before: entering x | after: entering x | offset (after) | console offset at the same t |
+|---:|---:|---:|---:|---:|
+| +39 | 480.0 (pinned) | 579.9 | +99.9 | +93 (interpolated +26..+65) |
+| +50 | 480.0 | 564.7 | +84.7 | +82 |
+| +64 | 480.0 | 548.6 | +68.6 | +71 (+65) |
+| +85 | 480.0 | 530.4 | +50.4 | +53 (+89) |
+| +103 | 480.0 | 518.6 | +38.6 | +41 (+102) |
+| +115 | 480.0 | 512.4 | +32.4 | +30.5 (+113) |
+| +163 | 480.0 | 495.9 | +15.9 | +13.5 (+163) |
+
+The departing icon (the old focused category) travelled 316.9 -> 278.1 in the before build (a template
+matched against a fading glyph, so the tail is noise) and 374.1 -> 294.6 in the after build, i.e. -105.9 at
++39 ms = -210 x 0.50 - the same bar motion, unchanged.
+
+## 3. The departed category label fades while the entering one brightens
+
+The console draws **one** category label at rest (under the focused icon) and **two** during a move: the
+departing label slides out under its own icon while its ink fades, and the entering label slides in under
+its icon while it brightens (14.2 section 3.1). Per-frame label ink, measured on the same `right1` frames
+(label cap band, screen y 347..358; background 59; settled peak 255; the two words are separated by their
+own ink runs, so the values are per set and not a fit):
+
+| t after key | departing: mid x | departing alpha | entering: mid x | entering alpha |
+|---:|---:|---:|---:|---:|
+| +26 | 515 | 0.765 | 725 | 0.388 |
+| +42 | 477 | 0.587 | 687 | 0.464 |
+| +54 | 448 | 0.444 | 658 | 0.668 |
+| +65 | 425 | 0.337 | 636 | 0.750 |
+| +89 | 409 | 0.260 | 619 | 0.770 |
+| +102 | 400 | 0.199 | 606 | 0.806 |
+| +113 | 388 | 0.158 | 596 | 0.847 |
+| +140 | - (gone) | 0 | 589 | 0.903 |
+| +163 | - | 0 | 579 | 0.934 |
+| +252 | - | 0 | 569 | 0.980 |
+| settled | - | 0 | 565.5 | 1.000 |
+
+Against the move's own progress p (read from the entering label's offset / 200): p = 0.203 at +26,
+0.648 at +65, 0.848 at +113, 0.933 at +163. The departing alpha tracks **1 - p** (+/-0.04 after +42) and the
+entering tracks **p** (+0.06..+0.19 early, +/-0.01 after +65) - i.e. a cross-fade on the category ease, not
+the asymmetric 0.58 + 0.42 p line the *item rows* use (14.2 section 4).
+
+The native now draws both, each at its own category's x, so the departing label rides the departing icon:
+
+| t | before: labels drawn | after: departing | after: entering |
+|---:|---|---:|---:|
+| +39 | one word at 566, peak 255 | mid 460, alpha 0.52 | mid 666, alpha 0.52 |
+| +50 | one word | 444, 0.44 | 650, 0.60 |
+| +64 | one word | 427, 0.36 | 634, 0.67 |
+| +72 | one word | 419, 0.33 | 627, 0.71 |
+| +85 | one word | 408, 0.27 | 616, 0.76 |
+| +103 | one word | 395, 0.21 | 604, 0.82 |
+| +115 | one word | 389, 0.18 | 598, 0.84 |
+| +163 | one word | (overlapped, 0.10) | 581, 0.92 |
+
+Alphas are `(peak - 77) / (255 - 77)` from the native's own background 77 and settled peak 255; the
+entering/leaving alphas are `1 - categoryFade_` / `categoryFade_`, i.e. the same 200 ms mode-5 cross-fade the
+columns use, with no new constant. At rest `categoryFade_` is 0 and `outgoing_` is empty, so only the focused
+label draws - the canonical frame is unchanged.
+
+## 4. The options panel's entrance has a measured delay
+
+UI-ELEMENT-GAP-AUDIT O6 measured the console's open as: starts **+115..150 ms** after the key, ramps
+**245..255 ms**, at rest **+360..410 ms**; the close starts +9 ms and ramps 200 ms. The panel's own ease
+(`optionsOpenEase_`) drove the slide (`x0 = 1330 + ahead*600`), the band's alpha and the page's 0.545 dim
+from the key with a flat 200 ms, i.e. **160-210 ms short**. `PafEase` now takes a fourth argument,
+`delayMilliseconds`, which holds `from_` for that long before the 60 Hz curve starts (`duration_` and
+`elapsed_` are seconds, so the delay is converted once at retarget). It is used only here; every other
+retarget keeps the default 0. The delay is carried by the ease rather than by starting it late because a
+late start cannot express the close's measured 9 ms offset and would desynchronise the slide from its own
+opacity.
+
+Measured: band left edge (leftmost column in y 200..900 whose luma departs from that run's root grab by more
+than 1.0; the resting band edge is 1320):
+
+| t after Triangle | before edge | after edge | after open amount (log) |
+|---:|---:|---:|---:|
+| +34 | 1640 | - (no change, 0.0) | 0.0000 |
+| +44 | 1600 | - | 0.0000 |
+| +56 | 1552 | - | 0.0000 |
+| +67 | 1518 | - | 0.0000 |
+| +84 | 1474 | - | 0.0000 |
+| +105 | 1434 | - | 0.0000 |
+| +118 | 1412 | - (no change, 0.0) | 0.0000 |
+| +136 | 1400 (interpolated) | 1834 | 0.0278 (+134) |
+| +144 | 1388 | 1784 | 0.1474 (+145) |
+| +155 | 1376 | 1728 | 0.2595 (+151) |
+| +166 | 1362 | 1676 | 0.4201 (+194) |
+| +177 | 1358 | - | 0.5390 (+197) |
+| +300 | 1320 (rest) | 1427 (0.84 of the ramp) | 0.7182 (+245) |
+| +600 | 1320 | 1320 (rest, byte-identical to before) | 1.0000 (+380) |
+
+The after build draws **nothing** until +130 (+/-1 frame), first shows the band at +136, and is at rest at
++380 = 130 + 250. The console's window is +115..150 for the start and +360..410 for rest; both are inside it.
+The settled panel is **pixel-identical** to the before build (max |diff| 0.0 over the whole frame), so only
+the entrance moved.
+
+**The close is still a hard cut, and O6's "close is right on duration" is wrong for this build.** The panel's
+draw is gated on `Shell::optionsOpen()`, so when the shell closes it the panel disappears in one frame no
+matter what the ease does: every frame from +21 ms after the closing Triangle is the plain page
+(`close_00_0021ms.png` .. `close_11_0160ms.png`, 1032123 bytes = the root grab; measured on the rebuilt exe).
+The 9 ms close delay is applied to the ease and is inert until the panel's content is latched across the
+close; that latch is not in this pass (see section 7).
+
+## 5. The PS-hold menu's staged envelope
+
+PARITY-SCORECARD 16.3 gives the envelope (black 1052 ms after the press, entries 1202..~1970). This pass
+re-measured the burst it came from frame by frame and found the staging inside it. Crop 300,470,1320,240;
+the plan (`plans/a07-ps-hold.txt`, `cburst ... 150:PS:1200`) puts the press at 150 ms of the burst, which
+makes the black frame exactly press+1052 and confirms the alignment:
+
+| burst ms | after press | crop mean | crop peak | reading |
+|---:|---:|---:|---:|---|
+| 1197 | +1047 | 65.97 | 255 | XMB still up |
+| 1202 | +1052 | **0.00** | 0 | fully black, instant |
+| 1411 | +1261 | 0.00 | 0 | black |
+| 1429 | +1279 | 0.52 | 63 | first text ink |
+| 1436 | +1286 | 1.62 | 148 | text ramping |
+| 1452 | +1302 | 2.42 | 207 | text ramping |
+| 1476 | +1326 | 3.21 | 255 | text full; focused row's bloom starts |
+| 1602 | +1452 | 3.49 | 255 | bloom growing (bright>88: 4,899) |
+| 1786 | +1636 | 3.87 | 255 | bloom growing (5,536) |
+| 1986 | +1836 | 4.27 | 255 | bloom settled (6,236) |
+| 2402 | +2252 | 3.43 | 255 | rest (the mean drifts down after the bloom peaks) |
+
+So 16.3's "entries fade in between 1202 and 1970" is the **whole appear window**, not a text fade: 1202 is
+the black onset, the text's own ink runs 1279..1326 (~47 ms), and what keeps changing until ~1840 is the
+selected row's bloom (its bright-pixel count grows 3,903 -> 6,236 with the text already opaque at 1326).
+
+The native drew the full menu on the first frame after the watcher's 1000 ms rule. Now `psPressed()` records
+the press instant and the menu block draws: nothing before press+1052 (the XMB stays up for the 52 ms between
+the rule and the envelope), the black plate from +1052, all menu content at
+`psHoldTextAlpha` (0 at 1279, 1 at 1326, linear - FIT), and the selected row's bloom at
+`psHoldBloomAmount` (0 at 1326, 1 at 1840, linear - FIT: the burst fixes the endpoints, not the shape).
+The envelope also had to enter the UI-layer signature: it advances with the clock, not with a shell change,
+so without it the cached layer froze on the frame the menu opened (measured: one `pshold:` line and then
+nothing, with every grab showing the plain XMB).
+
+| t after press | console: crop mean/peak | before: crop mean/peak | after: crop mean/peak |
+|---:|---:|---:|---:|
+| +1200 | (black at +1202) | 4.45 / 255 (full menu) | **0.00 / 0** |
+| +1800 | 3.87 / 255 (+1636, bloom growing) | 4.45 / 255 | 4.45 / 255 |
+| +2400 | 3.43 / 255 (+2252, rest) | 4.45 / 255 | 4.45 / 255 |
+
+The rebuilt exe's own trace (`XMB_MOTION_LOG=1`, one line per painted frame): `pshold: 1011 ms ... black 0`,
+`1059 ms ... black 1 text 0.000`, `1341 ms ... text 1.000 bloom 0.029`, `1850 ms ... bloom 1.000`. The 1000 ms
+hold rule in `ps_watcher.cpp` is unchanged (outside this pass's fence); the envelope is what the console
+spends after it.
+
+## 6. Gates and determinism
+
+- Canonical: `bun work/ab-layers.ts --capture --exe C:\dev\out\transitions\after\re-ps3-native.exe` ->
+  **PASS 6/6** with `text presence: 1668 bright pixels in the clock crop (minimum 900) PASS`.
+  frame 18.76 / 0.8360, top background 21.06 / 0.9434, category icon row 21.62 / 0.9062, item label row
+  11.99 / 0.3895, clock text 11.41 / 0.4528, info bar 15.05 / 0.7667 - every delta **0.00 / 0.0000**
+  against the stored baselines.
+- Determinism: two `--render-clock 20` root captures are SHA-256
+  `37e2b590c42ef0e3f3601ca492221147c9874d2e3b1785e6237b616f2c0bbc14` both - the same hash phases 13 and
+  14.2 recorded.
+- The two rest states this pass could have moved are clean: the settled options panel is byte-identical
+  before/after, and the settled depth-1 page is also byte-identical (max |diff| 0.00 over the whole frame;
+  both sides report the same state: settings, depth 1, "Update via Internet"). The first after grab of that
+  page caught the last 4 px of the 300 ms ease - the re-run is the one quoted, and it is what the table in
+  1.3 now uses.
+- Nothing was re-baselined. No reference, budget, capture tool, `main.cpp`, `shell.*`, `dialogs.cpp`,
+  `ribbon.cpp`, `hdr.cpp`, CMake or asset file was touched.
+
+## 7. What remains
+
+1. **The console's bar-layer duration** stays NOT MEASURABLE with the local artifacts (section 1.3): its
+   neighbours are already at their end state in the first visible frame because the page load outlasts the
+   recede. A burst that starts within ~50 ms of the recede's first frame, or a decoded per-frame `_Eye` /
+   `_Ambiant.w` dump of a page open (not just a close), would settle whether the bar layer is really 200 ms.
+2. **The console's visible page channel does not snap** anywhere in the 18-25 frames it moves; a two-channel
+   model for the *icon* itself (a 12-frame move plus the ~29-frame distance channel) would fit the tail
+   better than one 18-frame ease. This build keeps one content ease because the split is not separable from
+   these frames.
+3. **The options panel's close** draws no fade (section 4). The fix is a latch of the panel's titles, rows
+   and selection in `View` so the closing panel can draw while `Shell::optionsOpen()` is already false; the
+   measured 9 ms start and 200 ms ramp are already applied to the ease.
+4. GEOMETRY-ROOT 13.5's visible-vs-decoded recede layer is untouched: the neighbours still use the decoded
+   d 2700 -> 2483.53 geometry (pitch 217.43) rather than the visible row's 2857.2 / pitch 189.
+5. The PS envelope's two ramps are linear (FIT); the burst fixes the endpoints only. The console's slow
+   post-1840 drift (crop mean 4.27 -> 3.43 over ~400 ms) is not modelled.
+6. The category label's y is unchanged: the console's ink sits at screen y 347..358 and this build's 21 px
+   label in `{x-140,330,280,40}` lands inside the same band (3 px high). The geometry was not touched because
+   the rest frame matched references.
+
+## 8. Reproduction
+
+```
+# native captures (one process per burst; the burst's own filename carries the elapsed ms)
+powershell -File C:\dev\out\transitions\work\caps.ps1 -Exe <exe> -Out <dir>
+
+# page open, with the two-channel trace
+$env:XMB_MOTION_LOG='1'
+re-ps3-native.exe --dev-flash C:/dev/rpcs3/bin/dev_flash --data-dir <dir>/data ^
+  --render-clock 30 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00 ^
+  --focus-time 2000 --script "full,wait,wait,wait,LEFT,LEFT,LEFT,LEFT,LEFT,wait,wait,ENTER,wait,wait,wait,grab=<png>,quit"
+
+# measurement (bun; pure TS)
+bun C:\dev\out\transitions\work\report.ts page|cat|opt|ps
+bun C:\dev\out\transitions\work\neighbour-luma.ts
+
+# gates
+bun work/ab-layers.ts --capture --exe C:\dev\out\transitions\after\re-ps3-native.exe
+```
+
+Artifacts (never committed, this machine): `C:\dev\out\transitions\` - `cap-before\`, `cap-after\`,
+`det1\`, `det2\`, `work\` (the scratch measurement scripts and the contact sheets `band-look.png`,
+`ps-envelope.png`).
+
