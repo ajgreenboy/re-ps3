@@ -971,6 +971,11 @@ is wanted next.
 
 ### 11. Limits
 
+- The 12 named-state self-baselines (`work/ab-layers.ts --states`) carry text surfaces whose shadow is
+  now the firmware one (notification, options panel, subtitle cue, sign-in, download page). They are
+  expected to move and need a deliberate `--states --save-reference` refresh after review; they are
+  recorded native renders, not firmware comparisons, so this is a recording step rather than a
+  fidelity change. The canonical per-layer gate above is the firmware-facing one and it passes.
 - The shadow is a hard copy of the coverage. The reference's is soft: the scene glare blurs it and
   the capture compresses it. No blur was added - it would be a new pass, and 4.93 gives no evidence
   for one (TEXT-RASTER.md 1.5, 3.2). This is the largest remaining visual difference.

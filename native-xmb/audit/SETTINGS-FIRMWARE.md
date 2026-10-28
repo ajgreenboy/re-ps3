@@ -1573,3 +1573,284 @@ What this does to the rows above:
 No source was edited for this section; no RCO, threshold or reference was touched.
 
 
+
+---
+
+## 13. Phase 11.3 applied: the choice band (draw half), 2026-10-27/28
+
+Status: implemented in `src/view.cpp` and `src/view.h` only. The data half (section 11) and the second
+capture batch (section 12) are the evidence this pass draws from; no other source file was edited. The
+band is one drawing with two measured parameter sets - the settings choice list and the item options menu
+- and the page behind it is dimmed by the page's own content factor, not by a plate over the frame
+(13.2). Section 11.8's hunks are applied in shape; where the frames disagree with their numbers the
+frame value is used and the correction is dated below (13.3).
+
+### 13.1 What the slice changed
+
+| file | change |
+|---|---|
+| `src/view.h` | `View::ChoiceBand` (the committed model's labels, values, writability, provenance and scroll flag, cached by Preferences key), the resolver declarations and the focus rule |
+| `src/view.cpp` | `PanelBand`/`BandStop` parameter sets for the two measured bands; `drawOptionsPanel` gains the band form (measured fill, fixed or scrolling rows, no dot); the settings choice column resolves its firmware list and draws the band; the item menu draws its own band with its own numbers; the page under a band is dimmed; the info bar is suppressed while a band is up |
+
+No draw path reads the .rco for a list until a settings choice actually opens: the committed
+`settingsChoiceCatalogue()` is called once, lazily, on the first choice band (one line in the log), and
+the per-frame cost afterwards is a hash lookup plus at most 110 value comparisons.
+
+### 13.2 The dim is the page's, not a plate over the frame, and its factor is a fit
+
+Section 11.8's hunk A dims the whole screen (0,0,1920,1080 black at alpha 120). The frames do not show
+that. Measured on the same page with and without the band:
+
+| element | no band | with band | ratio | frames |
+|---|---:|---:|---:|---|
+| the parent's white help text (255 at rest) | 255 | **136** | 0.533 | `settings/display-page-rest.png` vs `settings/screensaver-list-rest.png` (batch 1) |
+| the same, batch 2 Screensaver band | 255 | **104** | 0.408 | `bands/display-page-rest.png` vs `bands/screensaver-band-rest.png` |
+| the same, batch 2 Theme band (the `Theme` label) | 255 | **131** | 0.513 | `bands/theme-page-ready.png` vs `lists/theme-list-rest.png` |
+| the category band's briefcase icon | 123.1 | **123.2** | 1.000 | batch 2, same pair |
+| the background at x 1200-1250, y 1000-1080 | 29.8 | 29.8 | 1.000 | batch 1, same pair |
+| the item menu's page label | 255 | **139** | 0.545 | `dialogs/options-state-before.png` vs `dialogs/options-open-01.png` |
+
+Two facts follow. The category band and the background are untouched - the briefcase icon is identical
+to within 0.1 luma and the background region is bit-identical - so a 120-alpha plate over the whole frame
+would darken both by 47 %, which the frames contradict. What dims is the page's own content, uniformly. Three
+readings of the page text give 0.408, 0.513 and 0.533; **0.52 is a fit inside that bracket** (0.545 for
+the item menu's single measurement), and the batch 2 Screensaver still is the outlier. The value is
+applied as a factor on the page's column (icons, labels, help text, value column all scale together), and
+it eases in with the band's own open amount. This entry replaces 9.5's "the dim alpha behind a band" as a
+measured bracket with a stated fit, not as an attested constant.
+
+The category band and background staying lit also means the native's `drawScene` needs no new pass: the
+factor is applied where the page's rows are drawn (`drawColumns`), outside the category loop and the
+background.
+
+### 13.3 Two parameter sets, from the frames
+
+| quantity | settings choice band | item options menu band | source |
+|---|---:|---:|---|
+| left edge (settled) | **1260** | **1320** | batch 1 y 100: first lit column 1260 / 1320, a 1 px step above the fill |
+| 2 px left step | 15/32/34 at 1260-1262 | 15/34 at 1320-1322 | same |
+| fill profile (alpha) | 23 at 1263, 37 at 1270, 50 at 1280, 60 at 1300, 61 at 1303-1330, 53 at 1400, 45 at 1450, 37 at 1500, 25 at 1550, 9 at 1600, 2 at 1650 | 25 at 1324, 38 at 1330, 51 at 1340, 61 at 1360, 62 at 1366-1388, 58 at 1420, 55 at 1450, 48 at 1500, 39 at 1550, 28 at 1600, 12 at 1650, 4 at 1690, 2 at 1700 | measured column by column at y 100, where the page behind is black so the luma is the alpha |
+| geometric zero | **1690** | **1742** | last column at luma 0 |
+| pitch | **40 px** | **38 px** | 11.6 / ITEM-MENU E1 |
+| rows | the focused row on the 505 focus row; the list scrolls with focus | fixed at 552 + 38 i (baselines 560/598/636); does not scroll | 11.6; E1 |
+| row text left | **1276** | **1334** | 11.6 (ink 1276-1278); E1 (ink 1337) |
+| dot / check | none | none | U4; 12.4a |
+| page behind | 0.52 of its own brightness (fit) | 0.545 | 13.2 |
+
+Three corrections to the committed numbers, all measured:
+
+- **The fill's left stops.** 11.8 encodes 0/.005 = 0/60, i.e. 60 luma at x 1262 and 61 by x 1320. The
+  frame's own profile is 15/32/34 at 1260-1262, 23 at 1263 and 60 only at 1300, so the committed stops
+  over-brighten x 1263-1299 by up to 35 luma. The drawn gradient uses the measured samples (the table
+  above); rendered against `settings/screensaver-list-rest.png` at y 100 the drawn profile is within 2
+  luma of the frame at every sample, and the 2 px left step comes out at 31 luma against the frame's 34.
+- **The item band's edge and end.** E1's "left edge x ~1330, fading to nothing by x ~1690" is approximate.
+  The frame's first lit column is 1320 (a 2 px step, 15 at 1320 and 34 at 1322) and its last is 1741 (4
+  luma at 1690, 2 at 1700, 0 at 1742). The drawn band uses the measured 1320/1742; rendered against
+  `dialogs/options-open-01.png` at y 100 it is within 1-3 luma at every sample.
+- **The item band's rows.** E1's baselines 560/598/636 are ink baselines; the draw rect centres the em box,
+  whose baseline sits 8 px below the rect centre at 23 px, so the rows are centred on 552 + 38 i.
+
+What the frames also show and this pass does **not** reproduce, recorded as open rather than guessed:
+
+- **The band's left edge is per-list** (12.3a, 12.4e): the Theme band's border is 1324/1325, not 1260, with
+  the same fill shape. This pass draws 1260 for every settings choice list, which is the number the
+  Screensaver/Display list measures; a per-list origin needs a rule the frames do not give.
+- **The Theme list separates its first item**: `Install` sits at ink top ~261, while `Original` (the
+  current, focused item) is at ~494 and `Classic`/`Air Paint` follow at ~532/~576, i.e. a 233 px gap after
+  the first row and the measured 40 px pitch inside the sublist. The drawn band keeps one 505-centred
+  column, so its `Install` row lands ~204 px below the frame's. The same pattern appears on Background
+  (`Brightness` at 381, then `Original`/`Classic`/`Wallpaper` at 537/581/621).
+- **The item menu's rows are two groups on the frame** (`Sort By`/`Group Content` at 318/356, then
+  `Start`/`Delete`/`Information` at 560/598/636). The drawn band keeps the committed single top-anchored
+  block; the grouping is a row-set and order question for the shell half, which does not build that row
+  set.
+
+### 13.4 Rows: labels from the committed model, focus by value, no dot, scrolling
+
+The band's labels and their authored order come from `settingsChoiceCatalogue()` (11.4), not from
+`choices()`: the drawn list is the RCO's own MItems in document order, so `Date Format` draws
+`YYYY/MM/DD`, `DD/MM/YYYY`, `MM/DD/YYYY` and `Time Format` draws `12-Hour Clock`, `24-Hour Clock` -
+the orders `choices()` does not have (11.3, 11.6).
+
+Not every row gets the band. A row draws the firmware band only when the committed model holds a
+firmware list for it, i.e. `source` is `rco` (the RCO's own page) or `capture` (Theme, whose page ships
+empty and whose four labels are the 2026-10-28 capture's). A row whose list is this build's own
+(`source` `native`, `rco-page-empty` or `none` - the 13 native lists of 11.7b/c and the four rows with no
+page at all) keeps today's options panel at x 1330 and logs one line naming the reason, so no function is
+lost:
+
+```
+view: settings choice band display/screensaverMinutes -> 5 items from rco (page_display_config_screensaverstartup), current row 2, fits the band
+view: settings choice band appearance/theme -> 4 items from capture (page_theme_config_theme), current row 1, fits the band
+view: settings choice band clock/dateFormat -> 3 items from rco (page_date_time_config_date_format), current row 2, fits the band
+view: settings choice band clock/timeZone -> 110 items from rco (page_date_time_config_timezone), current row 0, scrolls
+view: settings choice panel appearance/colour keeps this build's options panel: the firmware has no list of its own for this row (the Page has no LowerMenu items; the plugin builds the colour chips at run time (12 captured, labels not transcribed))
+```
+
+**Focus is the drawn row that owns the model's selection**, in this order: the item whose value the model
+would commit (`choiceValueMatches` against the selected entry's `option`), then the item the row's own
+displayed value names, then the model's position. The first rule is what keeps the focused label and the
+committed value paired when the RCO's order differs from `choices()`'s: on `Date Format` the drawn focus
+follows the value, not the index, so the highlighted row is always the one a Cross would write. The second
+rule exists for the time zone, whose firmware items are GMT-offset tokens no model value can match
+(13.6a). No dot and no check is drawn on a band (U4, 12.4a): the player panel's dot stays inside the
+`rows` path the in-player panel owns.
+
+The settings list scrolls with the focused row, as 11.8's `first`/`rowZero` pair does: row i sits at
+505 + (i - position) * 40 and rows outside the frame are skipped, so a 110-item list holds about 27 rows on
+screen (the measured band capacity, 11.4) and moves under the fixed 505 focus row. The item menu's list
+does not scroll (no Scroll object, E1): its rows are anchored at 552 + 38 i.
+
+### 13.5 Verification
+
+Build: `& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-band` (clean at `/W4
+/permissive- /utf-8`; no warning from the new code). Binary
+`C:\dev\out\native-band\re-ps3-native.exe`.
+
+Captures: the settings chain is five Lefts into the Settings column, eleven Downs to `Display Settings`,
+Enter, one Down to `Screensaver`, Enter, with `display/screensaverMinutes = 20` in the data directory so
+the current value is the frame's `After 20 Minutes`; the time zone chain is the same column, seven Downs to
+`Date and Time Settings`, Enter, four Downs to `Time Zone`, Enter. All captures pin `--render-clock 20
+--background-clock 2026-10-27T21:43:00 --ui-clock 2026-10-27T21:43:00 --focus-time 2000`.
+
+**Band fill against the frames** (added luma over the frame's own background, y 100):
+
+| x | 1260 | 1261 | 1262 | 1263 | 1270 | 1280 | 1300 | 1320 | 1340 | 1400 | 1450 | 1500 | 1550 | 1600 | 1650 | 1690 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| frame | 15.2 | 32.2 | 34.1 | 23.1 | 37.1 | 50.4 | 60.3 | 61.3 | 60.3 | 53.3 | 45.4 | 37.1 | 25.1 | 9.0 | 2.0 | 0.0 |
+| drawn | 20.1 | 31.0 | 27.0 | 22.1 | 36.0 | 48.1 | 58.1 | 59.1 | 58.1 | 51.1 | 43.8 | 36.0 | 24.0 | 9.0 | 2.0 | 0.0 |
+
+and for the item menu, added luma over its own background:
+
+| x | 1320 | 1322 | 1324 | 1330 | 1340 | 1360 | 1380 | 1400 | 1450 | 1500 | 1550 | 1600 | 1650 | 1690 | 1700 | 1742 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| frame | 15.2 | 34.1 | 25.4 | 38.1 | 51.3 | 61.2 | 62.4 | 60.5 | 55.5 | 47.6 | 39.4 | 28.1 | 11.9 | 3.9 | 2.0 | 0.0 |
+| drawn | 18.1 | 31.1 | 25.0 | 37.0 | 49.1 | 59.1 | 59.1 | 58.1 | 53.1 | 46.1 | 38.0 | 27.0 | 12.0 | 4.0 | 2.0 | 0.0 |
+
+**Region scores, before and after** (`work/ab-compare.ts`, the same reference frame and crop for both; the
+"before" binary is `C:\dev\out\native-choices\re-ps3-native.exe`, the data-half build):
+
+| crop | settings band, before | after | delta |
+|---|---|---|---|
+| band `1240,0,470,1080` | 16.21 dB / 0.6219 | **19.08 dB / 0.7538** | +2.87 dB / +0.132 |
+| band interior below the rows `1260,620,430,460` | 20.22 / 0.8246 | **22.19 / 0.8992** | +1.97 / +0.075 |
+| page left of the band `0,0,1240,1080` | 18.05 / 0.4345 | **18.64 / 0.4380** | +0.59 / +0.004 |
+| info bar `1700,72,220,64` | 11.37 / 0.0038 | **30.34 / 0.0929** | +18.97 dB |
+
+| crop | item menu, before | after | delta |
+|---|---|---|---|
+| band `1310,0,450,1080` | 17.82 / 0.7144 | **20.19 / 0.8016** | +2.37 / +0.087 |
+| band interior `1310,700,430,380` | 21.37 / 0.8701 | **22.10 / 0.9087** | +0.73 / +0.039 |
+| page `0,0,1310,1080` | 17.16 / 0.4014 | **18.19 / 0.4239** | +1.03 / +0.023 |
+| info bar `1742,72,178,64` | 11.93 / 0.0042 | **30.33 / 0.0929** | +18.40 dB |
+
+The label text is missing from every capture of the deliverable build (13.6b), so the crops above measure
+the fill, the edges and the page. The rows were measured two ways instead, both on scratch builds under
+`out/` that keep this pass's `view.cpp` verbatim:
+
+- `out/native-band-gate`: the repository tree with `text_renderer.{cpp,h}` and `font_raster.{cpp,h}` taken
+  from the 23:05 snapshot (`out/phase122-src/`), because the tree's own copies were mid-edit by another
+  pass. This is the real GL glyph pipeline and gives the numbers below.
+- `out/native-band-fallback`: the same `view.cpp` with `textRenderer_.draw` bypassed so the existing
+  QPainter fallback draws the same strings in the same rects; it crosses the first build's ink positions
+  within 1-2 px.
+
+| measurement | frame | drawn |
+|---|---|---|
+| Screensaver rows, ink tops (x 1270-1660, thr 140) | 418 / 458 / 495 / 538 / 578 | 415 / 455 / 496 / 534 / 576 |
+| Screensaver row ink left | 1275-1277 | 1276-1278 |
+| item menu row ink | 539-560 / 581-598 / 621-638, ink left 1336-1337 | 542-565 / 580-598, ink left 1335-1336 |
+| item menu row baselines | 560 / 598 / 636 | 561 / 599 |
+
+The rows sit 2-3 px above the frame's, uniformly: `AlignVCenter` puts the cap ink about 1.5 px above the
+rect centre while the frame's ink sits about 1.5 px below it. The audit's own 9.1 puts the focused row's
+centre at y 505, which is the value the hunk uses and this pass keeps; the residual is a fit-level detail,
+not a geometry error.
+
+**The current value's row is the focused one, and there is no dot.** The Screensaver band draws
+`After 5 Minutes`, `After 10 Minutes`, `After 20 Minutes` (brighter, on the focus row), `After 30
+Minutes`, `Do Not Use` with `display/screensaverMinutes = 20`: the focused row is the persisted value,
+put there by the value rule of 13.4 and not by the model's index. The Theme band draws its 4 items with
+`Original` (the current theme) on the focus row, and the Date Format band its 3 items with `MM/DD/YYYY`
+(the store's default) on the focus row - both from the log line's `current row`. No dot: the dot is gated
+on `rows && !firmwareBand`, the settings band draws with `rows` null and the item menu with
+`firmwareBand` set, so the only bright ink on the focus row is the glyph run. The marker column confirms
+it: at the item menu x 1332-1336 carries 6 ink rows (the `O` of `Open`) where a 9 px dot would carry 23.
+
+**Scrolling, on the 110-item time list** (`out/native-band-gate`, positions from the sidecars 0 / 60 / 110;
+row ink tops over x 1270-1660, the page's own text at 350-390 in every frame):
+
+| state | visible row ink tops |
+|---|---|
+| position 0 | **505 (focused)** then 545, 585, 625, 665, 705, 745, 785, 825, 865 - nothing above the focus row |
+| position 60 | 425, 465, **505 (focused)**, 545, 585, 625, 665, 705, 745, 785, 825, 865 - the list has scrolled under the fixed focus row |
+| end (drawn row 109) | 345, 385, 425, 465, **505 (focused)**, nothing below it - the last of the 110 items is on the focus row |
+
+The focus row is at 505 in all three states, ink appears above it only once the list scrolls, and at the
+end the column stops below the focus row: 110 items, 27 of them on screen at once, all drawn in the RCO's
+authored order.
+
+**The info bar is absent while a band is up.** Right of the band, where the plate and the analog clock sit
+(rect 1329..1919 x 75..133, clock centred 1791,104), the frame is 0.00 mean luma; the before capture reads
+48.59 mean / 255 max with 2263 pixels over 60 luma; the after capture reads 8.00 / 17.1 with none, which
+is the background's own 8.1. The item menu is the same: 46.29 / 255 before, 8.00 / 17.1 after, 0.00 in
+the frame. The item menu had to be suppressed too even though 11.8's hunk C says it does not: the frame
+shows no plate on either surface.
+
+**Determinism.** Two runs of the screensaver chain at `--render-clock 20` are byte-identical:
+`6CB59C9CB171070930CC4E362DC82A1565E550DD86A178D07F495E5DA3397556` for both
+`cap\det-1.png` and `cap\det-2.png` (1,056,231 bytes each).
+
+**The gate.** `bun work\ab-layers.ts --capture --exe C:/dev/out/native-band/re-ps3-native.exe` scores
+**5/6** on the deliverable build, failing `item label row` at 12.04 dB / 0.3860 against a baseline of
+11.94 / 0.3910 and a budget of baseline - 0.0040 SSIM. That build has no text (13.6b). The same gate on
+`out/native-band-gate` - this pass's `view.cpp` with the tree's own files, only the text renderer taken
+from the pre-regression 23:05 snapshot - scores **PASS: 6/6**, layer for layer identical to the data-half
+build's run:
+
+| layer | data-half build (23:14) | this pass's view.cpp + working text | baseline |
+|---|---|---|---|
+| frame | 18.29 / 0.8342 | 18.29 / 0.8342 | 18.02 / 0.8301 |
+| top background | 20.25 / 0.9363 | 20.25 / 0.9363 | 20.24 / 0.9344 |
+| category icon row | 20.93 / 0.8990 | 20.93 / 0.8990 | 21.05 / 0.8950 |
+| item label row | 11.95 / 0.3925 | 11.95 / 0.3925 | 11.94 / 0.3910 |
+| clock text | 11.39 / 0.4500 | 11.39 / 0.4500 | 11.39 / 0.4105 |
+| info bar | 14.98 / 0.7639 | 14.98 / 0.7639 | 14.78 / 0.6117 |
+
+The canonical frame is the XMB root and has no band, so the band code cannot move it; the layer numbers
+being identical to four decimals is the evidence that it does not. The deliverable build's 5/6 is the text
+regression, and the gate must be re-run on it once that pass lands.
+
+### 13.6 Findings outside this pass's write fence
+
+**(a) The time zone's stored value cannot be a firmware token.** 11.3 says the stored value "is now the
+zone's own item token". `Preferences::validBare` accepts only `System` or an id `QTimeZone` knows, so a
+token is dropped on load, and `Shell::valueText`'s token-to-RCO-label branch (11.3) cannot be reached by
+any value the store will keep. Consequence for this pass: the 110-item time zone band can never mark its
+current row, because the current value is never one of the firmware's 110 GMT items. The band draws the
+firmware's list and scrolls it; the current-row mark is verified on the Screensaver, Theme and Date Format
+lists, whose values do correspond.
+
+**(b) The tree draws no text at all in builds made after 23:34.** `src/text_renderer.cpp`,
+`src/text_renderer.h` and `src/font_raster.cpp` were being edited by another pass while this one built;
+every build from that window renders zero glyphs (clock text, item labels, band rows), deterministically
+across runs, while the 23:14 data-half binary renders text. The renderer logs its frame work ("frame ...
+in 40 draw(s), 572 glyph quads") and its mask composite ("union coverage active"), so it believes it drew.
+This is not caused by the band (the root frame has no band and loses its text too) and it blocks the
+row-label half of this section's pixel verification.
+
+**(c) The item menu's row groups and the Theme band's separated `Install` row** are measured in 13.3 and
+belong to the shell's row set, not to the drawing.
+
+### 13.7 Still open after this slice
+
+- The per-list band origin (1260 for Screensaver/Display, 1324 for Theme) and the Theme/Background lists'
+  separated first row - 12.3a/12.4e, not derived and not invented here.
+- The band's row text size and cap height: the 40 px pitch and x 1276 are measured, the glyph height is not
+  (12.8). The drawn rows use 23 px, the panel's existing size, which is a fit.
+- The dim's exact alpha: 0.52 is a fit inside a 0.408-0.535 bracket (13.2).
+- The item menu's two row groups and its Sort By nesting.
+- 11.9's list: the BG1 plate inside the band, the colour chips' rendered form, the two timer lists, the
+  three missing page objects, the commit cue, and wiring the 45 RCO lists to live rows.
+- The gate's 6/6 once the text renderer pass lands (13.5).
