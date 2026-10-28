@@ -951,3 +951,142 @@ is compile-tested; the repository's `view.*`, `shell.*` and `main.cpp` remain un
 - integration only (not applied here): one source-list line in `CMakeLists.txt`; the
   `View::Osk` state and call-site hunks are in the phase 12.4 hand-off report, because
   `src/view.*`, `src/shell.*` and `src/main.cpp` belong to the dialogs pass until 12.5.
+
+---
+
+## 13. Dated correction - 2026-10-27/28 capture batch
+
+Evidence added after sections 1-12 were written: one RPCS3 session of the real 4.93 XMB at 1920x1080
+(`C:\dev\out\rpcs3-ref-2026-10-28\`, `MANIFEST.md`), with three OSK bursts and six OSK stills. This
+section closes section 5.2 (caret blink), section 7 (open/close duration) and section 9 (default focus),
+and leaves 5.4 (masking) and 6 (key repeat) open. Nothing above is deleted. Frame paths are relative to
+the capture root; all numbers are screen pixels.
+
+### 13.1 Section 5.2 - caret blink: CLOSED
+
+Old text: "the captures were taken at ~5 fps, which is too slow to resolve the period - the blink period
+and duty cycle are **open** (F: the XMB's own caret conventions suggest ~500 ms, but that is a guess, not
+a trace)"; and section 10.2: "blink: ... the period is unknown (section 5.2), so use 500 ms and mark it F
+in the code comment."
+
+Resolved from `osk/caret-burst/` (172 frames, 3.185 s, 53.7 fps, frames `f_0000018.png` ... `f_0003203.png`;
+green metric in `logs/caret-series.csv`, measured with `tools/series.ps1`):
+
+| phase | frames | duration |
+|---|---|---|
+| lit | 462 -> 957 ms | 495 ms |
+| dark | 957 -> 1399 ms | 442 ms |
+| lit | 1399 -> 1903 ms | 504 ms |
+| dark | 1903 -> 2334 ms | 431 ms |
+| lit | 2334 -> 2832 ms | 498 ms |
+
+- **Period ~936 ms (~1.07 Hz); lit duty ~53% (~470 ms on / ~440 ms off).** The three lit phases
+  (495/504/498) and the two dark phases (442/431) are consistent; the lit phase is the longer one.
+- The measured blink is not symmetric, so a single "500 ms toggle" is wrong on both halves: use
+  ~470 ms lit and ~440 ms dark if the timer is expressed per phase, or a 936 ms period with a 53% duty.
+- `osk/osk-after-caret.png` is the state check after the burst.
+
+The superseded 500 ms guess in 5.2 and 10.2 should not be landed; 10.2's `blink 500 ms (F, not traced)`
+becomes `period ~936 ms, lit 495/504/498, dark 442/431 (M, 2026-10-27/28)`.
+
+### 13.2 Section 7 - panel open and close fade: CLOSED for the fade
+
+Old text: "Duration is **open**: the capture rig tops out near 5 frames per second, so a 200-300 ms fade
+cannot be resolved."
+
+Bursts: `osk/panel-open-burst/` (136 frames, 2.968 s, 45.5 fps; Cross on `Edit` at t=700 ms) and
+`osk/panel-close-burst/` (122 frames, 2.576 s, 47.0 fps; `O` at t=700 ms). Title-bar luma per frame:
+`logs/osk-titlebar-luma.csv` and `logs/osk-close-titlebar-luma.csv`.
+
+Open (title-bar luma, no panel = 5.9):
+
+| time | luma | reading |
+|---|---|---|
+| 1166 ms | 5.9 | no panel |
+| 1196 ms | 71.8 | ramp under way |
+| 1219 ms | 102.1 | |
+| 1241 ms | 119.5 | |
+| 1262 ms | 120.7 | at rest |
+
+- **Alpha ramp ~66-96 ms**, and the panel is at rest **~550 ms after the Cross press** (`Edit`), because
+  the calling dialog dims first.
+- Partial-alpha frames show the dialog's own text and `OK` button through the panel, exactly as
+  `s6-close` suggested - the panel is an alpha composite, not a slide or a scale.
+
+Close:
+
+| time | luma | reading |
+|---|---|---|
+| 803 ms | 120.6 | at rest |
+| 843 ms | 135.5 | brief bright flash |
+| - | 124.2 -> 108.6 -> 88.9 -> 36.3 -> 6.0 at 947 ms | visible fade |
+
+- **Visible fade ~104 ms**, with a brief bright flash at the start.
+
+So section 7's "the panel **fades**" is confirmed at 45-47 fps, and the duration is no longer open for
+the fade itself. What is still not separated: the fade's easing curve (the luma samples are too few for
+a mode fit), and whether the 550 ms Cross-to-rest is a fixed dialog dim before the panel or part of the
+same animation.
+
+### 13.3 Section 9 - default focus and panel: CONFIRMED, with a panel-rect correction
+
+Frame `osk/osk-default-focus.png` (panel settled after the route: Users column, `Create New User`, Cross,
+Cross on `Edit`):
+
+- **Default focus is `g`** (row 2, column 5 one-based, `asdfghjkl'`) - the third independent boot to
+  show it, so section 6's observed `g` and 12.2's "focus row 2, column 4 (zero-based)" stand.
+- Prediction cell reads **`a 0`**; title `User Name`; field `User 1` with the green I-beam and the hollow
+  cursor marker; function rows `@#: / a/a-grave / a/A / Backspace / Space`; bottom
+  `arrows / Input Mode / Enter / clipboard / keyboard`.
+- The user-create dialog behind the panel (`osk/user-create-dialog.png`) has the field at x 494, y 425,
+  693x35, with `X Edit` / `O Back`.
+
+Panel rect: a direct scan of `osk-default-focus.png` (luma >= 55 at x=500) gives **x 493..1426,
+y 290..789** (934 x 499). That agrees with section 4.1 (493, 290, 934x500) within 1 px and contradicts
+the batch summary's `x 493-1427, y 282-755`, which is 8 px high and 34 px short at the bottom; the frame
+value is used. The internal bands (title 46, field 58, grid 324, footer 58) were not re-measured.
+
+### 13.4 Still open after the batch
+
+- **Section 5.4, masking: still not captured.** `osk/bd-remote-passkey-01.png` and `-02.png` are the
+  `Register BD Remote Control` probe: the prompt waits for a physical BD remote, shows no passkey field,
+  and nothing was typed. The WPA/WEP key needs a scanned SSID and a network device. No password was typed
+  or logged this session. Section 5.4's "shape correct, metrics unverified" stands.
+- **Section 6, key repeat:** not exercised; still unmeasured.
+- **Section 7's panel-left-edge question** (left edges 493/532/571/610/649 across the old captures): the
+  batch only captured the default page at 493, so the other positions remain unexplained.
+- **Section 4.6 text sizes / cap heights:** not re-measured.
+- The fade easing curve and the 550 ms composition (13.2).
+
+No source file was edited for this section.
+
+---
+
+## 14. GIM texture decode - section 12.4 closed (2026-10-27)
+
+Section 12.4 recorded 38/52 textures decoding and the other 14 failing with
+`Unsupported GIM pixel format 0x5`. That gap is closed in `src/assets.cpp`; 12.4's text is
+kept as the record of the earlier state.
+
+`Assets::decodeGim` now implements the documented INDEX4/INDEX8/INDEX16 formats (palette
+block read from the picture's type-0x05 sibling, entries in RGBA8888 or 5650/5551/4444,
+index rows padded to the image pitch alignment). The fourteen OSK pictures are format 0x5
+but carry **no palette block**: their bytes are anti-aliased coverage (0,16,32,...255), so
+they decode as white RGB with the byte in alpha and are tinted by the draw. That is what
+the firmware's own textures store, not a fallback for a missing palette.
+
+Result through the real asset path:
+
+```
+osk: layout from firmware ... textures=52/52 named, 52 decoded
+  textures         52 named, 48 default-surface, 52 in image table, 52 decoded
+```
+
+The fourteen decode to legible shapes: the four arrow triangles, "Backspace", "Space",
+"Line Break", "Input Mode", "Enter", the copy and paste icons, "a", "A" and the soft
+rounded `LIST_WINDOW_FOCUS` square. The canonical layers gate stays PASS 6/6. Full format
+layout, palette-block field table, synthetic palette fixture and bounds results are in
+`audit/GIM-FORMATS.md`. Section 12.4's suggestion that the draw must use text fallbacks for
+these names can be retired; the `texturesDecoded` assertion text in `src/osk_layout.cpp`
+still carries the old 38/52 wording and is the only stale reference (it reports
+`52/52 decoded ... 0 need a text fallback`, applicability skip).

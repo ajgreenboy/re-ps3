@@ -9,6 +9,7 @@
 #include <limits>
 #include <array>
 #include <vector>
+#include <QVector>
 #include <QStringDecoder>
 #include <QTransform>
 
@@ -27,6 +28,104 @@ QByteArray inflate(const QByteArray& b, quint64 p, quint32 packed, quint32 expan
     framed.append(b.constData()+p,packed);
     auto result=qUncompress(framed);
     if(result.size()!=expanded) throw std::runtime_error("Asset zlib length mismatch");
+    return result;
+}
+// GIM TRUE-COLOUR HELPERS (palette entries and 16-bit pictures). The DXT path keeps
+// its own 565 helper because it reads little-endian block payloads; these read the
+// big-endian GIM picture/palette headers.
+QRgb gimColour565(quint16 value) {
+    const int r=value>>11,g=(value>>5)&63,b=value&31;
+    return qRgb((r<<3)|(r>>2),(g<<2)|(g>>4),(b<<3)|(b>>2));
+}
+QRgb gimColour5551(quint16 value) {
+    const int r=(value>>10)&31,g=(value>>5)&31,b=value&31;
+    return qRgba((r<<3)|(r>>2),(g<<3)|(g>>2),(b<<3)|(b>>2),value&0x8000?255:0);
+}
+QRgb gimColour4444(quint16 value) {
+    return qRgba(((value>>12)&15)*17,((value>>8)&15)*17,((value>>4)&15)*17,(value&15)*17);
+}
+// The colour table of a GIM palette block (block type 0x05). The block repeats the
+// image header: format at +0x04, order at +0x06, entry count as width*height at
+// +0x08/+0x0A, and the first colour at the header's own pixel offset (+0x1C).
+struct GimPalette {
+    QVector<QRgb> colours;
+    int format=-1;
+};
+bool readGimPalette(const QByteArray& b,quint64 begin,quint64 end,GimPalette& out) {
+    for(quint64 block=begin;block+16<=end && block+16<=quint64(b.size());) {
+        const auto type=u16(b,block);
+        const auto size=u32(b,block+4),data=u32(b,block+12);
+        if(size<16 || data<16 || data>=size || block+size>end || block+size>quint64(b.size())) {
+            if(type==5)throw std::runtime_error("Invalid GIM palette block");
+            return false;
+        }
+        if(type!=5) { block+=size;continue; }
+        const quint64 info=block+data;
+        range(b,info,0x30);
+        const auto format=u16(b,info+4);
+        const auto order=u16(b,info+6);
+        const quint64 count=quint64(u16(b,info+8))*u16(b,info+10);
+        // One entry is 2 bytes for the three 16-bit layouts and 4 for RGBA8888.
+        const quint64 entryBytes=format<=2?2:format==3?4:0;
+        if(!entryBytes)throw std::runtime_error(("Unsupported GIM palette format 0x"+QString::number(format,16)).toStdString());
+        if(order!=0)throw std::runtime_error("Unsupported GIM palette order");
+        // 16-bit indices cannot address more entries than this, and a palette with no
+        // entries would make every lookup fail.
+        if(!count || count>65536)throw std::runtime_error("Invalid GIM palette dimensions");
+        const quint64 start=info+u32(b,info+0x1c);
+        if(start<info+0x30 || start>block+size || count*entryBytes>block+size-start)throw std::runtime_error("GIM palette exceeds its block");
+        range(b,start,count*entryBytes);
+        out.format=format;
+        out.colours.clear();
+        out.colours.reserve(int(count));
+        for(quint64 i=0;i<count;++i) {
+            const quint64 at=start+i*entryBytes;
+            if(format==3)out.colours.push_back(qRgba(uchar(b[int(at)]),uchar(b[int(at)+1]),uchar(b[int(at)+2]),uchar(b[int(at)+3])));
+            else {
+                const auto value=u16(b,at);
+                out.colours.push_back(format==0?gimColour565(value):format==1?gimColour5551(value):gimColour4444(value));
+            }
+        }
+        return true;
+    }
+    return false;
+}
+// INDEX4/INDEX8/INDEX16 pictures. The image header's pixel offset points at the index
+// rows; each row is padded to the image's pitch alignment (16 bytes in the firmware
+// 4.93 pictures), so row y starts at y*stride rather than y*rowBytes. When the picture
+// carries no palette block the index is coverage: the PS3 4.93 OSK masks (LABEL_UP,
+// EN_LABEL_*, MODE_GUIDE_*, KEYTOP_*, LIST_WINDOW_FOCUS) are format 0x5 with only a
+// root/picture/image block and values that step through 0..255 as an anti-aliased
+// alpha ramp, so they decode as white with the index as alpha and are tinted by the
+// caller. Palette-bearing pictures map the index through the palette instead.
+QImage decodeIndexed(const QByteArray& bytes,quint64 pixels,quint64 end,int width,int height,int format,quint32 alignment,const GimPalette& palette) {
+    const quint64 bits=format==4?4:format==5?8:16;
+    const quint64 rowBytes=(quint64(width)*bits+7)/8;
+    const quint64 stride=((rowBytes+alignment-1)/alignment)*alignment;
+    const quint64 length=stride*quint64(height);
+    if(pixels>end || length>end-pixels)throw std::runtime_error("GIM index rows exceed image block");
+    range(bytes,pixels,length);
+    QImage result(width,height,QImage::Format_ARGB32);
+    const int entries=int(palette.colours.size());
+    for(int y=0;y<height;++y) {
+        auto* row=reinterpret_cast<QRgb*>(result.scanLine(y));
+        const auto* line=reinterpret_cast<const uchar*>(bytes.constData()+pixels+quint64(y)*stride);
+        for(int x=0;x<width;++x) {
+            quint32 index;
+            if(format==4) { // high nibble is the left-hand pixel
+                const auto packed=quint32(line[x>>1]);
+                index=(x&1)?(packed&15):(packed>>4);
+            } else if(format==5)index=line[x];
+            else index=qFromBigEndian<quint16>(line+x*2);
+            if(entries) {
+                if(index>=quint32(entries))throw std::runtime_error(("GIM palette index "+QString::number(index)+" exceeds "+QString::number(entries)+" entries").toStdString());
+                row[x]=palette.colours[int(index)];
+            } else {
+                const int coverage=format==4?int(index)*17:format==5?int(index):int(index>>8);
+                row[x]=qRgba(255,255,255,coverage);
+            }
+        }
+    }
     return result;
 }
 QImage decodeBlocks(const QByteArray& bytes,quint64 pixels,quint64 end,int width,int height,int format,quint32 alignment) {
@@ -142,17 +241,28 @@ Assets::Container Assets::readContainer(const QString& name) const {
     qInfo().noquote()<<"assets: RCO"<<name<<c.entries.size()<<"named images";
     return c;
 }
-QImage Assets::decodeGim(const QByteArray& b) {
+QImage Assets::decodeGim(const QByteArray& b,const QString& name) {
     if(!b.startsWith(".GIM1.00"))throw std::runtime_error("Unsupported GIM byte order");
     // Root and picture containers point to their first child; leaf blocks carry
     // their own total size. Only the first frame/mipmap is used for UI icons.
-    quint64 at=0x10;
+    // XMB_GIM_TRACE=1 prints the header, the palette and the result for every
+    // decoded picture; --export-image is the read-only caller that writes the pixels.
+    const bool trace=qEnvironmentVariableIntValue("XMB_GIM_TRACE")==1;
+    const auto traceLine=[&](const QString& line) {
+        if(trace)qInfo().noquote()<<"gim:"<<(name.isEmpty()?QStringLiteral("(unnamed)"):name)<<line;
+    };
+    quint64 at=0x10,pictureData=0,pictureEnd=quint64(b.size());
     for(int blocks=0;blocks<128;++blocks) {
         const auto type=u16(b,at);
         const auto size=u32(b,at+4),data=u32(b,at+12);
         if(size<16 || data<16 || data>=size)throw std::runtime_error("Invalid GIM block");
         range(b,at,size);
-        if(type==2 || type==3) { at+=data;continue; }
+        if(type==2 || type==3) {
+            // Remember the picture body so an indexed image can find its palette
+            // among the picture's own children (normally the sibling after it).
+            if(type==3){pictureData=at+data;pictureEnd=at+size;}
+            at+=data;continue;
+        }
         if(type!=4) { at+=size;continue; }
         const quint64 info=at+data;
         range(b,info,0x30);
@@ -162,8 +272,31 @@ QImage Assets::decodeGim(const QByteArray& b) {
         if(!w || !h || w>4096 || h>4096 || !alignment || alignment>4096)throw std::runtime_error("Invalid GIM dimensions");
         const quint64 pixels=info+u32(b,info+0x1c);
         if(pixels<info+0x30)throw std::runtime_error("GIM pixels overlap image metadata");
-        if(format>=8 && format<=10)return decodeBlocks(b,pixels,at+size,w,h,format,alignment);
+        if(format>=8 && format<=10) {
+            traceLine(QStringLiteral("format=0x%1 order=%2 %3x%4 align=%5 mode=block-compressed palette=-")
+                          .arg(format,0,16).arg(order).arg(w).arg(h).arg(alignment));
+            const QImage image=decodeBlocks(b,pixels,at+size,w,h,format,alignment);
+            traceLine(QStringLiteral("result %1x%2").arg(image.width()).arg(image.height()));
+            return image;
+        }
+        if(format>=4 && format<=6) {
+            GimPalette palette;
+            // The palette is a sibling of the image inside the same picture block.
+            // Format 0x5 pictures in the 4.93 OSK RCO carry no palette block; those
+            // bytes are an 8-bit coverage mask rather than palette indices.
+            const bool found=readGimPalette(b,pictureData?pictureData:at+size,pictureEnd,palette);
+            const QString paletteText=found
+                ? QStringLiteral("%1 entries fmt=0x%2").arg(int(palette.colours.size())).arg(palette.format,0,16)
+                : QStringLiteral("absent (coverage mask)");
+            traceLine(QStringLiteral("format=0x%1 order=%2 %3x%4 align=%5 mode=index palette=%6")
+                          .arg(format,0,16).arg(order).arg(w).arg(h).arg(alignment).arg(paletteText));
+            const QImage image=decodeIndexed(b,pixels,at+size,w,h,format,alignment,palette);
+            traceLine(QStringLiteral("result %1x%2").arg(image.width()).arg(image.height()));
+            return image;
+        }
         if(format!=3)throw std::runtime_error(("Unsupported GIM pixel format 0x"+QString::number(format,16)).toStdString());
+        traceLine(QStringLiteral("format=0x3 order=%1 %2x%3 align=%4 mode=rgba8888 palette=-")
+                      .arg(order).arg(w).arg(h).arg(alignment));
         const quint64 stride=((quint64(w)*4+alignment-1)/alignment)*alignment;
         if(pixels<info || pixels+stride*h>at+size)throw std::runtime_error("GIM pixels exceed image block");
         range(b,pixels,stride*h);
@@ -177,6 +310,7 @@ QImage Assets::decodeGim(const QByteArray& b) {
                 row[x]=qRgba(v>>24,(v>>16)&255,(v>>8)&255,v&255);
             }
         }
+        traceLine(QStringLiteral("result %1x%2").arg(result.width()).arg(result.height()));
         return result;
     }
     throw std::runtime_error("GIM image block not found");
@@ -216,7 +350,7 @@ const QImage& Assets::image(const QString& container,const QString& name) {
         if(compression==1)data=inflate(c.file,start,packed,u32(c.tables,extra+16));
         else if(compression==0)data=c.file.mid(start,packed);
         else throw std::runtime_error("Unsupported RCO image compression");
-        image=format==5?decodeGim(data):QImage::fromData(data);
+        image=format==5?decodeGim(data,name):QImage::fromData(data);
         if(image.isNull())throw std::runtime_error("Image decoder returned no pixels");
         ++decodedImages_;
         qInfo().noquote()<<"assets: decoded"<<key<<image.size();
