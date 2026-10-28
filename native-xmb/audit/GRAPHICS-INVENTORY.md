@@ -222,3 +222,19 @@ contact sheets the labels were transcribed from.
 
 Two frames in the set are **state proofs rather than surfaces**: `dlg-item-still-present.png` (the corrupt
 title survived the cancelled delete) and `users-after-osk.png` (no user was created).
+## Resolution: the two delete-confirm frames agree (2026-10-28, later)
+
+The "no box plate" note above was read against the 07:45 frame that the native two-button box was built from
+(`out/rpcs3-gaps-2026-10-28/stills/dialog__original__day__1080p.png`). Putting the two frames side by side
+(`frames/dlg-confirm-1800.png` here) they are the **same layout**, not two different dialog kinds:
+
+- a **319x176 lighter plaque around the item icon only**, x~430..712, y~395..558 - that is the object the native
+  draws as its "box plate" (white 43/255 wash), so the native plate is that tile, not a plate behind the text;
+- the **body text starts at x~1074** (the frame's x955 in the 1708-wide preview), left-aligned, two lines;
+- **Yes / No** on one row below it, No focused, at the native's measured x;
+- a **metadata block** under the plaque - a clock line (`22/10/2026 2:14`) and the status word (`Counting...`);
+- the **rule pair at y199 and y879** and the **X Enter / O Back** pair at y~800-814.
+
+So DIALOGS-FIRMWARE 2.1's dark `tex_msgdialog_bg` tile is the wrong plate for this surface (the frame's plaque
+is a light wash), and the native box's remaining deltas are the **metadata block** (the native box draws none) and
+the plaque's exact wash, not its geometry. The depth-2/message-page rule alphas stay per-class as measured.
