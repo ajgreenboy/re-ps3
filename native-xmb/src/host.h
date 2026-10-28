@@ -19,4 +19,18 @@ bool setMasterMuted(bool muted);
 // a launched title runs. Returns the state now in effect; the previous flags are logged so a released hold
 // proves the earlier request was live. Never changes a power plan or a setting.
 bool holdDisplayAwake(bool hold);
+// ---- Auto-Off (Phase 4, SESSION-POWER.md) ----
+// The console's Auto-Off turns the display off and leaves the XMB running, so the next controller press wakes
+// the panel back into the XMB instead of the desktop. Windows has no public "power the display off" API; the
+// documented equivalent is a WM_SYSCOMMAND/SC_MONITORPOWER (2) broadcast, which asks the system's window
+// defaults to power the panel down. It is a request, not a guarantee: a locked session, an RDP/virtual display,
+// a policy or a vendor driver can ignore it, and this build never escalates to a privileged tool, a power-plan
+// write or a simulated power button. Every attempt is logged. The only honest read-back Windows offers is the
+// GUID_CONSOLE_DISPLAY_STATE notification: observeDisplayState() subscribes once, displayState() reports what
+// was last observed, and requestDisplayOff() logs whether that state actually changed.
+bool requestDisplayOff();      // one request per idle period; logs the execution state, the broadcast and the read-back
+bool displayOffRequested();    // true while the display-off request stands (no activity, no display-on event)
+void noteUserActivity();       // a press or a shell touch re-arms the next idle period; the display wakes on input
+void observeDisplayState();    // subscribe to the console display state (once, at start-up or first request)
+int displayState();            // last observed display state: 0 off, 1 on, 2 dimmed, -1 unknown/not observed
 }

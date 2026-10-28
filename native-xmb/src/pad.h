@@ -1,4 +1,6 @@
 #pragma once
+#include <QString>
+#include <QVector>
 #include <QtGlobal>
 
 namespace xmb {
@@ -9,11 +11,30 @@ namespace xmb {
 namespace pad {
 // Buttons in XInput's wButtons layout, so callers handle both kinds of controller alike:
 // D-pad 0x1/0x2/0x4/0x8, START 0x10, SELECT 0x20, L3 0x40, R3 0x80, L1 0x100, R1 0x200, PS 0x400,
-// ✕ 0x1000, ○ 0x2000, □ 0x4000, △ 0x8000.
+// Cross 0x1000, Circle 0x2000, Square 0x4000, Triangle 0x8000.
 struct State { quint16 buttons=0; float lx=0,ly=0,rx=0,ry=0,l2=0,r2=0; };
+// What is attached, how, and its battery as the report carries it (Phase 4.3, audit/SESSION-POWER.md).
+enum class Kind { None, Ds3, Ds4, DualSense };
+// The input report's own id names the transport, so it is read from the report rather than guessed from a device
+// path: a DualSense sends 0x01 over USB and 0x31 over Bluetooth, a DualShock 4 sends 0x01 and 0x11. A DualShock 3
+// in this build is USB only.
+enum class Transport { Unknown, Usb, Bluetooth };
+// batteryPercent is -1 when the report does not carry a level (DualShock 3), when the report is too short to hold
+// the battery byte, or when the level field says "unknown" (a DualSense voltage/temperature/charging error).
+// charging is "discharging", "charging", "full", "not-charging" or "unknown"; empty when there is no level.
+struct Info { Kind kind=Kind::None; Transport transport=Transport::Unknown; int batteryPercent=-1; QString charging; };
 // Starts the watcher once (Windows only; elsewhere a no-op).
 void start();
 // The newest reading from any PlayStation controller, if one reported in the last 300 ms.
 bool latest(State& out);
+// The identity, transport and battery of the controller behind latest(), on the same 300 ms freshness window.
+// False when no controller reported recently; out is left untouched then.
+bool info(Info& out);
+// One input report through the same parser the watcher uses (report id in byte 0, as Windows returns it). The
+// battery byte is read only when the report is long enough for the layout's own offset, so a short or unknown
+// report is rejected instead of reading past its end. Local verification runs documented synthetic reports here.
+bool parseReport(Kind kind,const QVector<quint8>& report,Info& out);
+QString kindName(Kind kind);          // "DualShock 3", "DualShock 4", "DualSense", "None"
+QString transportName(Transport kind); // "USB", "Bluetooth", "Unknown"
 }
 }
