@@ -11,6 +11,8 @@
 #include "photo_viewport.h"
 #include "media_controls.h"
 #include "text_renderer.h"
+#include "osk_layout.h"
+#include "rco_objects.h"
 #include <array>
 #include <functional>
 #include <QDateTime>
@@ -264,23 +266,34 @@ private:
     static constexpr double dialogHintMilliseconds=100;
     static constexpr double dialogSettleMilliseconds=150;
     void grabIntroFrame();
-    // PS3 on-screen keyboard (reference frame 64 s): 10x4 character grid, two function rows, prediction panel.
-    // `masked` is the password composition mode (audit/JELLYFIN-NATIVE.md): the field draws one dot per
-    // character and the UI signature carries the dot count instead of the text, so a secret cannot leak into
-    // the frame, the signature cache or a capture. Every other caller leaves it false and the keyboard behaves
-    // exactly as it did.
+    // PS3 on-screen keyboard, resolved from the firmware (audit/OSK-FIRMWARE.md): a 10x6 grid of 72x54 cells
+    // from `oskfullkeypanel_plugin.rco` plus the decrypted module's row strings, a 7x7 symbol palette and a
+    // prediction column. oskLayout_ is loaded once in the constructor and every key, rect and caption comes
+    // from it; nothing here holds a layout table.
+    // `masked` is the password composition mode (audit/JELLYFIN-NATIVE.md): the field draws one bullet per
+    // character and the UI signature carries the bullet count instead of the text, so a secret cannot leak into
+    // the frame, the signature cache or a capture. Every other caller leaves it false.
     struct Osk {
-        bool open=false,shift=false,symbols=false,masked=false;
+        bool open=false,masked=false;
         bool preserveWhitespace=false,allowEmpty=false;
+        // The firmware's own state: `page` indexes OskLayout::pages (0 lower, 1 caps); the palette is the
+        // `@#:` popup with its own 5-visible-row window over the 32 symbols; caretLit is the blink phase.
+        bool paletteOpen=false,caretLit=true;
+        int page=0,paletteRow=0,paletteColumn=0,paletteScroll=0;
         QString title,text;
         int row=0,column=0,cursor=0,maxLength=32;
         std::function<void(QString)> done;
     };
     Osk osk_;
+    // The one RCO reader and the one resolved layout: both are startup work, never per-frame work.
+    RcoObjects oskObjects_{assets_};
+    OskLayout oskLayout_;
     void openOsk(const QString& title,const QString& initial,std::function<void(QString)> done,bool masked=false);
     void drawOsk(QPainter& p);
     void oskMove(int dx,int dy);
     void oskPress();                 // the focused key
+    void oskPaletteMove(int dx,int dy);
+    void oskPalettePress();
     void oskInsert(const QString& value);
     void oskBackspace();
     void oskClose(bool accept);

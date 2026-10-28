@@ -123,6 +123,11 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         for(const auto& entry:category.entries)assets_.image(entry.container,entry.texture);
     }
     syncColumns();
+    // The keyboard layout is resolved once, from the firmware, where the assets are already open: one RCO
+    // through the P1.1 reader and one decrypted module (audit/OSK-FIRMWARE.md 12). A failed or absent firmware
+    // read falls back to the committed table and logs which source it used, so the keyboard always has a
+    // layout and the provenance is never guessed.
+    oskLayout_=loadOskLayout(assets_,oskObjects_);
     monthImage_=assets_.image("qgl/lines",QString("textures/month_bg/rgb/%1.dds").arg(QDateTime::currentDateTime().date().month(),2,10,QChar('0')));
     connect(&shell_,&Shell::changed,this,[this]{++uiRevision_;syncColumns();loadWallpaper();update();});
     connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){
@@ -752,6 +757,12 @@ void View::paintGL() {
     // it is resolved, then composited at half scale, where the bilinear fetch averages each 2x2 block. MSAA plus 2x
     // supersampling gives smooth glyph and icon edges. The layer is redrawn only when something visible changed.
     const QSize device(int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF())),pixels=device*2;
+    // The keyboard's caret blink. 500 ms is the audit's FIT (OSK-FIRMWARE 5.2: the capture rig tops out near
+    // 5 fps, so the period was never traced) and lives in OskCaret::blinkMilliseconds, not here. A pinned
+    // --render-clock drives the phase as well as the background, so two captures of one state are identical
+    // frames; a live run follows the wall clock.
+    const qint64 blinkMs=secondsOverride_>=0?qint64(secondsOverride_*1000.):clock_.elapsed();
+    if(osk_.open)osk_.caretLit=((blinkMs/qMax(1,oskLayout_.caret.blinkMilliseconds))%2)==0;
     QString signature=QString::asprintf("%.4f %.4f %.4f %d %d %d ",categoryPosition_,depthPosition_,categoryFade_,shell_.category(),shell_.depth(),uiRevision_);
     for(const auto& column:columns_)signature+=QString::number(column.position,'f',4)+' ';
     signature+=shell_.clockText()+shell_.message()+shell_.status();
@@ -767,10 +778,13 @@ void View::paintGL() {
         const double resting=double(focusTime());
         signature+=QString::asprintf(" glow %d idle %d",int((.5-.5*std::cos(2*std::numbers::pi*resting/3400.))*24),int(std::clamp((resting-4000)/800.,0.,1.)*16));
     }
-    // The keyboard's cached UI signature: the caret, the modifiers, and the text being composed. A masked field
-    // contributes its dot count only, so the plaintext never enters this cache string.
-    if(osk_.open)signature+=QString::asprintf("osk %d %d %d %d %d %d ",osk_.row,osk_.column,osk_.cursor,osk_.shift,osk_.symbols,int((clock_.elapsed()/500)%2))+
-        (osk_.masked?QString(osk_.text.size(),QChar(0x2022)):osk_.text);
+    // The keyboard's cached UI signature: the focused key, the page, the palette window and the caret phase,
+    // plus the text being composed. A masked field contributes its bullet count only, so the plaintext never
+    // enters this cache string (which is one bug away from a captured frame - audit/JELLYFIN-NATIVE.md 3).
+    if(osk_.open)signature+=QString::asprintf("osk %d %d %d %d %d %d %d %d %d ",
+        osk_.row,osk_.column,osk_.cursor,osk_.page,int(osk_.paletteOpen),osk_.paletteRow,osk_.paletteColumn,
+        osk_.paletteScroll,int(osk_.caretLit))+
+        (osk_.masked?QString(osk_.text.size(),oskLayout_.mask.glyph):osk_.text);
     // The notification composite animates outside a shell change (slide/fade), so its amount and content are
     // part of the signature: quantised by 1/256, which is finer than the 2x layer can show.
     if(notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
@@ -1444,16 +1458,31 @@ void View::drawScene(QPainter& p) {
             }
         }
         if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
-        // Info bar (system_plugin tex_infobar: a translucent white band with a bright bottom edge) framing the clock in the
-        // top-right corner; the clock's centre sits at y~104 as in the reference video. A message page keeps
-        // only the analog clock face (measured on D4: plate and date text absent, clock kept), which
-        // drawPageChrome draws with the page.
+        // Info bar: the information panel's own material, xmb_plugin_normal:tex_indi_bg, a 24x24 nine-slice
+        // tile with an 8 px white alpha ramp on every side around a black interior at alpha 13/255 (5.1%).
+        // It frames the clock in the top-right corner; the clock's centre sits at y~104 as in the reference
+        // video. A message page keeps only the analog clock face (measured on D4: plate and date text
+        // absent, clock kept), which drawPageChrome draws with the page.
         if(!messageScreen) {
-            // Measured from the saved 1920x1080 firmware root capture; runtime PAF projection remains to trace.
+            // Measured from the saved 1920x1080 firmware frames (audit/ITEM-MENU-INFO-FIRMWARE.md B3/E4):
+            // the visible plate is 591x58 at (1329,75), flush to the right screen edge. The tile's own 1 px
+            // transparent margin lies just outside that core (x1328/y74) and its right border falls past
+            // x1919, which is why the firmware plate shows top, bottom and left ramps but no right edge.
+            // The 9-slice keeps the 8 px border at its native pixel size, so the measured ramp is
+            // reproduced instead of being smeared by stretching the whole tile.
             const QRectF infoBar(1329,75,591,58);
-            p.save();p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,20));p.drawRoundedRect(infoBar,4,4);
-            p.setOpacity(.12);p.drawImage(infoBar,assets_.image("system_plugin","tex_infobar"));
-            p.setOpacity(1);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));p.drawRoundedRect(infoBar.adjusted(.5,.5,-.5,-.5),4,4);p.restore();
+            const QImage& plate=assets_.image("xmb_plugin_normal","tex_indi_bg");
+            if(!plate.isNull()) {
+                drawNineSlice(p,"xmb_plugin_normal","tex_indi_bg",infoBar.adjusted(-1,-1,8,1),8.,1.);
+            } else {
+                // The decoder reads this tile (audit/TEXTURE-COVERAGE.md: 3174/3174); if a future flash
+                // cannot, keep the drawing this block shipped before and say so once.
+                static bool plateFallbackWarned=false;
+                if(!plateFallbackWarned){plateFallbackWarned=true;qWarning().noquote()<<"view: info bar plate xmb_plugin_normal/tex_indi_bg did not decode; drawing the tex_infobar fallback";}
+                p.save();p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,20));p.drawRoundedRect(infoBar,4,4);
+                p.setOpacity(.12);p.drawImage(infoBar,assets_.image("system_plugin","tex_infobar"));
+                p.setOpacity(1);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));p.drawRoundedRect(infoBar.adjusted(.5,.5,-.5,-.5),4,4);p.restore();
+            }
             text({1240,82,525,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
             const auto time=shell_.clockDateTime().time();const QPointF center(1791,104);
             const auto hand=[&](double angle,double length){const double a=angle*std::numbers::pi/180.;return QPointF(std::sin(a)*length,-std::cos(a)*length);};
@@ -1463,6 +1492,32 @@ void View::drawScene(QPainter& p) {
                 p.drawEllipse(c,14,14);p.drawLine(c,c+hand(time.minute()*6,10));p.drawLine(c,c+hand((time.hour()%12)*30+time.minute()*.5,7));
             }
             p.restore();
+            // The firmware's indicator row (page_xmb_indicator in xmb_plugin_normal.rco, B1): five 32x32
+            // slots at fixed offsets from the clock, inside the same plate. The whole group is authored at
+            // alpha 0 and only the slots the console has state for appear. This build has one real source
+            // among the five: Steam friends' presence, for tex_indi_online and its online_num counter.
+            // There is no unread-message source (tex_indi_message), no in-XMB text-chat session
+            // (tex_indi_chat), no signed-in user avatar (the avatar slot has no RCO image, and this build
+            // has no console/PSN account), and no PlayStation Plus membership (tex_indi_plus), so those
+            // four stay undrawn: an empty slot is honest, a fabricated count is not.
+            int onlineFriends=0;
+            for(const auto& category:shell_.categories()) {
+                if(category.id!="friends")continue;
+                for(const auto& entry:category.entries)
+                    if(entry.friendRow && entry.presenceState!=0)++onlineFriends; // persona state 0 = Offline
+                break;
+            }
+            if(onlineFriends>0) {
+                // Offsets are the RCO's own -244 message, -274 chat, -342 online, -376 avatar, -410 plus,
+                // measured from the clock text's right edge; the 32 px row is centred on the plate (y 104).
+                const double iconAnchorX=1760.; // measured clock ink right edge (B3/E4)
+                const QRectF online(iconAnchorX-342.,88,32,32);
+                p.drawImage(online,assets_.image("xmb_plugin_normal","tex_indi_online"));
+                // online_num sits at +14/+2 inside the slot. Its RCO size 10 has no measured px mapping
+                // (the clock text is also size 10 but renders a 22 px cap), so 15 px is a fit that keeps
+                // the count inside the 32 px slot.
+                text(QRectF(online.left()+14,online.top()+2,18,18),QString::number(onlineFriends),15,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+            }
         }
     }
     // Message surfaces (dialogs.cpp): the kind decides the shape. An inline line is drawn on the normal
@@ -1650,18 +1705,25 @@ void View::pollVolumeRamp(float down,float up,qint64 now) {
 // recovered, so the rect here is fitted rather than traced - and it is fitted to the one band no other
 // composite uses: immediately left of the information panel (x 1329..1920, y 75..133), above the
 // notification plaque (y 145), left of the options panel (x 1330) and clear of the OSK (y 290) and the PS
-// menu (which blacks the frame). The fill and border are the information bar's own material, so it reads as
-// part of the XMB rather than as an application overlay.
+// menu (which blacks the frame). The backing is the information panel's own material,
+// xmb_plugin_normal:tex_indi_bg (the same 24x24 nine-slice tile the info bar uses), so the HUD reads as part
+// of the XMB rather than as an application overlay; its rect stays a FIT, not a traced projection.
 void View::drawVolumeHud(QPainter& p,double opacity) {
     const double alpha=std::clamp(opacity,0.,1.);
     if(alpha<=.002)return;
     const QRectF panel(1000,75,222,58);
     p.save();
     p.setOpacity(alpha);
-    p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,20));p.drawRoundedRect(panel,4,4);
-    p.setOpacity(.12*alpha);p.drawImage(panel,assets_.image("system_plugin","tex_infobar"));
-    p.setOpacity(alpha);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));
-    p.drawRoundedRect(panel.adjusted(.5,.5,-.5,-.5),4,4);
+    const QImage& plate=assets_.image("xmb_plugin_normal","tex_indi_bg");
+    if(plate.isNull()) {
+        // Keep the pre-nine-slice drawing if the tile cannot be read (audit/TEXTURE-COVERAGE.md: it does).
+        static bool hudFallbackWarned=false;
+        if(!hudFallbackWarned){hudFallbackWarned=true;qWarning().noquote()<<"view: volume HUD plate xmb_plugin_normal/tex_indi_bg did not decode; drawing the tex_infobar fallback";}
+        p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,20));p.drawRoundedRect(panel,4,4);
+        p.setOpacity(.12*alpha);p.drawImage(panel,assets_.image("system_plugin","tex_infobar"));
+        p.setOpacity(alpha);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));
+        p.drawRoundedRect(panel.adjusted(.5,.5,-.5,-.5),4,4);
+    } else drawNineSlice(p,"xmb_plugin_normal","tex_indi_bg",panel,8.,alpha);
     const auto label=[&](const QRectF& rect,const QString& value,int size,QColor colour,int flags) {
         if(textRenderer_.ready()) {
             QFont font(shell_.fontFamily());font.setPixelSize(size);
@@ -1909,7 +1971,11 @@ void View::keyPressEvent(QKeyEvent* e) {
         case Qt::Key_Left:oskMove(-1,0);break;case Qt::Key_Right:oskMove(1,0);break;
         case Qt::Key_Up:oskMove(0,-1);break;case Qt::Key_Down:oskMove(0,1);break;
         case Qt::Key_Return:case Qt::Key_Enter:if(e->modifiers()&Qt::ControlModifier)oskClose(true);else oskPress();break;
-        case Qt::Key_Escape:oskClose(false);break;
+        // Back is one layer at a time: the palette first, then the keyboard (audit OSK-FIRMWARE 4.3).
+        case Qt::Key_Escape:
+            if(osk_.paletteOpen){osk_.paletteOpen=false;update();}
+            else oskClose(false);
+            break;
         case Qt::Key_Backspace:oskBackspace();break;
         default: {
             const auto scalars=e->text().toUcs4();
@@ -1963,9 +2029,13 @@ void View::focusOutEvent(QFocusEvent* e) {
 void View::pollController() {
 #ifdef Q_OS_WIN
     if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;volumeRamp_=0;return;}
+    // A --script run is the script's own input: every scripted key goes through replayKeyTap, which dispatches the
+    // same handlers the pad drives. A physical controller is therefore not read at all, so a capture cannot depend
+    // on a pad lying on its d-pad (which used to walk the keyboard focus off the default key between two grabs).
+    static const bool scriptedInput=QCoreApplication::arguments().contains(QStringLiteral("--script"));
     // XInput pad 0 and any PlayStation controller over HID (pad.cpp), merged; the left stick doubles as the D-pad.
-    XINPUT_STATE state{};const bool xinput=XInputGetState(0,&state)==ERROR_SUCCESS;
-    pad::State hid;const bool playstation=pad::latest(hid);
+    XINPUT_STATE state{};const bool xinput=!scriptedInput && XInputGetState(0,&state)==ERROR_SUCCESS;
+    pad::State hid;const bool playstation=!scriptedInput && pad::latest(hid);
     quint16 buttons=quint16((xinput?state.Gamepad.wButtons:0)|(playstation?hid.buttons:0)|keyHeld_);
     // PS is consumed by the global watcher (ps_watcher.cpp), which also covers a focused game; it must
     // never reach the XMB navigation bits below.
@@ -2011,10 +2081,12 @@ void View::pollController() {
     // Counted from the last deadline, not from this poll, so the 16 ms poll does not stretch the interval to 80 ms.
     const qint64 nextRepeat=std::max(repeatAt_,now-repeatInterval)+repeatInterval;
     const auto movement=quint16(edge|(repeat?buttons:0));
-    if(osk_.open) { // ✕ press, ○ cancel, □ backspace, △ space, START accept (the PS3 keyboard's own bindings)
+    if(osk_.open) { // X press, Circle cancel, Square backspace, Triangle space, START accept (the PS3 keyboard's bindings)
         if(movement&XINPUT_GAMEPAD_DPAD_LEFT)oskMove(-1,0);if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)oskMove(1,0);
         if(movement&XINPUT_GAMEPAD_DPAD_UP)oskMove(0,-1);if(movement&XINPUT_GAMEPAD_DPAD_DOWN)oskMove(0,1);
-        if(edge&XINPUT_GAMEPAD_A)oskPress();if(edge&XINPUT_GAMEPAD_B)oskClose(false);
+        if(edge&XINPUT_GAMEPAD_A)oskPress();
+        // Circle is Back: it closes the symbol palette first and the keyboard second, like Escape (audit 4.3).
+        if(edge&XINPUT_GAMEPAD_B){if(osk_.paletteOpen){osk_.paletteOpen=false;update();}else oskClose(false);}
         if(edge&XINPUT_GAMEPAD_X)oskBackspace();if(edge&XINPUT_GAMEPAD_Y)oskInsert(" ");
         if(edge&XINPUT_GAMEPAD_START)oskClose(true);
         if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
@@ -2056,43 +2128,52 @@ void View::pollController() {
 #endif
 }
 // ---- On-screen keyboard -----------------------------------------------------------------------------------------
-// Geometry from the reference (RPCS3 video, 64 s), at 1080p: window x 493-1427, y 290-788; title bar 290-328;
-// text field 333-389; a 10x4 character grid from x 500 with a 72 px pitch; two function rows; prediction panel at right.
+// The keyboard is the firmware's (audit/OSK-FIRMWARE.md): a 934x500 panel at 493,290 with a title bar, an entry
+// field and a footer; a 10x6 grid of 72x54 cells from 496,406 with 66x50 key faces; a prediction column at 1216; a
+// 7x7 symbol palette with five visible rows; black at alpha 0.70 behind all of it. Every rect, caption, colour and
+// texture name comes from oskLayout_, which the constructor resolves from oskfullkeypanel_plugin.rco and the
+// decrypted module. Each element draws its firmware texture when the name is present AND decoded and falls back to
+// the measured colour/text otherwise, so a name the asset loader cannot read yet switches over on its own (the
+// badges and focus rings did exactly that when the GIM decoder landed - audit 12.4, 14).
 namespace {
-enum class OskAction { None, Symbols, Shift, Backspace, Space, Left, Right, Enter };
-struct OskKey { const char* label; int column,span; OskAction action; QColor top,bottom; const char* button; };
-const QColor oskYellow1(214,209,150),oskYellow2(176,170,110),oskTeal1(176,206,214),oskTeal2(132,166,176),oskBlue1(140,176,214),oskBlue2(92,128,170);
-const OskKey oskFunctionRows[2][8]={
-    {{"*%#",0,1,OskAction::Symbols,oskYellow1,oskYellow2,""},{"",1,1,OskAction::None,oskYellow1,oskYellow2,""},
-     {"a/à",2,1,OskAction::None,oskTeal1,oskTeal2,"L2"},{"a/A",3,1,OskAction::Shift,oskTeal1,oskTeal2,"R2"},
-     {"Backspace",4,2,OskAction::Backspace,oskTeal1,oskTeal2,"□"},{"Space",6,2,OskAction::Space,oskTeal1,oskTeal2,"△"},
-     {"",8,2,OskAction::None,oskTeal1,oskTeal2,""},{nullptr,0,0,OskAction::None,{},{},""}},
-    {{"▲",0,1,OskAction::None,oskBlue1,oskBlue2,""},{"▼",1,1,OskAction::None,oskBlue1,oskBlue2,""},
-     {"◀",2,1,OskAction::Left,oskBlue1,oskBlue2,"L1"},{"▶",3,1,OskAction::Right,oskBlue1,oskBlue2,"R1"},
-     {"⊞",4,1,OskAction::None,oskBlue1,oskBlue2,""},{"",5,1,OskAction::None,oskTeal1,oskTeal2,""},
-     {"Input Mode",6,2,OskAction::None,oskTeal1,oskTeal2,"SELECT"},{"Enter",8,2,OskAction::Enter,oskTeal1,oskTeal2,"START"}}};
-const OskKey* oskFunctionKey(int row,int column) {
-    for(const auto& key:oskFunctionRows[row-4])if(key.label && column>=key.column && column<key.column+key.span)return &key;
-    return nullptr;
-}
-constexpr double oskRowY[6]={434,488,542,596,650,704};
 int oskAdjacent(const QString& text,int cursor,bool forward) {
     QTextBoundaryFinder boundaries(QTextBoundaryFinder::Grapheme,text);
     boundaries.setPosition(cursor);
     const int next=forward?boundaries.toNextBoundary():boundaries.toPreviousBoundary();
     return next<0?(forward?int(text.size()):0):next;
 }
+// The measured key-face colours at four heights of the 66x50 face - 0%, 40%, 75% and 100% - taken from
+// s1/f0060-0257.png as a median over each key's left inset so no caption ink lands in the sample. The profile is not
+// a straight two-stop ramp: the face brightens to a plateau at 40-75% and then drops to a dark lower lip. They are
+// NOT the RCO's BUTTON_BASE_* images: those are pre-composite artwork whose gradient runs the other way
+// (BUTTON_BASE_WHITE reads 165/219/239 where the captured face reads 169/196/190/152), and the per-key row
+// assignment lives in the module at run time, not in the RCO (audit 2.1). So the faces are drawn from this geometry.
+struct OskFace { QColor at0,at40,at75,at100; };
+OskFace oskFace(const QString& role) {
+    if(role==QStringLiteral("olive"))return {QColor(152,157,117),QColor(175,183,144),QColor(179,183,156),QColor(122,125,129)};
+    if(role==QStringLiteral("blue"))return {QColor(121,152,160),QColor(145,177,182),QColor(152,174,179),QColor(129,129,131)};
+    if(role==QStringLiteral("mint"))return {QColor(109,151,132),QColor(137,175,158),QColor(148,175,164),QColor(110,107,109)};
+    if(role==QStringLiteral("arrow"))return {QColor(116,150,156),QColor(140,169,177),QColor(140,161,167),QColor(110,107,109)};
+    return {QColor(164,168,164),QColor(196,195,196),QColor(190,188,190),QColor(152,150,152)};  // letters and digits
+}
+// Where a key's caption sits. The capture's character keys are not caption-centred: every one of the ten columns
+// puts its glyph centre 53.5 px right of the cell's left edge (measured on all four character rows), while the
+// function-row captions are centred on the key. Both are measured, not fitted (audit 4.6).
+constexpr double oskCharacterCaptionCentre=53.5;
 }
 QString View::oskCharacter(int row,int column) const {
-    static const char* lower[4]={"1234567890","qwertyuiop","asdfghjkl'","zxcvbnm,.?"};
-    static const char* upper[4]={"1234567890","QWERTYUIOP","ASDFGHJKL\"","ZXCVBNM;:!"};
-    static const char* symbols[4]={"!@#$%^&*()","-_=+[]{}\\|","/<>`~;:\"'&","@#%*+-=_.,"};
-    const char* const* set=osk_.symbols?symbols:osk_.shift?upper:lower;
-    return QString(QChar(set[row][column]));
+    // One source for a key's character: the resolved page, never a table in this file.
+    const OskKey* key=oskLayout_.keyAt(osk_.page,row,column);
+    return key?key->label:QString();
 }
 void View::openOsk(const QString& title,const QString& initial,std::function<void(QString)> done,bool masked) {
     osk_=Osk{};osk_.open=true;osk_.title=title;osk_.text=initial;osk_.cursor=int(initial.size());osk_.done=std::move(done);
     osk_.masked=masked;
+    // The firmware's default focus: row 2, column 4 = `g`, in two independent boots (audit 5, 12.2). The layout
+    // carries it, so a different layout can start somewhere else without touching this call.
+    osk_.page=0;
+    osk_.row=oskLayout_.defaultFocusRow;
+    osk_.column=oskLayout_.defaultFocusColumn;
     update();
 }
 void View::oskClose(bool accept) {
@@ -2117,85 +2198,359 @@ void View::oskBackspace() {
     update();
 }
 void View::oskMove(int dx,int dy) {
-    osk_.row=(osk_.row+dy+6)%6;
+    // The palette owns the arrows while it is open: it is a 7x5 window over the symbol list (audit 4.3).
+    if(osk_.paletteOpen) { oskPaletteMove(dx,dy);return; }
+    const OskPage* page=oskLayout_.page(osk_.page);
+    if(!page || page->rows.isEmpty())return;
+    const int rowCount=int(page->rows.size());
+    osk_.row=(osk_.row+dy+rowCount)%rowCount;   // up/down wrap over the six rows, keeping the column
     if(dx!=0) {
-        if(osk_.row>=4) { // jump over multi-column keys
-            const auto* key=oskFunctionKey(osk_.row,osk_.column);
-            osk_.column=dx>0?(key?key->column+key->span:osk_.column+1):(key?key->column-1:osk_.column-1);
-        } else osk_.column+=dx;
-        osk_.column=(osk_.column+10)%10;
+        // Left/right land on keys, not cells: a wide key occupies its span, so a horizontal move jumps the whole
+        // span and wraps inside the row (audit 5, "wide keys occupy their span").
+        const OskKey* current=page->keyAt(osk_.row,osk_.column);
+        int target=current?(dx>0?current->column+current->span:current->column-1):osk_.column+dx;
+        if(target>=oskLayout_.columns)target=0;
+        if(target<0)target=oskLayout_.columns-1;
+        if(const OskKey* next=page->keyAt(osk_.row,target))osk_.column=next->column;
+        else osk_.column=target;
     }
-    if(osk_.row>=4)if(const auto* key=oskFunctionKey(osk_.row,osk_.column))osk_.column=key->column;
+    // A vertical move can land inside a wide key or on a blank cell; the key's own left column is the focus.
+    if(const OskKey* key=page->keyAt(osk_.row,osk_.column))osk_.column=key->column;
+    update();
+}
+void View::oskPaletteMove(int dx,int dy) {
+    const OskPalette& palette=oskLayout_.palette;
+    if(palette.columns<=0 || palette.visibleRows<=0)return;
+    osk_.paletteColumn=(osk_.paletteColumn+dx+palette.columns)%palette.columns;
+    int row=osk_.paletteRow+dy;
+    // 32 symbols fill four rows of seven plus four cells, so the 5-row window has nothing to scroll on this page;
+    // the arithmetic is here because the module string continues with accented symbols after the ASCII run.
+    const int symbolRows=(int(palette.symbols.size())+palette.columns-1)/palette.columns;
+    const int maxScroll=std::max(0,symbolRows-palette.visibleRows);
+    if(row<0) {
+        if(osk_.paletteScroll>0) { --osk_.paletteScroll;row=0; }
+        else row=0;
+    } else if(row>=palette.visibleRows) {
+        if(osk_.paletteScroll<maxScroll) { ++osk_.paletteScroll;row=palette.visibleRows-1; }
+        else row=palette.visibleRows-1;
+    }
+    osk_.paletteRow=row;
+    update();
+}
+void View::oskPalettePress() {
+    const QChar symbol=oskLayout_.palette.symbolAtCell(osk_.paletteRow,osk_.paletteColumn,osk_.paletteScroll);
+    if(!symbol.isNull())oskInsert(QString(symbol));
+    // F: the capture never shows a symbol being accepted, so closing the popup after the insert is a fit, not a
+    // trace. Back (Escape/Circle) is the traced way out.
+    osk_.paletteOpen=false;
     update();
 }
 void View::oskPress() {
-    if(osk_.row<4){oskInsert(oskCharacter(osk_.row,osk_.column));if(osk_.shift && !osk_.symbols)osk_.shift=false;return;}
-    const auto* key=oskFunctionKey(osk_.row,osk_.column);if(!key)return;
+    if(osk_.paletteOpen) { oskPalettePress();return; }
+    const OskKey* key=oskLayout_.keyAt(osk_.page,osk_.row,osk_.column);
+    if(!key)return;
+    // Every action the layout can carry is dispatched, and the three that the native build cannot honour say so
+    // in the log instead of doing nothing silently (audit 8: no IME modules, no dictionary, no XMB clipboard).
     switch(key->action) {
-    case OskAction::Symbols:osk_.symbols=!osk_.symbols;break;
-    case OskAction::Shift:osk_.shift=!osk_.shift;break;
+    case OskAction::Character:oskInsert(key->label);break;
     case OskAction::Backspace:oskBackspace();break;
-    case OskAction::Space:oskInsert(" ");break;
-    case OskAction::Left:osk_.cursor=oskAdjacent(osk_.text,osk_.cursor,false);break;
-    case OskAction::Right:osk_.cursor=oskAdjacent(osk_.text,osk_.cursor,true);break;
+    case OskAction::Space:oskInsert(QStringLiteral(" "));break;
+    case OskAction::Shift:osk_.page=osk_.page==0?1:0;break;
+    case OskAction::Accent:qInfo().noquote()<<"osk: accent page is not captured; the accent key is inert";break;
+    case OskAction::Palette:osk_.paletteOpen=true;osk_.paletteRow=0;osk_.paletteColumn=0;osk_.paletteScroll=0;break;
     case OskAction::Enter:oskClose(true);return;
+    case OskAction::MoveUp:oskMove(0,-1);break;
+    case OskAction::MoveDown:oskMove(0,1);break;
+    case OskAction::CaretLeft:osk_.cursor=oskAdjacent(osk_.text,osk_.cursor,false);break;
+    case OskAction::CaretRight:osk_.cursor=oskAdjacent(osk_.text,osk_.cursor,true);break;
+    case OskAction::Mode:qInfo().noquote()<<"osk: Input Mode is unavailable (no IME modules; audit 8.3)";break;
+    case OskAction::Copy:case OskAction::Paste:qInfo().noquote()<<"osk: copy/paste is not wired to a clipboard yet";break;
     case OskAction::None:break;
     }
     update();
 }
 void View::drawOsk(QPainter& p) {
+    const OskPage* page=oskLayout_.page(osk_.page);
+    if(!page)return;
+    const OskLayout& l=oskLayout_;
+    const QString container=QStringLiteral("oskfullkeypanel_plugin");
+    // The text renderer is the one metric authority (audit/TEXT-RENDERER.md); the QPainter pen is the fallback for a
+    // run where FreeType did not initialise.
     const auto label=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignCenter,bool bold=false) {
-        if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);f.setBold(bold);textRenderer_.draw(*this,p,r,value,f,colour,flags,0,false);return;}
-        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setBold(bold);f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(colour);p.drawText(r,flags,value);
+        if(value.isEmpty())return;
+        QFont f(shell_.fontFamily());f.setPixelSize(size);f.setBold(bold);
+        if(textRenderer_.ready()){textRenderer_.draw(*this,p,r,value,f,colour,flags,0,false);return;}
+        f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(colour);p.drawText(r,flags,value);
     };
-    const auto key=[&](const QRectF& r,QColor top,QColor bottom,bool focused) {
-        QLinearGradient g(r.topLeft(),r.bottomLeft());g.setColorAt(0,focused?QColor(255,255,255):top);g.setColorAt(1,focused?QColor(225,232,236):bottom);
-        p.setPen(QPen(QColor(60,60,60,160),1));p.setBrush(g);p.drawRoundedRect(r,5,5);
-        if(focused){p.setPen(QPen(QColor(255,255,255,170),3));p.setBrush(Qt::NoBrush);p.drawRoundedRect(r.adjusted(-3,-3,3,3),7,7);}
+    // The decoded RCO image for a name, or null when the name is absent or its GIM pixel format is not decoded yet.
+    // Assets caches pixels and failures alike, so this is a map lookup after the startup load.
+    const auto texture=[&](const QString& name)->const QImage& {
+        static const QImage none;
+        if(name.isEmpty())return none;
+        return assets_.image(container,name);
+    };
+    // A 3x3 nine-slice from nine named RCO images, each border's size taken from the image itself (the panel's are
+    // 10/20 wide and 15/62 tall, the candidate window's 10/19 and 9/18 - audit 2.1). False when any piece is missing,
+    // so the caller draws its measured fallback instead.
+    const auto slice9=[&](const QString& tl,const QString& tc,const QString& tr,
+                          const QString& ml,const QString& mc,const QString& mr,
+                          const QString& bl,const QString& bc,const QString& br,const QRectF& r) {
+        const QImage* piece[9]={&texture(tl),&texture(tc),&texture(tr),&texture(ml),&texture(mc),
+                                &texture(mr),&texture(bl),&texture(bc),&texture(br)};
+        for(const QImage* image:piece)if(image->isNull())return false;
+        const qreal left=piece[0]->width(),right=piece[2]->width();
+        const qreal top=piece[0]->height(),bottom=piece[6]->height();
+        if(r.width()<left+right || r.height()<top+bottom)return false;
+        const qreal dx[4]={r.left(),r.left()+left,r.right()-right,r.right()};
+        const qreal dy[4]={r.top(),r.top()+top,r.bottom()-bottom,r.bottom()};
+        p.save();
+        for(int row=0;row<3;++row)for(int column=0;column<3;++column) {
+            const QImage& image=*piece[row*3+column];
+            const QRectF target(dx[column],dy[row],dx[column+1]-dx[column],dy[row+1]-dy[row]);
+            if(target.width()<=0. || target.height()<=0.)continue;
+            p.drawImage(target,image,QRectF(0,0,image.width(),image.height()));
+        }
+        p.restore();
+        return true;
     };
     p.save();
-    p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,120)); // the XMB dims behind the keyboard
-    const QRectF window(493,290,934,498);
-    p.setPen(QPen(QColor(30,30,30),1.5));p.setBrush(QColor(78,78,80));p.drawRect(window);
-    QLinearGradient title(0,290,0,328);title.setColorAt(0,QColor(222,222,222));title.setColorAt(1,QColor(178,178,178));
-    p.fillRect(QRectF(494,291,932,37),title);
-    label({506,291,40,37},QString(QChar(0x270e)),22,QColor(40,40,40));
-    label({540,291,800,37},osk_.title,20,QColor(30,30,30),Qt::AlignLeft|Qt::AlignVCenter);
-    p.fillRect(QRectF(494,330,932,60),QColor(52,52,54));
-    QFont fieldFont(shell_.fontFamily());fieldFont.setPixelSize(26);p.setFont(fieldFont);
-    // A masked field (the Jellyfin password) draws one bullet per character and measures the caret against those
-    // bullets, so the position stays right without the characters being drawn anywhere.
-    const QString composed=osk_.masked?QString(osk_.text.size(),QChar(0x2022)):osk_.text;
-    // One metric authority: the caret sits at the pen advance of the composed prefix, measured with the same
-    // unhinted FreeType advances that place the field's glyphs (TextRenderer::measure). The QPainter fallback
-    // keeps Qt's metrics, which then also draw the glyphs. The caret's 2x36 px bar is a fitted size: the
-    // firmware's caret metrics are not recovered (audit/TEXT-RASTER.md leaves the pen-width trace open).
-    const auto fieldAdvance=[&](const QString& text) {
+    // The dim behind the panel: black at the measured 0.70, not the 120/255 the free-hand keyboard used (4.1).
+    QColor dim=l.bands.dim;dim.setAlphaF(l.bands.dimAlpha);
+    p.fillRect(QRectF(0,0,1920,1080),dim);
+    // The panel plate: the middle band's own measured colour first (157,154,157 - the plate and key-seam colour the
+    // capture shows), then the RCO's nine-slice (oskpanel_base1x0..3x2) over it. The slice's right-hand pieces are a
+    // 34%-alpha shadow (tbase1x2/tbase2x3 sample black at alpha 87), so drawing them straight onto the page made the
+    // panel's right edge dark instead of a shaded plate - over the fill they shade it, as the capture shows.
+    const QRectF panelRect(l.bands.panel);
+    p.fillRect(panelRect,QColor(157,154,157));
+    if(!slice9(l.slices.value(QStringLiteral("panel/1x0")),l.slices.value(QStringLiteral("panel/1x1")),
+               l.slices.value(QStringLiteral("panel/1x2")),l.slices.value(QStringLiteral("panel/2x0")),
+               l.slices.value(QStringLiteral("panel/2x1")),l.slices.value(QStringLiteral("panel/2x3")),
+               l.slices.value(QStringLiteral("panel/3x0")),l.slices.value(QStringLiteral("panel/3x1")),
+               l.slices.value(QStringLiteral("panel/3x2")),panelRect)) {
+        p.setPen(QPen(QColor(30,30,30),1));p.setBrush(Qt::NoBrush);
+        p.drawRect(panelRect.adjusted(.5,.5,-.5,-.5));
+    }
+    // Title bar: flat 141,142,140 with the sheen at its bottom edge (4.1). No texture - the RCO's plane carries
+    // width=0 and the module assigns it at run time (12.1).
+    QLinearGradient title(0,l.bands.titleBar.top(),0,l.bands.titleBar.bottom());
+    title.setColorAt(0,l.bands.titleTop);title.setColorAt(1,l.bands.titleBottom);
+    p.fillRect(QRectF(l.bands.titleBar),title);
+    label(QRectF(l.bands.titleIcon.left()-6,l.bands.titleBar.top()+2,24,34),QString(QChar(0x270e)),22,l.bands.titleTextColour);
+    label(QRectF(double(l.bands.titleText.left()),double(l.bands.titleBar.top()),double(l.bands.titleText.width()),
+                 double(l.bands.titleBar.height())),osk_.title,27,l.bands.titleTextColour,Qt::AlignLeft|Qt::AlignVCenter);
+    // Entry field: the measured 86 -> 62 -> 47 vertical gradient, one line, clipped at its own edges (4.1, 5.1).
+    QLinearGradient field(0,l.bands.field.top(),0,l.bands.field.bottom());
+    field.setColorAt(0,l.bands.fieldTop);field.setColorAt(.5,l.bands.fieldMid);field.setColorAt(1,l.bands.fieldBottom);
+    p.fillRect(QRectF(l.bands.field),field);
+    QFont fieldFont(shell_.fontFamily());fieldFont.setPixelSize(22);
+    // A masked field draws one bullet per character (the layout's mask glyph) and measures the caret against those
+    // bullets, so the position stays right without the characters being drawn anywhere (5.4).
+    const QString composed=osk_.masked?QString(osk_.text.size(),l.mask.glyph):osk_.text;
+    const auto advance=[&](const QString& text) {
         return textRenderer_.ready()?textRenderer_.measure(fieldFont,text):QFontMetricsF(fieldFont).horizontalAdvance(text);
     };
-    const double before=fieldAdvance(composed.left(osk_.cursor));
-    const double scroll=std::max(0.,before-896.);
-    p.save();p.setClipRect(QRectF(512,330,900,60),Qt::IntersectClip);
-    label({512-scroll,330,std::max(900.,fieldAdvance(composed)+4.),60},composed,26,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-    if((clock_.elapsed()/500)%2==0)p.fillRect(QRectF(512+before-scroll,342,2,36),QColor(140,220,120)); // blinking cursor
+    const double inset=20.;                                  // 5.1: text origin x 494+20
+    const double textX=l.bands.field.left()+inset;
+    const double textWidth=l.bands.field.width()-2*inset;
+    const double before=advance(composed.left(osk_.cursor));
+    const double scroll=std::max(0.,before-(textWidth-4.));
+    p.save();
+    p.setClipRect(QRectF(textX,double(l.bands.field.top()),textWidth,double(l.bands.field.height())),Qt::IntersectClip);
+    label({textX-scroll,double(l.bands.field.top()),std::max(textWidth,advance(composed)+4.),
+           double(l.bands.field.height())},composed,22,l.bands.fieldTextColour,Qt::AlignLeft|Qt::AlignVCenter);
+    // The caret is two marks, not one (5.2): a 2 px I-beam with 12 px serifs, 27 px tall, at the pen advance, in the
+    // measured 130,249,12 green, plus the hollow triangle 12 px to its right. Both are drawn only while the blink
+    // phase is lit; the phase comes from OskCaret::blinkMilliseconds in paintGL.
+    if(osk_.caretLit) {
+        const double x=textX+before-scroll;
+        const double y=l.bands.field.top()+9;
+        p.fillRect(QRectF(x,y,l.caret.shaftWidth,l.caret.height),l.caret.colour);
+        const double serifX=x-(l.caret.serifWidth-l.caret.shaftWidth)/2.;
+        p.fillRect(QRectF(serifX,y,l.caret.serifWidth,2),l.caret.colour);
+        p.fillRect(QRectF(serifX,y+l.caret.height-2,l.caret.serifWidth,2),l.caret.colour);
+        const double markerX=x+l.caret.markerInset;
+        const double markerTop=y+3;
+        p.setPen(QPen(Qt::white,2));p.setBrush(Qt::NoBrush);
+        p.drawLine(QPointF(markerX,markerTop),QPointF(markerX,markerTop+l.caret.markerHeight));
+        p.drawLine(QPointF(markerX,markerTop),QPointF(markerX+l.caret.markerWidth,markerTop+l.caret.markerHeight/2.));
+        p.drawLine(QPointF(markerX,markerTop+l.caret.markerHeight),
+                   QPointF(markerX+l.caret.markerWidth,markerTop+l.caret.markerHeight/2.));
+    }
     p.restore();
-    for(int row=0;row<4;++row)for(int column=0;column<10;++column) {
-        const QRectF r(500+column*72,oskRowY[row]-23,66,46);
-        key(r,QColor(236,236,236),QColor(190,190,190),osk_.row==row && osk_.column==column);
-        label(r,oskCharacter(row,column),22,QColor(40,40,40));
+    // The key grid. A key's cell is its span x 72 by 54; the face is inset by 3/2, so a one-cell face is the measured
+    // 66x50 and a two-cell one 138x50 (4.1, 4.2).
+    for(const OskRow& row:page->rows) {
+        for(const OskKey& key:row.keys) {
+            const QRectF face(double(l.gridOrigin.x()+key.column*l.cell.width()+l.faceInset.x()),
+                              double(l.gridOrigin.y()+row.row*l.cell.height()+l.faceInset.y()),
+                              double(key.span*l.cell.width()-2*l.faceInset.x()),
+                              double(l.cell.height()-2*l.faceInset.y()));
+            const bool focused=osk_.row==row.row && osk_.column>=key.column && osk_.column<key.column+key.span;
+            // The focused face brightens instead of changing colour: measured on s3/f0020-0078.png the focused a/A
+            // reads 152,159,140 / 206,219,140 / 210,220,183 against 157,163,124 / 172,178,139 / 162,165,138 at rest.
+            const auto lit=[&](const QColor& colour) {
+                if(!focused)return colour;
+                const auto mix=[&](int channel){return int(channel+(255-channel)*.35);};
+                return QColor(mix(colour.red()),mix(colour.green()),mix(colour.blue()));
+            };
+            // The palette opener in the function row is drawn on a mint plate in the capture (measured
+            // 116,157,141 at 784,676, the same as the blank key beside it), while the layout's inferred role for it
+            // reads "blue"; the capture wins.
+            const OskFace colours=oskFace(key.icon==QStringLiteral("grid")?QStringLiteral("mint"):key.face);
+            QLinearGradient gradient(face.topLeft(),face.bottomLeft());
+            gradient.setColorAt(0,lit(colours.at0));gradient.setColorAt(.4,lit(colours.at40));
+            gradient.setColorAt(.75,lit(colours.at75));gradient.setColorAt(1,lit(colours.at100));
+            p.setPen(Qt::NoPen);p.setBrush(gradient);
+            p.drawRoundedRect(face,l.keyCornerRadius,l.keyCornerRadius);
+            // The button badge: the module's LABEL_* pill, drawn at the measured 20 px height its 74x28 artwork
+            // carries (the pill itself fills the left 44 px of it). LABEL_UP/DOWN/LEFT/RIGHT are the arrow keys' whole
+            // face art, so those keys draw their glyph caption instead of a pill.
+            const QImage& badge=texture(key.badgeTexture);
+            const bool hasBadge=!badge.isNull();
+            if(hasBadge) {
+                const double badgeWidth=badge.width()*(20./badge.height());
+                p.drawImage(QRectF(face.left()+2,face.top()-3,badgeWidth,20),badge);
+            } else if(!key.badge.isEmpty()) {
+                QFont badgeFont(shell_.fontFamily());badgeFont.setPixelSize(13);
+                const double badgeWidth=std::max(18.,QFontMetricsF(badgeFont).horizontalAdvance(key.badge)+12.);
+                const QRectF pill(face.left()+2,face.top()-1,badgeWidth,18);
+                p.setPen(Qt::NoPen);p.setBrush(QColor(64,70,80,235));
+                p.drawRoundedRect(pill,9,9);
+                label(pill,key.badge,13,QColor(240,240,240));
+            }
+            // Captions. A character key's glyph centre is the measured cell.left + 53.5, 2 px below the face centre,
+            // at 24 px; a function-row caption is centred on the key, 6 px below the face centre (the badge shares the
+            // top of the face) and is drawn at 19 px, which is what the capture's 93 px "Backspace" and 53 px "Space"
+            // inks give. Sizes are measured, not fitted (audit 4.6: cap 19 and 18).
+            const bool character=row.row<4;
+            const QRectF caption=character
+                ?QRectF(double(l.gridOrigin.x()+key.column*l.cell.width())+oskCharacterCaptionCentre-59.,face.top()+4.,120.,face.height())
+                :face.adjusted(0,12,0,0);
+            label(caption,key.label,character?24:19,QColor(30,40,50));
+            // The palette opener carries a drawn glyph, not a caption: four columns by three rows of 5 px squares on a
+            // 7 px pitch (a 26x19 block), centred on the face like the capture's.
+            if(key.icon==QStringLiteral("grid")) {
+                p.setPen(Qt::NoPen);p.setBrush(QColor(30,40,50));
+                for(int line=0;line<3;++line)for(int square=0;square<4;++square)
+                    p.drawRect(QRectF(face.center().x()-12.5+square*7.,face.center().y()-10.5+line*7.,5.,5.));
+            }
+            // The focus ring is the firmware's own: SBTN_FOCUS 84x66, or LBTN_FOCUS 166x66 for a wide key, centred on
+            // the face (66+18 by 50+16, i.e. 9/8 px of ring outside it - 4.5).
+            if(focused) {
+                const QImage& ring=texture(key.span>1?QStringLiteral("LBTN_FOCUS"):QStringLiteral("SBTN_FOCUS"));
+                if(!ring.isNull())
+                    p.drawImage(QRectF(face.center().x()-ring.width()/2.,face.center().y()-ring.height()/2.,
+                                       ring.width(),ring.height()),ring);
+                else {p.setPen(QPen(QColor(255,255,255,190),2));p.setBrush(Qt::NoBrush);
+                      p.drawRoundedRect(face.adjusted(-6,-6,6,6),7,7);}
+            }
+        }
     }
-    for(int row=4;row<6;++row)for(const auto& k:oskFunctionRows[row-4]) {
-        if(!k.label)continue;
-        const QRectF r(500+k.column*72,oskRowY[row]-23,k.span*72-6,46);
-        key(r,k.top,k.bottom,osk_.row==row && osk_.column==k.column);
-        const bool highlighted=(k.action==OskAction::Shift && osk_.shift) || (k.action==OskAction::Symbols && osk_.symbols);
-        if(*k.button){label({r.left()+4,r.top()+1,r.width()-8,14},k.button,11,QColor(30,30,30,200),Qt::AlignLeft|Qt::AlignTop);}
-        label(r.adjusted(0,*k.button?8:0,0,0),k.label,k.span>1?19:20,highlighted?QColor(10,90,160):QColor(30,40,50),Qt::AlignCenter,highlighted);
+    // The prediction column: the candidate list, its header, the mode and count cells, then the two buttons outside
+    // the 10-column grid (4.4). The list stays empty: the console's candidates come from ime.prx's dictionary, which a
+    // PC build does not have, and fabricating them would be a different feature (8.2).
+    // The list's own nine-slice is pre-composite artwork (CANDIDATE_WINDOW0x0 reads 129,130,129 where the frame
+    // measures 110,110,110), so the measured plate is drawn: fill 110 with the slice's light top and dark bottom edge.
+    p.setPen(Qt::NoPen);p.setBrush(QColor(110,110,110));
+    p.drawRoundedRect(QRectF(l.bands.candidateList),3,3);
+    p.fillRect(QRectF(double(l.bands.candidateList.left())+3,double(l.bands.candidateList.top()),
+                      double(l.bands.candidateList.width())-6,1),QColor(151,151,151));
+    p.fillRect(QRectF(double(l.bands.candidateList.left())+3,double(l.bands.candidateList.bottom()-1),
+                      double(l.bands.candidateList.width())-6,1),QColor(100,100,100));
+    // Header: the measured 92 -> 80 gradient with a light line along its bottom edge.
+    QLinearGradient header(0,l.bands.predictionHeader.top(),0,l.bands.predictionHeader.bottom());
+    header.setColorAt(0,QColor(92,92,92));header.setColorAt(1,QColor(80,80,80));
+    p.fillRect(QRectF(l.bands.predictionHeader),header);
+    p.fillRect(QRectF(double(l.bands.predictionHeader.left()),double(l.bands.predictionHeader.bottom()-1),
+                      double(l.bands.predictionHeader.width()),1),QColor(120,124,125));
+    label(QRectF(l.bands.predictionHeader.left()+14.,double(l.bands.predictionHeader.top()),
+                 double(l.bands.predictionHeader.width())-46.,double(l.bands.predictionHeader.height())),
+          l.captions.prediction,16,QColor(235,235,235),Qt::AlignLeft|Qt::AlignVCenter);
+    // The mode and count cells are their own darker wells (85,85,85) inside the header strip.
+    p.fillRect(QRectF(l.bands.modeCell),QColor(85,85,85));
+    p.fillRect(QRectF(l.bands.countCell),QColor(85,85,85));
+    label(QRectF(l.bands.modeCell),page->modeCaption,18,QColor(237,237,237));
+    label(QRectF(l.bands.countCell),QStringLiteral("0"),18,QColor(237,237,237));
+    for(const OskPredictionButton& button:l.predictionButtons) {
+        const QRectF rect(button.rect);
+        QLinearGradient gradient(rect.topLeft(),rect.bottomLeft());
+        gradient.setColorAt(0,QColor(137,169,175));gradient.setColorAt(1,QColor(112,145,151));
+        p.setPen(Qt::NoPen);p.setBrush(gradient);p.drawRoundedRect(rect,l.keyCornerRadius,l.keyCornerRadius);
+        // KEYTOP_COPY / KEYTOP_PASTE carry the glyph as a white mask (24x24 of ink inside a 72x54 transparent card) for
+        // paf's icon material, so painting them raw draws a white block on the light key. The mask is tinted to the
+        // measured ink colour and cached per texture; the card is drawn at the button's own size, which puts the glyph
+        // where the card has it.
+        static QHash<QString,QImage> tintedCards;
+        const auto card=[&](const QString& name,const QColor& ink)->const QImage& {
+            static const QImage none;
+            const QImage& source=texture(name);
+            if(source.isNull())return none;
+            const QString key=name+QChar('/')+ink.name();
+            if(const auto it=tintedCards.constFind(key);it!=tintedCards.constEnd())return it.value();
+            QImage tinted=source.convertToFormat(QImage::Format_ARGB32);
+            for(int y=0;y<tinted.height();++y) {
+                auto* line=reinterpret_cast<QRgb*>(tinted.scanLine(y));
+                for(int x=0;x<tinted.width();++x)line[x]=qRgba(ink.red(),ink.green(),ink.blue(),qAlpha(line[x]));
+            }
+            return tintedCards.insert(key,tinted).value();
+        };
+        const QImage& glyph=card(button.texture,QColor(30,50,60,button.enabled?255:120));
+        if(!glyph.isNull()) {
+            p.save();p.setOpacity(button.enabled?1.:.55);p.drawImage(rect,glyph);p.restore();continue;
+        }
+        // The fallback shapes, for a run without the RCO: two offset plates for copy, a clipboard for paste.
+        p.setPen(QPen(QColor(30,50,60,button.enabled?255:120),2));
+        p.setBrush(QColor(30,50,60,button.enabled?255:120));
+        if(button.action==OskAction::Copy) {
+            p.drawRect(QRectF(rect.left()+19,rect.top()+16,17,17));
+            p.drawRect(QRectF(rect.left()+26,rect.top()+23,17,17));
+        } else {
+            p.setBrush(Qt::NoBrush);
+            p.drawRect(QRectF(rect.left()+21,rect.top()+20,20,24));
+            p.drawRect(QRectF(rect.left()+27,rect.top()+15,8,6));
+        }
     }
-    p.fillRect(QRectF(1218,404,197,230),QColor(58,58,60)); // prediction candidates
-    p.fillRect(QRectF(1218,637,197,33),QColor(96,104,112));
-    label({1226,637,120,33},"Prediction",15,QColor(230,230,230),Qt::AlignLeft|Qt::AlignVCenter);
-    p.fillRect(QRectF(494,730,932,57),QColor(64,64,66));
+    // Footer: (70,70,70) with the capture's 2 px light top edge and its own bottom line (4.1).
+    p.fillRect(QRectF(l.bands.footer),QColor(70,70,70));
+    p.fillRect(QRectF(double(l.bands.footer.left()),double(l.bands.footer.top()),
+                      double(l.bands.footer.width()),2),QColor(102,100,102));
+    p.fillRect(QRectF(double(l.bands.footer.left()),double(l.bands.footer.bottom()-1),
+                      double(l.bands.footer.width()),1),l.bands.footerBottom);
+    // The symbol palette, last so it covers the left half of the keyboard: the RCO's BASE_SYMBOL plate as a
+    // nine-slice (its interior reads 112,111,112 against the measured 114,114,114), a 7x5 window of 53x53 cells on a
+    // 48 px pitch, and FOCUS_SYMBOL on the focused cell (4.3).
+    if(osk_.paletteOpen) {
+        const OskPalette& palette=l.palette;
+        const QImage& plate=texture(QStringLiteral("BASE_SYMBOL"));
+        if(!plate.isNull())drawNineSlice(p,container,QStringLiteral("BASE_SYMBOL"),QRectF(palette.frame),12.,1.);
+        else p.fillRect(QRectF(palette.frame),QColor(114,114,114));
+        for(int row=0;row<palette.visibleRows;++row)for(int column=0;column<palette.columns;++column) {
+            const QChar symbol=palette.symbolAtCell(row,column,osk_.paletteScroll);
+            if(symbol.isNull())continue;
+            const QRect cell=palette.cellRect(row,column);
+            if(row==osk_.paletteRow && column==osk_.paletteColumn) {
+                const QImage& focus=texture(QStringLiteral("FOCUS_SYMBOL"));
+                if(!focus.isNull())p.drawImage(QRectF(cell),focus);
+                else {p.setPen(QPen(Qt::white,2));p.setBrush(Qt::NoBrush);p.drawRect(cell);}
+            }
+            label(QRectF(cell),QString(symbol),22,QColor(235,235,235));
+        }
+        // The scroll strip only has a knob when the module's symbol list runs past the five visible rows.
+        const int symbolRows=(int(palette.symbols.size())+qMax(1,palette.columns)-1)/qMax(1,palette.columns);
+        if(symbolRows>palette.visibleRows) {
+            const QRectF track(palette.frame.right()-16.,double(palette.gridOrigin.y()),
+                               12.,double(palette.visibleRows*palette.pitch.height()));
+            const QImage& base=texture(QStringLiteral("SCROLL_BASE_SYMBOL"));
+            if(!base.isNull())p.drawImage(track,base); else p.fillRect(track,QColor(90,90,90));
+            const double knobHeight=std::max(12.,track.height()*palette.visibleRows/symbolRows);
+            const double maxScroll=std::max(1,symbolRows-palette.visibleRows);
+            const double knobTop=track.top()+(track.height()-knobHeight)*osk_.paletteScroll/maxScroll;
+            const QImage& knob=texture(QStringLiteral("SCROLL_KNOB_SYMBOL"));
+            const QRectF knobRect(track.left(),knobTop,track.width(),knobHeight);
+            if(!knob.isNull())p.drawImage(knobRect,knob); else p.fillRect(knobRect,QColor(200,200,200));
+        }
+    }
     p.restore();
 }
 }
