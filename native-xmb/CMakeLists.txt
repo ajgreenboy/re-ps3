@@ -12,6 +12,7 @@ endif()
 qt_add_executable(re-ps3-native
     src/main.cpp src/assets.cpp src/assets.h src/p3t.cpp src/p3t.h src/qrc.cpp src/qrc.h src/catalog.cpp src/catalog.h
     src/rco_objects.cpp src/rco_objects.h
+    src/osk_layout.cpp src/osk_layout.h
     src/xmbml_view.cpp src/xmbml_view.h
     src/preferences.cpp src/preferences.h
     src/media_library.cpp src/media_library.h src/settings_menu.cpp

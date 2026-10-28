@@ -801,3 +801,153 @@ position 0, caret left/right, Circle closing without changing the field, and Sta
 | `work/osk-layout.proposed.json` | the machine-readable layout of section 4 |
 | `native-xmb/audit/FIRMWARE-PARITY-GAPS.md` row M6 | the gap this closes; its "no prediction content, Input Mode inert" description is superseded |
 | `native-xmb/HANDOFF-PHASES.md:102-121` | the RPCS3 capture how-to this run followed |
+
+## 12. The runtime layout module (phase 12.4) -- M
+
+`native-xmb/src/osk_layout.{h,cpp}` resolves the keyboard from the firmware when the app runs. It
+does not copy a layout table: `loadOskLayout(Assets&, RcoObjects&)` reads the resource through
+`RcoObjects` (the P1.1 reader, not a second RCO parser), reads the module through
+`Assets::vshModule` (the existing `--vsh-modules` path), and resolves the named textures through
+`Assets::image` (the same call `View::drawImage` makes). `work/osk-layout.proposed.json` is used
+only as the logged fallback when `--dev-flash` is absent or the firmware read fails.
+
+### 12.1 What each source supplies
+
+| Value | Source at run time |
+|---|---|
+| panel, title bar, field, footer, prediction column | measured reference sections 4.1/4.4 (the RCO panel planes store `width=0`; the module assigns them at runtime) |
+| key cell / face, grid origin | `BUTTON_BASE_B_S` = 72x54 and `BUTTON_BASE_WHITE` = 144x54 through `Assets::image`, cross-checked against the measured 72x54 cell / 66x50 face |
+| 9-slice image references | `oskpanel_base1x0..3x2`, `fullkey_candidate_list_base0x0..2x2`, `fullkey_menuelist_base0x0..2x2` object `image` references resolved through the image tree |
+| palette 7x7 grid and 49 buttons | `symbol_palette_bg` width/height = 7/7 and the 49 `sym_btnNN` children of `symbol_palette_group` |
+| lower/caps row strings | the 24-byte label table in `oskfullkeypanel_plugin.prx`; the first English groups are `0x5f9f4` (ids `0x1bc..0x1cc`) and `0x5fa6c` (ids `0x1d0..0x1e0`) |
+| palette symbols | the UTF-16BE string at module file `0x40c7a`: one page flag character followed by 32 symbols |
+| captions | the RCO text table by label: `msg_space_osk`, `msg_back_space_osk`, `GRAPHIC_input_mode`, `GRAPHIC_enter`, `msg_prediction`, `GRAPHIC_input_mode_en` |
+| caption material | `Materials::textMaterial("oskfullkeypanel_plugin", "fullkey_list_text")`: size 10, white, shadow 4/-5 at alpha 1 |
+| 52 named textures | the declared list from `work/osk-layout.proposed.json`, each checked against the RCO image table and then decoded through `Assets::image` |
+
+The module SHA-256 is decoded from the same bytes and recorded in the layout (`7b33ffb5...b64256`,
+407488 B). The RCO is reported as 132 objects, 203 images, 65 English strings, 193344 B. Bounds:
+module 64 MiB, 64 program headers, 32 load segments, 64 code units per label string, 65536 label
+records, 512 groups, 65536 palette candidates, 512 palette units. No string or table read is
+unbounded, and every read is length-checked against the segment or file.
+
+### 12.2 Resolved shape (firmware mode)
+
+```
+panel            493,290 934x500
+title/field/footer 932x46 + 932x58 + 934x58
+grid             496,406 cell 72x54 face 66x50 10x6
+keys             rows 0-3: 10+10+10+10; row 4: 7; row 5: 8; total 55 (40 character)
+pages            lower, caps, symbolPalette
+palette          7x7 (49 buttons, 5 visible rows), 32 symbols, origin 634,434
+                 cell 53x53 pitch 48x48 frame 595,398 353x332
+prediction       list 1216,394 203x246; header 1216,641 203x33;
+                 copy 1217,678 62x52; paste 1322,678 62x52;
+                 copy KEYTOP_COPY enabled, paste KEYTOP_PASTE disabled
+captions         Space | Backspace | Input Mode | Enter | Prediction
+caret            130,249,12 height 27 shaft 2 serif 12 blink 500 ms (F, not traced)
+dim              0,0,0 alpha 0.70
+focus            row 2, column 4 (1-based column 5) = g
+textures         52 named, 48 default-surface, 52 in image table, 38 decoded
+```
+
+The default focus is the capture's `g`: row 2, column 4 in the zero-based `View::Osk` state. The
+audit's "row 2, column 5" is one-based; `g` is the fifth letter of `asdfghjkl'` when counted from 1.
+
+### 12.3 The palette is 32 symbols, not 94
+
+The string at module file `0x40c7a` is one page-flag character followed by the 32 punctuation
+symbols:
+
+```
+!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
+```
+
+The first character is `:` for the page-flag-set variant and `!` for the page-flag-clear variant,
+so stripping it gives the same 32 symbols in both. The symbols fill 4 full rows of 7 plus 4 cells
+of the fifth visible row, which is what the `s11-symbol` capture shows. The module string continues
+with accented symbols after the ASCII run; the layout records them as `palette.extras` but does not
+draw them on the captured page. Section 4.3's "94 printable ASCII" is superseded: 94 is the whole
+printable ASCII range including digits and letters; the palette page is punctuation only.
+
+### 12.4 Texture names and the decode gap
+
+All 52 declared names exist in the RCO image table (203 images). The existing `Assets::image` path
+returns pixels for 38 of them. The other 14 are named but fail with
+`Unsupported GIM pixel format 0x5` (the same failure through `Assets::bestImage`, so it is not a
+container-choice problem):
+
+```
+LABEL_UP LABEL_DOWN LABEL_LEFT LABEL_RIGHT
+EN_LABEL_DELETE EN_LABEL_SPACE EN_LABEL_RETURN EN_LABEL_MODE EN_LABEL_CLOSE
+KEYTOP_COPY KEYTOP_PASTE MODE_GUIDE_ALPHABET MODE_GUIDE_ALPHABET_CAP LIST_WINDOW_FOCUS
+```
+
+The layout therefore stores `present` (name in the image table) and `decoded` (pixels returned)
+separately. The draw slice must use the text badge/caption fallbacks the keys already carry for
+those 14, or a later pass must extend the asset decoder (the asset loader is outside the 12.4/12.5
+write fence). No layout assertion depends on all 52 decoding: `textures` asserts the 52 names and
+the 48 default-surface subset; `texturesDecoded` is reported as an informational skip (38/52).
+
+### 12.5 Cost
+
+Measured with `QElapsedTimer` inside `loadOskLayout` on the reference tree, 10 consecutive loads
+in one process after the RCO body was warm (`native-osk-layout/osk-layout-check.exe --repeat 10`).
+The first line is the cold-in-process load; later loads reuse `RcoObjects` and the decoded image
+cache.
+
+| Measurement | Result |
+|---|---|
+| first load, total | 9.76 ms |
+| warm loads, total | 6.81 ms min / 8.23 ms median / 9.76 ms max |
+| RCO read + parse (`RcoObjects`) | 0.27-0.45 ms, 193344 B |
+| text table + caption map | 0.03-0.05 ms, 65 strings |
+| module read + label/palette scan | 3.76-5.05 ms, 407488 B |
+| image table + 52 texture lookups/decodes | 2.12-3.28 ms (38 decodes; 14 decoder failures) |
+| fallback layout (no `--dev-flash`) | 0.10-0.27 ms, 0 B read |
+
+The load is one startup call, not a per-frame cost. `View::paintGL` only reads the resolved
+`OskLayout` (`page`, `keyAt`, `keyFaceRect`, `palette`).
+
+### 12.6 Fallback provenance
+
+With no `--dev-flash` the loader logs exactly:
+
+```
+osk: layout from committed table (provenance work/osk-layout.proposed.json; dev-flash absent)
+```
+
+The fallback carries the same 55-key shape, 934x500 panel, 72x54 cell, 7x7/49-button palette and
+32-symbol palette page. It cannot resolve the 52 textures (0 in the image table, 0 decoded), so
+the seven firmware-only assertions are skipped rather than failed. With `--dev-flash` present but
+`--vsh-modules` absent, the RCO captions/geometry/textures are kept and only the row strings and
+palette come from the committed table, with a log line naming the missing module.
+
+### 12.7 Verification
+
+The scratch build and self-check live outside the repository, at
+`C:/dev/out/native-osk-layout` (build) and `C:/dev/out/native-osk-layout-src` (CMake and check
+main), and compile the two new files without touching the repository's `CMakeLists.txt`:
+
+```
+& C:/dev/out/native-osk-layout/osk-layout-check.exe `
+  --dev-flash C:/dev/rpcs3/bin/dev_flash `
+  --vsh-modules C:/dev/xmb/fw493/vsh_module --repeat 1
+```
+
+Result: `osk: self-check PASS (33/33 applicable assertions; 1 skipped; source=firmware)`. The skip
+is `texturesDecoded` (38/52; section 12.4). The same executable with no `--dev-flash` reports
+`PASS (27/27 applicable assertions; 7 skipped; source=committed)`.
+
+The View::Osk integration hunk was also applied to a scratch copy of `view.h`/`view.cpp` and the
+full app built and linked (`C:/dev/out/native-osk-layout/full-repo/re-ps3-native.exe`), so the hunk
+is compile-tested; the repository's `view.*`, `shell.*` and `main.cpp` remain untouched.
+
+### 12.8 Files
+
+- new `native-xmb/src/osk_layout.h`
+- new `native-xmb/src/osk_layout.cpp`
+- this section
+- integration only (not applied here): one source-list line in `CMakeLists.txt`; the
+  `View::Osk` state and call-site hunks are in the phase 12.4 hand-off report, because
+  `src/view.*`, `src/shell.*` and `src/main.cpp` belong to the dialogs pass until 12.5.
