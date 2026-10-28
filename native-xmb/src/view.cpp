@@ -694,6 +694,13 @@ void View::paintGL() {
     categoryEase_.retarget(shell_.category(),moveMilliseconds);categoryEase_.advance(dt);categoryPosition_=categoryEase_.value;
     if(!outgoing_.isEmpty()){fadeEase_.advance(dt);categoryFade_=fadeEase_.value;if(!fadeEase_.running()){categoryFade_=0;outgoing_.clear();}}
     depthEase_.retarget(shell_.depth(),pageMilliseconds,4);depthEase_.advance(dt);depthPosition_=depthEase_.value;
+    // Capture-only switch: XMB_DEPTH_PIN=<0..2> holds the depth progress at that value, so a deterministic
+    // --render-clock grab can measure one intermediate frame of the page move (the easing itself runs on the
+    // real frame clock, which --render-clock does not pin). Unset in every normal run, where it changes nothing.
+    if(const QString pin=qEnvironmentVariable("XMB_DEPTH_PIN");!pin.isEmpty()) {
+        bool ok=false;const double pinned=std::clamp(pin.toDouble(&ok),0.,double(shell_.depth()));
+        if(ok)depthPosition_=pinned;
+    }
     for(auto& column:columns_){column.ease.retarget(column.selection,moveMilliseconds);column.ease.advance(dt);column.position=column.ease.value;}
     // The item-level Triangle options panel: its list slides in from the right over 200 ms (mode 5) and moves
     // between rows on the same curve. A fresh open lands on the current selection without sliding the list.
@@ -1617,31 +1624,68 @@ void View::drawScene(QPainter& p) {
         previousMediaOpen_=false;
         const auto& categories=shell_.categories();
         const double childAmount=std::clamp(depthPosition_,0.,1.);
+        // Category-band transition (GEOMETRY-ROOT 5.2/5.3, decoded fpdump7 2026-10-28). The bar keeps its
+        // world grid (200 wu pitch + 10 focus padding, worldY 250/260) while the camera distance falls
+        // 2700 -> 2483.53, so the projection 2700/d turns those into screen pitch 200 -> 217.43, unfocused
+        // y 290 -> 268.21 and the bar's focused row 280 -> 257.34. The interpolation is linear in the
+        // animated distance (the decoded d series is the eased property), so screen positions follow 1/d,
+        // not a screen-space lerp. [TRACED: endpoints and the 210 wu pitch from the decoded vertex
+        // constants. FIT: the ease driving them is the existing depth PafEase (300 ms mode 4) fitted to the
+        // 18-frame burst; PAGE-MOVE 14.1 traces the firmware bar driver at 200 ms mode 5 instead, and the
+        // 0.902-per-frame distance/brightness channel is slower than the 18-frame x channel (PAGE-MOVE 1.3,
+        // 7 reading 1). One ease is used because the parent move owns the geometry, not the timing.]
+        const double recedeDistance=2700.-(2700.-2483.53)*childAmount;   // 2700 -> 2483.53
+        const double recede=2700./recedeDistance;                        // projection factor 1 -> 1.08716
+        // The bar layer's focused category stays on its root world x and only projects: 565 -> 530.57 (the
+        // decoded transition draws put it at 530.85 including that frame's 0.27 px offset).
+        const double barFocusX=kColumnX-395.*(recede-1.);
+        // The bright focused icon is the page's own draw, not the bar layer: it keeps world size 167.328 and
+        // y 280 and travels 262 px left (565 -> 303). The captured transition frames show no vertical move
+        // of that icon; the 257.34 above is the dim bar-layer row hidden behind it. [TRACED]
+        const double pageX=kColumnX-262.*childAmount;
+        // The neighbours are the transition-only bar layer. Its material brightness ramps 0.698 -> 0.067
+        // (decoded _Ambiant.w) and its presence ends at depth 1, so the settled state draws exactly one
+        // icon at 303. The two factors are kept apart: the glass renderer multiplies _Ambiant.w by the
+        // layout opacity, so folding both into one would square the root state. [FIT: the captured open
+        // frame is already post-recede (its ~700 ms page load outlasts the recede), so only the
+        // 0.698/0.067 endpoints bound this curve; the linear presence term is this build's.]
+        const double barBrightness=.698+(.067-.698)*childAmount;
+        const double barPresence=childAmount>=.999?0.:1.-childAmount;
         for(int i=0;i<categories.size() && !messageScreen;++i) {
-            // Firmware geometry (RPCS3 capture at 1920x1080, audit/PIPELINE.md): focus column at x 565, icons 200 px apart
-            // with 10 px more either side of the focused one, centres y 290 (focused 280); quads 117 px, focused 167 px;
-            // shader brightness 0.698 unfocused, 1 focused. Inside a page (reference 95 s) the open category steps 262 px
-            // left (traced: RCO xmenu posX -395 and the captured open-page x 303, audit/LAYOUT-TRACE.md); the ones to its
-            // right stay faintly (~0.1) on a 186 px pitch, and the ones to its left leave.
+            // Firmware geometry (RPCS3 capture at 1920x1080, audit/PIPELINE.md): focus column at x 565, icons
+            // 200 px apart with 10 px more either side of the focused one; quads 117 px, focused 167 px;
+            // shader brightness 0.698 unfocused, 1 focused. At rest those are exact, so childAmount 0
+            // reproduces them and childAmount 1 draws the page's one icon at 303 with no neighbours.
             const auto& cat=categories[i];const double distance=i-categoryPosition_;            const bool open=i==shell_.category();
-            const double level0X=kColumnX+distance*200+10*std::clamp(distance,-1.,1.);
-            // Open-page recession (traced 2026-10-27, RPCS3 burst): the bar keeps its 200-unit pitch at the
-            // recorded parent distance 2857.2, i.e. 200*2700/2857.2 = 189.0 px (measured 190.5 px in frames);
-            // the old 186 was a fit. The 0.945 scale is the same recession.
-            const double x=open || distance<0?level0X-childAmount*262:level0X+(kColumnX-40+distance*189.0-level0X)*childAmount;
             const double focus=std::max(0.,1.-std::abs(distance));
+            // Projected root grid: the bar anchor plus (200 n + 10 sign n) * 2700/d.
+            const double x=open?pageX:barFocusX+(200.*distance+10.*std::clamp(distance,-1.,1.))*recede;
+            const double y=open?290.-10.*focus:540.-250.*recede;
+            const double iconScale=open?1.:recede;
             // No dim behind a message: both measured reference frames keep the XMB at full brightness
             // (audit 4.1 "frame dim behind a message"), so the 0.18 and 135-alpha washes are gone.
-            const double opacity=open?1.:(1.-childAmount)+(distance>0?.067*childAmount:0.);
+            const double opacity=open?1.:barPresence;
+            const double material=open?1.:barBrightness;
+            if(opacity<=0.)continue;
             p.save();p.setOpacity(opacity);
             if(const auto themed=shell_.themeIcon(cat.themeIcon);!themed.isNull()) {
                 // A PS3 theme's icon keeps its own colours and takes the quad of the firmware's glass icon.
-                const double size=117.13+50.2*focus;p.setOpacity(opacity*(.698+.302*focus));
-                p.drawImage(QRectF(x-size/2,290-10*focus-size/2,size,size),themed);
+                const double size=(117.13+50.2*focus)*iconScale;p.setOpacity(opacity*material);
+                p.drawImage(QRectF(x-size/2,y-size/2,size,size),themed);
             }
             else if(cat.container=="qgl/icontex" && icons_.ready())
-                iconQueue_.push_back({cat.texture,{x,290-10*focus},117.13+50.2*focus,.698+.302*focus,opacity});
-            else {const double size=76+focus*16;p.setOpacity(opacity*(.67+.33*focus));drawCategory(p,cat,{x-size/2,290-size/2,size,size});}
+                // The glass renderer takes the world quad and the real distance, so the projection (and
+                // _Eye.z for the refraction) is the firmware's; the QPainter paths below scale explicitly.
+                iconQueue_.push_back({cat.texture,{x,y},117.13+50.2*focus,material,opacity,open?2700.:recedeDistance});
+            else {
+                // drawCategory is the visible-glyph fit (4.1 #11), not the captured quad; its focused
+                // y stays at the old 290 so this transition change cannot move a settled fallback glyph.
+                const double size=(76+focus*16)*iconScale;
+                // The fallback glyph's own 0.67 unfocused brightness is a glyph fit, not _Ambiant.w, so the
+                // bar ramp is applied as the ratio to the 0.698 state brightness (exactly 1 at the root).
+                const double ramp=open?1.:barBrightness/.698;
+                p.setOpacity(opacity*(.67+.33*focus)*ramp);drawCategory(p,cat,{x-size/2,(open?290.:y)-size/2,size,size});
+            }
             if(i==shell_.category()){p.setOpacity((1.-childAmount));text({x-140,330,280,40},cat.title,21,Qt::white,Qt::AlignCenter);}
             p.restore();
         }
@@ -1758,12 +1802,18 @@ void View::drawScene(QPainter& p) {
                 const double depth=behind*(1.-focus);
                 const double y=540+(505+row-540-15*depth*std::clamp(distance,0.,1.))*(1.-.055*depth);
                 if(y<-100 || y>1050)continue;
-                const double iconX=kColumnX-behind*(109.46+152*focus)+ahead*250+offset;
+                // The incoming page column is one slot right and 10.223% larger in the decoded transition
+                // (fp_0174..fp_0181: 774.09 = 565+210; 85.554 = 77.616*1.10223, 203.700 = 184.8*1.10227),
+                // easing to zero offset and 1.0 with the depth move. The scale is on the icons only: the
+                // decoded incoming rows keep their 80 px y grid (fp_0175/0176 at screen 120/40), so `y`
+                // and the row pitch are not scaled. [TRACED offset and scale; the ease is the depth PafEase.]
+                const double entryScale=1.+.10223*ahead;
+                const double iconX=kColumnX-behind*(109.46+152*focus)+ahead*210+offset;
                 // Reference (RPCS3 4.x video): square icons ~60 px, ~105 px when focused; utility folders are icons too.
                 // Only media thumbnails (album art) keep a wide tile.
                 // Setting rows carry the small round settings bullet: 18 px, 39 px focused (reference 95 s).
                 const bool bullet=entry.container=="qgl/icontex" && entry.texture=="23n";
-                const double size=bullet?18+focus*21:level==0?60+focus*44:40+focus*16;
+                const double size=(bullet?18+focus*21:level==0?60+focus*44:40+focus*16)*entryScale;
                 // Firmware folder glyphs: a folder row in the Game column carries the emblem of what it holds - the
                 // captured Game Data Utility row is item_tex_ps3game_folder (folder + gamepad, explore_category_game.rco
                 // and explore_plugin_full.rco), not the bare storage folder. Steam's All Games / collection / Not
@@ -1777,8 +1827,8 @@ void View::drawScene(QPainter& p) {
                 // (77.616 unfocused / 184.800 focused, 2857.2/0.247 below focus). Keeping the wide album/ICON0 card
                 // there drew a 320x180 placeholder on the same spot as the open category icon (Video Library over the
                 // film strip), so a behind row is drawn at the item-icon box of its own level, art or not.
-                const double quad=itemIconSize(level,bullet,focus);
-                double iconWidth=tile?155+focus*165:size,iconHeight=tile?90+focus*90:size;
+                const double quad=itemIconSize(level,bullet,focus)*entryScale;
+                double iconWidth=tile?(155+focus*165)*entryScale:size,iconHeight=tile?(90+focus*90)*entryScale:size;
                 if(behind>.001 && tile){iconWidth=size;iconHeight=size;}
                 // Captured parent-column brightness (_Ambiant.w 0.698 focused, 0.247 unfocused, RPCS3 fpdump7): it
                 // belongs to the column, not to the glass row class, or the card behind a page stays at full strength.
@@ -1831,7 +1881,7 @@ void View::drawScene(QPainter& p) {
                 const bool inlineStandIn=inlineMessage && active && level==shell_.depth() && i==column.selection;
                 // One label column per level, as on the PS3 (GEOMETRY-ROOT 8: icon centre +113 at the top
                 // level - the measured 678 px origin, not the 664 the +99 gave - and +57 inside a page).
-                const double labelX=kColumnX+(level==0?(tile?173:113):60)+ahead*250+offset;
+                const double labelX=kColumnX+(level==0?(tile?173:113):60)+ahead*210+offset;
                 const double alpha=(.455+.545*focus)*(entry.disabled?.55:1.);
                 // A row's own value wins when it sets one (the sign-in page's fields: server URL, user name and
                 // the password as dots). Every other row leaves Entry::fieldValue empty, so this falls through to
@@ -1872,7 +1922,7 @@ void View::drawScene(QPainter& p) {
                                 shown=clipped.elided?clipped.prefix+QString(QChar(0x2026)):value;
                             } else shown=QFontMetrics(valueFont).elidedText(value,Qt::ElideRight,440);
                         }
-                        text({1300+offset,y-25,440,50},shown,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
+                        text({1300+ahead*210+offset,y-25,440,50},shown,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
                     }
                     const auto subtitle=shell_.subtitleText(entry);
                     if(!subtitle.isEmpty())text({labelX,y+20,1100,30},subtitle,17,QColor(230,230,230,int(235*alpha)),Qt::AlignLeft|Qt::AlignTop);
@@ -1883,7 +1933,7 @@ void View::drawScene(QPainter& p) {
                 p.restore();
             }
             if(level>0 && columnAlpha>0 && panelAmount<.999) {
-                p.save();p.setOpacity(columnAlpha*(1.-behind));text({kColumnX-142+ahead*250,480,50,50},QString(QChar(0x2039)),42,Qt::white,Qt::AlignCenter);p.restore();
+                p.save();p.setOpacity(columnAlpha*(1.-behind));text({kColumnX-142+ahead*210,480,50,50},QString(QChar(0x2039)),42,Qt::white,Qt::AlignCenter);p.restore();
             }
         }
         };
