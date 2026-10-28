@@ -1,7 +1,8 @@
 {
   "schema": "xmb-parity-catalogue/1",
   "generated": "2026-10-27",
-  "note": "Every reachable XMB state, with the firmware XMBML view that defines it, the script route that opens it in the native build, its native reachability, dump assertions (Tier A), trace assertions (Tier C) and the region crops the scorecard scores (Tier B). Routes are resolved at capture time from one discovery dump of the Game column (work/parity.ts), so no LEFT/RIGHT or DOWN count is typed in here.",
+  "updated": "2026-10-28",
+  "note": "Every reachable XMB state, with the firmware XMBML view that defines it, the script route that opens it in the native build, its native reachability, dump assertions (Tier A), trace assertions (Tier C) and the region crops the scorecard scores (Tier B). Routes are resolved at capture time from one discovery dump of the Game column (work/parity.ts), so no LEFT/RIGHT or DOWN count is typed in here. A state whose surface has no firmware counterpart carries noFirmwareReference: true: it is still a captured native surface, but it owes no firmware reference, so --references-missing and the scorecard's coverage denominators leave it out of the reference debt instead of counting it as a missing capture. Five pages are in that class (the Steam folder, the host video folder, the Steam store sections, the Jellyfin sign-in page and Continue Watching).",
   "flash": "C:/dev/rpcs3/bin/dev_flash",
   "xmbmlRoot": "vsh/resource/explore/xmb",
   "xmbmlInventory": {
@@ -199,6 +200,225 @@
       ]
     },
     {
+      "id": "page-settings-network",
+      "title": "Settings > Network Settings page",
+      "class": "text-heavy",
+      "pageModel": "native+xmbml",
+      "xmbml": { "document": "category_sysconf.xml", "view": "seg_network" },
+      "xmbmlNote": "The row is one of category_sysconf.xml seg_fixed_items' 16 Settings-column rows (1-based row 16); the page's five rows are the seg_network segment view resolved at run time, in the definition's own order (SETTINGS-FIRMWARE.md 5.15/10.3).",
+      "native": { "reachable": "yes", "how": "Settings column, Network Settings row, ENTER" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "network" }] },
+      "expect": {
+        "category": "settings",
+        "depth": 1,
+        "entryId": "net_netlist",
+        "entryCount": 5,
+        "pageKind": "page",
+        "log": [{ "pattern": "settings: network segment page resolved 5 rows from category_sysconf\\.xml" }]
+      },
+      "tierANote": "Row set: 5 firmware rows, no native-only row added (the firmware's own five). The values are not shown on this page in either build - each row opens its own page.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "page rows", "crop": [400, 380, 1000, 620], "required": true },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "psnrDb": 18.0, "ssim": 0.84 }
+      ]
+    },
+    {
+      "id": "page-network-status-list",
+      "title": "Settings > Network Settings > Settings and Connection Status List (depth-2 read-only page)",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_sysconf.xml", "view": "seg_network" },
+      "xmbmlNote": "The row is seg_network's first row (net_netlist). The depth-2 body has no XMBML view: the firmware builds the table at run time (SETTINGS-FIRMWARE.md 12.2), and this build answers the row with the D5 information page host::networkStatus reports - label/value rows built from the host's own network, not the console's 13 fixed rows.",
+      "native": { "reachable": "yes", "how": "Settings column, Network Settings row, ENTER, then row 1 (Settings and Connection Status List), ENTER: the row opens the host's network status as a D5 information page" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "network" }, { "rowIndex": 0 }] },
+      "expect": { "category": "settings", "depth": 1, "entryId": "net_netlist", "entryCount": 5, "pageKind": "page" },
+      "tierANote": "Page-scoped Tier A, like the OSK's: Shell::showMessage writes no sidecar field and no log line, so the assertions prove the Network Settings page and the focused row under it, not the information page itself (neither the firmware's 13 rows nor the host report is asserted). The firmware page is rules y 199 and y 879 with 13 label/value rows at pitch 40, labels right-aligned at x 939 and values left at x 979 (SETTINGS-FIRMWARE.md 12.2); the native page is the same D5 shape over the host's values.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "status rows", "crop": [400, 280, 800, 500], "required": true },
+        { "name": "title rule", "crop": [80, 150, 1520, 60], "required": true }
+      ]
+    },
+    {
+      "id": "page-network-test-error",
+      "title": "Internet Connection Test message page (the one real firmware error surface)",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_sysconf.xml", "view": "seg_network" },
+      "xmbmlNote": "The row is seg_network's fourth row (net_internet_test). The page itself is the firmware's string-only D4 message page (DIALOGS-FIRMWARE.md 2.5, CAPTURE-BATCH-2-2026-10-28.md 5.2: rules y 199 and y 879, message ink x 753-1163 y 530-546, back hint x 1155-1239 y 897-916, no code field, no focusable control), not an XMBML view.",
+      "native": { "reachable": "yes", "how": "Settings column, Network Settings row, ENTER, then row 4 (Internet Connection Test), ENTER: the row answers with this build's own message page (Shell::activate Action::Unavailable), titled with the firmware row's title; no connection test runs" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "network" }, { "rowIndex": 3 }] },
+      "expect": { "category": "settings", "depth": 1, "entryId": "net_internet_test", "entryCount": 5, "pageKind": "page" },
+      "tierANote": "Page-scoped Tier A: the message has no dump field, so the assertions prove the page and the focused row, not the message. Content difference by construction: the firmware's body is `An Ethernet cable is not connected.` after a variable timeout (measured at 12 s, 15 s and 26 s across three runs), while this build draws its own `not available in the native recreation yet` explanation - no test runs and no firmware string is reproduced. The firmware body rect the regions frame is the measured one; the native body is at the shared message position, so Tier B on this state compares the surface shape, not the text.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "message body", "crop": [700, 470, 520, 100], "required": true },
+        { "name": "back hint", "crop": [1140, 880, 120, 56], "required": true }
+      ]
+    },
+    {
+      "id": "page-network-connection-settings",
+      "title": "Internet Connection Settings message page",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_sysconf.xml", "view": "seg_network" },
+      "xmbmlNote": "The row is seg_network's third row (net_internet_setting). The page is the same D4 message page the console shows when a network-required title is launched (CAPTURE-BATCH-2-2026-10-28.md 5.1: title `Internet Connection Settings`, body `Adjust settings for connection to the Internet.` / `If making a wired connection, you must have an Ethernet cable connected.`, OK, X Enter / O Back, no code); not an XMBML view.",
+      "native": { "reachable": "yes", "how": "Settings column, Network Settings row, ENTER, then row 3 (Internet Connection Settings), ENTER: the row answers with this build's own message page (Shell::activate Action::Unavailable), titled with the firmware row's title" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "network" }, { "rowIndex": 2 }] },
+      "expect": { "category": "settings", "depth": 1, "entryId": "net_internet_setting", "entryCount": 5, "pageKind": "page" },
+      "tierANote": "Page-scoped Tier A (the message has no dump field). Content difference by construction: the firmware body is the two-line connection advice, this build's is its own unavailable explanation, and no connection-setting flow runs. The batch's `depth2/ics-page-01.png` is the same page reached from the Network Settings row, so it is the right reference for this state rather than for a separate one. The body region is the frame's own ink box (checked on `error/icp-page-rest.png`: two left-aligned lines at x about 528-1390, y about 485-525), not a measured constant.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "message body", "crop": [500, 460, 900, 110], "required": true },
+        { "name": "back hint", "crop": [1140, 880, 120, 56], "required": true }
+      ]
+    },
+    {
+      "id": "page-settings-theme",
+      "title": "Settings > Theme Settings page",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_sysconf.xml", "view": "seg_fixed_items" },
+      "xmbmlNote": "The Theme Settings row is one of seg_fixed_items' 16 Settings-column rows (1-based row 7). The page body is built from sysconf_plugin's page_theme_config sub-pages (theme, color, background, font), and the at-rest page is the four firmware rows followed by this build's two native-only pickers (Select Theme, Select Wallpaper).",
+      "native": { "reachable": "yes", "how": "Settings column, Theme Settings row, ENTER" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "theme" }] },
+      "expect": {
+        "category": "settings",
+        "depth": 1,
+        "entryId": "theme",
+        "entryCount": 6,
+        "pageKind": "page",
+        "log": [{ "pattern": "settings: theme page from the RCO row set: 6 rows, 2 native-only" }]
+      },
+      "tierANote": "Row set: the firmware's four rows (Theme, Color, Background, Font) plus two native-only rows, which are this build's only way to load a .p3t theme or a wallpaper (SETTINGS-FIRMWARE.md 5.6/12.4). The 6-vs-4 row count is a stated design difference, not a route miss.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "page rows", "crop": [400, 380, 1000, 620], "required": true },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "psnrDb": 18.0, "ssim": 0.84 }
+      ]
+    },
+    {
+      "id": "theme-list",
+      "title": "Theme Settings > Theme choice band",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "No XMBML view: the choice page is sysconf_plugin's page_theme_config_theme, an empty Page in the RCO (0 children), so the plugin builds the list at run time (SETTINGS-FIRMWARE.md 9.3f/12.4a). The four labels this build draws are the captured ones (lists/theme-list-rest.png): Install, Original, Classic, Air Paint.",
+      "native": { "reachable": "yes", "how": "Theme Settings page, Theme row, ENTER: the choice band opens over the dimmed page" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "theme" }, { "rowIndex": 0 }] },
+      "expect": {
+        "category": "settings",
+        "depth": 2,
+        "entryId": "appearance/theme/0",
+        "entryCount": 1,
+        "pageKind": "page",
+        "log": [{ "pattern": "view: settings choice band appearance/theme -> 4 items from capture" }]
+      },
+      "tierANote": "Two different row counts, both true: the choice page the shell pushes carries this build's own one-item model (Original), and the view draws the firmware's captured four over it - so the sidecar's entryCount is 1 while the band log says 4 items from capture. The branch that draws a firmware band needs a list whose source is rco or capture; Theme is one of the four on this page that qualifies. The band's own extent is measured (left border x 1324, geometric zero about x 1744, item text left 1341, rows 261/494/532/576), which is what the regions frame.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
+        { "name": "band rows", "crop": [1324, 240, 420, 380], "required": true }
+      ]
+    },
+    {
+      "id": "color-list",
+      "title": "Theme Settings > Color choice list",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "No XMBML view: page_theme_config_color has no LowerMenu items in sysconf_plugin.rco, so the plugin builds the chips at run time and the firmware draws 12 unlabelled chips at pitch 40 with a live recolour (SETTINGS-FIRMWARE.md 12.4b). This build's list is its own six labelled values (Original, Blue, Purple, Red, Green, Silver) drawn as its own options panel - the view says so in one log line per run.",
+      "native": { "reachable": "yes", "how": "Theme Settings page, Color row, ENTER: this build's colour list opens as its own options panel over the page" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "theme" }, { "rowIndex": 1 }] },
+      "expect": {
+        "category": "settings",
+        "depth": 2,
+        "entryId": "appearance/colour/0",
+        "entryCount": 6,
+        "pageKind": "page",
+        "log": [{ "pattern": "view: settings choice panel appearance/colour keeps this build's options panel" }]
+      },
+      "tierANote": "Content and drawing both differ by construction, and the log line is the assertion that says so: the firmware's list is 12 unlabelled colour chips with a live full-screen preview, this build's is 6 labelled values in its own panel (not the firmware band). The regions frame the Theme page's measured band origin (x 1324) and the Color list's measured ink (label line 494-523, chips from 531 at pitch 40, chevron 969-977); the Color page's own left edge was not measured separately, so the crop borrows the Theme page's border. The per-list row origin is a known open item (12.4e), not a constant this catalogue can assume.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
+        { "name": "chip column", "crop": [1324, 470, 420, 520], "required": true }
+      ]
+    },
+    {
+      "id": "background-list",
+      "title": "Theme Settings > Background choice list",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "No XMBML view: page_theme_config_background has no LowerMenu items in sysconf_plugin.rco, so the list is built at run time (SETTINGS-FIRMWARE.md 12.4c). The firmware's list is `Brightness >` (a submenu row), then Original (current), Classic, Wallpaper; this build's is its own three values drawn as its own options panel.",
+      "native": { "reachable": "yes", "how": "Theme Settings page, Background row, ENTER: this build's background list opens as its own options panel over the page" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "theme" }, { "rowIndex": 2 }] },
+      "expect": {
+        "category": "settings",
+        "depth": 2,
+        "entryId": "appearance/background/0",
+        "entryCount": 3,
+        "pageKind": "page",
+        "log": [{ "pattern": "view: settings choice panel appearance/background keeps this build's options panel" }]
+      },
+      "tierANote": "Content difference by construction: the firmware has a fourth row (the Brightness submenu) this build does not draw, and the labels below it are this build's three; the view logs that it keeps its own panel rather than the firmware band. Regions use the Theme page's measured band origin (x 1324) and the firmware's measured row ink tops 381/537/581/621.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
+        { "name": "band rows", "crop": [1324, 360, 420, 300], "required": true }
+      ]
+    },
+    {
+      "id": "font-list",
+      "title": "Theme Settings > Font choice list",
+      "class": "composite",
+      "pageModel": "native",
+      "xmbml": null,
+      "xmbmlNote": "No XMBML view: page_theme_config_font has no LowerMenu items in sysconf_plugin.rco (SETTINGS-FIRMWARE.md 12.4d). The firmware's list is Original (current), Rounded, Pop; this build lists the firmware font families it actually ships (Original plus the two registered faces) as its own options panel.",
+      "native": { "reachable": "yes", "how": "Theme Settings page, Font row, ENTER: this build's font list opens as its own options panel over the page" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "theme" }, { "rowIndex": 3 }] },
+      "expect": {
+        "category": "settings",
+        "depth": 2,
+        "entryId": "appearance/font/0",
+        "entryCount": 3,
+        "pageKind": "page",
+        "log": [{ "pattern": "view: settings choice panel appearance/font keeps this build's options panel" }]
+      },
+      "tierANote": "Content difference by construction: same three-row count as the firmware, different labels - the firmware's Rounded and Pop are not shipped here, so the two extra rows name the firmware font faces this build registers (SCE-PS3 Seurat LATIN, VAGRundschriftDLig). The view logs its own panel rather than the firmware band. Regions use the Theme page's measured band origin and the firmware's measured row ink tops 491/539/578.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
+        { "name": "band rows", "crop": [1324, 470, 420, 150], "required": true }
+      ]
+    },
+    {
+      "id": "page-settings-video",
+      "title": "Settings > Video Settings page",
+      "class": "text-heavy",
+      "pageModel": "native",
+      "xmbml": { "document": "category_sysconf.xml", "view": "seg_fixed_items" },
+      "xmbmlNote": "The Video Settings row is one of seg_fixed_items' 16 Settings-column rows (1-based row 3). The page body is built from sysconf_plugin's page_bdvd_config sub-pages; the firmware's page has 19 rows (SETTINGS-FIRMWARE.md 12.5), and this build lists the seven measured rows plus three native-only media rows.",
+      "native": { "reachable": "yes", "how": "Settings column, Video Settings row, ENTER" },
+      "route": { "column": "settings", "stages": [{ "catalogueId": "video" }] },
+      "expect": {
+        "category": "settings",
+        "depth": 1,
+        "entryId": "bd_menu_lang",
+        "entryCount": 10,
+        "pageKind": "page",
+        "log": [{ "pattern": "settings: video page from the RCO row set: 10 rows, 3 native-only" }]
+      },
+      "tierANote": "Row set difference stated, not averaged away: the firmware's page has 19 BD/DVD rows (batch 2 walked all of them to `50 Hz Video Output`), this build lists the seven measured rows and then three native-only rows (Repeat, Shuffle, Volume) that are the page's only working settings on a PC. Its rows are all explained refusals where no drive or decoder exists.",
+      "regions": [
+        { "name": "frame", "crop": [0, 0, 1920, 1080] },
+        { "name": "page rows", "crop": [400, 380, 1000, 620], "required": true },
+        { "name": "category icon row", "crop": [0, 240, 1920, 120], "psnrDb": 18.0, "ssim": 0.84 }
+      ]
+    },
+    {
       "id": "page-game-all-games",
       "title": "Game > All Games (Steam library folder)",
       "class": "text-heavy",
@@ -206,6 +426,7 @@
       "xmbml": null,
       "xmbmlNote": "No firmware equivalent: this is the native Steam library folder (collections, Not Installed, Family Shared). It is in the catalogue because it is a reachable XMB page with a saved regression reference.",
       "native": { "reachable": "yes", "how": "Game column, All Games row (steam-folder-all-games), ENTER" },
+      "noFirmwareReference": true,
       "route": { "column": "game", "stages": [{ "catalogueId": "steam-folder-all-games" }] },
       "expect": {
         "category": "game",
@@ -228,6 +449,7 @@
       "xmbml": { "document": "category_video.xml", "view": "root" },
       "xmbmlNote": "The row is from category_video.xml; the page lists the host's chosen video folder, which has no firmware view.",
       "native": { "reachable": "yes", "how": "Video column, Video Library row, ENTER" },
+      "noFirmwareReference": true,
       "dataSeed": "out/native-reference/store/video-data",
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini"],
       "route": { "column": "video", "stages": [{ "catalogueId": "library" }] },
@@ -245,6 +467,7 @@
       "xmbml": null,
       "xmbmlNote": "Native Steam surface, no firmware equivalent; included because it is reachable and network-free.",
       "native": { "reachable": "yes", "how": "Game column, Steam Store row, ENTER" },
+      "noFirmwareReference": true,
       "route": { "column": "game", "stages": [{ "catalogueId": "steam-store" }] },
       "expect": {
         "category": "game",
@@ -289,6 +512,7 @@
       "xmbml": null,
       "xmbmlNote": "Native in-XMB sign-in page (audit/JELLYFIN-NATIVE.md); a registered service app row in the TV column, no firmware view.",
       "native": { "reachable": "yes", "how": "TV/Video Services column, a registered Jellyfin service row (custom:jellyfin), ENTER" },
+      "noFirmwareReference": true,
       "dataSeed": "out/native-reference/store/jf-smoke",
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "apps.json", "cache"],
       "waits": 12,
@@ -364,6 +588,7 @@
       "xmbml": null,
       "xmbmlNote": "Native page built from media/resume (audit/MEDIA-CONTROLS.md); no firmware view.",
       "native": { "reachable": "yes", "how": "Video column, Continue Watching row with a seeded resume record, ENTER" },
+      "noFirmwareReference": true,
       "dataSeed": "out/native-reference/phase5/resume-data",
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini"],
       "route": { "column": "video", "stages": [{ "catalogueId": "continue" }] },

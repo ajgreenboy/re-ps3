@@ -1,7 +1,7 @@
 {
   "schema": "xmb-parity-references-map/1",
-  "updated": "2026-10-27",
-  "note": "The auditable record of which RPCS3 frame backs which Tier B cell. Authored from what each batch's MANIFEST.md says the frame shows (the manifest section is cited in every note), not from file names. `entries` is the input to work/parity-import.ts; the importer rewrites each entry's `applied` block with the cell, the destination reference and provenance paths, and the source and destination sha256 (identity: the importer copies or hard-links, it never converts). An entry's `replaced` field records a deliberate re-import of the same source into the same cell - the map has been imported three times: twice on 2026-10-27 (batch 1, the second run because the first sidecars carried the manifest's typography and the corpus is ASCII) and once on 2026-10-28 with batch 2 added (--replace re-validates and re-copies the nine batch-1 cells from the same sources, sha256 identical, so only the applied blocks move). Batch 2's frames are night frames, so they are filed at night cells and never at the canonical day cell; see native-xmb/audit/PARITY-SCORECARD.md section 11. The images stay under out/parity-references/, which .gitignore excludes, so this file is the committed part: paths and hashes, never firmware pixels.",
+  "updated": "2026-10-28",
+  "note": "The auditable record of which RPCS3 frame backs which Tier B cell. Authored from what each batch's MANIFEST.md says the frame shows (the manifest section is cited in every note), not from file names. `entries` is the input to work/parity-import.ts; the importer rewrites each entry's `applied` block with the cell, the destination reference and provenance paths, and the source and destination sha256 (identity: the importer copies or hard-links, it never converts). An entry's `replaced` field records a deliberate re-import of the same source into the same cell - the map has been imported four times: twice on 2026-10-27 (batch 1, the second run because the first sidecars carried the manifest's typography and the corpus is ASCII), once later that day with batch 2's four night cells added, and once on 2026-10-28 after work/parity-catalogue.json gained ten states for the settings surfaces batch 2 captured (the Network Settings page, the depth-2 status list, the two message pages, the Theme Settings page and its four choice lists, and the Video Settings page). Each run used --replace, which re-validates and re-copies the batch-1 cells from the same sources (sha256 identical) so only the applied blocks move. Batch 2's frames are night frames, so they are filed at night cells and never at the canonical day cell; see native-xmb/audit/PARITY-SCORECARD.md sections 11 and 12. The images stay under out/parity-references/, which .gitignore excludes, so this file is the committed part: paths and hashes, never firmware pixels.",
   "referenceRoot": "out/parity-references",
   "contract": "work/parity-reference.json",
   "catalogue": "work/parity-catalogue.json",
@@ -24,8 +24,8 @@
       "status": "imported",
       "session": "2026-10-27 22:39:07-23:52 local (America/Chicago), one session in two RPCS3 boots (boot 1 22:39-22:47 ended in an emulator fault; boot 2 22:50-23:52)",
       "frames": "22,400 PNGs: 251 stills + 22,149 burst frames in 19 bursts; every still 1920x1080; burst frames are full-frame 1920x1080 or a documented 1:1 crop",
-      "imported": 4,
-      "reason": "The batch manifest does not state its capture date in the form work/parity-import.ts reads (it looks for a '- Session: <YYYY-MM-DD> <HH:MM>' line; this manifest says 'One capture session, two RPCS3 boots: boot 1 22:39:07 ...' with no date on that line), so the importer refused it as incomplete (exit 2, 'no capture date'). The rig manifest is not edited here. The frames are imported through importManifest, a byte-faithful copy of the batch manifest (same 30,006 bytes plus exactly one inserted '- Session:' bullet, sha256 above) whose date is the local capture date evidenced by the batch's own logs/refcap-*.log stamps (2026-10-27T22:39 to 23:21) and the section 8 restore audit - 2026-10-27 local is 2026-10-28 UTC, which is the folder name. If the rig adds that line to the real manifest, re-running the importer against it replaces the sidecars' source.manifest with the primary file and changes nothing else. Only stills are eligible: the bursts are crops of an animated region, not full frames. The console clock was left at its night time and nothing was committed (manifest 8), so every eligible frame is a night frame, filed at night cells and never at a canonical day cell; the theme is original on the strength of lists/theme-page-rest.png (Theme/Color/Background/Font all read Original), not assumed."
+      "imported": 14,
+      "reason": "The batch manifest does not state its capture date in the form work/parity-import.ts reads (it looks for a '- Session: <YYYY-MM-DD> <HH:MM>' line; this manifest says 'One capture session, two RPCS3 boots: boot 1 22:39:07 ...' with no date on that line), so the importer refused it as incomplete (exit 2, 'no capture date'). The rig manifest is not edited here. The frames are imported through importManifest, a byte-faithful copy of the batch manifest (same 30,006 bytes plus exactly one inserted '- Session:' bullet, sha256 above) whose date is the local capture date evidenced by the batch's own logs/refcap-*.log stamps (2026-10-27T22:39 to 23:21) and the section 8 restore audit - 2026-10-27 local is 2026-10-28 UTC, which is the folder name. If the rig adds that line to the real manifest, re-running the importer against it replaces the sidecars' source.manifest with the primary file and changes nothing else. Only stills are eligible: the bursts are crops of an animated region, not full frames. The console clock was left at its night time and nothing was committed (manifest 8), so every eligible frame is a night frame, filed at night cells and never at a canonical day cell; the theme is original on the strength of lists/theme-page-rest.png (Theme/Color/Background/Font all read Original), not assumed. The 2026-10-28 run added the ten cells the new catalogue states made possible: the batch's error/, depth2/, lists/ and tails/ groups were refused for one reason only - no catalogue state named the surface - and each of the ten rows cites the manifest section and the frame's own clock."
     }
   ],
   "entries": [
@@ -47,7 +47,7 @@
         "destinationSha256": "cf68d72202d09ae38418fa5403948385f9e655a38be289287a757d3b71bd9a6f",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:36:09.783Z",
+        "imported": "2026-10-28T05:11:03.104Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.state.json"
       },
       "skipped": null
@@ -70,7 +70,7 @@
         "destinationSha256": "0008bdabe7a7d259efd8c3d914c4cd939f18c563addae1917754ed3cc9f97f28",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T04:36:09.789Z",
+        "imported": "2026-10-28T05:11:03.111Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.state.json"
       },
       "skipped": null
@@ -93,7 +93,7 @@
         "destinationSha256": "69c3b5818c2b377cb80c33b416c8f4d0a7f436310780438dbb21d376468d43ad",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:36:09.796Z",
+        "imported": "2026-10-28T05:11:03.118Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.state.json"
       },
       "skipped": null
@@ -116,7 +116,7 @@
         "destinationSha256": "b7b26ec6eb9ba2f0fb164069c4034ab1afeecd08ff114808351bd7f8fc72efcc",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:36:09.802Z",
+        "imported": "2026-10-28T05:11:03.125Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.state.json"
       },
       "skipped": null
@@ -139,7 +139,7 @@
         "destinationSha256": "f0bac56f57cca70d6767077af647a4b626eb6fdbb1339c3e24702d8ba031af5c",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:36:09.808Z",
+        "imported": "2026-10-28T05:11:03.132Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.state.json"
       },
       "skipped": null
@@ -162,7 +162,7 @@
         "destinationSha256": "4f8270ee31ff89a64d46c9576732c80a0f0aa0af12a61277d0223ac1b9af8c2b",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:36:09.814Z",
+        "imported": "2026-10-28T05:11:03.139Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.state.json"
       },
       "skipped": null
@@ -185,7 +185,7 @@
         "destinationSha256": "bd2d220c2c712bb0c4dbf29f55b00a0a5c8554581bc4ba91bf7b9cef81253f62",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T04:36:09.820Z",
+        "imported": "2026-10-28T05:11:03.145Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.state.json"
       },
       "skipped": null
@@ -208,7 +208,7 @@
         "destinationSha256": "0a5fca6fa209da79fc268278eb34e460ddb0e19ce46390b16fe73985f1be3274",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:36:09.825Z",
+        "imported": "2026-10-28T05:11:03.151Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.state.json"
       },
       "skipped": null
@@ -231,7 +231,7 @@
         "destinationSha256": "dfc705fe3fd25ff02831748eae56b0364ae7ab4ea1ed1bc22cb43f590cb1777a",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:36:09.831Z",
+        "imported": "2026-10-28T05:11:03.158Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.state.json"
       },
       "skipped": null
@@ -254,7 +254,8 @@
         "destinationSha256": "d5e772eb4001579d61bdd6b05f4b88f577bd5109f03f51ee759a1e55b8303a80",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T04:36:09.837Z"
+        "imported": "2026-10-28T05:11:03.164Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-network__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-network__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -276,7 +277,8 @@
         "destinationSha256": "e06c8981a7a1e9733d0db0802b62974edb42753122a4e5932ada5ad3c9e142d9",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T04:36:09.842Z"
+        "imported": "2026-10-28T05:11:03.171Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-psn__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-psn__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -298,7 +300,8 @@
         "destinationSha256": "40d18eede723e893faaaf43c43fb115efc5619db12fa8960e2917775512a79a7",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T04:36:09.848Z"
+        "imported": "2026-10-28T05:11:03.176Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-friends__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-friends__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -320,14 +323,235 @@
         "destinationSha256": "36f6bdf61288b0ca55d2e4875eaf26f5fcf6e32669fdb0cfa377beb6353f4902",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T04:36:09.855Z"
+        "imported": "2026-10-28T05:11:03.183Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__night__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-settings-network",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/depth2/network-settings-page.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "console 27/10 22:51 (DD/MM 24-hour), 2026-10-27 22:51 local - 9 min before the contract's 23:00-01:00 night window (the night preset is held at 00:00)",
+      "note": "Manifest 4.2: 'Settings row 16 -> Cross', one of the depth2/ group's 16 stills - the Network Settings page inside the Network category. The frame shows the page the state names with its focused first row expanded: Settings and Connection Status List (focused, with its help line), Internet Connection (Enabled), Internet Connection Settings, Internet Connection Test, Media Server Connection (Enabled). Filed at the night cell because its own clock reads 27/10 22:51 and the wave is the night wave; 9 minutes before the window, so the pin is nearest, not exact - the same caveat the batch's three night columns carry. Mismatch by construction: the console clock is DD/MM 24-hour where the app renders MM/DD 12-hour at its pinned 2026-10-25T12:32:00, and the console prints a value on rows 1 and 5 (Enabled) where the native page shows none - every native row opens its own page.",
+      "applied": {
+        "cell": "page-settings-network__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\depth2\\network-settings-page.png",
+        "sourceSha256": "d832210de929c50af4ad70c67692b9958b2d7b522a56e0d18534ffaa6f1f0afb",
+        "destinationSha256": "d832210de929c50af4ad70c67692b9958b2d7b522a56e0d18534ffaa6f1f0afb",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.189Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-network-status-list",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/depth2/statuslist-rest.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "not readable on this frame: the depth-2 page has no clock plate and its info bar is absent (luma 0 at x 1300/1340/1700/1900 on y 100); the batch's night session, 2026-10-27 22:39-23:52 local",
+      "note": "Manifest 4.2: 'page row 1 -> Cross' - the read-only status list at rest, the batch's headline depth-2 frame and the geometry the catalogue's regions come from: rules y 199 and y 879, 13 rows with ink tops 291-771 at pitch 40, labels right-aligned at x 939, values left at x 979-980 (SETTINGS-FIRMWARE 12.2). The rows are the console's own (Internet Connection/Enabled ... UPnP/Enabled), and the page has no focusable row, so the frame is the resting state. Filed at the night cell on the batch's session record rather than a per-frame clock, because this page has no clock. Content difference by construction: this build answers the row with the host's own network report (a D5 information page over the Network Settings page), not the console's 13 fixed rows.",
+      "applied": {
+        "cell": "page-network-status-list__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\depth2\\statuslist-rest.png",
+        "sourceSha256": "dfc1c9502b26f02b383fc9d5c85da3a69ec985c612e6c84cf5bde8a2c332fab5",
+        "destinationSha256": "dfc1c9502b26f02b383fc9d5c85da3a69ec985c612e6c84cf5bde8a2c332fab5",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.196Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-network-test-error",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/error/page-at-rest.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "console 27/10 23:21 (DD/MM 24-hour), 2026-10-27 23:21 local - inside the contract's 23:00-01:00 night window",
+      "note": "Manifest 4.1d: the Internet Connection Test's settled error page after its variable timeout (route Settings row 16, row 4, Cross; page-at-rest.png is the 'text at rest, fully readable' still). The frame shows the one real firmware error surface this rig can reach: title `Internet Connection Test`, the dimmed heading ghost, the message `An Ethernet cable is not connected.`, the O Back hint, and an unfilled info bar with the clock plate at 23:21; no code field, no focusable control, no dim behind (CAPTURE-BATCH-2 5.2/5.5). Filed at the night cell, and its clock is inside the night window, so the pin and the token agree. Mismatch by construction: the native build answers the same row with its own unavailable message page, so the message text is this build's and no connection test runs; the console's DD/MM 24-hour clock is not a format the app renders.",
+      "applied": {
+        "cell": "page-network-test-error__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\error\\page-at-rest.png",
+        "sourceSha256": "9ca6b59d9f226d8948b0b8c9ef723820c3d8107af40ecca62221b39558da8824",
+        "destinationSha256": "9ca6b59d9f226d8948b0b8c9ef723820c3d8107af40ecca62221b39558da8824",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.202Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-network-connection-settings",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/error/icp-page-rest.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "not readable on this frame: the message page has no clock plate (no info bar); the batch's night session, 2026-10-27 22:39-23:52 local",
+      "note": "Manifest 4.1c: the network-required message page reached by launching PlayStation(R)Store (icp-page-rest.png is the settled 'text at rest' still; the same page is depth2/ics-page-01.png reached from Network Settings row 3, so the row path and the Store path produce the one page this state names). The frame shows title `Internet Connection Settings`, the two-line body `Adjust settings for connection to the Internet.` / `If making a wired connection, you must have an Ethernet cable connected.`, an OK button and `X Enter` / `O Back` hints; no code, no clock, no dim. Filed at the night cell on the session record. Mismatch by construction: the native row answers with this build's own unavailable message page (no connection-setting flow runs), so the body text differs; the measured body ink box on this frame is what the catalogue's message-body region frames.",
+      "applied": {
+        "cell": "page-network-connection-settings__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\error\\icp-page-rest.png",
+        "sourceSha256": "ba259a5849feb572148896e734d713869a0b83189960ea1748ed121b967d1332",
+        "destinationSha256": "ba259a5849feb572148896e734d713869a0b83189960ea1748ed121b967d1332",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.208Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-settings-theme",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/lists/theme-page-rest.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "console 27/10 22:52 (DD/MM 24-hour), 2026-10-27 22:52 local - 8 min before the contract's 23:00-01:00 night window (nearest pin)",
+      "note": "Manifest 4.5: 'Settings column row 7 Theme Settings -> Cross -> page rows Theme, Color, Background, Font' - the page at rest (lists/theme-page-rest.png). The frame shows Theme focused with its one-line help, then Color, Background and Font, each reading Original: this is also the batch's own evidence for the corpus's theme token, which batch 1 had to assume (scorecard 11.1). Filed at the night cell (22:52, nearest pin). Mismatch by construction: the native page carries the same four firmware rows plus two native-only pickers (Select Theme, Select Wallpaper), and the console clock is DD/MM 24-hour where the app renders MM/DD 12-hour at its pinned 2026-10-25T12:32:00.",
+      "applied": {
+        "cell": "page-settings-theme__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\lists\\theme-page-rest.png",
+        "sourceSha256": "bf6c99e0c118a030e3a2c309f2607ec9be9b1cdd98139d1ab929d37a495945d0",
+        "destinationSha256": "bf6c99e0c118a030e3a2c309f2607ec9be9b1cdd98139d1ab929d37a495945d0",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.215Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "theme-list",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/lists/theme-list-rest.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "not readable on this frame: the choice band covers the clock plate; the batch's night session, 2026-10-27 22:39-23:52 local",
+      "note": "Manifest 4.5: 'Cross on Theme' - the Theme list at rest: Install, Original (current and focused, with no check and no dot), Classic, Air Paint with its preview icon, over the dimmed Theme Settings page. The frame is the one batch-2 still whose parent page is the same screen this state's route opens, and it measures the band's left border at x 1324-1325 with the gradient running to about x 1744 (SETTINGS-FIRMWARE 12.3/12.4a) - the origin the catalogue's band regions use. Filed at the night cell; the clock is hidden behind the band. Content difference: the labels are the same four the native build draws (its view logs '4 items from capture'), so what Tier B measures here is the band's geometry and the page beneath it.",
+      "applied": {
+        "cell": "theme-list__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\theme-list__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\theme-list__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\lists\\theme-list-rest.png",
+        "sourceSha256": "ea39764d7be891e40d31827ff8684f612f3206f60fc356af8df5fec116677085",
+        "destinationSha256": "ea39764d7be891e40d31827ff8684f612f3206f60fc356af8df5fec116677085",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.222Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "color-list",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/lists/color-list-rest.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "not readable on this frame: the choice band covers the clock plate; the batch's night session, 2026-10-27 22:39-23:52 local",
+      "note": "Manifest 4.5: 'Cross on Color' - the colour list at rest: 12 unlabelled chips (11 drawn at rest plus the down-chevron), the label line above the column reading the current value (Original), chip pitch 40 with the first ink top at 531 (SETTINGS-FIRMWARE 12.4b). This is the new state whose native counterpart is furthest from the firmware: the native build draws six labelled values in its own options panel, not the firmware's unlabelled chips, and its view logs that it keeps its own panel. Filed at the night cell on the session record; the reference is real for the surface and a stated mismatch on the row model - what the cell can measure is the band and the dimmed page, not a chip it does not draw.",
+      "applied": {
+        "cell": "color-list__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\color-list__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\color-list__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\lists\\color-list-rest.png",
+        "sourceSha256": "3b7a1f64bd8c3f7d572915c23bf6cc50946f902377b23fbe128331c659fbf42d",
+        "destinationSha256": "3b7a1f64bd8c3f7d572915c23bf6cc50946f902377b23fbe128331c659fbf42d",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.228Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "background-list",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/lists/background-list-rest.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "not readable on this frame: the choice band covers the clock plate; the batch's night session, 2026-10-27 22:39-23:52 local",
+      "note": "Manifest 4.5: 'Cross on Background' - the Background list at rest: Brightness (a submenu row with a chevron), Original (current and focused), Classic, Wallpaper; row ink tops 381/537/581/621, the measurement that corrects the single-row-origin assumption (SETTINGS-FIRMWARE 12.4c/12.4e). Filed at the night cell on the session record. Mismatch by construction: the native list has three values and no Brightness row, drawn in this build's own panel rather than the firmware band.",
+      "applied": {
+        "cell": "background-list__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\background-list__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\background-list__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\lists\\background-list-rest.png",
+        "sourceSha256": "8587582d89bb4f43efbda2ff0a380bb27d02b5035b0b96a096e4162b569e6d5f",
+        "destinationSha256": "8587582d89bb4f43efbda2ff0a380bb27d02b5035b0b96a096e4162b569e6d5f",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.234Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "font-list",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/lists/font-list-rest.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "not readable on this frame: the choice band covers the clock plate; the batch's night session, 2026-10-27 22:39-23:52 local",
+      "note": "Manifest 4.5: 'Cross on Font' - the Font list at rest: Original (current and focused), Rounded, Pop; row ink tops 491/539/578 (SETTINGS-FIRMWARE 12.4d). Filed at the night cell on the session record. Mismatch by construction: the native list has the same three-row count with different labels (the firmware faces this build registers: SCE-PS3 Seurat LATIN, VAGRundschriftDLig) and draws its own options panel rather than the firmware band.",
+      "applied": {
+        "cell": "font-list__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\font-list__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\font-list__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\lists\\font-list-rest.png",
+        "sourceSha256": "098dfba48532ea868395e3f15ac261e6db0c0313bfc04bc4ea69e60ea3240d4f",
+        "destinationSha256": "098dfba48532ea868395e3f15ac261e6db0c0313bfc04bc4ea69e60ea3240d4f",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.241Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-settings-video",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "C:/dev/out/rpcs3-ref2-2026-10-28/tails/video-page-top.png",
+      "manifest": "C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md",
+      "clock": "console 27/10 23:04 (DD/MM 24-hour), 2026-10-27 23:04 local - inside the contract's 23:00-01:00 night window",
+      "note": "Manifest 4.6: 'Settings row 3 Video Settings -> Cross -> 22x Down' - the top of the Video Settings page (tails/video-page-top.png), the frame whose 19-row walk to `50 Hz Video Output` closes the page tail (SETTINGS-FIRMWARE 12.5). The frame shows BD - Menu Language focused with its help line and its value English, then BD - Audio Language, BD - Subtitle Language, BD - Internet Connection (Confirm), DVD - Menu Language, ... Filed at the night cell and inside the night window (23:04), so the pin and the token agree. Mismatch by construction: the native page lists the seven measured rows and then three native-only media rows (Repeat, Shuffle, Volume) where the console has 19 BD/DVD rows, and the console clock is DD/MM 24-hour where the app renders MM/DD 12-hour.",
+      "applied": {
+        "cell": "page-settings-video__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref2-2026-10-28\\tails\\video-page-top.png",
+        "sourceSha256": "d3ba675443042c39e2401462d86fa0931631834dcb76ed92b390976347b9dc7e",
+        "destinationSha256": "d3ba675443042c39e2401462d86fa0931631834dcb76ed92b390976347b9dc7e",
+        "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:11:03.249Z"
       },
       "skipped": null
     }
   ],
   "summary": {
-    "entries": 13,
-    "applied": 13,
+    "entries": 23,
+    "applied": 23,
     "skipped": 0,
     "referenceRoot": "C:\\dev\\xmb\\out\\parity-references"
   }

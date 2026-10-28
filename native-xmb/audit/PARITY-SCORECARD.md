@@ -3,19 +3,21 @@
 Method, threshold policy and the first measured scorecard for the 1:1 fidelity track
 ([PARITY-PHASES.md](../PARITY-PHASES.md), P0.1-P0.5). Written 2026-10-27.
 
-**Status: infrastructure complete, no screen at parity.** The catalogue covers 25 capturable states and
-3 honestly-uncapturable ones; every capturable state was captured on 2026-10-27 and gated on Tier A
-(dumps) and Tier C (input traces), with 19 passing Tier A. Since the two imports in sections 10 and 11
-(2026-10-27), **9 of 25** canonical cells and **14 of 600** matrix cells have a real RPCS3 reference: the
-one pre-contract frame, eight frames from the `rpcs3-ref-2026-10-28` batch, and four night cells from
-`rpcs3-ref2-2026-10-28`. The second batch moved the matrix (10 -> 14) but not the canonical count, because
-every frame in it is a night frame; it does give three states (`column-network`, `column-psn`,
-`column-friends`) their first reference of any kind, at night. Every imported canonical reference is
-labelled mismatch-by-construction on its background pin, its console clock, its theme assumption or its
-page beneath; the four night cells are the first cells where the pin and the state agree, and they are
-measured in 11.4. The other 16 canonical cells have no reference, and 5 of those 16 states have no
-firmware view to capture. That is the honest state of the corpus, and it is what P0 exists to make
-visible.
+**Status: infrastructure complete, no screen at parity.** The catalogue covers 35 capturable states and
+3 honestly-uncapturable ones (38 in all, 5 of them native-only with no firmware counterpart): ten states
+were added on 2026-10-28 for the surfaces the second capture batch photographed and this app can actually
+reach (section 12). Every pre-existing capturable state was captured on 2026-10-27 and gated on Tier A
+(dumps) and Tier C (input traces), with 19 passing Tier A; the ten new states were captured on 2026-10-28
+and all ten pass Tier A (12.5). Since the three imports in sections 10, 11 and 12, **9 of 30**
+firmware-reference canonical cells and **24 of 720** firmware-reference matrix cells have a real RPCS3
+reference (the matrix itself is 840 cells; 120 of them belong to the five native-only states, which owe no
+reference). The references are: the one pre-contract frame, eight frames from the
+`rpcs3-ref-2026-10-28` batch, and fourteen night cells from `rpcs3-ref2-2026-10-28`. Every imported
+canonical reference is labelled mismatch-by-construction on its background pin, its console clock, its
+theme assumption or its page beneath; the night cells are the cells where the pin and the state agree, and
+they are measured in 11.4. **22 of the 30** firmware-referenced states now have a reference somewhere
+(12 did before section 12's import); 21 of the 30 canonical cells have none, and 8 states have no reference
+anywhere. That is the honest state of the corpus, and it is what P0 exists to make visible.
 
 Nothing here is a visual-parity claim. A screen is 1:1 only when Tier A, Tier B and Tier C all pass for
 it ([PARITY-PHASES.md](../PARITY-PHASES.md), "What 1:1 means here").
@@ -135,8 +137,9 @@ the row it actually landed on.
 
 ## 2. The catalogue (P0.1)
 
-`work/parity-catalogue.json` - 28 states, 25 capturable today, 3 recorded as not capturable with the exact
-missing backend. Every state carries: id, screen class, the firmware XMBML document and view that defines
+`work/parity-catalogue.json` - 38 states, 35 capturable today, 3 recorded as not capturable with the exact
+missing backend, and 5 marked `noFirmwareReference` (native surfaces with no firmware counterpart, section
+12.4). Every state carries: id, screen class, the firmware XMBML document and view that defines
 it (or an explicit "native, no firmware view" with the reason), the native reachability, the script route,
 the dump assertions, the trace assertions and the region crops.
 
@@ -146,8 +149,13 @@ across 28 documents), so a stale document or view id fails without a capture.
 | Class | States | What they are |
 |---|---:|---|
 | `icon-heavy` | 11 | the root and the ten columns (Users, Settings, Photo, Music, Video, TV/Video Services, Game, Network, PlayStation Network, Friends) |
-| `text-heavy` | 9 | Settings > System Settings, Game > All Games, Video > Video Library, Game > Steam Store sections, Network > Download Management, TV > Jellyfin sign-in, Continue Watching, Trophy Collection (not capturable), plus the dialog's Video column |
-| `composite` | 8 | options panel, dialog, OSK, notification, volume display, information panel indicator, PS menu, media player panel, PSN sign-in (not capturable) |
+| `text-heavy` | 14 | Settings > System Settings, Network Settings, the depth-2 status list, the two Network message pages, Theme Settings, Video Settings, Game > All Games, Video > Video Library, Game > Steam Store sections, Network > Download Management, TV > Jellyfin sign-in, Continue Watching, Trophy Collection (not capturable) |
+| `composite` | 13 | options panel, dialog, OSK, notification, volume display, information panel indicator, PS menu, media player panel, the four Theme choice lists, PSN sign-in (not capturable) |
+
+Ordered by class, not by section: the ten states added on 2026-10-28 are `page-settings-network`,
+`page-network-status-list`, `page-network-test-error`, `page-network-connection-settings`,
+`page-settings-theme`, `theme-list`, `color-list`, `background-list`, `font-list` and `page-settings-video`
+(12.1).
 
 Coverage of the P0 seed list:
 
@@ -176,7 +184,9 @@ inserted disc the PC does not expose. Each is printed by `--catalogue` with its 
 
 ## 3. The capture matrix (P0.2)
 
-`work/parity-reference.json` `matrix`: **25 states x 3 themes x 4 backgrounds x 2 resolutions = 600 cells**.
+`work/parity-reference.json` `matrix`: **35 states x 3 themes x 4 backgrounds x 2 resolutions = 840 cells**
+(was 25 x 24 = 600 before the ten states of section 12 were added; 120 of the 840 belong to the five
+native-only states, which owe no firmware reference and are excluded from the reference debt).
 
 - **Theme axis**: the three states `appearance/background` and `appearance/theme` actually produce -
   `original` (the wave), `classic`, `p3t-01` (the firmware's own theme through the p3t path).
@@ -198,7 +208,7 @@ projection is P10's work, not a scaled 1080p frame, and the scorecard says so ra
 window to a console mode.
 
 The default run captures the **canonical cell** (`original` / `day` / `1080p`) for every capturable state -
-one cell each, 25 captures. `--matrix` with `--capture` runs all 600; `--theme/--background/--resolution`
+one cell each, 35 captures. `--matrix` with `--capture` runs all 840; `--theme/--background/--resolution`
 slice it.
 
 ## 4. The reference contract (P0.3)
@@ -371,6 +381,14 @@ reported as "no reference yet".
 > references (`column-network`, `column-psn`, `column-friends`) are still listed here because their
 > canonical (day) cell is empty - the report counts cells, not states with a reference somewhere.
 
+> **Updated 2026-10-28 (section 12):** ten states were added and ten night cells imported, so the live
+> list is **9 of 30** firmware-reference canonical cells (35 states in the catalogue are capturable, 5 of
+> them native-only with no firmware reference and therefore not owed one; 30 is the denominator that
+> matters) and **24 of 720** firmware-reference matrix cells (the matrix is 840 cells, 120 of them on the
+> five native-only states). The report now also answers the question this section flagged: **22 of the 30**
+> firmware-referenced states have a reference somewhere (9 did at the canonical cell). The canonical count
+> still does not move, for the same honest reason as section 11 - every new cell is a night cell.
+
 > **Measured result, not a placeholder.** This section carries no unfilled template block: the results
 > are the filled tables in section 6 and the header above. For run `run-20261027-222734` /
 > `scorecard-20261027-223917`: **Tier A 19/25, Tier B 0/25, Tier C 6/25, A+B+C 0/25.** The six Tier A
@@ -479,6 +497,22 @@ composite surfaces, then the 4 background presets and 720p.
   batch's other stills are refused in 11.5 (bursts are crops, the update frames are a host overlay, and
   about 100 frames show surfaces no catalogue state names). No budget, matrix axis or catalogue entry
   changed.
+- **2026-10-28 (catalogue extension and third import)** - ten states added for the surfaces batch 2
+  captured and the app can reach: `page-settings-network`, `page-network-status-list`,
+  `page-network-test-error`, `page-network-connection-settings`, `page-settings-theme`, `theme-list`,
+  `color-list`, `background-list`, `font-list`, `page-settings-video` (12.1-12.3). Catalogue 28 -> 38
+  states, capturable 25 -> 35, matrix 600 -> 840 cells. Five native-only pages marked
+  `noFirmwareReference: true`; `work/parity.ts` gained that field (validation, `--catalogue`, `--list`),
+  honours it in `--references-missing` (which now also reports state coverage) and in the scorecard's
+  reference-debt denominators (12.4). All ten new states captured on the current build
+  (`C:/dev/out/native-status3/re-ps3-native.exe`, sha256 `BE55FF1E...a631E9`) - 10/10 cells, **Tier A
+  PASS for all ten** - and again on the pre-regression build with text
+  (`C:/dev/out/native-choices/re-ps3-native.exe`, sha256 `6B668353...036DF0`) for pixel evidence, where the
+  six page states pass and the four list states fail only the band/panel log oracle that build predates
+  (12.5). Ten night cells imported from `rpcs3-ref2-2026-10-28` (23 cells total, 0 skipped, exit 0;
+  `--references-missing` **9/30** canonical and **14 -> 24 of 720** firmware-reference matrix cells; 22 of
+  30 states now have a reference somewhere, 12 before). No budget, no contract change, no matrix axis
+  changed, no pre-existing reference re-scored.
 
 ## 10. Reference corpus import - 2026-10-27 (batch `rpcs3-ref-2026-10-28`)
 
@@ -997,7 +1031,7 @@ indicator, and a playing local file. Those are harness gaps on the native side a
 5. **The five native-only pages** (`page-game-all-games`, `page-video-library`,
    `page-steam-store-sections`, `page-jellyfin-signin`, `continue-watching`): no firmware reference exists
    or should; the catalogue needs a `noFirmwareReference` marker so `--references-missing` stops counting
-   them as owed (10.6).
+   them as owed (10.6). **Done 2026-10-28: section 12.4.**
 6. **A catalogue extension, before any further rig work.** Batch 2 captured ten surfaces the catalogue
    cannot name: Settings > Network Settings (depth 1), Settings and Connection Status List (depth 2), the
    `Internet Connection Settings` message page, the Internet Connection Test error page, the Theme Settings
@@ -1005,7 +1039,9 @@ indicator, and a playing local file. Those are harness gaps on the native side a
    Adding them as states (with the batches' geometries and the manifest's row lists) would let most of
    batch 2's stills - the `error/`, `depth2/`, `lists/`, `bands/` and `tails/` groups - become references,
    and would put the corpus's bottleneck back on the rig, where it can be fixed. That is a catalogue edit
-   and is not made here.
+   and is not made here. **Done 2026-10-28: sections 12.1-12.6 - the ten states exist, ten cells were
+   imported, and the bottleneck is back on the rig (the day-window session in item 1 is now the whole
+   remaining gap for these surfaces).**
 7. **Night cells for the five columns that already have a reference** (from `nav/colL-4..8.png`, 22:46),
    if the corpus wants a night reference for every column: five map rows and one `--capture --background
    night` run, with the focused-row caveat recorded. Optional; it adds cells, not states.
@@ -1029,3 +1065,295 @@ indicator, and a playing local file. Those are harness gaps on the native side a
 **Not a parity claim.** Four cells gained a reference; none gained a pass. Tier B still passes nothing,
 and every number in 11.4 either carries a named mismatch-by-construction or, for the System page, compares
 the wrong page. The corpus is larger and better labelled, not closer to 1:1.
+
+## 12. Catalogue extension - 2026-10-28 (the surfaces batch 2 captured)
+
+Section 11.5 ended with the finding this section acts on: of batch 2's 251 stills, four backed a cell, and
+the rest were refused for one reason above all others - **no catalogue state named the surface**. The
+bottleneck had moved from the rig to the catalogue. This section adds the ten states that fix it, marks the
+five native-only pages so the reference debt stops counting them, adds the one tool change the marking
+needs, captures every new state on two builds, and imports the ten night cells the new states make
+possible.
+
+Dated 2026-10-28 local (America/Chicago), which is also the batch folder's date (2026-10-27 local is
+2026-10-28 UTC). No budget, no matrix axis, no reference contract field and no pre-existing state was
+changed.
+
+### 12.1 The ten states
+
+Every route is **resolved, not typed**: `work/parity.ts` reads the columns and row indices out of one
+discovery dump per data seed, so the numbers below are what the tool found (`catalogue:network[15]` means
+the discovery dump listed Network Settings as row 15 of the Settings column), not offsets written into the
+catalogue.
+
+| State | Class | Native route (resolved) | Firmware surface it names | Regions |
+|---|---|---|---|---|
+| `page-settings-network` | text-heavy | Settings column > `network[15]` | the depth-1 Network Settings page, 5 rows from `seg_network` (SETTINGS 5.15/10.3) | frame, page rows, category icon row |
+| `page-network-status-list` | text-heavy | ... > `network[15]` > row 0 | Settings and Connection Status List, the depth-2 read-only table (SETTINGS 12.2) | frame, status rows, title rule |
+| `page-network-test-error` | text-heavy | ... > `network[15]` > row 3 | the Internet Connection Test message page, the one real firmware error surface (BATCH-2 5.2) | frame, message body, back hint |
+| `page-network-connection-settings` | text-heavy | ... > `network[15]` > row 2 | the Internet Connection Settings message page (BATCH-2 5.1c, manifest 4.2) | frame, message body, back hint |
+| `page-settings-theme` | text-heavy | Settings column > `theme[6]` | the depth-1 Theme Settings page, 4 firmware rows (SETTINGS 5.6/12.4) | frame, page rows, category icon row |
+| `theme-list` | composite | ... > `theme[6]` > row 0 | the Theme choice band, 4 captured labels (SETTINGS 9.3f/12.4a) | frame, band column, band rows |
+| `color-list` | composite | ... > `theme[6]` > row 1 | the Color choice list, 12 unlabelled chips (SETTINGS 12.4b) | frame, band column, chip column |
+| `background-list` | composite | ... > `theme[6]` > row 2 | the Background choice list, 3 items + `Brightness >` (SETTINGS 12.4c) | frame, band column, band rows |
+| `font-list` | composite | ... > `theme[6]` > row 3 | the Font choice list, 3 items (SETTINGS 12.4d) | frame, band column, band rows |
+| `page-settings-video` | text-heavy | Settings column > `video[2]` | the depth-1 Video Settings page, 19 firmware rows (SETTINGS 12.5) | frame, page rows, category icon row |
+
+`page-settings-network` and `page-settings-theme`/`page-settings-video` claim `category_sysconf.xml`
+`seg_network` and `seg_fixed_items` respectively, and `--catalogue` cross-checks both against the firmware
+document (both views exist; exit 0, no problems). The four choice lists claim `xmbml: null` with the reason
+in `xmbmlNote`: their pages are sysconf_plugin RCO page objects, not XMBML views, and the two of the four
+that the RCO authors as empty (`page_theme_config_*`) are built at run time by the plugin.
+
+### 12.2 Regions: the measured geometry they frame
+
+No crop was invented. Each one is the frame measurement the batch's audit recorded:
+
+| Region | Crop | Where the number comes from |
+|---|---|---|
+| `page rows` (depth-1 settings pages) | 400,380,1000,620 | SETTINGS 2.2: focused row centre y 505, values left at x 1301, help lines to y 564, 80 px row pitch (D24) |
+| `status rows` (depth-2 table) | 400,280,800,500 | SETTINGS 12.2: rows 13, ink tops 291 -> 771, pitch 40, labels right-aligned x 939, values left x 979-980 |
+| `title rule` (depth-2 table) | 80,150,1520,60 | SETTINGS 12.2: title ink y 167-185 and the 1 px rule at y 199 (the D4/D5 rule pair, with y 879 below) |
+| `message body` (ICT page) | 700,470,520,100 | BATCH-2 5.2: heading ghost y 490-523, message ink x 753-1163 y 530-546 |
+| `message body` (ICS page) | 500,460,900,110 | checked on `error/icp-page-rest.png` this pass: two left-aligned lines at x about 528-1390, y about 485-525 (the audit records the shape, not the ink box) |
+| `back hint` (both message pages) | 1140,880,120,56 | BATCH-2 5.2: `O Back` ink x 1155-1239, y 897-916 |
+| `band column` (Theme page lists) | 1324,0,420,1080 | SETTINGS 12.3: Theme band left border x 1324-1325, geometric zero about x 1744, full height |
+| `band rows` / `chip column` | per list | SETTINGS 12.4e row ink tops: Theme 261/494/532/576, Background 381/537/581/621, Font 491/539/578, Color label line 494-523 then chips 531-957 with the chevron at 969-977 |
+
+Two honest notes on the crops. First, the **band origin is per page, not a constant**:
+SETTINGS-FIRMWARE 12.3(a) showed the Display page's Screensaver band starts at x 1260 and the Theme page's
+at x 1324, 64 px apart, so all four of these lists use 1324 - they are opened from the Theme page - and the
+1260 number is not used for them. Second, the Color/Background/Font lists' own left edges were not measured
+separately; their crops borrow the Theme page's border and their rows are the measured ink tops. Both facts
+are in the states' `tierANote`s, not only here.
+
+### 12.3 Honest reachability, state by state
+
+The ten states split into four groups by what the app actually does, and each group is stated rather than
+smoothed over:
+
+- **Same surface, same route (4 states).** `page-settings-network`, `page-settings-theme`,
+  `page-settings-video` and `theme-list` are pages and a band the app really draws. Row-count differences
+  are by design and asserted, not hidden: the Network page is the firmware's 5 rows exactly; the Theme page
+  is the firmware's 4 rows plus 2 native-only pickers (6); the Video page is the firmware's measured 7 rows
+  plus 3 native-only media rows (10) against the console's 19; the Theme band is the firmware's 4 captured
+  labels, drawn from the captured list because the RCO page is empty.
+- **Same route, different table (1 state).** `page-network-status-list`: the row opens a D5 information
+  page whose label/value rows are the **host's own network report**, not the console's 13 fixed rows. The
+  surface class matches (titled page, rule pair, label/value rows, no focus); the content does not.
+- **Reached as the build's own message page (2 states).** `page-network-test-error` and
+  `page-network-connection-settings`: pressing the row calls `Shell::activate`'s `Action::Unavailable`
+  branch, which draws this build's message page titled with the firmware row's title and a body of
+  `This feature is not available in the native recreation yet.` No connection test runs and no firmware
+  string (`An Ethernet cable is not connected.`, the two-line connection advice) is reproduced, so the
+  content difference is by construction and is the state's `tierANote`. The surface itself is the same D4
+  shape: on the native captured frame the title rule measures **y = 198** (the firmware's is 199), the
+  `O Back` hint sits in the same bottom band, and the body is this build's own string (12.5).
+- **Reached as the build's own list (3 states).** `color-list`, `background-list`, `font-list`: the view
+  logs that it keeps its own options panel because the firmware's page has no list of its own in the RCO,
+  and the app draws 6 labelled colours / 3 backgrounds / 3 fonts where the console draws 12 unlabelled
+  chips / 3 values plus a submenu / 3 named fonts.
+
+**The Tier A scope caveat, stated once and applied where it belongs.** `Shell::showMessage` writes no
+sidecar field and no log line, so no message page can be identified from the dumps. The three states that
+open one (`page-network-status-list`, `page-network-test-error`,
+`page-network-connection-settings`) therefore have **page-scoped Tier A**: their assertions prove the
+Network Settings page and the focused row under it, not the page on top. That is the same scope the OSK
+already carries (1.1), and it is the one place a future sidecar field (`messageTitle`/`messageKind`) would
+close a real gap. Their Tier B regions still frame the firmware's measured rects, so the pixel half of the
+comparison is not weakened by it.
+
+### 12.4 `noFirmwareReference`, and the one tool change it needed
+
+Five states are native surfaces with no firmware counterpart: `page-game-all-games` (the Steam library
+folder), `page-video-library` (the host's video folder page), `page-steam-store-sections` (the Steam store
+sections), `page-jellyfin-signin` (a registered Jellyfin service) and `continue-watching` (the native
+resume page). Each now carries `"noFirmwareReference": true`. The semantics are deliberately narrow:
+
+- they are **still captured and gated** like every other state (they stay in `--capture`, in the matrix and
+  in the Tier A/C denominators - the app reaches them and their dumps are real);
+- they **owe no firmware reference**, so `--references-missing` no longer lists them and the scorecard's
+  reference-debt denominators exclude them. A rig frame for them must not exist; asking for one was the
+  bug section 10.6 named.
+
+`work/parity.ts` changed in five places, all in service of that field (no contract or matrix-axis change):
+
+1. `State` gains `noFirmwareReference?: boolean`, and `loadCatalogue` rejects a non-boolean value.
+2. `--catalogue` prints the flag in the state list (`native-only: no firmware surface defines this page, so
+   no firmware reference is owed`) and in its JSON (`noFirmwareReference: true`), and its header line now
+   reads `38 (35 capturable today, 5 native-only with no firmware reference)`.
+3. `--list` gained a `fw reference owed` / `no fw reference (native-only)` column.
+4. `--references-missing` now reports **three denominators**: `present/firmwareCells` (cells present out of
+   the cells that owe a reference), the selected-cell total with the native-only cells named, and a
+   **states** measure (`withReference/firmwareReferenced`, plus the native-only state count). That last one
+   closes the limitation 11.3 recorded - the report could count cells but not answer "does this state have
+   a reference anywhere". JSON gains `firmwareCells`, `states` and `noFirmwareReference`.
+5. The scorecard gains `totals.noFirmwareReference`, `totals.firmwareReferenced`,
+   `totals.statesWithReference`, `totals.coveredFirmware` (the firmware-referenced states the run actually
+   covered, so a ten-state run does not read as "0 of 30"), a `nativeOnly` list with its own markdown
+   section, a reference-coverage line in both the markdown and the console summary, and a limits line.
+   `missingReferences` excludes the
+   native-only cells. `totals.capturable` keeps its meaning (capture coverage), so the two denominators
+   cannot be confused.
+
+The matrix is **840 cells** (35 states); the reference debt is **720 cells** (30 states). `--matrix` still
+prints 840, because those 120 cells are genuinely captured - they are just never owed a reference.
+
+### 12.5 Capture evidence
+
+Two runs, same routes, two builds. Neither scored Tier B (see 12.8's note on why), and both are **partial
+runs**: the scorecard's `claims/capturable` denominator is the catalogue's 35 capturable states, so a
+ten-state run reads `0/35` and means nothing about coverage; the per-run line to read is the reference
+coverage one (`0/10 states covered by this run` here, because the ten captured cells are day cells and
+every reference for these states is a night cell).
+
+**Run 1 - the current build, Tier A only.** `bun work/parity.ts --capture --state
+page-settings-network,page-network-status-list,page-network-test-error,page-network-connection-settings,
+page-settings-theme,theme-list,color-list,background-list,font-list,page-settings-video --exe
+C:/dev/out/native-status3/re-ps3-native.exe` -> `out/parity/run-20261028-000600`, **10/10 cells captured,
+Tier A PASS for all ten**, exit 0. Build sha256 `BE55FF1E912A43956F6F5E2F78BAF5B883A79FE5A6138A3C6A4FE53CB2A631E9`
+(the tree with the in-flight text-renderer regression: it draws no glyphs, which is why it is used for the
+structural tier only - Tier A is dumps and logs and needs no pixels).
+
+| State | Sidecar oracle (all PASS) | Log oracle (all PASS) |
+|---|---|---|
+| `page-settings-network` | category settings, depth 1, rows 5, pageKind page, row `net_netlist` ("Settings and Connection Status List") | `settings: network segment page resolved 5 rows from category_sysconf.xml` |
+| `page-network-status-list` | same page and row, depth 1 (the info page does not push a page) | same line (page-scoped: see 12.3) |
+| `page-network-test-error` | row `net_internet_test` ("Internet Connection Test"), rows 5 | same line (page-scoped) |
+| `page-network-connection-settings` | row `net_internet_setting` ("Internet Connection Settings"), rows 5 | same line (page-scoped) |
+| `page-settings-theme` | category settings, depth 1, rows 6, row `theme` | `settings: theme page from the RCO row set: 6 rows, 2 native-only` |
+| `theme-list` | depth 2, rows 1, row `appearance/theme/0` ("Original") | `view: settings choice band appearance/theme -> 4 items from capture (page_theme_config_theme), current row 1, fits the band` |
+| `color-list` | depth 2, rows 6, row `appearance/colour/0` | `view: settings choice panel appearance/colour keeps this build's options panel: ...` |
+| `background-list` | depth 2, rows 3, row `appearance/background/0` | `view: settings choice panel appearance/background keeps this build's options panel: ...` |
+| `font-list` | depth 2, rows 3, row `appearance/font/0` | `view: settings choice panel appearance/font keeps this build's options panel: ...` |
+| `page-settings-video` | category settings, depth 1, rows 10, row `bd_menu_lang` | `settings: video page from the RCO row set: 10 rows, 3 native-only` |
+
+Those log assertions are the load-bearing part, and they say what the pictures cannot: the Theme list is
+drawn as the **firmware band with the four captured labels**, while the other three lists are the **build's
+own panel** and the view says so. Without them the four list states would be indistinguishable in Tier A
+(each only proves "a choice page opened", depth 2 and the model's row count).
+
+**Run 2 - the pre-regression build with text, for pixel evidence.** The same command with `--exe
+C:/dev/out/native-choices/re-ps3-native.exe --out out/parity-pre` -> `out/parity-pre/run-20261028-000953`.
+Build sha256 `6B668353C20F3522512B13F65ED59098BAB36F71F6A5C8183BF324E10F036DF0`. All ten cells captured;
+the **six page states pass Tier A** with the same summaries, and the four list states pass their sidecar
+assertions (depth 2, row `Original`) but **fail only the band/panel log line** - that build predates the
+Phase 13 draw hunk, so it emits no `view: settings choice ...` line at all. That is a build difference,
+reported as a FAIL rather than excused away (the harness retried each list state three times, as designed).
+
+The pixel evidence this run adds:
+
+- `page-network-test-error/frame.png` shows a real message page: title `Internet Connection Test` with the
+  globe icon, a 1 px rule at **y = 198** (measured on the frame; the firmware's is 199), the body
+  `This feature is not available in the native recreation yet.` and the `O Back` hint in the bottom band.
+  That is the surface the state names, with the body difference 12.3 states, visible rather than asserted.
+- `theme-list/frame.png` shows the pre-regression build's own panel with one item (`Original`) where the
+  current tree draws the firmware's four - the picture of the difference the log line proves in run 1.
+
+What the two runs together say: the routes and the surfaces are right (run 1), the text and message
+surfaces are right (run 2), and the only thing neither build can show is the current tree's own pixels -
+which is the regression's limit, not the corpus's.
+
+### 12.6 The import: ten more of batch 2's stills
+
+The batch manifest still carries no `- Session:` line, so the import re-used the disclosed byte-faithful
+import copy from 11.1 (verified again this pass, both hashes unchanged):
+
+- original `C:/dev/out/rpcs3-ref2-2026-10-28/MANIFEST.md`, 30,006 bytes, sha256
+  `9e0d66e5affd629b7d6971869e3570070658daa3d1ce6e62e68dcfe2f1ec372c`;
+- import copy `out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md`, 30,599 bytes, sha256
+  `218c4aad1337030d4c0020899f3289b42b190201094fa3ebf7878099de7d80d0` - the original bytes plus exactly one
+  inserted bullet.
+
+```powershell
+bun work/parity-import.ts --map work/parity-references-map.json `
+  --manifest C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md `
+  --manifest C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md --replace
+```
+
+Result: **23 cells imported, 0 skipped, exit 0** - the 13 already-imported cells re-validated and re-copied
+byte-identically (source and destination sha256 compare equal; only their `applied` blocks moved), plus ten
+new cells. Every new row is `manifestRef: exact` (the manifest names the file itself), not `group`.
+
+| Cell (all `original` / `night` / `1080p`) | Source frame | Clock on the frame | Why this frame |
+|---|---|---|---|
+| `page-settings-network` | `depth2/network-settings-page.png` | **27/10 22:51** | the page with its focused first row expanded (manifest 4.2) |
+| `page-network-status-list` | `depth2/statuslist-rest.png` | not readable (the page has no clock plate) | the 13-row table at rest, the source of 12.2's geometry |
+| `page-network-test-error` | `error/page-at-rest.png` | **27/10 23:21** (inside the night window) | the error page, text at rest (manifest 4.1d) |
+| `page-network-connection-settings` | `error/icp-page-rest.png` | not readable (no clock on the page) | the two-line message page, text at rest (4.1c) |
+| `page-settings-theme` | `lists/theme-page-rest.png` | **27/10 22:52** | the Theme page at rest; also the batch's theme-token evidence |
+| `theme-list` | `lists/theme-list-rest.png` | not readable (the band covers the plate) | the Theme band with its 4 labels |
+| `color-list` | `lists/color-list-rest.png` | not readable (band) | the 12-chip list at rest |
+| `background-list` | `lists/background-list-rest.png` | not readable (band) | the Background list at rest |
+| `font-list` | `lists/font-list-rest.png` | not readable (band) | the Font list at rest |
+| `page-settings-video` | `tails/video-page-top.png` | **27/10 23:04** (inside the night window) | the top of the 19-row page (manifest 4.6) |
+
+Three pin readings, stated because they differ:
+
+- **Four frames carry a readable clock**, and two of those (23:04, 23:21) are inside the contract's
+  23:00-01:00 night window; the other two (22:51, 22:52) are 8-9 minutes before it, so their `night` token
+  is a **nearest pin**, exactly the caveat 11.4 records for the 22:45 column frames.
+- **Six frames have no readable clock at all** - the depth-2 table and the ICS message page have no clock
+  plate, and the four list bands cover the plate. Their `night` token rests on the frame's own appearance
+  (the night wave is visible in every one) and on the batch's session record, not on a clock string. The
+  sidecar's `clock` field says exactly which case each cell is, so a reader of the JSON does not need this
+  table.
+- **Every cell is a night cell.** Nothing was filed at a canonical day cell, because no frame in this batch
+  is a day frame. The canonical cells of all ten states therefore stay empty, and that is the correct
+  reading rather than an import failure.
+
+Theme is `original` on evidence (`lists/theme-page-rest.png` shows Theme, Color, Background and Font all
+reading `Original`), not assumption. The mapping table's `note` for each row cites the manifest section and
+the frame's own clock, and its batch block records which manifest was used and why.
+
+### 12.7 Coverage before and after
+
+```powershell
+bun work/parity.ts --references-missing          # 9/30 firmware-reference canonical cells
+bun work/parity.ts --references-missing --matrix # 24/720 firmware-reference matrix cells (840 cells, 5 native-only states owe 120 of them)
+bun work/parity.ts --matrix                       # 840 cells = 35 states x 3 themes x 4 backgrounds x 2 resolutions
+```
+
+| Measure | Before this pass (28 states) | New catalogue, before the import | After the import |
+|---|---:|---:|---:|
+| canonical (`original/day/1080p`) cells with a reference | 9 / 25 | 9 / 30 | **9 / 30** |
+| matrix cells with a reference | 14 / 600 | 14 / 720 | **24 / 720** |
+| states with a reference somewhere | 12 (of 25) | 12 / 30 | **22 / 30** |
+| native-only states that owe no reference | counted as owed | **5 (120 cells)** | 5 (120 cells) |
+| catalogue states / capturable | 28 / 25 | 38 / 35 | 38 / 35 |
+
+Readings:
+
+- **The canonical count does not move (9/30), and its denominator grows (25 -> 30).** Ten states were added
+  and every frame that references them is a night frame; filing one at a day cell would be the batch-1
+  mistake repeated. The honest effect is a *lower* coverage ratio over a *correctly larger* debt.
+- **The matrix moves 14 -> 24 of 720** and the state measure 12 -> 22 of 30. Both are real coverage: ten
+  more states now pair with a firmware frame at their own pin.
+- **The native-only five leave the debt.** Before this pass `--references-missing` listed them as missing
+  firmware references; that was the bug section 10.6 predicted. They are still in the matrix (840), still
+  captured, still reported - as native surfaces, not as debt.
+
+### 12.8 What is still owed, and what would measure it
+
+- **A day-window session is now the whole remaining gap for these surfaces**: ten canonical cells
+  (`...__original__day__1080p`) and, for the two states whose new reference is a nearest-pin night frame
+  (`page-settings-network` at 22:51 and `page-settings-theme` at 22:52), a 10:00 frame too. That is one rig
+  run of the same routes with the console clock at 10:00 and the clock format the app renders - the recipe
+  11.6 already states.
+- **No Tier B number was produced this pass, deliberately.** The imported cells are night cells, so the
+  canonical day run cannot pair them; a night capture on the current build has no glyphs, so its number
+  would measure the text-renderer regression; and on the pre-regression build four of the ten states draw a
+  different row model, so their number would compare two different lists. The first honest run is one
+  command once the regression is fixed:
+  `bun work/parity.ts --capture --score --background night --state page-settings-network,page-network-status-list,page-network-test-error,page-network-connection-settings,page-settings-theme,theme-list,color-list,background-list,font-list,page-settings-video`.
+- **The message-page Tier A gap is a sidecar field, not a harness change.** One field each
+  (`messageTitle`/`messageKind`) in `src/main.cpp`'s grab sidecar would let the three page-scoped states
+  assert their surface, exactly as the OSK and info-indicator entries need theirs (1.1).
+- **Eight capturable states still have no reference anywhere** (`column-tv`, `page-download-management`,
+  `dialog`, `notification`, `volume-hud`, `info-indicator`, `ps-menu`, `media-player-panel`), and **21 of the
+  30** firmware-reference canonical cells are empty - the ten new states' day cells plus those eight plus
+  the three columns whose only reference is a night cell. The authoritative list is
+  `--references-missing`'s, cell by cell.
+
+**Not a parity claim.** Ten states and ten references were added; no cell gained a Tier B pass, no budget
+moved, and the corpus is larger and better labelled, not closer to 1:1.

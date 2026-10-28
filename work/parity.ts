@@ -87,6 +87,9 @@ type State = {
   xmbml: { document: string; view: string } | null;
   xmbmlNote?: string;
   native: NativeReach;
+  // A native surface with no firmware counterpart: it is still captured and gated, but it owes no
+  // firmware reference, so it is left out of the reference debt instead of counted as a missing capture.
+  noFirmwareReference?: boolean;
   route?: Route;
   dataSeed?: string;
   seedPaths?: string[];
@@ -283,6 +286,8 @@ function loadCatalogue(): Catalogue {
       fail(`${state.id}: native.reachable must be yes|message-only|backend|no`);
     if (state.native.reachable !== 'yes' && state.captures !== false)
       fail(`${state.id}: a state that is not reachable must set "captures": false`);
+    if (state.noFirmwareReference !== undefined && typeof state.noFirmwareReference !== 'boolean')
+      fail(`${state.id}: noFirmwareReference must be a boolean`);
     if (!Array.isArray(state.regions) || !state.regions.length) fail(`${state.id}: regions must be a non-empty array`);
     const regionNames = new Set<string>();
     for (const [regionIndex, region] of state.regions.entries()) {
@@ -1206,9 +1211,14 @@ type ScoreCard = {
     claims: number;
     noReference: number;
     failed: number;
+    noFirmwareReference: number;
+    firmwareReferenced: number;
+    statesWithReference: number;
+    coveredFirmware: number;
   };
   missingReferences: string[];
   unavailable: Array<{ state: string; title: string; reason: string }>;
+  nativeOnly: Array<{ state: string; title: string; why: string }>;
   limits: string[];
 };
 
@@ -1254,6 +1264,15 @@ function buildScorecard(catalogue: Catalogue, refs: ReferenceDoc, opts: ReturnTy
   }
   const capturable = catalogue.states.filter(state => state.captures !== false).length;
   const captured = new Set(cells.filter(cell => !cell.error).map(cell => cell.state)).size;
+  const nativeOnly = catalogue.states.filter(state => state.noFirmwareReference === true);
+  const nativeOnlyIds = new Set(nativeOnly.map(state => state.id));
+  const firmwareReferenced = capturable - nativeOnly.filter(state => state.captures !== false).length;
+  // A state counts as referenced when at least one of its cells has a reference at all (Tier B measured),
+  // which is the "does this state have a frame anywhere" question a cell count cannot answer. The run only
+  // speaks for the states it covered, so the fraction is per run and the catalogue totals are reported
+  // beside it - a 10-state run must not read as "0 of 30".
+  const coveredFirmware = new Set(cells.filter(cell => !nativeOnlyIds.has(cell.state)).map(cell => cell.state)).size;
+  const statesWithReference = new Set(cells.filter(cell => cell.tierB !== 'no-reference' && cell.tierB !== 'not-captured').map(cell => cell.state)).size;
   const totals = {
     states: catalogue.states.length,
     capturable,
@@ -1264,10 +1283,19 @@ function buildScorecard(catalogue: Catalogue, refs: ReferenceDoc, opts: ReturnTy
     claims: states.filter(state => state.claim === 'A+B+C').length,
     noReference: cells.filter(cell => cell.tierB === 'no-reference').length,
     failed: cells.filter(cell => cell.tierA === 'fail' || cell.tierB === 'fail' || cell.tierC === 'fail').length,
+    noFirmwareReference: nativeOnly.length,
+    firmwareReferenced,
+    statesWithReference,
+    coveredFirmware,
   };
-  const missingReferences = cells.filter(cell => cell.tierB === 'no-reference').map(cell => cell.key);
+  // The reference debt excludes the native-only surfaces: a firmware frame for them must not exist.
+  const missingReferences = cells.filter(cell => cell.tierB === 'no-reference' && !nativeOnlyIds.has(cell.state)).map(cell => cell.key);
   const unavailable = catalogue.states.filter(state => state.captures === false)
     .map(state => ({ state: state.id, title: state.title, reason: state.native.reason ?? state.native.how ?? '' }));
+  const nativeOnlyList = nativeOnly.map(state => ({
+    state: state.id, title: state.title,
+    why: state.xmbmlNote ?? 'native surface: no firmware view defines this page',
+  }));
   return {
     schema: 'xmb-parity-scorecard/1',
     generated: isoNow(),
@@ -1283,13 +1311,15 @@ function buildScorecard(catalogue: Catalogue, refs: ReferenceDoc, opts: ReturnTy
     totals,
     missingReferences,
     unavailable,
+    nativeOnly: nativeOnlyList,
     limits: [
       'A Tier B number is a perceptual distance to an emulator frame, not bit-exactness: the console\'s RSX rasterisation is only partly recoverable (PARITY-PHASES "What this track will still not deliver").',
       'A state is called 1:1 only when Tier A, Tier B and Tier C all pass. A+ B numbers alone are not parity.',
-      'Tier A passes on the app\'s own dumps (XMB_DUMP_ENTRIES, the grab sidecar, XMB_LOG). A state whose surface has no dump or sidecar field (the OSK, the controller indicator) cannot pass Tier A, and the scorecard says so instead of treating the picture as proof.',
+      'Tier A passes on the app\'s own dumps (XMB_DUMP_ENTRIES, the grab sidecar, XMB_LOG). A state whose surface has no dump or sidecar field (the OSK, the controller indicator, the message pages) cannot pass Tier A for that surface, and the scorecard says so instead of treating the picture as proof.',
       'Tier B budgets are provisional targets until a matched RPCS3 reference exists (work/parity-reference.json budgets.revisionNote).',
       'The capture reads the host\'s Steam library and the host\'s Steam settings where a state includes them, so a changed library fails the dump assertions loudly instead of quietly scoring a different state.',
       '720p cells are a 1280x720 windowed framebuffer: the host has no 720p display mode, so the console\'s own 720p projection is P10, not this cell.',
+      'States that carry noFirmwareReference are native surfaces with no firmware counterpart: they are captured and gated like any other state, but a firmware reference for them must not exist, so they are excluded from the reference debt (totals.firmwareReferenced).',
     ],
   };
 }
@@ -1317,6 +1347,10 @@ function renderMarkdown(card: ScoreCard, refs: ReferenceDoc): string {
   lines.push(`**${card.totals.claims}/${card.totals.capturable} capturable states pass all three tiers.** `
     + `Tier A ${card.totals.tierA}, Tier B ${card.totals.tierB}, Tier C ${card.totals.tierC}; `
     + `${card.totals.noReference} captured cell(s) have no reference yet; ${card.totals.failed} cell gate failure(s).`);
+  lines.push('');
+  lines.push(`**Reference coverage (this run):** ${card.totals.statesWithReference}/${card.totals.coveredFirmware} firmware-referenced states `
+    + `covered by the run pair with a reference; the catalogue has ${card.totals.firmwareReferenced} firmware-referenced states `
+    + `and ${card.totals.noFirmwareReference} native-only ones that owe none (${card.totals.states} states total).`);
   lines.push('');
   lines.push('## Tier B budgets (per screen class)');
   lines.push('');
@@ -1395,6 +1429,17 @@ function renderMarkdown(card: ScoreCard, refs: ReferenceDoc): string {
     lines.push('| state | title | why |');
     lines.push('|---|---|---|');
     for (const state of card.unavailable) lines.push(`| ${state.state} | ${state.title} | ${state.reason} |`);
+    lines.push('');
+  }
+  if (card.nativeOnly.length) {
+    lines.push('## Native-only surfaces (no firmware reference by design)');
+    lines.push('');
+    lines.push('These states are captured and gated like any other, but no firmware surface defines them, so a'
+      + ' firmware reference must not exist and they are excluded from the reference debt above.');
+    lines.push('');
+    lines.push('| state | title | why |');
+    lines.push('|---|---|---|');
+    for (const state of card.nativeOnly) lines.push(`| ${state.state} | ${state.title} | ${state.why} |`);
     lines.push('');
   }
   lines.push('## Limits of this scorecard');
@@ -1610,6 +1655,7 @@ function reportCatalogue(catalogue: Catalogue, refs: ReferenceDoc, asJson: boole
       states: catalogue.states.map(state => ({
         id: state.id, title: state.title, class: state.class, pageModel: state.pageModel,
         xmbml: state.xmbml, native: state.native, captures: state.captures !== false,
+        noFirmwareReference: state.noFirmwareReference === true,
         route: state.route ?? null, regions: state.regions, expect: state.expect ?? null,
         trace: state.trace ?? [], tierANote: state.tierANote,
       })),
@@ -1617,7 +1663,8 @@ function reportCatalogue(catalogue: Catalogue, refs: ReferenceDoc, asJson: boole
     }, null, 2));
   } else {
     console.log(`parity catalogue: ${cataloguePath}`);
-    console.log(`  states     ${catalogue.states.length} (${catalogue.states.filter(s => s.captures !== false).length} capturable today)`);
+    console.log(`  states     ${catalogue.states.length} (${catalogue.states.filter(s => s.captures !== false).length} capturable today, `
+      + `${catalogue.states.filter(s => s.noFirmwareReference === true).length} native-only with no firmware reference)`);
     console.log(`  XMBML      ${catalogue.xmbmlInventory?.documents ?? '?'} documents, `
       + `${catalogue.xmbmlInventory?.views ?? '?'} views, ${catalogue.xmbmlInventory?.items ?? '?'} item/query definitions`);
     console.log(`  flash      ${flash}${existsSync(flash) ? '' : ' (absent: XMBML cross-check skipped)'}`);
@@ -1639,6 +1686,8 @@ function reportCatalogue(catalogue: Catalogue, refs: ReferenceDoc, asJson: boole
            ...(state.route.preGrab ?? []).length ? [`then ${(state.route.preGrab ?? []).join(' ')}`] : []].join(' > ')
         : 'no input';
       console.log(`  ${pad(state.id, idWidth, true)}  ${route}`);
+      if (state.noFirmwareReference === true)
+        console.log(`  ${' '.repeat(idWidth)}  native-only: no firmware surface defines this page, so no firmware reference is owed`);
       if (state.native.reason) console.log(`  ${' '.repeat(idWidth)}  why: ${state.native.reason}`);
       if (state.tierANote) console.log(`  ${' '.repeat(idWidth)}  scope: ${state.tierANote}`);
     }
@@ -1679,26 +1728,57 @@ function reportMatrix(catalogue: Catalogue, refs: ReferenceDoc, cells: Cell[], a
 }
 
 function reportReferencesMissing(catalogue: Catalogue, refs: ReferenceDoc, cells: Cell[], asJson: boolean) {
+  // A state marked noFirmwareReference is a native surface with no firmware counterpart (the Steam folder,
+  // the host video folder, the store sections, the sign-in page, Continue Watching). Its cells owe no
+  // firmware reference: counting them as debt would keep asking the rig for a frame that must not exist.
+  // They stay in the catalogue, in --capture and in the matrix - only the reference debt leaves them out.
+  const nativeOnly = new Set(catalogue.states.filter(state => state.noFirmwareReference === true).map(state => state.id));
+  const owed = cells.filter(cell => !nativeOnly.has(cell.state));
   const missing: Array<{ key: string; state: string }> = [];
   const present: Array<{ key: string; reference: string; kind: string; provenance: boolean }> = [];
+  const nativeCells: Array<{ key: string; state: string }> = [];
   for (const cell of cells) {
     const reference = referencePathFor(cell.key, refs);
-    if (!existsSync(reference.path)) {
+    const exists = existsSync(reference.path);
+    if (nativeOnly.has(cell.state)) {
+      if (!exists) nativeCells.push({ key: cell.key, state: cell.state });
+      continue;
+    }
+    if (!exists) {
       missing.push({ key: cell.key, state: cell.state });
       continue;
     }
     present.push({ key: cell.key, reference: reference.path, kind: reference.kind, provenance: existsSync(provenancePathFor(cell.key, refs)) });
   }
+  // States, not cells: the report used to say only how many cells were empty, which cannot answer "does
+  // this state have a reference anywhere" (the limitation PARITY-SCORECARD.md 11.3 recorded).
+  const referencedStates = new Set(present.map(entry => cells.find(cell => cell.key === entry.key)?.state ?? ''));
+  const owedStates = new Set(owed.map(cell => cell.state));
+  const statesWithReference = [...owedStates].filter(state => referencedStates.has(state)).length;
+  const stateSummary = {
+    total: catalogue.states.length,
+    firmwareReferenced: owedStates.size,
+    withReference: statesWithReference,
+    missing: owedStates.size - statesWithReference,
+    noFirmwareReference: nativeOnly.size,
+  };
   if (asJson) {
     console.log(JSON.stringify({
       schema: 'xmb-parity-references-missing/1',
       referenceRoot: resolveRepo(refs.root),
       cells: cells.length,
+      firmwareCells: owed.length,
       present, missing,
-      note: 'A cell with no reference is reported, never scored against another state.',
+      states: stateSummary,
+      noFirmwareReference: { states: [...nativeOnly], cells: nativeCells.length },
+      note: 'A cell with no reference is reported, never scored against another state. A state with '
+        + 'noFirmwareReference owns no firmware surface, so its cells owe no reference and are reported separately.',
     }, null, 2));
   } else {
-    console.log(`references: ${present.length}/${cells.length} selected cells present`);
+    console.log(`references: ${present.length}/${owed.length} firmware-reference cells present`
+      + `  (${cells.length} selected cells, ${nativeCells.length} on ${nativeOnly.size} native-only state(s) that owe none)`);
+    console.log(`  states: ${statesWithReference}/${owedStates.size} firmware-referenced states have a reference somewhere; `
+      + `${nativeOnly.size} native-only state(s) owe none (${catalogue.states.length} states in the catalogue)`);
     console.log(`  root ${resolveRepo(refs.root)}`);
     if (present.length) {
       console.log('');
@@ -1717,6 +1797,12 @@ function reportReferencesMissing(catalogue: Catalogue, refs: ReferenceDoc, cells
       console.log('');
       console.log('  These are captured and gated on Tier A/C, and reported as "no reference yet" for Tier B.');
       console.log('  The RPCS3 rig produces them: work/parity-reference.json rpcs3.perCellRecipe.');
+    }
+    if (nativeOnly.size) {
+      console.log('');
+      console.log('  Native-only surfaces (noFirmwareReference): no firmware frame exists, and none should be captured:');
+      for (const state of catalogue.states.filter(candidate => candidate.noFirmwareReference === true))
+        console.log(`    ${pad(state.id, 24, true)}  ${state.title}`);
     }
   }
   if (missing.length) process.exitCode = 1;
@@ -1863,8 +1949,9 @@ async function main() {
     for (const state of catalogue.states) {
       const cells = state.captures === false ? 'not capturable' : 'capturable';
       const trace = state.trace?.length ? `${state.trace.length} trace step(s)` : 'no trace';
+      const reference = state.noFirmwareReference === true ? 'no fw reference (native-only)' : 'fw reference owed';
       console.log(`${pad(state.id, 24, true)} ${pad(state.class, 11, true)} ${pad(state.native.reachable, 12, true)} `
-        + `${pad(cells, 14, true)} ${pad(String(state.regions.length), 2, true)} region(s)  ${trace}`);
+        + `${pad(cells, 14, true)} ${pad(reference, 29, true)} ${pad(String(state.regions.length), 2, true)} region(s)  ${trace}`);
     }
     return;
   }
@@ -1934,6 +2021,9 @@ function reportScorecard(card: ScoreCard, paths: { jsonPath: string; mdPath: str
   console.log(`parity scorecard: ${card.totals.claims}/${card.totals.capturable} capturable states pass A+B+C`);
   console.log(`  Tier A ${card.totals.tierA} pass, Tier B ${card.totals.tierB} pass, Tier C ${card.totals.tierC} pass`);
   console.log(`  ${card.totals.noReference} captured cell(s) with no reference yet; ${card.totals.failed} cell gate failure(s)`);
+  console.log(`  reference coverage ${card.totals.statesWithReference}/${card.totals.coveredFirmware} states covered by this run `
+    + `(+${card.totals.noFirmwareReference} native-only that owe none; catalogue ${card.totals.firmwareReferenced} + `
+    + `${card.totals.noFirmwareReference} native-only of ${card.totals.states})`);
   console.log('');
   const width = Math.max(5, ...card.states.map(state => state.state.length));
   console.log(`${pad('state', width, true)}  ${pad('class', 11, true)}  ${pad('A', 6)}  ${pad('B', 14)}  ${pad('C', 4)}  claim`);
