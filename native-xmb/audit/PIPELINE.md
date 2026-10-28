@@ -808,3 +808,198 @@ it would reproduce either the native's plateau or the console's value and locali
 - No change was kept, so there is no before/after delta: the numbers above are the current tree's numbers, and the
   pedestal did not shrink. Scratch scripts and dumps live under `out/bgprobe/` and are local only; no budget,
   reference or harness file was touched.
+
+## The display chain against the captured call list, and where the day term actually lives, 2026-10-28 (third pass)
+
+This pass was asked to test the hypothesis that the state-dependent day excess (+19.6..+21.4/255 at day against
++0.8..+1.5/255 at night) is an energy term in the post-background chain: the glare/bloom contribution, a tone-curve
+shoulder, or the firmware's `ToneApplyDisplay` composite. It rebuilt the console's display chain from the captures,
+then measured the native frame against the native pre-tone-map scene on the same build. The result is the opposite of
+the hypothesis and is worth stating first: **the day excess is already in the scene before `Hdr::finish`, and inside
+that window the frame equals `ToneMap(scene)` to 0.0/255, so no display-chain term - glare, tone curve, composite
+program or dither - can own it.** No source file was changed by this pass; the canonical frame is byte-identical
+(SHA256 `FB3882E5...0F35412` from two independent captures) and the gate is PASS 6/6.
+
+### 1. The console's chain, from the captured call list
+
+`out/native-reference/fp-dump2/calls.txt` holds 306 draws with the microcode length of every draw; `fpdump7/calls.txt`
+holds 2348. Program names come from the plugin's own table (`out/native-reference/lines/cg-programs.txt`, which gives
+`ucode N bytes` per `.fpo`). Length histogram of the 306-draw window, with the only names of that size:
+
+| ucode | count | program(s) of that microcode length |
+|---:|---:|---|
+| 8608 | 5 | `lib/moyou/back_colours0.fpo` (the 395-instruction background) |
+| 400 | 4 | `lib/glutils/GlareSourcePre.fpo` (unique at this size) |
+| 640 | 54 | `lib/glutils/Gaussian.fpo` (also `moyou/ffd_shader2.fpo`) |
+| 96 | 5 | `lib/glutils/ToneApplyDisplay.fpo`, `moyou/ffd_alpha_blend.fpo`, `glutils/BlurAcc.fpo` (three share 96) |
+| 48 | 27 | `glutils/AccGlare.fpo`, `ApplyDisplay.fpo`, `CopyVarAlpha.fpo`, `moyou/background.fpo` |
+| 128 | 0 | `lib/glutils/ApplyGlare.fpo` (unique at this size) |
+| 112 | 0 | `lib/glutils/GlareSourceNoTone.fpo` (unique at this size) |
+| 272 | 0 | `lib/glutils/ToneMap.fpo` (unique at this size) |
+| 384 | 0 | `lib/glutils/ToneApplyDisplayMRT.fpo` (unique at this size) |
+
+Limits of that evidence, stated because the previous pass leaned on it: the window is a sparse sample (the recorded
+frame indices run 24..478 and only five of them carry a full set of draws), and it contains **no** 272-byte `ToneMap`
+and **no** 112-byte `GlareSourceNoTone`, i.e. it does not hold a complete HDR chain. So "the firmware never draws
+`ApplyGlare`" is true of these 306 draws and not proven for every frame; and "96 bytes = `ToneApplyDisplay`" is an
+inference from the size and from the once-per-captured-frame cadence, not an identification (two other programs share
+96 bytes). What the window does establish is enough to read the two programs' arithmetic:
+
+`ToneApplyDisplay.fpo` (6 instructions, translated in `out/native-reference/lines/glsl/ToneApplyDisplay.fpo.glsl`):
+
+```
+r0 = texture(_Glare, uv)                      // TEXUNIT1
+r1 = r0 * _GlareWeight                        // slot 0
+r0 = texture(preexpose_Noise, gl_FragCoord)   // TEXUNIT13
+r0 = -r0 * 0.125 + r1                         // fc[1] = 0.125
+out = r0
+```
+
+It never samples the screen: the tone-mapped screen is already in the destination and this pass adds `glare x weight`
+and subtracts `noise/8`. `ApplyGlare.fpo` (128 bytes, ours) instead samples both and replaces the target:
+`screen*_Weight1.x + glare*_Weight1.y`, and `Hdr::finish` sets `_Weight1 = (1, GLARE LEVEL)`. The two are the same sum
+apart from the dither, which is what `VIDEO-REFERENCES.md` already records.
+
+The background draw itself is `surface 64x32` with four 64x32 month palettes in `tex0..tex3` (format 0x85) - the
+console renders the background at 64x32 and scales it up, where this build evaluates the same program at 1920x1080.
+
+### 2. The measurement that takes the display chain out of the running
+
+`XMB_BG_SCENE` dumps the float scene after the background draw, the ribbon and the procedural pass, and before
+particles and `Hdr::finish`. Comparing that dump with the captured frame gives the chain's own contribution pixel by
+pixel; comparing both with the reference gives the console's. Canonical pins (`--render-clock 30`,
+`--background-clock 2026-10-25T10:00`, `--ui-clock 2026-10-25T12:32`, `--focus-time 2000`), top window y<70,
+x<1400, where the previous pass measured the day term:
+
+| day, y<70 x<1400 | R | G | B |
+|---|---:|---:|---:|
+| native display | 125.3 | 104.8 | 62.5 |
+| console display | 103.9 | 82.7 | 42.9 |
+| native scene (dump) | 0.4357 | 0.3673 | 0.2233 |
+| console scene (reference inverted through the day preset) | 0.3642 | 0.2926 | 0.1549 |
+| **native frame minus `ToneMap(scene)`** | **+0.00** | **+0.06** | **+0.09** |
+| native minus console, linear scene | +0.0715 | +0.0747 | +0.0684 |
+| native minus console, display | +21.4 | +22.1 | +19.6 |
+
+The fifth row is the whole argument. In the exact window where the day term lives, this build's frame is
+`ToneMap(scene)` to a tenth of a level: the glare contributes **0.0/255** there, and the tone map is applied exactly
+as configured. A chain applied to the same scene can therefore not produce the console's value; the console's scene
+must be below ours. Repeating it per band (x<1400) gives `native - ToneMap(scene)` of +0.00, -0.04, +2.08, +8.96,
++0.33, +1.87, +0.74, +1.47, +2.97, +2.12, +1.94, +2.10 for R - the glare is real but local (its maximum is at the
+ribbon's upper edge, band 3), and it is zero in the ribbon-free top and bottom bands.
+
+Two more host-side tests, both negative:
+
+- **A tone-curve change cannot reconcile the pair.** Solving the shipped curve for the per-pixel `k = 1/white^2`
+  over EXPOSURE 0.70..1.45 on the ribbon-free bands (y 0-240 and 900-1080, x<1400) leaves no interior solution: the
+  best grid point is EXPOSURE 0.792 with a per-channel `white` of 0.739 / 0.791 / 1.712 (relative sd 194%) and an
+  rms of 13.0/255, against 21.95/255 for the shipped 1.05 / 0.899181. A single (EXPOSURE, WHITE) pair maps our scene
+  onto the console's display nowhere.
+- **The day term is not an additive pedestal either.** Fitting `console = a * native + b` inside the top window gives
+  a = 0.983, b = -18.1, rms 1.00/255, but across the ribbon-free bands the difference falls from +21.0 (band 0) to
+  +16.4 (band 10) as the scene falls from 0.44 to 0.34, and per channel the scene deltas are equal in absolute terms
+  while the channels' levels differ by 2x. A constant subtraction fits one band and misses the rest; the previous
+  pass's refusal to ship one was right.
+
+What the term looks like instead: a smooth field, flat within a band (+-0.6/255), +21 at the top and +16.5 at the
+bottom, equal across channels in linear scene units. That is a property of the background program's output, not of
+the display chain - which is where the previous pass's five exclusions put it, now with the chain itself measured
+rather than assumed.
+
+### 3. The glare term, and the one chain divergence this pass did find
+
+The only glare-source program the captured window draws is `GlareSourcePre` (400 bytes, 4 draws), and it does not
+read a linear scene: it inverts `ToneMap` on the tone-mapped display, which has been clipped at 1. The inverse
+saturates, so the recovered scene at display white is `WHITE LEVEL / EXPOSURE` = 0.899181 / 1.05 = **0.8564** at
+day, and the source can exceed `GLARE THRESH` (0.738857) by at most **0.1175** for any pixel at or above white.
+This build feeds `GlareSourceNoTone` with the raw float scene and a threshold of `GLARE THRESH / EXPOSURE`, so its
+source is unbounded above (a scene of 2.0 gives an excess of 1.30, eleven times the console's cap). That is a real
+divergence in the chain and it is on the list for the next pass. It cannot be the day term: the glare is 0.0/255 in
+the window where the term lives, and the cap only bites on the clipped specular of the ribbon and the clock plate.
+
+The composite divergence is real too (`ToneApplyDisplay` + dither against `ApplyGlare`), and it is not ported here
+because three inputs are untraced and each candidate interpretation is contradicted by a measurement:
+
+1. **The dither.** `-noise/8` is state-independent. If it were the ~16-21/255 pedestal, the night background would
+   be clipped to zero (the console's night top window is 6.28 / 6.17 / 5.80) and this build's would read +8, not the
+   +1.50 measured. It also requires the noise sampler's address mode and the bound texel: the captured `tex13` of
+   the background draw is 32x32 format 0xe5, not the 64x64 `textures/TGA/Noise.tga` the second pass names, and the
+   captured display draw has no parameter dump.
+2. **The weight.** `_GlareWeight` is a runtime constant whose setter the decompile leaves behind a vtable
+   (`custom_render_all.c`); the AccGlare per-level `_Weight` is a reconstruction (`GLARE SUM POW^level`
+   normalised), so the console's per-level weights are not known either.
+3. **The destination and blend.** `ToneApplyDisplay` does not write the screen, so its result depends on what is
+   already in the target and on the blend factors, neither of which the capture records. Swapping it in without them
+   would subtract a fitted constant from one state and clip the other.
+
+### 4. The night state, measured properly
+
+The second pass's night numbers are the top window at the reference's own clock; this pass reproduces them, and also
+finds that the night state is not globally right: its lower half is a second, separate gap. Reference
+`root__original__night__1080p` (console 10/27 9:53 PM) against a capture at `--background-clock
+2026-10-27T21:53:00`:
+
+| night | band 0 (y 0-90) | band 5 | band 8 | band 11 |
+|---|---:|---:|---:|---:|
+| native scene R/G/B | 0.023 / 0.022 / 0.019 | 0.212 / 0.189 / 0.157 | 0.121 / 0.080 / 0.030 | 0.172 / 0.114 / 0.049 |
+| console scene, inverted | 0.015 / 0.014 / 0.014 | 0.135 / 0.115 / 0.104 | 0.062 / 0.020 / 0.001 | 0.119 / 0.059 / 0.001 |
+| delta | +0.008 / +0.007 / +0.005 | +0.076 / +0.074 / +0.053 | +0.059 / +0.060 / +0.029 | +0.053 / +0.055 / +0.047 |
+
+In the top window (y<70, x<1400) the night reads +1.50 / +1.37 / +0.83 display, matching the second pass; the lower
+half carries +0.05..+0.095 in scene units, which is larger than the console's own level in blue (0.049 against 0.001)
+and about 40% in red. That is a background-level, spatially structured
+gap (a night palette / day-night-blend difference), not a pedestal and not the display chain. Every fragment-program
+capture in the repository is at 10:00, so `_NightDayBlend`, `_DayTime` and `_NightTime` have never been decoded at a
+night clock; that capture is the cheapest next artifact for this half of the problem.
+
+### 5. Tables, scores and gate (no change kept, so before equals after)
+
+12-band native-minus-console luma, 90 px bands, full width, canonical pins. Day (frame SHA256 `FB3882E5...0F35412`):
+
+| band | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| day | +21.4 | +20.2 | +19.6 | +20.0 | +30.8 | +35.3 | +27.3 | -7.1 | -3.4 | +10.6 | +17.1 | +16.8 |
+| night (21:53) | +3.8 | +6.4 | +14.1 | +20.5 | +15.9 | +31.7 | +27.0 | +16.8 | +23.8 | +22.8 | +20.6 | +21.7 |
+
+Bands 0-3 and 10-11 are ribbon-free (the ribbon sits at y 360-840); the night lower bands include the reference's
+different Game-column rows, which is why the top window above is the state comparison rather than the band means.
+The day table is the current build's; bands 0-4, 6 and 9-11 agree with the second pass within 0.5/255 and bands 5, 7
+and 8 differ by up to 1.1/255 (this capture is from `out/native-xmb`, the second pass's from `out/native-pedestal`).
+
+- Canonical gate, `work/ab-layers.ts --capture --exe C:\dev\xmb\out\native-xmb\re-ps3-native.exe`: **PASS 6/6**
+  with the text-presence line (1,677 bright pixels, minimum 900). Frame 18.31 / 0.8356 (base 18.29 / 0.8342), top
+  background 20.25 / 0.9363, category icon row 21.20 / 0.9029 (base 20.93 / 0.8990), item label row 11.95 / 0.3924,
+  clock text 11.39 / 0.4500, info bar 14.98 / 0.7639. No re-baselining.
+- `work/parity.ts --capture --score --state root,page-settings-system`: Tier A PASS on both cells. Root frame
+  17.86 / 0.8226, top background 22.24 / 0.9710 PASS, category icon row 20.52 / 0.9087 PASS, item label row
+  11.03 / 0.3957 (content), clock text 11.57 / 0.5376, info bar 14.54 / 0.7669. `page-settings-system` frame
+  18.50 / 0.8533 PASS, page rows 16.26 / 0.7397 (content). Same numbers as the second pass.
+- Determinism: two independent `--capture` runs of root day (different run directories) are SHA256-identical,
+  `FB3882E50EEF90956CBA9DB40E683DA9A744415323C9782F22B73E71C0F35412`.
+- Build identity: every number above is `out/native-xmb/re-ps3-native.exe` (built 07:08:40), the build the stored
+  capture baselines were measured on. Concurrent passes have since moved `view.cpp` (07:59) and `work/parity.ts`
+  (08:03) and committed them; no HDR or particle file changed, and this pass rebuilt nothing, so the canonical frame
+  above is the one that owns the current baselines rather than a fresh build of a tree other passes are still
+  editing.
+
+### 6. What closes it, and what this pass did not do
+
+No source file was edited (no `hdr.cpp`, `hdr.h` or `particles.cpp` change was shipped), because every candidate
+display-chain correction is either impossible in magnitude (the glare is zero where the term lives), contradicted by
+one of the two states (the dither), or blocked on an untraced input (the `_GlareWeight`, the AccGlare weights, the
+composite's destination/blend). The closing artifacts, in the order that settles the most per unit of work:
+
+1. **The console's 64x32 pre-tone-map surface** after the `back_colours0` draw at the pinned clock - the previous
+   pass's item 7. It decides between "our translation computes a different value" and "the console's draw differs"
+   with one comparison against `XMB_BG_SCENE`.
+2. **A CPU evaluation of the translated 395-instruction program** on the console's seven decoded constants and the
+   two month palettes, which localises the instruction if (1) says translation.
+3. **A night-clock fragment capture** (the existing ones are all 10:00) to read `_NightDayBlend` / `_DayTime` /
+   `_NightTime` at 21:53, for the night lower-half gap in section 4.
+
+The glare-source cap in section 3 is the one chain change worth doing and it should be done as a proper port of
+`ToneMap -> GlareSourcePre -> threshold -> Gaussian -> AccGlare`, with its own before/after, not as a clamp bolted
+onto the current `GlareSourceNoTone` feed.
+
+Scratch scripts and dumps for this pass live under `out/hdrprobe/` (`analyze.py`, `fit.py`, the two scene dumps, the
+21:53 capture) and are local only; no budget, reference or harness file was touched.
