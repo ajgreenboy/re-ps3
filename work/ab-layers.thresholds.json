@@ -332,7 +332,7 @@
     },
     {
       "name": "jellyfin-signin",
-      "description": "The in-XMB Jellyfin sign-in page opened from a registered Jellyfin service row in the TV column (the seeded apps.json registration, no server contacted). Five rows, focus on Username, the registration URL shown read-only, and the page, not a modal widget.",
+      "description": "The in-XMB Jellyfin sign-in page opened from a registered Jellyfin service row in the TV column (the seeded apps.json registration, no server contacted). Six rows (Server URL, Username, Password, Stay Signed In, Sign In, Cancel), focus on Username, the registration URL shown read-only, and the page, not a modal widget.",
       "reference": "out/native-reference/layers/jellyfin-signin.png",
       "dataSeed": "out/native-reference/store/jf-smoke",
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "apps.json", "cache"],
@@ -342,7 +342,7 @@
       "expect": {
         "category": "tv",
         "depth": 1,
-        "entryCount": 5,
+        "entryCount": 6,
         "entryId": "jellyfin-signin:username",
         "entryTitle": "Username",
         "pageKind": "jellyfinSignIn",
@@ -353,7 +353,7 @@
           "focusedRow": "jellyfin-signin:username",
           "modalWidget": ""
         },
-        "log": [{ "pattern": "jellyfin: sign-in page opened rows= Server URL\\|Username\\|Password\\|Sign In\\|Cancel focus= Username" }]
+        "log": [{ "pattern": "jellyfin: sign-in page opened rows= Server URL\\|Username\\|Password\\|Stay Signed In\\|Sign In\\|Cancel focus= Username" }]
       },
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
