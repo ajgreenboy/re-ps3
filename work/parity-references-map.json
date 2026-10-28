@@ -1,0 +1,240 @@
+{
+  "schema": "xmb-parity-references-map/1",
+  "updated": "2026-10-27",
+  "note": "The auditable record of which RPCS3 frame backs which Tier B cell. Authored from what each batch's MANIFEST.md says the frame shows (the manifest section is cited in every note), not from file names. `entries` is the input to work/parity-import.ts; the importer rewrites each entry's `applied` block with the cell, the destination reference and provenance paths, and the source and destination sha256 (identity: the importer copies or hard-links, it never converts). An entry's `replaced` field records a deliberate re-import of the same source into the same cell - here the batch was imported twice on 2026-10-27 because the first sidecars carried the manifest's typography and the corpus is ASCII; the source frame did not change. The images stay under out/parity-references/, which .gitignore excludes, so this file is the committed part: paths and hashes, never firmware pixels.",
+  "referenceRoot": "out/parity-references",
+  "contract": "work/parity-reference.json",
+  "catalogue": "work/parity-catalogue.json",
+  "importer": "work/parity-import.ts",
+  "batches": [
+    {
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "captureRoot": "C:/dev/out/rpcs3-ref-2026-10-28",
+      "status": "imported",
+      "session": "2026-10-27 21:34-21:59 local (America/Chicago), one RPCS3 boot",
+      "frames": "135 stills + 9 bursts, all 1920x1080",
+      "imported": 9
+    },
+    {
+      "manifest": "C:/dev/out/rpcs3-ref2-2026-10-28/MANIFEST.md",
+      "captureRoot": "C:/dev/out/rpcs3-ref2-2026-10-28",
+      "status": "refused",
+      "reason": "No MANIFEST.md at import time (2026-10-27 23:0x local). The directory existed and was still being written (menus/, lists/, depth2/, nav2/, bands/ and logs/ with mtimes at 22:5x-23:0x), but with no manifest there is no statement of what each frame shows, and frames are never mapped from file names alone. work/parity-import.ts refuses a batch with no manifest; re-run it when MANIFEST.md lands."
+    }
+  ],
+  "entries": [
+    {
+      "state": "root",
+      "theme": "original",
+      "background": "night",
+      "resolution": "1080p",
+      "source": "dialogs/root-clock-mmdd-12h.png",
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "clock": "console 10/27 9:53 PM (MM/DD 12-hour), 2026-10-27 21:53 local - the firmware's night window",
+      "note": "Manifest 4.1/6: the Game-column root after Settings > Date Format = MM/DD/YYYY and Time Format = 12-Hour Clock, so the clock plate reads '10/27 9:53 PM' - the format the native app renders - with the plate at x=1329, y=75, 591x58 px. Filed at the night cell, not the canonical day cell, because the frame was taken at 21:53 (the firmware's night background: dark wave, stars) and root__original__day__1080p is occupied by the registered pre-contract frame; see the scorecard for the contract change that retiring that entry would need. Content differs from the native root by construction: the console Game column holds PlayStation Store / Saved Data Utility (PS3) / Corrupted Data while the native build holds the Steam Store rows, so the category icon row and the item label row are not the same rows.",
+      "applied": {
+        "cell": "root__original__night__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\dialogs\\root-clock-mmdd-12h.png",
+        "sourceSha256": "cf68d72202d09ae38418fa5403948385f9e655a38be289287a757d3b71bd9a6f",
+        "destinationSha256": "cf68d72202d09ae38418fa5403948385f9e655a38be289287a757d3b71bd9a6f",
+        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T04:02:31.798Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-user",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "nav/users-column.png",
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "clock": "console 10/27 9:47 PM (MM/DD 12-hour), 2026-10-27 21:47 local - the firmware's night window",
+      "note": "Manifest 4.3/4.5: the Users-column state check from the OSK route (Users column before the up move to Create New User), one of the 24 nav/ frames the manifest says document the route and the state each capture was taken in. The manifest names nav/ as a group, not this file, so the mapping records manifestRef=group. Filed at the canonical cell because that is the only cell the scorecard captures today; the frame itself is a 21:47 night frame, so the background layer differs from the cell's day pin by construction. Rows differ by construction: the console shows '*User' plus 'Turn Off System' / 'Create New User' above the column, the native build rebuilds the Users column from the profile set.",
+      "applied": {
+        "cell": "column-user__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\nav\\users-column.png",
+        "sourceSha256": "0008bdabe7a7d259efd8c3d914c4cd939f18c563addae1917754ed3cc9f97f28",
+        "destinationSha256": "0008bdabe7a7d259efd8c3d914c4cd939f18c563addae1917754ed3cc9f97f28",
+        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "manifestRef": "group",
+        "imported": "2026-10-28T04:02:31.805Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-settings",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "settings/column-system-update.png",
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "clock": "console 27/10 21:39 (DD/MM 24-hour, inferred from the 21:40 settings page frames of the same group)",
+      "note": "Manifest 4.2: 'Settings column, focus row 1 (System Update)' - the Settings column state, used as the U8 context frame. The frame itself shows the console's focused-first-row treatment: System Update is expanded into a title, a one-line help block and an icon plate, and the rows below keep the column pitch (Game Settings, Video Settings, Music Settings, Chat Settings, System Settings, Theme Settings ...). Two caveats by construction: the frame is a night frame filed at the canonical day cell (the scorecard scores only the canonical cell today), and the console's clock is DD/MM 24-hour (27/10 21:39) while the app renders MM/DD 12-hour. Whether the native column reproduces the expanded focused row is a fidelity question this reference is meant to expose, not a mapping error.",
+      "applied": {
+        "cell": "column-settings__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\settings\\column-system-update.png",
+        "sourceSha256": "69c3b5818c2b377cb80c33b416c8f4d0a7f436310780438dbb21d376468d43ad",
+        "destinationSha256": "69c3b5818c2b377cb80c33b416c8f4d0a7f436310780438dbb21d376468d43ad",
+        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T04:02:31.812Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-photo",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "media/photo-column-empty.png",
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "clock": "console 10/27 9:53 PM (MM/DD 12-hour), 2026-10-27 21:53 local - the firmware's night window",
+      "note": "Manifest 4.4: 'root -> left from Game through Video, Music, Photo ... evidence that the Media columns hold no playable items' - this is the Photo column (Photo icon focused, rows 'Search for Media Servers', 'Photo Gallery', 'Playlists'). Filed at the canonical day cell while the frame is a 21:53 night frame, so the background differs from the cell's pin by construction. Content differs by construction as well: the console's VFS holds no photos, the native build lists the host's chosen photo folder.",
+      "applied": {
+        "cell": "column-photo__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\media\\photo-column-empty.png",
+        "sourceSha256": "b7b26ec6eb9ba2f0fb164069c4034ab1afeecd08ff114808351bd7f8fc72efcc",
+        "destinationSha256": "b7b26ec6eb9ba2f0fb164069c4034ab1afeecd08ff114808351bd7f8fc72efcc",
+        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T04:02:31.820Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-music",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "media/music-column-empty.png",
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "clock": "console 2026-10-27 21:5x local (MM/DD 12-hour, the time-format setting of that group) - the firmware's night window",
+      "note": "Manifest 4.4: the Music column of the same left-walk, with only 'Search for Media Servers' and 'Playlists' - the manifest's own description of the empty Music page. Filed at the canonical day cell while the frame is a night frame (background differs by construction); rows differ by construction too: the console has no music, the native build lists the host's music folder.",
+      "applied": {
+        "cell": "column-music__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\media\\music-column-empty.png",
+        "sourceSha256": "f0bac56f57cca70d6767077af647a4b626eb6fdbb1339c3e24702d8ba031af5c",
+        "destinationSha256": "f0bac56f57cca70d6767077af647a4b626eb6fdbb1339c3e24702d8ba031af5c",
+        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T04:02:31.827Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-video",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "media/video-column-empty.png",
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "clock": "console 2026-10-27 21:5x local (MM/DD 12-hour, the time-format setting of that group) - the firmware's night window",
+      "note": "Manifest 4.4: the Video column of the same left-walk ('Video/Music/Photo pages are empty'; the console Video column reads BD Data Utility / Search for Media Servers / Video Editor & Uploader, checked on the frame). Filed at the canonical day cell while the frame is a night frame, so the background differs from the cell's pin by construction. Content differs by construction: the console Video column has no playable items, the native build's Video column carries Continue Watching and Video Library.",
+      "applied": {
+        "cell": "column-video__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\media\\video-column-empty.png",
+        "sourceSha256": "4f8270ee31ff89a64d46c9576732c80a0f0aa0af12a61277d0223ac1b9af8c2b",
+        "destinationSha256": "4f8270ee31ff89a64d46c9576732c80a0f0aa0af12a61277d0223ac1b9af8c2b",
+        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T04:02:31.835Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-settings-system",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "settings/page-system-settings.png",
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "clock": "console 27/10 21:40 (DD/MM 24-hour), 2026-10-27 21:40 local - the firmware's night window",
+      "note": "Manifest 4.2: Settings column row 6 (System) opened with Cross, settled 2.4 s, then Circle back - the settings page group rows 2-16. The frame shows the System page: 'Automatic Update' focused with a two-line help block, then System Name, System Language, Character Set, Dictionary Type, Add/Edit Term, Delete Predictive Text Dictionary. There is no file name for this row in the manifest (the group is a '...' range), so manifestRef=group; the page identity was checked against the frame, not assumed from the name. Two caveats by construction: the frame is a night frame filed at the canonical day cell, and its clock is DD/MM 24-hour while the app renders MM/DD 12-hour. The row values differ by construction - the native page is built from sysconf_plugin RCO schemas and the host's own system strings.",
+      "applied": {
+        "cell": "page-settings-system__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\settings\\page-system-settings.png",
+        "sourceSha256": "bd2d220c2c712bb0c4dbf29f55b00a0a5c8554581bc4ba91bf7b9cef81253f62",
+        "destinationSha256": "bd2d220c2c712bb0c4dbf29f55b00a0a5c8554581bc4ba91bf7b9cef81253f62",
+        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "manifestRef": "group",
+        "imported": "2026-10-28T04:02:31.842Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "osk",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "osk/osk-default-focus.png",
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "clock": "not readable: the OSK's dimmed parent hides the clock plate; session 2026-10-27 21:5x local - night window",
+      "note": "Manifest 4.3: 'panel settled' after the open burst, the default-focus frame - title 'User Name', field 'User 1', default focus 'g', prediction cell 'a 0', function rows @#: / a/a / a/A / Backspace / Space. The panel geometry in the manifest (x 493-1427, y 282-755) is the same panel the catalogue's 'osk panel' crop [480,280,960,520] frames, which is why this frame is a fair reference for the panel layer. It is NOT a matched state: the app's OSK opens over the Jellyfin sign-in page while this one opens over the console's Create New User dialog, so the page beneath (and the whole-frame region) differs by construction, and the frame is a night frame filed at the canonical day cell. The catalogue has no Tier A oracle for the OSK either (the dump cannot see an open keyboard).",
+      "applied": {
+        "cell": "osk__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\osk\\osk-default-focus.png",
+        "sourceSha256": "0a5fca6fa209da79fc268278eb34e460ddb0e19ce46390b16fe73985f1be3274",
+        "destinationSha256": "0a5fca6fa209da79fc268278eb34e460ddb0e19ce46390b16fe73985f1be3274",
+        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T04:02:31.848Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "options-panel",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "dialogs/options-open-01.png",
+      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
+      "clock": "not readable: the options band covers the clock plate; session 2026-10-27 21:5x local - night window",
+      "note": "Manifest 4.1/6: Triangle on the focused Game item, settled 1.5 s - the per-item options menu (expage_menu), rows 'Start / Delete / Information' at baselines y 479/516/554, pitch 37-38 px, band starting at x 1180, with the 'Sort By' / 'Group Content' entries above them. This is the same surface the native options panel draws over the Video Library page, so it is the right reference for the panel layer, but it is not a matched state: the console's rows are the corrupt-item set (Start/Delete/Information) while the native panel's are Open/Information/Sort By/Close, and the page under the panel is the Game column rather than a folder page. The frame is a night frame filed at the canonical day cell. The row-set difference is a content difference by construction, stated rather than averaged away.",
+      "applied": {
+        "cell": "options-panel__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\dialogs\\options-open-01.png",
+        "sourceSha256": "dfc705fe3fd25ff02831748eae56b0364ae7ab4ea1ed1bc22cb43f590cb1777a",
+        "destinationSha256": "dfc705fe3fd25ff02831748eae56b0364ae7ab4ea1ed1bc22cb43f590cb1777a",
+        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T04:02:31.854Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.state.json"
+      },
+      "skipped": null
+    }
+  ],
+  "summary": {
+    "entries": 9,
+    "applied": 9,
+    "skipped": 0,
+    "referenceRoot": "C:\\dev\\xmb\\out\\parity-references"
+  }
+}
