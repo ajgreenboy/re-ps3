@@ -1136,6 +1136,7 @@ struct PanelBand {
     bool fixedRows=false;     // rows are anchored at rowCentre and do not travel with focus
     double rowCentre=505.;    // fixed rows: row 0's text centre; scrolling list: the focus row's centre
     double labelInset=16.;    // row text left = x0 + labelInset
+    double groupGap=0.;       // fixed rows: distance up to a divider group's origin
     double contentDim=1.;     // brightness of the page the band covers, at rest (measured)
     const BandStop* stops=nullptr;
     int stopCount=0;
@@ -1178,7 +1179,7 @@ const PanelBand kChoiceBand{.firmware=true,.x0=1260.,.fadeEnd=1690.,.pitch=40.,.
 // first baseline; drawing centres the em box 8 px above that baseline, which is the offset measured
 // between the rect centre and the ink bottom on this build's capture (SETTINGS 13.5).
 const PanelBand kOptionsBand{.firmware=true,.x0=1320.,.fadeEnd=1742.,.pitch=38.,.fixedRows=true,
-    .rowCentre=552.,.labelInset=14.,.contentDim=.545,.stops=kOptionsBandStops,
+    .rowCentre=552.,.labelInset=14.,.groupGap=237.,.contentDim=.545,.stops=kOptionsBandStops,
     .stopCount=int(std::size(kOptionsBandStops))};
 }
 const View::ChoiceBand* View::choiceBandFor(const QString& setting) {
@@ -1232,8 +1233,11 @@ int View::choiceBandFocus(const ChoiceBand& band,const QVector<Entry>& model,int
             if(shell_.valueText(model[i])==QString(QChar(0x25CF))){dot=i;break;}
         return std::clamp(rest+picked-(dot>=0?dot:0),0,count-1);
     }
-    // (3) Nothing in the drawn list is current: keep the model's own position.
-    return std::clamp(picked,0,count-1);
+    // (3) Nothing in the drawn list is current: draw no focused row. The caller still gets a position
+    // for its own motion, but no item may claim to be the stored value (the IANA time-zone case,
+    // SETTINGS-FIRMWARE 13.6a: the model reports currentRow -1 and the band must agree).
+    (void)picked;
+    return -1;
 }
 void View::drawScene(QPainter& p) {
     iconQueue_.clear();
@@ -1314,11 +1318,19 @@ void View::drawScene(QPainter& p) {
         }
         const double labelX=firmwareBand?x0+band->labelInset:x0+(rows?34:16);
         const double labelWidth=(firmwareBand?fadeEnd:1920.)-labelX-24;
+        // The shell's dividerBefore is the firmware's group break: rows before it are the utility group,
+        // which starts groupGap px above the action group's own origin. Both origins are this band's
+        // measured numbers, so no menu-specific y offset enters the view.
+        int groupBreak=0;
+        if(rows)for(int i=0;i<int(rows->size());++i)if((*rows)[i].dividerBefore){groupBreak=i;break;}
         for(int i=0;i<int(rowCount);++i) {
             const double distance=i-position;
             // Firmware rows are anchored on the measured baselines and do not travel with focus; the
             // settings list keeps its 40 px pitch and its centred-with-focus motion.
-            const double y=(firmwareBand&&band->fixedRows)?focusRow+double(i)*pitch:focusRow+distance*pitch;
+            const bool aboveBreak=firmwareBand&&band->fixedRows&&groupBreak>0&&i<groupBreak;
+            const double y=(firmwareBand&&band->fixedRows)
+                ?focusRow+double(aboveBreak?i:i-groupBreak)*pitch-(aboveBreak?band->groupGap:0.)
+                :focusRow+distance*pitch;
             if(y<-40 || y>1120)continue;
             const double focus=std::max(0.,1.-std::abs(distance));
             const QRectF rect(labelX,y-20,labelWidth,40);
@@ -2275,6 +2287,9 @@ void View::toggleMusicPanel() {
     musicPanelOpen_=!musicPanelOpen_;
     if(musicPanelOpen_) {
         musicPanelFocus_=0;
+        // The firmware plays its module-action cue on panel open (explore_plugin_all.c:38936); the native
+        // cue map calls that sound Cue::Accept, not Cue::Confirm (audit MEDIA-PANELS-FIRMWARE 7.2/11.7).
+        shell_.playCue(InteractionAudio::Cue::Accept);
         // A fresh open starts the fade from nothing: the ease is reset so the 150 ms runs from 0.
         musicPanelEase_=PafEase();
         musicPanelEase_.retarget(0.);
