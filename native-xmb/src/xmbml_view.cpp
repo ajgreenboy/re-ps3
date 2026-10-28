@@ -71,6 +71,77 @@ QString nativeId(const QString& key,const QHash<QString,QString>& aliases) {
     if(candidateAlias!=aliases.cend() && !candidateAlias->isEmpty())return *candidateAlias;
     return candidate;
 }
+// The row's table, looked up by the node's attr, then its key; a view with a single table is
+// unambiguous. One lookup rule for the column reader and the segment reader, so the two cannot drift.
+const QMap<QString,QString>* tableFor(const XmbView& host,const QString& attr,const QString& key,bool allowSingle) {
+    auto table=host.tables.constFind(attr);
+    if(table==host.tables.constEnd() && key!=attr)table=host.tables.constFind(key);
+    if(table==host.tables.constEnd() && allowSingle && host.tables.size()==1)table=host.tables.constBegin();
+    return table==host.tables.constEnd()?nullptr:&table.value();
+}
+// Every field the definition puts in a row's table. title/info/icon are what a column row needs; the
+// remaining four are the settings pages' own semantics (child=segment, ch_pos, fo_lbl2_alpha,
+// bar_action), carried verbatim so a caller never has to re-open the document to read them.
+void readTableAttributes(XmbmlColumnRow& row,const QMap<QString,QString>& table) {
+    row.hasTable=true;
+    row.titleRsc=table.value(QStringLiteral("title_rsc"));
+    row.iconRsc=table.value(QStringLiteral("icon_rsc"));
+    row.infoRsc=table.value(QStringLiteral("info_rsc"));
+    row.moduleName=table.value(QStringLiteral("module_name"));
+    row.moduleAction=table.value(QStringLiteral("module_action"));
+    row.child=table.value(QStringLiteral("child"));
+    row.chPos=table.value(QStringLiteral("ch_pos"));
+    row.foLbl2Alpha=table.value(QStringLiteral("fo_lbl2_alpha"));
+    row.barAction=table.value(QStringLiteral("bar_action"));
+}
+XmbmlFallback fallbackFor(const XmbmlResolveOptions& options,const QString& itemKey,const QString& queryKey) {
+    if(!itemKey.isEmpty()) {
+        const auto found=options.fallbacks.constFind(itemKey);
+        if(found!=options.fallbacks.cend() && !found->isEmpty())return *found;
+    }
+    const auto found=options.fallbacks.constFind(queryKey);
+    if(found!=options.fallbacks.cend())return *found;
+    return XmbmlFallback{};
+}
+// Resolve one row's title/info/icon through the container's text table and the caller's fallback,
+// counting which source won. Shared by both readers: a label can only be resolved one way.
+void resolveRowLabels(XmbmlResolvedColumn& column,XmbmlColumnRow& row,const XmbmlTextResolver& text,
+                      const XmbmlResolveOptions& options) {
+    const auto resolveText=[&](const QString& key) {
+        if(key.isEmpty() || !text)return QString{};
+        return text(column.container,key);
+    };
+    row.container=column.container;
+    if(!row.titleRsc.isEmpty()) {
+        row.title=resolveText(row.titleRsc);
+        if(!row.title.isEmpty()){row.titleSource=FieldSource::Rco;++column.rcoRows;row.titleKey=row.titleRsc;}
+    }
+    if(!row.iconRsc.isEmpty()){row.icon=row.iconRsc;row.iconSource=FieldSource::Xmbml;}
+    if(!row.infoRsc.isEmpty()) {
+        row.detail=resolveText(row.infoRsc);
+        if(!row.detail.isEmpty())row.detailSource=FieldSource::Rco;
+    }
+    const auto fallback=fallbackFor(options,row.itemKey,row.queryKey);
+    // A label the firmware builds in a plugin: its resource key lives in the same container, so
+    // the text is still the firmware's own and still goes through the locale table.
+    if(row.title.isEmpty() && !fallback.titleRsc.isEmpty()) {
+        row.title=resolveText(fallback.titleRsc);
+        if(!row.title.isEmpty()){row.titleSource=FieldSource::Rco;++column.pluginRows;row.titleKey=fallback.titleRsc;}
+    }
+    if(row.icon.isEmpty() && !fallback.iconRsc.isEmpty()) {
+        row.icon=fallback.iconRsc;row.iconSource=FieldSource::Fallback;
+    }
+    if(row.title.isEmpty() && !fallback.title.isEmpty()) {
+        row.title=fallback.title;row.titleSource=FieldSource::Fallback;++column.fallbackRows;
+    }
+    if(row.icon.isEmpty() && !fallback.icon.isEmpty()) {
+        row.icon=fallback.icon;row.iconSource=FieldSource::Fallback;
+    }
+    if(row.detail.isEmpty() && !fallback.detail.isEmpty()) {
+        row.detail=fallback.detail;row.detailSource=FieldSource::Fallback;
+    }
+    if(row.title.isEmpty())++column.untitled;
+}
 }
 
 QString queryKindName(QueryKind kind) {
@@ -198,68 +269,14 @@ XmbmlResolvedColumn resolveCategoryColumn(const QString& category,const XmbmlTex
         column.error=QStringLiteral("view \"")+column.viewId+QStringLiteral("\" is not defined");
         return column;
     }
-    const auto resolveText=[&](const QString& key) {
-        if(key.isEmpty() || !text)return QString{};
-        return text(column.container,key);
-    };
-    const auto fallbackFor=[&](const QString& itemKey,const QString& queryKey) {
-        if(!itemKey.isEmpty()) {
-            const auto found=options.fallbacks.constFind(itemKey);
-            if(found!=options.fallbacks.cend() && !found->isEmpty())return *found;
-        }
-        const auto found=options.fallbacks.constFind(queryKey);
-        if(found!=options.fallbacks.cend())return *found;
-        return XmbmlFallback{};
-    };
     QSet<QString> seenIds;
     // Resolve one row's table fields, text and id, then append it. `tableHost` is the view that
     // carries the attribute table: the expanded view for a row, the root view for a provider query.
     const auto append=[&](XmbmlColumnRow row,const XmbView& tableHost,const QString& lookupAttr,
                           const QString& lookupKey,bool allowsSingleTable) {
         if(column.rows.size()>=rowLimit){++column.skipped;return;}
-        auto table=tableHost.tables.constFind(lookupAttr);
-        if(table==tableHost.tables.constEnd() && lookupKey!=lookupAttr)
-            table=tableHost.tables.constFind(lookupKey);
-        if(table==tableHost.tables.constEnd() && allowsSingleTable && tableHost.tables.size()==1)
-            table=tableHost.tables.constBegin();
-        if(table!=tableHost.tables.constEnd()) {
-            row.hasTable=true;
-            row.titleRsc=table->value(QStringLiteral("title_rsc"));
-            row.iconRsc=table->value(QStringLiteral("icon_rsc"));
-            row.infoRsc=table->value(QStringLiteral("info_rsc"));
-            row.moduleName=table->value(QStringLiteral("module_name"));
-            row.moduleAction=table->value(QStringLiteral("module_action"));
-        }
-        row.container=column.container;
-        if(!row.titleRsc.isEmpty()) {
-            row.title=resolveText(row.titleRsc);
-            if(!row.title.isEmpty()){row.titleSource=FieldSource::Rco;++column.rcoRows;row.titleKey=row.titleRsc;}
-        }
-        if(!row.iconRsc.isEmpty()){row.icon=row.iconRsc;row.iconSource=FieldSource::Xmbml;}
-        if(!row.infoRsc.isEmpty()) {
-            row.detail=resolveText(row.infoRsc);
-            if(!row.detail.isEmpty())row.detailSource=FieldSource::Rco;
-        }
-        const auto fallback=fallbackFor(row.itemKey,row.queryKey);
-        // A label the firmware builds in a plugin: its resource key lives in the same container, so
-        // the text is still the firmware's own and still goes through the locale table.
-        if(row.title.isEmpty() && !fallback.titleRsc.isEmpty()) {
-            row.title=resolveText(fallback.titleRsc);
-            if(!row.title.isEmpty()){row.titleSource=FieldSource::Rco;++column.pluginRows;row.titleKey=fallback.titleRsc;}
-        }
-        if(row.icon.isEmpty() && !fallback.iconRsc.isEmpty()) {
-            row.icon=fallback.iconRsc;row.iconSource=FieldSource::Fallback;
-        }
-        if(row.title.isEmpty() && !fallback.title.isEmpty()) {
-            row.title=fallback.title;row.titleSource=FieldSource::Fallback;++column.fallbackRows;
-        }
-        if(row.icon.isEmpty() && !fallback.icon.isEmpty()) {
-            row.icon=fallback.icon;row.iconSource=FieldSource::Fallback;
-        }
-        if(row.detail.isEmpty() && !fallback.detail.isEmpty()) {
-            row.detail=fallback.detail;row.detailSource=FieldSource::Fallback;
-        }
-        if(row.title.isEmpty())++column.untitled;
+        if(const auto* table=tableFor(tableHost,lookupAttr,lookupKey,allowsSingleTable))readTableAttributes(row,*table);
+        resolveRowLabels(column,row,text,options);
         row.order=column.rows.size();
         if(seenIds.contains(row.id))++column.duplicateIds;
         else seenIds.insert(row.id);
@@ -325,6 +342,72 @@ XmbmlResolvedColumn resolveCategoryColumn(const QString& category,const XmbmlTex
     }
     if(column.rows.isEmpty())
         column.error=QStringLiteral("the \"")+column.viewId+QStringLiteral("\" view defines no rows");
+    return column;
+}
+XmbmlResolvedColumn resolveSegmentView(const QString& category,const QString& viewId,
+                                       const XmbmlTextResolver& text,
+                                       const XmbmlResolveOptions& options) {
+    XmbmlResolvedColumn column;
+    column.viewId=viewId;
+    column.path=categoryColumnPath(category,options);
+    column.category=categoryStem(column.path);
+    column.container=options.container.isEmpty()?QStringLiteral("explore_category_")+column.category
+                                                :options.container;
+    int rowLimit=options.rowLimit;
+    if(rowLimit<=0 || rowLimit>128)rowLimit=64;
+    if(!QFileInfo(column.path).isFile()) {
+        column.error=QStringLiteral("XMBML definition not found: ")+column.path;
+        return column;
+    }
+    const auto document=readXmbDocument(column.path);
+    column.sha256=document.sha256;
+    if(!document.error.isEmpty()){column.error=document.error;return column;}
+    const auto segment=document.views.constFind(viewId);
+    if(segment==document.views.constEnd()) {
+        column.error=QStringLiteral("view \"")+viewId+QStringLiteral("\" is not defined");
+        return column;
+    }
+    QSet<QString> seenIds;
+    // One pass over the segment view's own item order; each child Query names the group view whose
+    // <Items> are the page's rows (the settings the group binds, in that group's order).
+    for(const auto& node:segment->items) {
+        if(node.kind!=QLatin1String("Query")){++column.skipped;continue;}
+        const auto groupKey=node.attributes.value(QStringLiteral("key"));
+        if(groupKey.isEmpty()){++column.skipped;continue;}
+        const auto groupSource=node.attributes.value(QStringLiteral("src"));
+        const auto groupView=viewFromSource(groupSource);
+        ++column.queries;
+        const auto group=document.views.constFind(groupView);
+        if(group==document.views.constEnd()){++column.skipped;continue;}
+        int rowNodes=0;
+        for(const auto& child:group->items)
+            if(child.kind==QLatin1String("Item")||child.kind==QLatin1String("Query"))++rowNodes;
+        if(rowNodes==0){++column.skipped;continue;}
+        for(const auto& child:group->items) {
+            if(child.kind!=QLatin1String("Item") && child.kind!=QLatin1String("Query")){++column.skipped;continue;}
+            if(column.rows.size()>=rowLimit){++column.skipped;continue;}
+            XmbmlColumnRow row;
+            row.queryKey=groupKey;
+            row.itemKey=child.attributes.value(QStringLiteral("key"));
+            row.itemClass=child.attributes.value(QStringLiteral("class"));
+            row.viewId=groupView;
+            row.source=groupSource;
+            row.provider=providerFromSource(groupSource);
+            row.query=QueryKind::Local;
+            row.folder=child.kind==QLatin1String("Query");
+            row.id=nativeId(row.itemKey.isEmpty()?groupKey:row.itemKey,options.idAliases);
+            const auto attr=child.attributes.value(QStringLiteral("attr"));
+            if(const auto* table=tableFor(*group,attr.isEmpty()?row.itemKey:attr,row.itemKey,rowNodes==1))
+                readTableAttributes(row,*table);
+            resolveRowLabels(column,row,text,options);
+            row.order=column.rows.size();
+            if(seenIds.contains(row.id))++column.duplicateIds;
+            else seenIds.insert(row.id);
+            column.rows.push_back(std::move(row));
+        }
+    }
+    if(column.rows.isEmpty())
+        column.error=QStringLiteral("the \"")+viewId+QStringLiteral("\" view defines no rows");
     return column;
 }
 } // namespace xmb
