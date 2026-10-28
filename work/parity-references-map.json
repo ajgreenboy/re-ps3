@@ -1,7 +1,7 @@
 {
   "schema": "xmb-parity-references-map/1",
   "updated": "2026-10-28",
-  "note": "The auditable record of which RPCS3 frame backs which Tier B cell. Authored from what each batch's MANIFEST.md says the frame shows (the manifest section is cited in every note), not from file names. `entries` is the input to work/parity-import.ts; the importer rewrites each entry's `applied` block with the cell, the destination reference and provenance paths, and the source and destination sha256 (identity: the importer copies or hard-links, it never converts). An entry's `replaced` field records a deliberate re-import of the same source into the same cell - the map has been imported four times: twice on 2026-10-27 (batch 1, the second run because the first sidecars carried the manifest's typography and the corpus is ASCII), once later that day with batch 2's four night cells added, and once on 2026-10-28 after work/parity-catalogue.json gained ten states for the settings surfaces batch 2 captured (the Network Settings page, the depth-2 status list, the two message pages, the Theme Settings page and its four choice lists, and the Video Settings page). Each run used --replace, which re-validates and re-copies the batch-1 cells from the same sources (sha256 identical) so only the applied blocks move. Batch 2's frames are night frames, so they are filed at night cells and never at the canonical day cell; see native-xmb/audit/PARITY-SCORECARD.md sections 11 and 12. The images stay under out/parity-references/, which .gitignore excludes, so this file is the committed part: paths and hashes, never firmware pixels.",
+  "note": "The auditable record of which RPCS3 frame backs which Tier B cell. Authored from what each batch's MANIFEST.md says the frame shows (the manifest section is cited in every note), not from file names. `entries` is the input to work/parity-import.ts; the importer rewrites each entry's `applied` block with the cell, the destination reference and provenance paths, and the source and destination sha256 (identity: the importer copies or hard-links, it never converts). An entry's `replaced` field records a deliberate re-import of the same source into the same cell - the map has been imported four times: twice on 2026-10-27 (batch 1, the second run because the first sidecars carried the manifest's typography and the corpus is ASCII), once later that day with batch 2's four night cells added, and once on 2026-10-28 after work/parity-catalogue.json gained ten states for the settings surfaces batch 2 captured (the Network Settings page, the depth-2 status list, the two message pages, the Theme Settings page and its four choice lists, and the Video Settings page). Each run used --replace, which re-validates and re-copies the batch-1 cells from the same sources (sha256 identical) so only the applied blocks move. Batch 2's frames are night frames, so they are filed at night cells and never at the canonical day cell; see native-xmb/audit/PARITY-SCORECARD.md sections 11 and 12. The images stay under out/parity-references/, which .gitignore excludes, so this file is the committed part: paths and hashes, never firmware pixels. Fifth import (2026-10-28, the day-window batch C:/dev/out/rpcs3-day-2026-10-28): 21 rows added, all theme=original/background=day/resolution=1080p, from a session whose console clock was 10:00 local and whose Date/Time formats were MM/DD + 12-hour on the console - the first batch in this corpus that can occupy a canonical day cell without being mismatch-by-construction on the pin. root is deliberately absent (registered cell, scorecard 10.7).",
   "referenceRoot": "out/parity-references",
   "contract": "work/parity-reference.json",
   "catalogue": "work/parity-catalogue.json",
@@ -26,6 +26,27 @@
       "frames": "22,400 PNGs: 251 stills + 22,149 burst frames in 19 bursts; every still 1920x1080; burst frames are full-frame 1920x1080 or a documented 1:1 crop",
       "imported": 14,
       "reason": "The batch manifest does not state its capture date in the form work/parity-import.ts reads (it looks for a '- Session: <YYYY-MM-DD> <HH:MM>' line; this manifest says 'One capture session, two RPCS3 boots: boot 1 22:39:07 ...' with no date on that line), so the importer refused it as incomplete (exit 2, 'no capture date'). The rig manifest is not edited here. The frames are imported through importManifest, a byte-faithful copy of the batch manifest (same 30,006 bytes plus exactly one inserted '- Session:' bullet, sha256 above) whose date is the local capture date evidenced by the batch's own logs/refcap-*.log stamps (2026-10-27T22:39 to 23:21) and the section 8 restore audit - 2026-10-27 local is 2026-10-28 UTC, which is the folder name. If the rig adds that line to the real manifest, re-running the importer against it replaces the sidecars' source.manifest with the primary file and changes nothing else. Only stills are eligible: the bursts are crops of an animated region, not full frames. The console clock was left at its night time and nothing was committed (manifest 8), so every eligible frame is a night frame, filed at night cells and never at a canonical day cell; the theme is original on the strength of lists/theme-page-rest.png (Theme/Color/Background/Font all read Original), not assumed. The 2026-10-28 run added the ten cells the new catalogue states made possible: the batch's error/, depth2/, lists/ and tails/ groups were refused for one reason only - no catalogue state named the surface - and each of the ten rows cites the manifest section and the frame's own clock."
+    },
+    {
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "captureRoot": "C:/dev/out/rpcs3-day-2026-10-28",
+      "status": "imported",
+      "session": "2026-10-28 00:25-00:35 local (America/Chicago), one RPCS3 boot",
+      "frames": "61 stills, every one 1920x1080; 22 are the canonical cell files, no bursts",
+      "imported": 21,
+      "reason": "The day-window session the scorecard recipe (11.6/11.7, 12.8) asked for: guest clock 10:00 through a `Console time offset (s)` in the scratch config, Date Format MM/DD/YYYY and Time Format 12-Hour Clock committed on the console through Date and Time Settings, theme evidenced in the same session by page-settings-theme.png (Theme/Color/Background/Font all Original), Vulkan 1920x1080 with exclusive fullscreen disabled, clock scale 100, 2 s settle. The manifest carries the `- Session:` line the importer needs, so the real manifest is imported directly - no import copy. `root` is captured but not mapped: root__original__day__1080p is backed by the registered pre-contract frame and parity-import.ts refuses a registered cell even with --replace (scorecard 10.7); the frame is staged at stills/root__original__day__1080p.png for that contract change. osk and options-panel are mapped because their panels are the surfaces the states name, but their console routes differ from the catalogue's native-only routes, so they are Tier B pictures only.",
+      "manifestSha256": "ca242fc3530f11f7da11861c4791e16dc3978256c89f3192f04a4268c0bf05fa",
+      "manifestBytes": 24387,
+      "replaced": 8,
+      "root": "captured but not imported: root__original__day__1080p is the registered pre-contract cell and parity-import.ts refuses a registered cell even with --replace (scorecard 10.7). The matched day frame is staged at C:/dev/out/rpcs3-day-2026-10-28/stills/root__original__day__1080p.png (sha256 fdd46090...).",
+      "scorecard": "out/parity/scorecards/scorecard-20261028-004646.json",
+      "scorecardRun": "out/parity/run-20261028-003804",
+      "coverage": {
+        "canonicalBefore": "9/30",
+        "canonicalAfter": "22/30",
+        "matrixBefore": "24/720",
+        "matrixAfter": "37/720"
+      }
     }
   ],
   "entries": [
@@ -47,7 +68,7 @@
         "destinationSha256": "cf68d72202d09ae38418fa5403948385f9e655a38be289287a757d3b71bd9a6f",
         "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.104Z",
+        "imported": "2026-10-28T05:37:50.687Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\root__original__night__1080p.state.json"
       },
       "skipped": null
@@ -57,20 +78,20 @@
       "theme": "original",
       "background": "day",
       "resolution": "1080p",
-      "source": "nav/users-column.png",
-      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
-      "clock": "console 10/27 9:47 PM (MM/DD 12-hour), 2026-10-27 21:47 local - the firmware's night window",
-      "note": "Manifest 4.3/4.5: the Users-column state check from the OSK route (Users column before the up move to Create New User), one of the 24 nav/ frames the manifest says document the route and the state each capture was taken in. The manifest names nav/ as a group, not this file, so the mapping records manifestRef=group. Filed at the canonical cell because that is the only cell the scorecard captures today; the frame itself is a 21:47 night frame, so the background layer differs from the cell's day pin by construction. Rows differ by construction: the console shows '*User' plus 'Turn Off System' / 'Create New User' above the column, the native build rebuilds the Users column from the profile set.",
+      "source": "stills/column-user__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:02 AM",
+      "note": "Manifest 3 row 2: the Users column at row 0 - Turn Off System focused, then Create New User and *User - on the day wave with the console plate at 10:02 AM in the app's MM/DD 12-hour format. Mismatch by construction that no rig run can remove: the console rows are its own account rows while the native column draws Create New User / User from the host profile store.",
       "applied": {
         "cell": "column-user__original__day__1080p",
         "reference": "C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.png",
         "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.state.json",
-        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\nav\\users-column.png",
-        "sourceSha256": "0008bdabe7a7d259efd8c3d914c4cd939f18c563addae1917754ed3cc9f97f28",
-        "destinationSha256": "0008bdabe7a7d259efd8c3d914c4cd939f18c563addae1917754ed3cc9f97f28",
-        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
-        "manifestRef": "group",
-        "imported": "2026-10-28T05:11:03.111Z",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\column-user__original__day__1080p.png",
+        "sourceSha256": "f8dc7fdcce1a76b749487b6232d284c454ff88c8e1c9a2b3b5e5247096a36cfc",
+        "destinationSha256": "f8dc7fdcce1a76b749487b6232d284c454ff88c8e1c9a2b3b5e5247096a36cfc",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.695Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-user__original__day__1080p.state.json"
       },
       "skipped": null
@@ -80,20 +101,20 @@
       "theme": "original",
       "background": "day",
       "resolution": "1080p",
-      "source": "settings/column-system-update.png",
-      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
-      "clock": "console 27/10 21:39 (DD/MM 24-hour, inferred from the 21:40 settings page frames of the same group)",
-      "note": "Manifest 4.2: 'Settings column, focus row 1 (System Update)' - the Settings column state, used as the U8 context frame. The frame itself shows the console's focused-first-row treatment: System Update is expanded into a title, a one-line help block and an icon plate, and the rows below keep the column pitch (Game Settings, Video Settings, Music Settings, Chat Settings, System Settings, Theme Settings ...). Two caveats by construction: the frame is a night frame filed at the canonical day cell (the scorecard scores only the canonical cell today), and the console's clock is DD/MM 24-hour (27/10 21:39) while the app renders MM/DD 12-hour. Whether the native column reproduces the expanded focused row is a fidelity question this reference is meant to expose, not a mapping error.",
+      "source": "stills/column-settings__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:01 AM",
+      "note": "Manifest 3 row 3: the Settings column at row 0 - System Update focused with its help line, then Game Settings, Video Settings, Music Settings, Chat Settings, System Settings, Theme Settings - day wave, plate 10:01 AM MM/DD 12-hour. Content differs by construction: the console row set is the firmware's 16 Settings rows, the native column draws its own list.",
       "applied": {
         "cell": "column-settings__original__day__1080p",
         "reference": "C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.png",
         "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.state.json",
-        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\settings\\column-system-update.png",
-        "sourceSha256": "69c3b5818c2b377cb80c33b416c8f4d0a7f436310780438dbb21d376468d43ad",
-        "destinationSha256": "69c3b5818c2b377cb80c33b416c8f4d0a7f436310780438dbb21d376468d43ad",
-        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\column-settings__original__day__1080p.png",
+        "sourceSha256": "3ae594a78b5e39aef34082549b925157c5dad384468fd7edfc1c9ac3812dd172",
+        "destinationSha256": "3ae594a78b5e39aef34082549b925157c5dad384468fd7edfc1c9ac3812dd172",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.118Z",
+        "imported": "2026-10-28T05:37:50.703Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-settings__original__day__1080p.state.json"
       },
       "skipped": null
@@ -103,20 +124,20 @@
       "theme": "original",
       "background": "day",
       "resolution": "1080p",
-      "source": "media/photo-column-empty.png",
-      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
-      "clock": "console 10/27 9:53 PM (MM/DD 12-hour), 2026-10-27 21:53 local - the firmware's night window",
-      "note": "Manifest 4.4: 'root -> left from Game through Video, Music, Photo ... evidence that the Media columns hold no playable items' - this is the Photo column (Photo icon focused, rows 'Search for Media Servers', 'Photo Gallery', 'Playlists'). Filed at the canonical day cell while the frame is a 21:53 night frame, so the background differs from the cell's pin by construction. Content differs by construction as well: the console's VFS holds no photos, the native build lists the host's chosen photo folder.",
+      "source": "stills/column-photo__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:01 AM",
+      "note": "Manifest 3 row 4: the Photo column at row 0 - Search for Media Servers focused, then Photo Gallery, Playlists - day wave, plate 10:01 AM. The console VFS holds no photos, so the native column's host photo folder has no console counterpart; content mismatch by construction.",
       "applied": {
         "cell": "column-photo__original__day__1080p",
         "reference": "C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.png",
         "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.state.json",
-        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\media\\photo-column-empty.png",
-        "sourceSha256": "b7b26ec6eb9ba2f0fb164069c4034ab1afeecd08ff114808351bd7f8fc72efcc",
-        "destinationSha256": "b7b26ec6eb9ba2f0fb164069c4034ab1afeecd08ff114808351bd7f8fc72efcc",
-        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\column-photo__original__day__1080p.png",
+        "sourceSha256": "1f16a9edb7c590cb8da6d7dff0bc66af3963e32f75529cd6edab33f4d5504bec",
+        "destinationSha256": "1f16a9edb7c590cb8da6d7dff0bc66af3963e32f75529cd6edab33f4d5504bec",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.125Z",
+        "imported": "2026-10-28T05:37:50.711Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-photo__original__day__1080p.state.json"
       },
       "skipped": null
@@ -126,20 +147,20 @@
       "theme": "original",
       "background": "day",
       "resolution": "1080p",
-      "source": "media/music-column-empty.png",
-      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
-      "clock": "console 2026-10-27 21:5x local (MM/DD 12-hour, the time-format setting of that group) - the firmware's night window",
-      "note": "Manifest 4.4: the Music column of the same left-walk, with only 'Search for Media Servers' and 'Playlists' - the manifest's own description of the empty Music page. Filed at the canonical day cell while the frame is a night frame (background differs by construction); rows differ by construction too: the console has no music, the native build lists the host's music folder.",
+      "source": "stills/column-music__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:01 AM",
+      "note": "Manifest 3 row 5: the Music column at row 0 - Search for Media Servers focused, then Playlists - day wave, plate 10:01 AM. Empty console VFS against the host music folder: content mismatch by construction.",
       "applied": {
         "cell": "column-music__original__day__1080p",
         "reference": "C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.png",
         "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.state.json",
-        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\media\\music-column-empty.png",
-        "sourceSha256": "f0bac56f57cca70d6767077af647a4b626eb6fdbb1339c3e24702d8ba031af5c",
-        "destinationSha256": "f0bac56f57cca70d6767077af647a4b626eb6fdbb1339c3e24702d8ba031af5c",
-        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\column-music__original__day__1080p.png",
+        "sourceSha256": "7800a0e85c92085d303a256216e08e12275f6ef9abb652c0eaac0e9e631c48fc",
+        "destinationSha256": "7800a0e85c92085d303a256216e08e12275f6ef9abb652c0eaac0e9e631c48fc",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.132Z",
+        "imported": "2026-10-28T05:37:50.719Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-music__original__day__1080p.state.json"
       },
       "skipped": null
@@ -149,20 +170,20 @@
       "theme": "original",
       "background": "day",
       "resolution": "1080p",
-      "source": "media/video-column-empty.png",
-      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
-      "clock": "console 2026-10-27 21:5x local (MM/DD 12-hour, the time-format setting of that group) - the firmware's night window",
-      "note": "Manifest 4.4: the Video column of the same left-walk ('Video/Music/Photo pages are empty'; the console Video column reads BD Data Utility / Search for Media Servers / Video Editor & Uploader, checked on the frame). Filed at the canonical day cell while the frame is a night frame, so the background differs from the cell's pin by construction. Content differs by construction: the console Video column has no playable items, the native build's Video column carries Continue Watching and Video Library.",
+      "source": "stills/column-video__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:01 AM",
+      "note": "Manifest 3 row 6: the Video column at row 0 - BD Data Utility focused, then Search for Media Servers, Video Editor & Uploader - day wave, plate 10:01 AM. The native column draws Continue Watching / Video Library; content mismatch by construction.",
       "applied": {
         "cell": "column-video__original__day__1080p",
         "reference": "C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.png",
         "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.state.json",
-        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\media\\video-column-empty.png",
-        "sourceSha256": "4f8270ee31ff89a64d46c9576732c80a0f0aa0af12a61277d0223ac1b9af8c2b",
-        "destinationSha256": "4f8270ee31ff89a64d46c9576732c80a0f0aa0af12a61277d0223ac1b9af8c2b",
-        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\column-video__original__day__1080p.png",
+        "sourceSha256": "6839413c4f34064fdf59398d4ba02d32688bfc6ed364e0a4bd3e6d3e8222f9c9",
+        "destinationSha256": "6839413c4f34064fdf59398d4ba02d32688bfc6ed364e0a4bd3e6d3e8222f9c9",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.139Z",
+        "imported": "2026-10-28T05:37:50.727Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-video__original__day__1080p.state.json"
       },
       "skipped": null
@@ -172,20 +193,20 @@
       "theme": "original",
       "background": "day",
       "resolution": "1080p",
-      "source": "settings/page-system-settings.png",
-      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
-      "clock": "console 27/10 21:40 (DD/MM 24-hour), 2026-10-27 21:40 local - the firmware's night window",
-      "note": "Manifest 4.2: Settings column row 6 (System) opened with Cross, settled 2.4 s, then Circle back - the settings page group rows 2-16. The frame shows the System page: 'Automatic Update' focused with a two-line help block, then System Name, System Language, Character Set, Dictionary Type, Add/Edit Term, Delete Predictive Text Dictionary. There is no file name for this row in the manifest (the group is a '...' range), so manifestRef=group; the page identity was checked against the frame, not assumed from the name. Two caveats by construction: the frame is a night frame filed at the canonical day cell, and its clock is DD/MM 24-hour while the app renders MM/DD 12-hour. The row values differ by construction - the native page is built from sysconf_plugin RCO schemas and the host's own system strings.",
+      "source": "stills/page-settings-system__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:03 AM",
+      "note": "Manifest 3 row 10: the System Settings page by the catalogue route (Settings row 6 > Cross) - Automatic Update focused (Off) with its help line, then System Name (PS3-354), System Language, Character Set, Dictionary Type, Add/Edit Term, Delete Predictive Text Dictionary - day wave, plate 10:03 AM. This is the page the catalogue state names, unlike the batch-2 night reference whose native capture landed on the System Update page; content still differs by construction (this build's RCO row set and host strings against the console's 25 rows).",
       "applied": {
         "cell": "page-settings-system__original__day__1080p",
         "reference": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.png",
         "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.state.json",
-        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\settings\\page-system-settings.png",
-        "sourceSha256": "bd2d220c2c712bb0c4dbf29f55b00a0a5c8554581bc4ba91bf7b9cef81253f62",
-        "destinationSha256": "bd2d220c2c712bb0c4dbf29f55b00a0a5c8554581bc4ba91bf7b9cef81253f62",
-        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
-        "manifestRef": "group",
-        "imported": "2026-10-28T05:11:03.145Z",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\page-settings-system__original__day__1080p.png",
+        "sourceSha256": "fca31123c3a498c6999749e512e2a4c19ce8e5ec8c08d57c2144f2b5b9ac8ddf",
+        "destinationSha256": "fca31123c3a498c6999749e512e2a4c19ce8e5ec8c08d57c2144f2b5b9ac8ddf",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.735Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__day__1080p.state.json"
       },
       "skipped": null
@@ -195,20 +216,20 @@
       "theme": "original",
       "background": "day",
       "resolution": "1080p",
-      "source": "osk/osk-default-focus.png",
-      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
-      "clock": "not readable: the OSK's dimmed parent hides the clock plate; session 2026-10-27 21:5x local - night window",
-      "note": "Manifest 4.3: 'panel settled' after the open burst, the default-focus frame - title 'User Name', field 'User 1', default focus 'g', prediction cell 'a 0', function rows @#: / a/a / a/A / Backspace / Space. The panel geometry in the manifest (x 493-1427, y 282-755) is the same panel the catalogue's 'osk panel' crop [480,280,960,520] frames, which is why this frame is a fair reference for the panel layer. It is NOT a matched state: the app's OSK opens over the Jellyfin sign-in page while this one opens over the console's Create New User dialog, so the page beneath (and the whole-frame region) differs by construction, and the frame is a night frame filed at the canonical day cell. The catalogue has no Tier A oracle for the OSK either (the dump cannot see an open keyboard).",
+      "source": "stills/osk__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "not readable on this frame: the modal dim covers the clock plate",
+      "note": "Manifest 3 row 22: the firmware on-screen keyboard at its default page - title `User Name`, field `User 1` with the I-beam, default focus `g`, prediction `a 0`, the function row @#: / a-umlaut / A / Backspace / Space, the footer arrows / Input Mode / Enter / clipboard / keyboard, hints X Edit and O Back - opened from Users > Create New User > Edit (the name field) because this rig has no Jellyfin service, so the catalogue route (tv > custom:jellyfin > ENTER) is not reproducible. Tier A cannot pass for this cell on this frame (the page underneath is the create-user dialog, not the sign-in page); it is a Tier B picture of the OSK panel. The dim covers the plate, so the day pin rests on the session clock.",
       "applied": {
         "cell": "osk__original__day__1080p",
         "reference": "C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.png",
         "provenance": "C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.state.json",
-        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\osk\\osk-default-focus.png",
-        "sourceSha256": "0a5fca6fa209da79fc268278eb34e460ddb0e19ce46390b16fe73985f1be3274",
-        "destinationSha256": "0a5fca6fa209da79fc268278eb34e460ddb0e19ce46390b16fe73985f1be3274",
-        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\osk__original__day__1080p.png",
+        "sourceSha256": "39dac674c1d3730c4ba617a40e850c78488a00559fb2b9adb5f1a595e23f254b",
+        "destinationSha256": "39dac674c1d3730c4ba617a40e850c78488a00559fb2b9adb5f1a595e23f254b",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.151Z",
+        "imported": "2026-10-28T05:37:50.742Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\osk__original__day__1080p.state.json"
       },
       "skipped": null
@@ -218,20 +239,20 @@
       "theme": "original",
       "background": "day",
       "resolution": "1080p",
-      "source": "dialogs/options-open-01.png",
-      "manifest": "C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md",
-      "clock": "not readable: the options band covers the clock plate; session 2026-10-27 21:5x local - night window",
-      "note": "Manifest 4.1/6: Triangle on the focused Game item, settled 1.5 s - the per-item options menu (expage_menu), rows 'Start / Delete / Information' at baselines y 479/516/554, pitch 37-38 px, band starting at x 1180, with the 'Sort By' / 'Group Content' entries above them. This is the same surface the native options panel draws over the Video Library page, so it is the right reference for the panel layer, but it is not a matched state: the console's rows are the corrupt-item set (Start/Delete/Information) while the native panel's are Open/Information/Sort By/Close, and the page under the panel is the Game column rather than a folder page. The frame is a night frame filed at the canonical day cell. The row-set difference is a content difference by construction, stated rather than averaged away.",
+      "source": "stills/options-panel__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "not readable on this frame: the options band covers the clock plate",
+      "note": "Manifest 3 row 21: the firmware per-item options panel at rest - Sort By (submenu), Group Content (submenu), then Start (focused), Delete, Information; band left edge about x 1330 with the full-height gradient - day wave, plate covered by the band. **Route differs on purpose**: the catalogue route is Video > Video Library > TRIANGLE, which this rig cannot open (no Video Library page), so the panel was opened on Game > Corrupted Data with Triangle, the same expage_menu surface. Tier A cannot pass for this cell on this frame (the page underneath is different); it is a Tier B picture of the panel only.",
       "applied": {
         "cell": "options-panel__original__day__1080p",
         "reference": "C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.png",
         "provenance": "C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.state.json",
-        "source": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\dialogs\\options-open-01.png",
-        "sourceSha256": "dfc705fe3fd25ff02831748eae56b0364ae7ab4ea1ed1bc22cb43f590cb1777a",
-        "destinationSha256": "dfc705fe3fd25ff02831748eae56b0364ae7ab4ea1ed1bc22cb43f590cb1777a",
-        "manifest": "C:\\dev\\out\\rpcs3-ref-2026-10-28\\MANIFEST.md",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\options-panel__original__day__1080p.png",
+        "sourceSha256": "a850b5b04f75a49a0f31b1a33e354b7bb74a4d41d31388f3911c788963e42c46",
+        "destinationSha256": "a850b5b04f75a49a0f31b1a33e354b7bb74a4d41d31388f3911c788963e42c46",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.158Z",
+        "imported": "2026-10-28T05:37:50.748Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.png, C:\\dev\\xmb\\out\\parity-references\\options-panel__original__day__1080p.state.json"
       },
       "skipped": null
@@ -254,7 +275,7 @@
         "destinationSha256": "d5e772eb4001579d61bdd6b05f4b88f577bd5109f03f51ee759a1e55b8303a80",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T05:11:03.164Z",
+        "imported": "2026-10-28T05:37:50.756Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-network__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-network__original__night__1080p.state.json"
       },
       "skipped": null
@@ -277,7 +298,7 @@
         "destinationSha256": "e06c8981a7a1e9733d0db0802b62974edb42753122a4e5932ada5ad3c9e142d9",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T05:11:03.171Z",
+        "imported": "2026-10-28T05:37:50.763Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-psn__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-psn__original__night__1080p.state.json"
       },
       "skipped": null
@@ -300,7 +321,7 @@
         "destinationSha256": "40d18eede723e893faaaf43c43fb115efc5619db12fa8960e2917775512a79a7",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "group",
-        "imported": "2026-10-28T05:11:03.176Z",
+        "imported": "2026-10-28T05:37:50.771Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\column-friends__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\column-friends__original__night__1080p.state.json"
       },
       "skipped": null
@@ -323,7 +344,7 @@
         "destinationSha256": "36f6bdf61288b0ca55d2e4875eaf26f5fcf6e32669fdb0cfa377beb6353f4902",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.183Z",
+        "imported": "2026-10-28T05:37:50.777Z",
         "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-system__original__night__1080p.state.json"
       },
       "skipped": null
@@ -346,7 +367,8 @@
         "destinationSha256": "d832210de929c50af4ad70c67692b9958b2d7b522a56e0d18534ffaa6f1f0afb",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.189Z"
+        "imported": "2026-10-28T05:37:50.783Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -368,7 +390,8 @@
         "destinationSha256": "dfc1c9502b26f02b383fc9d5c85da3a69ec985c612e6c84cf5bde8a2c332fab5",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.196Z"
+        "imported": "2026-10-28T05:37:50.790Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -390,7 +413,8 @@
         "destinationSha256": "9ca6b59d9f226d8948b0b8c9ef723820c3d8107af40ecca62221b39558da8824",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.202Z"
+        "imported": "2026-10-28T05:37:50.797Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -412,7 +436,8 @@
         "destinationSha256": "ba259a5849feb572148896e734d713869a0b83189960ea1748ed121b967d1332",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.208Z"
+        "imported": "2026-10-28T05:37:50.803Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -434,7 +459,8 @@
         "destinationSha256": "bf6c99e0c118a030e3a2c309f2607ec9be9b1cdd98139d1ab929d37a495945d0",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.215Z"
+        "imported": "2026-10-28T05:37:50.810Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -456,7 +482,8 @@
         "destinationSha256": "ea39764d7be891e40d31827ff8684f612f3206f60fc356af8df5fec116677085",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.222Z"
+        "imported": "2026-10-28T05:37:50.817Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\theme-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\theme-list__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -478,7 +505,8 @@
         "destinationSha256": "3b7a1f64bd8c3f7d572915c23bf6cc50946f902377b23fbe128331c659fbf42d",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.228Z"
+        "imported": "2026-10-28T05:37:50.825Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\color-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\color-list__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -500,7 +528,8 @@
         "destinationSha256": "8587582d89bb4f43efbda2ff0a380bb27d02b5035b0b96a096e4162b569e6d5f",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.234Z"
+        "imported": "2026-10-28T05:37:50.831Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\background-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\background-list__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -522,7 +551,8 @@
         "destinationSha256": "098dfba48532ea868395e3f15ac261e6db0c0313bfc04bc4ea69e60ea3240d4f",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.241Z"
+        "imported": "2026-10-28T05:37:50.838Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\font-list__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\font-list__original__night__1080p.state.json"
       },
       "skipped": null
     },
@@ -544,14 +574,301 @@
         "destinationSha256": "d3ba675443042c39e2401462d86fa0931631834dcb76ed92b390976347b9dc7e",
         "manifest": "C:\\dev\\xmb\\out\\parity-references\\import\\rpcs3-ref2-2026-10-28.MANIFEST.md",
         "manifestRef": "exact",
-        "imported": "2026-10-28T05:11:03.249Z"
+        "imported": "2026-10-28T05:37:50.844Z",
+        "replaced": "C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__night__1080p.png, C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__night__1080p.state.json"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-network",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/column-network__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:00 AM",
+      "note": "Manifest 3 row 7: the Network column at row 0 - Online Instruction Manuals focused, then Remote Play, Internet Browser, Internet Search - day wave, plate 10:00 AM. Replaces the batch-2 night cell as this state's only day reference; content mismatch by construction (the native column projects from category_network.xml with its own rows).",
+      "applied": {
+        "cell": "column-network__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-network__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-network__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\column-network__original__day__1080p.png",
+        "sourceSha256": "4618d40aa30a7a078f36fc148457c6109ac31457c736177dedeef8ef8dba9f38",
+        "destinationSha256": "4618d40aa30a7a078f36fc148457c6109ac31457c736177dedeef8ef8dba9f38",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.851Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-psn",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/column-psn__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:00 AM",
+      "note": "Manifest 3 row 8: the PlayStation Network column at row 0 - Sign Up focused over the column's own full-bleed sign-up artwork - day wave, plate 10:00 AM. Signed-out and offline is the console's own state here, not a captured failure; the native column is its own signed-out list, so layout and row set differ by construction.",
+      "applied": {
+        "cell": "column-psn__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-psn__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-psn__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\column-psn__original__day__1080p.png",
+        "sourceSha256": "54e159bb20b83c4c39dfa2cc915e7aa70889e9ff615c06ea44bd321c41d56686",
+        "destinationSha256": "54e159bb20b83c4c39dfa2cc915e7aa70889e9ff615c06ea44bd321c41d56686",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.859Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "column-friends",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/column-friends__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:00 AM",
+      "note": "Manifest 3 row 9: the Friends column - the category icon and label render, the column holds no rows because the console is signed out, offline and has no friends. Day wave, plate 10:00 AM. The batch-2 night reference for the same state is the same rowless column, so the comparison is real; the native column draws its signed-out row set, which is the mismatch.",
+      "applied": {
+        "cell": "column-friends__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\column-friends__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\column-friends__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\column-friends__original__day__1080p.png",
+        "sourceSha256": "e7a81095f55301be5f696d06b6f25add7debf0ef9d52d82766bf925907522a7b",
+        "destinationSha256": "e7a81095f55301be5f696d06b6f25add7debf0ef9d52d82766bf925907522a7b",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.866Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-settings-network",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/page-settings-network__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:04 AM",
+      "note": "Manifest 3 row 11: the depth-1 Network Settings page by the catalogue route (Settings row 16 > Cross) - all 5 firmware rows: Settings and Connection Status List (focused), Internet Connection (Enabled), Internet Connection Settings, Internet Connection Test, Media Server Connection (Enabled) - day wave, plate 10:04 AM. Replaces the batch-2 22:51 nearest-pin night frame; the native page is 5 rows from category_sysconf.xml seg_network, so the row count matches and the values are the host's own.",
+      "applied": {
+        "cell": "page-settings-network__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-settings-network__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\page-settings-network__original__day__1080p.png",
+        "sourceSha256": "a308056f1a767d10f0c11e75e546f28a970188423e3e70393162dfe93174aba8",
+        "destinationSha256": "a308056f1a767d10f0c11e75e546f28a970188423e3e70393162dfe93174aba8",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.873Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-network-status-list",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/page-network-status-list__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "not readable on this frame: the title rule replaces the info bar",
+      "note": "Manifest 3 row 12: the Settings and Connection Status List by the catalogue route (Network Settings > row 0 > Cross) - the depth-2 read-only table, 13 label/value rows from Internet Connection/Enabled to UPnP/Enabled, title rule above, O Back below; row pitch 40 px measured on the frame (ink tops 291 -> 771) with labels right-aligned and values left-aligned. Day wave behind the page; the plate is not drawn on this page, so the day pin rests on the session clock (10:00-10:07) and the frame itself. The row values are the console's own network report, which is the mismatch against the native page's host report.",
+      "applied": {
+        "cell": "page-network-status-list__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-network-status-list__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\page-network-status-list__original__day__1080p.png",
+        "sourceSha256": "c6cf359dec60c02172061806b522573e3f5708a734bfefbf9aa217fbf132a1cc",
+        "destinationSha256": "c6cf359dec60c02172061806b522573e3f5708a734bfefbf9aa217fbf132a1cc",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.881Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-network-test-error",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/page-network-test-error__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:05 AM",
+      "note": "Manifest 3 row 13: the real firmware Internet Connection Test error page, text at rest after the test failed - title bar with the globe icon, the 1 px rule, the dimmed heading ghost, body exactly `An Ethernet cable is not connected.`, footer O Back, no code field - day wave, plate 10:05 AM. Captured 26 s after Cross, inside the measured 12-26 s variable timeout, which is why this is a settled still and not a burst. Replaces the batch-2 23:21 night frame; the native build answers the same row with its own `not available in the native recreation yet` message page, which is the stated content difference.",
+      "applied": {
+        "cell": "page-network-test-error__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-network-test-error__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\page-network-test-error__original__day__1080p.png",
+        "sourceSha256": "2cb71aa935fe2491d10df6f4f286bbfc3511ed4eb5c2d606003486b63315fa23",
+        "destinationSha256": "2cb71aa935fe2491d10df6f4f286bbfc3511ed4eb5c2d606003486b63315fa23",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.888Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-network-connection-settings",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/page-network-connection-settings__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:07 AM",
+      "note": "Manifest 3 row 14: the firmware Internet Connection Settings message page by the catalogue route (Network Settings > row 2 > Cross) - title bar with the globe icon, the two-line body `Adjust settings for connection to the Internet.` / `If making a wired connection, you must have an Ethernet cable connected.`, OK, X Enter / O Back - day wave, plate 10:07 AM. Replaces the batch-2 night frame; the native row answers with this build's own message page, which is the stated content difference.",
+      "applied": {
+        "cell": "page-network-connection-settings__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-network-connection-settings__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\page-network-connection-settings__original__day__1080p.png",
+        "sourceSha256": "c9842bcc20b074cdb3af4125b0fab40eda159730796f8b50d97e7872acc8fefc",
+        "destinationSha256": "c9842bcc20b074cdb3af4125b0fab40eda159730796f8b50d97e7872acc8fefc",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.896Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-settings-theme",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/page-settings-theme__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:03 AM",
+      "note": "Manifest 3 row 15: the Theme Settings page by the catalogue route (Settings row 7 > Cross) - and this session's theme evidence: Theme Original, Color Original, Background Original, Font Original on their four firmware rows with the help lines - day wave, plate 10:03 AM. Replaces the batch-2 22:52 nearest-pin night frame; the native page is the firmware's 4 rows plus 2 native-only pickers (6), which is the stated row-set difference.",
+      "applied": {
+        "cell": "page-settings-theme__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-settings-theme__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\page-settings-theme__original__day__1080p.png",
+        "sourceSha256": "0a6e846afa74f24b47f47637e8a696a768f09f08747f9c2e74ac6b3036837e89",
+        "destinationSha256": "0a6e846afa74f24b47f47637e8a696a768f09f08747f9c2e74ac6b3036837e89",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.903Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "theme-list",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/theme-list__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "not readable on this frame: the choice band covers the clock plate",
+      "note": "Manifest 3 row 16: the Theme choice band at rest over the dimmed page - Install, Original (current and focused), Classic, Air Paint with its preview thumbnail; four items, no overflow chevron - day wave behind the band. The band covers the plate, so the day pin rests on the session clock (10:00-10:07) and the frame. Replaces the batch-2 night frame; the native band draws the same four captured labels over its own one-item model, so this is the closest of the four lists to a matched surface and still differs in the underlying row model.",
+      "applied": {
+        "cell": "theme-list__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\theme-list__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\theme-list__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\theme-list__original__day__1080p.png",
+        "sourceSha256": "9de56d39efa83694071367206af55d448db21b71f53c6b64fbfdc9c9ae6ef364",
+        "destinationSha256": "9de56d39efa83694071367206af55d448db21b71f53c6b64fbfdc9c9ae6ef364",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.911Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "color-list",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/color-list__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "not readable on this frame: the choice band covers the clock plate",
+      "note": "Manifest 3 row 17: the Color choice list at rest - label line `Original` and 12 unlabelled chips with the overflow chevron, no text per chip - day wave behind the band. Day pin on the session clock and the frame. Replaces the batch-2 night frame; the native list is this build's own six labelled colours, i.e. a different list, which is the stated difference.",
+      "applied": {
+        "cell": "color-list__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\color-list__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\color-list__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\color-list__original__day__1080p.png",
+        "sourceSha256": "d8b529ff79615c16f28b6f81bbb4c04e4151a1c528b6b114f76bd1c1710df46a",
+        "destinationSha256": "d8b529ff79615c16f28b6f81bbb4c04e4151a1c528b6b114f76bd1c1710df46a",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.919Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "background-list",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/background-list__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "not readable on this frame: the choice band covers the clock plate",
+      "note": "Manifest 3 row 18: the Background choice list at rest - Brightness with a submenu chevron, Original (current and focused), Classic, Wallpaper - day wave behind the band. Day pin on the session clock and the frame. Replaces the batch-2 night frame; the native list has three values and no Brightness row, which is the stated difference.",
+      "applied": {
+        "cell": "background-list__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\background-list__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\background-list__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\background-list__original__day__1080p.png",
+        "sourceSha256": "531f2b533db6e53708a853751decd97d90198a0170f2d5fa6daab14e3840a545",
+        "destinationSha256": "531f2b533db6e53708a853751decd97d90198a0170f2d5fa6daab14e3840a545",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.928Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "font-list",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/font-list__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "not readable on this frame: the choice band covers the clock plate",
+      "note": "Manifest 3 row 19: the Font choice list at rest - Original (current and focused), Rounded, Pop - day wave behind the band. Day pin on the session clock and the frame. Replaces the batch-2 night frame; the native list draws its own three firmware faces, which is the stated difference.",
+      "applied": {
+        "cell": "font-list__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\font-list__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\font-list__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\font-list__original__day__1080p.png",
+        "sourceSha256": "ec76343cf125c1aaf9236acc8928b98153049178aa39564933c2d72b623f8d07",
+        "destinationSha256": "ec76343cf125c1aaf9236acc8928b98153049178aa39564933c2d72b623f8d07",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.935Z"
+      },
+      "skipped": null
+    },
+    {
+      "state": "page-settings-video",
+      "theme": "original",
+      "background": "day",
+      "resolution": "1080p",
+      "source": "stills/page-settings-video__original__day__1080p.png",
+      "manifest": "C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md",
+      "clock": "10/28 10:03 AM",
+      "note": "Manifest 3 row 20: the top of the Video Settings page by the catalogue route (Settings row 3 > Cross) - BD - Menu Language focused (English) with its help line, then BD - Audio Language, BD - Subtitle Language, BD - Internet Connection (Confirm), DVD - Menu Language, DVD - Audio Language, DVD - Subtitle Language - day wave, plate 10:03 AM. Replaces the batch-2 23:04 night frame; the console page has 19 BD/DVD rows and the native page lists seven plus three native-only media rows, which is the stated difference.",
+      "applied": {
+        "cell": "page-settings-video__original__day__1080p",
+        "reference": "C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__day__1080p.png",
+        "provenance": "C:\\dev\\xmb\\out\\parity-references\\page-settings-video__original__day__1080p.state.json",
+        "source": "C:\\dev\\out\\rpcs3-day-2026-10-28\\stills\\page-settings-video__original__day__1080p.png",
+        "sourceSha256": "4891bf641345ce1a59baae858e8de16d359247dcc4d99161195c5041b02a1e73",
+        "destinationSha256": "4891bf641345ce1a59baae858e8de16d359247dcc4d99161195c5041b02a1e73",
+        "manifest": "C:\\dev\\out\\rpcs3-day-2026-10-28\\MANIFEST.md",
+        "manifestRef": "exact",
+        "imported": "2026-10-28T05:37:50.942Z"
       },
       "skipped": null
     }
   ],
   "summary": {
-    "entries": 23,
-    "applied": 23,
+    "entries": 36,
+    "applied": 36,
     "skipped": 0,
     "referenceRoot": "C:\\dev\\xmb\\out\\parity-references"
   }

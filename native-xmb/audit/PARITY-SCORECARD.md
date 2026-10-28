@@ -513,6 +513,22 @@ composite surfaces, then the 4 background presets and 720p.
   `--references-missing` **9/30** canonical and **14 -> 24 of 720** firmware-reference matrix cells; 22 of
   30 states now have a reference somewhere, 12 before). No budget, no contract change, no matrix axis
   changed, no pre-existing reference re-scored.
+- **2026-10-28 (day-window matched session and fourth import)** - the recipe 11.6/11.7/12.8 asked for: one
+  RPCS3 boot (00:25:52-00:35:25 local) with the guest clock at 10:00 put there by
+  `System > Console time offset (s)` (34,362 s) rather than by the host clock, Date Format `MM/DD/YYYY` and
+  Time Format `12-Hour Clock` committed on the console through Date and Time Settings, Theme evidenced on
+  the frame (`Theme/Color/Background/Font = Original`), Vulkan 1920x1080 with exclusive fullscreen disabled,
+  clock scale 100, 2 s settle. The batch manifest carries a `- Session:` line, so the importer took the real
+  manifest with no import copy: 36 cells, 0 skipped, exit 0 - 13 new canonical day cells plus 8 deliberate
+  replacements of night frames that had been filed at day cells. `--references-missing` **9 -> 22 of 30**
+  canonical and **24 -> 37 of 720** matrix cells; states-with-a-reference stays 22 of 30 because every state
+  here already had a night cell. `root` is captured and staged but **not imported**: its cell is the
+  registered pre-contract frame and the importer refuses a registered cell (10.7 still open). The first
+  genuine canonical Tier B run (`run-20261028-003804`, `scorecard-20261028-004646`, current build
+  `706b43f3...c712d`) captures 22/22 with Tier A PASS for all and Tier B 0 pass; the columns move from about
+  10.5 dB / 0.22 SSIM (night frame at a day cell) to 17.7-19.0 dB / 0.83-0.86, with `root` as the
+  build-change control at +0.58 dB / +0.024. No budget, no contract change, no matrix axis and no tool
+  changed; section 13 carries the per-cell numbers and the two that are not surface comparisons.
 
 ## 10. Reference corpus import - 2026-10-27 (batch `rpcs3-ref-2026-10-28`)
 
@@ -1357,3 +1373,212 @@ Readings:
 
 **Not a parity claim.** Ten states and ten references were added; no cell gained a Tier B pass, no budget
 moved, and the corpus is larger and better labelled, not closer to 1:1.
+
+## 13. Day-window matched session - 2026-10-28 (batch `rpcs3-day-2026-10-28`)
+
+Section 11.7 item 1 and section 12.8 asked for one thing: the canonical `original/day/1080p` cells captured
+with the console in the state the app renders, not a night frame wearing a day label. This section is that
+session. It ran once, on 2026-10-28 local (America/Chicago), 00:25:52 - 00:35:25, one RPCS3 boot, and it took
+21 canonical cells off mismatch-by-construction. `root` is the exception and is named as one below.
+
+Dated 2026-10-28 local. No budget, no matrix axis, no reference-contract field, no pre-existing state and no
+tool was changed. The only edits in the repository are `work/parity-references-map.json` (the dated rows this
+section describes) and this section.
+
+### 13.1 The session, and how each axis was matched
+
+| Axis | What was done | Evidence |
+|---|---|---|
+| Console clock in the day window | RPCS3 v0.0.43 has `System > Console time offset (s)` (`system_config.h:332`, added to the guest clock at `sys_time.cpp:367/382/414`); the scratch config set 34,362 s so the guest clock booted at 09:58:30 and the host clock was never touched | plate reads `10/28 10:00 AM` on the first cell and `10/28 10:07 AM` on the last; the clock was probed 70 s apart and advanced one minute |
+| Date Format MM/DD/YYYY | set through the console UI: Settings row 8 `Date and Time Settings` > `Date Format` (list `YYYY/MM/DD`, `DD/MM/YYYY`, `MM/DD/YYYY`; one Down from current, Cross) | `frames/s03-datetime-page.png` (before: `DD/MM/YYYY`, plate `28/10 10:00`) -> `frames/s07-after-dateformat.png` (after: `MM/DD/YYYY`, plate `10/28 10:00`) |
+| Time Format 12-Hour Clock | console UI: `Time Format` (list `12-Hour Clock`, `24-Hour Clock`; current is last, so Up selects 12-hour, Cross) | `frames/s11-after-timeformat.png` (after: `12-Hour Clock`, plate `10/28 10:00 AM`) |
+| Theme Original, evidenced | Theme Settings page opened in the same session; Theme/Color/Background/Font all read `Original`; every choice list was opened and cancelled, nothing committed | `stills/page-settings-theme__original__day__1080p.png` |
+| Preset | Vulkan, 1920x1080, Exclusive Fullscreen Mode: Disable, borderless client area exactly 1920x1080, Resolution Scale 100, Clocks scale 100, 2 s settle after the last key | `config/capture-config.yml`, `MANIFEST.md` section 1 |
+| Same state by the catalogue route | Game column row 0 for `root`; each column at row 0; Settings rows 3/6/7/8/16 for the pages; the four lists by their own row indices; Network rows 0/2/3 for the depth-2 surfaces | `MANIFEST.md` section 3, one route per row |
+
+61 stills were taken; 22 are the canonical cell files. No bursts: the day pin's state is a settled frame,
+and the one transient surface (`page-network-test-error`) was captured at rest after the test's variable
+12-26 s timeout rather than as a burst.
+
+### 13.2 The import: the real manifest, no import copy
+
+`C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md` carries a `- Session: 2026-10-28 00:25` line, a
+`| RPCS3 build |` row, a `| Firmware | 4.93 |` row and a `| Video |` row with `1920x1080`, so
+`work/parity-import.ts` accepts it directly - the first batch in this corpus that never needed the
+disclosed import-copy workaround 11.1 and 12.6 describe. Manifest sha256
+`ca242fc3530f11f7da11861c4791e16dc3978256c89f3192f04a4268c0bf05fa`, 24,387 bytes.
+
+```powershell
+bun work/parity-import.ts --map work/parity-references-map.json `
+  --manifest C:/dev/out/rpcs3-ref-2026-10-28/MANIFEST.md `
+  --manifest C:/dev/xmb/out/parity-references/import/rpcs3-ref2-2026-10-28.MANIFEST.md `
+  --manifest C:/dev/out/rpcs3-day-2026-10-28/MANIFEST.md --replace
+```
+
+Result: **36 cells imported, 0 skipped, exit 0**. The 23 earlier entries were re-validated and re-copied
+byte-identically (source and destination sha256 equal; only their `applied` blocks moved), and 21 canonical
+day cells were written: **13 new cells and 8 deliberate replacements** of the night frames that had been
+filed at day cells. Every row is `manifestRef: exact` and every sidecar's `clock` field is the string read off
+that frame's own plate, or the sentence saying why the plate is covered.
+
+Two rows are mapped with a caveat rather than a clean route. `osk` and `options-panel` have native-only
+catalogue routes (`column=tv > custom:jellyfin` and `column=video > library`) that this rig cannot open - no
+TV column, no Jellyfin service, no Video Library page - so they were reached the only way a stock console
+offers: `Users > Create New User > Edit` for the keyboard and `Game > Corrupted Data > TRIANGLE` for the
+options panel. The panels are the surfaces the states name; the pages underneath are not. Both cells are
+therefore Tier B pictures only, and their Tier A cannot pass on this frame. The manifest says so per row and
+so does each sidecar's `note`.
+
+**`root` is captured but not imported, and this is the one canonical cell the session does not move.**
+`root__original__day__1080p` is backed by the `registered` pre-contract frame
+`out/native-reference/ab-rpcs3-root.png`, `parity.ts` pairs a registered cell by that path before the contract
+path, and `parity-import.ts` refuses a registered cell even with `--replace` (10.7). The brief forbade editing
+`work/parity-reference.json`, so the matched frame - Game column, selection 0, depth 0, plate `10/28 10:00 AM`
+- is staged at `C:/dev/out/rpcs3-day-2026-10-28/stills/root__original__day__1080p.png` (sha256
+`fdd4609008f2cd5d0823c119dfc00d18a05dbc1b98fd53dccc5d75e4456a6c1c`) and **10.7 remains the decision the
+corpus owner has to make**. One line out of `registered` plus one import run is all it takes; until then the
+canonical root cell is still the 2026-10-25 DD/MM 24-hour Corrupted-Data frame, and its Tier B number below
+measures that old pair, not today's frame.
+
+### 13.3 Coverage before and after
+
+| Measure | Before this pass | After this pass |
+|---|---:|---:|
+| canonical (`original/day/1080p`) cells with a reference | **9 / 30** | **22 / 30** |
+| of those, genuinely at the day pin | 1 (the registered legacy root, itself 21:53) | 21 (+ the same registered root) |
+| matrix cells with a reference | 24 / 720 | **37 / 720** |
+| firmware-referenced states with a reference somewhere | 22 / 30 | 22 / 30 (unchanged - every state here already had a night cell) |
+| native-only states that owe no reference | 5 (120 cells) | 5 (120 cells) |
+
+The canonical count moves 9 -> 22, not 9 -> 30, and the difference is worth stating: 8 of the 21 rows replace
+a frame that was already sitting at a day cell, so only 13 cells are new. That is exactly the mismatch 11.6
+named - those 8 cells were "present" before and were not day frames.
+
+Still empty, 8 cells, all named in 12.8 and unchanged by this pass: `column-tv` (this rig has no TV column),
+`page-download-management` (needs a DOWN route the build cancels), and the six event-dependent composites
+(`dialog`, `notification`, `volume-hud`, `info-indicator`, `ps-menu`, `media-player-panel`), which need an
+event or input path the rig does not have.
+
+### 13.4 The Tier B numbers that are now genuine
+
+One run, one command, the current build `C:/dev/out/native-final/re-ps3-native.exe`
+(sha256 `706b43f3b49ad38b72bfbd0fa19fc64ba59a2b1bafe1f1e63e5c652c605c712d`), canonical theme/background/
+resolution, the 22 states that now have a canonical reference:
+
+```powershell
+bun work/parity.ts --capture --score --state root,column-user,column-settings,column-photo,column-music,column-video,`
+column-network,column-psn,column-friends,page-settings-system,page-settings-network,page-network-status-list,`
+page-network-test-error,page-network-connection-settings,page-settings-theme,theme-list,color-list,`
+background-list,font-list,page-settings-video,osk,options-panel `
+  --exe C:/dev/out/native-final/re-ps3-native.exe
+```
+
+`run-20261028-003804`, `scorecard-20261028-004646`. 22/22 cells captured, **Tier A PASS for all 22**, Tier B
+**0 pass**, Tier C 0 pass (`options-panel` FAILs its trace and was retried three times). No state reaches
+A+B+C, so this is not a pass claim - but every number below pairs the right state, at the right pin, with a
+reference that is the firmware's own day frame. They are the first genuine Tier B numbers in the corpus.
+
+| Cell | `frame` | required regions (PSNR / SSIM; budget) |
+|---|---|---|
+| `root` | 18.92 / 0.8554 | top background 20.25 / 0.9363 PASS; category icon row 20.90 / 0.8982 FAIL; item label row 12.04 / 0.3860 FAIL; info bar 17.61 / 0.8244 PASS; clock text 13.64 / 0.5128 FAIL (not gating) - icon-heavy 20 / 0.90 |
+| `column-user` | 18.46 / 0.8436 | category icon row 19.42 / 0.8637; item label row 11.70 / 0.3951 |
+| `column-settings` | 18.96 / 0.8390 | 19.16 / 0.8863; 12.64 / 0.4481 |
+| `column-photo` | 17.71 / 0.8348 | 18.65 / 0.8718; 10.46 / 0.3561 |
+| `column-music` | 17.82 / 0.8415 | 18.06 / 0.8587; 10.60 / 0.3627 |
+| `column-video` | 18.02 / 0.8393 | 18.16 / 0.8571; 10.68 / 0.4054 |
+| `column-network` | 18.50 / 0.8476 | category icon row **20.73 / 0.9221 PASS**; item label row 11.14 / 0.4094 |
+| `column-psn` | **8.82 / 0.6202** | 9.69 / 0.7513; 10.45 / 0.4322 - the one cell that is worse than the others, and the reason is content: the console column is the full-bleed Sign Up artwork while the native column is a text list |
+| `column-friends` | 18.39 / 0.8602 | category icon row **21.65 / 0.9424 PASS**; item label row 10.97 / 0.4846 (the console column has no rows) |
+| `page-settings-system` | 18.83 / 0.8553 PASS | page rows 16.78 / 0.7455 FAIL; category icon row 21.32 / 0.9180 PASS (not gating) - text-heavy 18 / 0.85 |
+| `page-settings-network` | 18.17 / 0.8633 PASS | page rows 15.87 / 0.7392 FAIL; category icon row 21.31 / 0.9179 PASS (not gating) |
+| `page-network-status-list` | 17.44 / 0.8460 | status rows 12.97 / 0.6427; title rule 17.34 / 0.6934 |
+| `page-network-test-error` | 15.53 / 0.7810 | message body 10.20 / 0.3467; back hint 12.20 / 0.5589 |
+| `page-network-connection-settings` | 15.55 / 0.7780 | message body 10.01 / 0.3083; back hint 12.20 / 0.5588 |
+| `page-settings-theme` | 18.18 / 0.8394 | page rows 15.69 / 0.7158; category icon row 21.33 / 0.9161 PASS (not gating) |
+| `theme-list` | 18.59 / 0.8512 | band column 19.92 / 0.8670; band rows 17.32 / 0.7385 - composite 18 / 0.88 |
+| `color-list` | 18.61 / 0.8446 | band column 19.01 / 0.8321; chip column 18.93 / 0.8079 |
+| `background-list` | 18.28 / 0.8428 | band column 19.35 / 0.8458; band rows 16.54 / 0.6767 |
+| `font-list` | 17.85 / 0.8344 | band column 19.48 / 0.8448; band rows 16.72 / 0.6416 |
+| `page-settings-video` | 18.61 / 0.8493 | page rows 16.45 / 0.7252; category icon row 21.32 / 0.9181 PASS (not gating) |
+| `osk` | **26.12 / 0.8900 PASS** | osk panel 21.27 / **0.7669** FAIL - the PSNR clears 18 and the SSIM is 0.11 short of 0.88 |
+| `options-panel` | 18.91 / 0.8746 | options panel 19.56 / 0.8436 - **not a panel measurement, see below** |
+
+**What the pin change was worth.** The eight replaced cells had been scored on 2026-10-27 against night
+frames; today's run scores them against day frames, and the control for the build change is `root`, whose
+reference did not change at all:
+
+| Cell | 2026-10-27 run (night frame at a day cell, build `0a82595e`) | 2026-10-28 run (day frame, build `706b43f3`) |
+|---|---|---|
+| `root` (control - same reference both runs) | 18.34 / 0.8314 | 18.92 / 0.8554 |
+| `column-user` | 10.74 / 0.2408 | 18.46 / 0.8436 |
+| `column-settings` | 10.63 / 0.2528 | 18.96 / 0.8390 |
+| `column-photo` | 10.49 / 0.2181 | 17.71 / 0.8348 |
+| `column-music` | 10.50 / 0.2177 | 17.82 / 0.8415 |
+| `column-video` | 10.45 / 0.2147 | 18.02 / 0.8393 |
+| `page-settings-system` | 10.57 / 0.2606 | 18.83 / 0.8553 |
+| `osk` | 15.29 / 0.2395 | 26.12 / 0.8900 |
+| `options-panel` | 17.68 / 0.4932 | 18.91 / 0.8746 |
+
+The columns move about +8 dB and +0.6 SSIM while the control moves +0.58 dB and +0.024, so the jump is the
+pin, not the build. The remaining gap to 20 dB / 0.90 is not: the current build draws **no text at all**.
+
+### 13.5 What the numbers do not measure yet, and the two that are not surface comparisons
+
+**The current build is text-blind.** Every native frame in this run draws icons, plates and the wave but no
+glyphs: no column labels, no clock digits, no page rows, no message body. This is the in-flight text-renderer
+regression 12.5 used `native-status3` for structure only; `native-final` is built from the same tree. So every
+`item label row`, `page rows`, `band rows`, `status rows`, `message body`, `back hint` and `clock text` region
+above compares console text against empty pixels, and the frame numbers are dominated by the same gap. They
+are honest numbers for this build and this reference set, and they are **not** the ceiling of what the
+surfaces can score once glyphs render. The correct reading is: the structure (background, icons, plate, panel
+rect, band gradient) is now being measured against a matched pin, and it is close - the category icon row
+passes on three columns and is within 0.002-0.04 SSIM of passing on several more - while the text half is
+unmeasurable until the regression is fixed.
+
+Two numbers are weaker than the rest and are labelled rather than counted:
+
+- **`options-panel` is not a panel comparison.** The native capture FAILed its Tier C trace
+  (`shell: options opened ...`) on all three attempts, and the scored frame shows the Video column with a
+  dimmed folder page and **no options band at all**. The 19.56 / 0.8436 on the panel region therefore compares
+  the console's panel against a frame without one, and must not be read as "the panels are 19.56 dB apart".
+  The honest statement is: the console side is captured (`stills/options-panel__original__day__1080p.png`,
+  band at x~1330 with Sort By / Group Content / Start / Delete / Information); the native side did not open
+  its panel on this build, so Tier C is the finding, not the number.
+- **`osk`'s pass is the whole frame, not the panel.** 26.12 / 0.8900 clears the composite budget because both
+  frames are a dark dim with a similar plate; the panel region is 21.27 / 0.7669 and fails on SSIM. With the
+  keyboard's glyphs missing on the native side, the panel region cannot be better than that yet.
+
+One more structural difference worth recording because it touches every column cell: the native icon row
+carries a **TV/Video Services column** between Video and Game, and the console's does not (this rig has no
+registered service). The `category icon row` region is a 1920x120 strip of that row, so it compares a
+different set of categories - which is why it can pass on `column-network` and `column-friends`, whose
+windows land on icons both sides draw, and fail elsewhere. That is a real firmware-vs-build column-set
+difference, not a rendering miss.
+
+### 13.6 What is still owed
+
+- **The registered-root decision (10.7).** One matched frame is staged and ready; the canonical root cell
+  cannot leave mismatch-by-construction until `work/parity-reference.json`'s `registered` entry is retired.
+  This pass was forbidden from touching that file, so the decision is still the corpus owner's.
+- **Glyphs.** Until the text-renderer regression is fixed, no cell can pass A+B+C on text-bearing regions, and
+  a re-run of exactly the command in 13.4 on a text-rendering build is the measurement that follows this one.
+  The reference set it would use now exists.
+- **The six event-dependent composites and `column-tv`/`page-download-management`** - unchanged: they need the
+  event/input path on the rig and the native side, not another day session.
+- **The OSK's route gap.** The keyboard was captured from `Create New User` because the catalogue's route is
+  the Jellyfin sign-in page. A sidecar field naming the modal (12.8's `messageTitle`/`messageKind`, extended
+  to the OSK) would let the state assert the panel instead of the page under it; that is a tool change, not
+  made here.
+- **One workspace fact outside this pass, recorded because it would otherwise look like this pass's write.**
+  `work/parity-catalogue.json`'s mtime moved at 00:46:35 during the scoring run (sha256 `76fce2eb...` was
+  recorded by the run at 00:38:04, the file is `b67e09c1...` after), and `work/ab-layers.ts` /
+  `work/ab-layers.thresholds.json` moved at 00:45:04 / 00:46:39 - concurrent work in the same checkout. **No
+  command in this pass writes those files** (`parity.ts` has no write path to the catalogue; the importer only
+  reads it), and neither `work/parity-reference.json` nor `work/parity.ts` moved. The run in 13.4 validated the
+  `76fce2eb` version; the file still validates after the change (`--catalogue`, exit 0, 38 states, 35
+  capturable), so the routes cited in 13.1 are the ones the run used. Flagged for the owner of that file, not
+  reverted here - reverting someone else's in-flight edit is not this pass's call.
+
+**Not a parity claim.** 21 canonical cells are now backed by a matched day frame instead of a night frame;
+coverage moves 9 -> 22 of 30 canonical and 24 -> 37 of 720 matrix cells; no cell passes Tier A+B+C, no budget
+moved, and the first genuine Tier B numbers are structural numbers on a build that cannot draw text.
