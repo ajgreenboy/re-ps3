@@ -894,3 +894,208 @@ native's `x0 = 1320` (`view.cpp` item band, SETTINGS 13.3) is exact for the opti
   frame pair with and without the plate over a known background, which does not exist.
 
 No source file was edited for this section.
+
+---
+
+## 12. Dated correction - 2026-10-28: the column/page item layout, corrected against the matched pair
+
+This section closes the layout half of the first genuine Tier B scorecard (`PARITY-SCORECARD.md` 15: whole
+frames 17.6-19.0 dB, page rows 15.9 / 0.72, band rows 15.8-17.2 / 0.51-0.74, category icon rows often
+passing). It is the first pass in this document that edits source: `src/view.cpp` only. Nothing above is
+deleted, and two of the numbers above are corrected by the matched frames rather than by taste (12.6, 12.7).
+
+Method: for each failing surface the native frame captured by the harness (same pins: render clock 30 s,
+background clock 2026-10-25T10:00, UI clock 2026-10-25T12:32, focus age 2000 ms) was diffed against the
+matched console frame in `out/parity-references/<state>__original__day__1080p.png`, using Rec.709 luma
+column/row profiles and ink runs (Python + Pillow, Rec.709 luma, 1 px profiles at the cited rows/columns).
+"Native, before" is `scorecard-20261028-012659` (exe `C:/dev/out/native-bands2/re-ps3-native.exe`, sha256
+`94e57264...c29c54`); "after" is `scorecard-20261028-063514` (run `run-20261028-062356`, exe
+`C:\dev\xmb\out\native-xmb\re-ps3-native.exe`, sha256 `0e8023fb...afc4eae`). The tree's final exe is
+`a1c178ab...a37b` (a comment-order edit after the measured build); it was re-captured for `root` and
+`theme-list` and produces **byte-identical frames** (SHA256 `fb3882e5...` and `8b6cbdd1...` both times), and
+the canonical layer gate re-run on it gives the same six per-layer values, so every number below applies to
+the installed build. No budget, reference or harness file was touched.
+
+### 12.1 The per-surface delta table
+
+Every row is a measured delta on the matched pair, not an inference. "Ref crop" names the frame and the
+rows/columns the number was read at.
+
+| # | element | native before | console (matched frame) | delta | ref crop |
+|---|---|---|---:|---:|---|
+| 1 | level-0 item label pen | 664 (565+99) | 678 (565+113) | **+14** | `root...png` label ink left 682 at y 492-523; `column-user/settings/network` ink 682-683; `5.4` measured 678 on `settings-b.png` |
+| 2 | level-0 category title centre y | 355 | 350 | **-5** | `root...png` title ink y 342-358 against native 347-363 (same 21 px size) |
+| 3 | parent-column unfocused icon x | 455.00 (565-110) | 455.54 (565-109.46) | **+0.54** | section 8 / 5.1 (traced transform), no settled frame isolates it |
+| 4 | depth-1 category neighbours' alpha | 0.100 | about 0.067 | **-0.033** | `page-settings-theme...png`: icon peak 82 over a 70 background (implied 0.07) against native 100 over 84 (0.104) |
+| 5 | Theme-page band left edge | 1260 | 1324-1325 | **+64** | `theme-list...png` y 100: 77 at 1322, 85 at 1324, 97 at 1326 (1 px step) |
+| 6 | Theme-page band geometric zero | 1690 | 1744 | **+54** | `theme-list...png`: fill over the parent page 17 at x 1700, 6 at 1740, 1-3 from 1780 (12.3) |
+| 7 | Theme-page band row text x | 1276 (1260+16) | 1341 (1324+17) | **+65** | `theme-list...png` ink left 1340-1341 on all four rows |
+| 8 | Theme-page band fill | 61 peak, Screensaver curve | 56 peak at about 1400 | **-5** + shape | `theme-list...png`: delta over the parent page 25 at 1340, 35 at 1380-1420, 33 at 1460, 30 at 1500, 27 at 1540, 38 at 1620, 17 at 1700, 6 at 1740 |
+| 9 | Theme band utility row (`Install`) | 465 (40 px above focus) | 261-278 ink | **-204** | `theme-list...png` first row ink 261-278 (12.4e) |
+| 10 | Theme band theme rows | 505/545/585 | 499/541/578 ink | -6 / -4 / -7, pitch 40 kept | `theme-list...png` rows 2-4 ink tops |
+| 11 | Color/Background/Font band | this build's panel: edge 1330, fill to 1920, text 1348 | same Theme-page plane: edge 1324, zero 1744, text 1341 | **+6 / -176 tail / -7** | `color-list`, `background-list`, `font-list` at y 100: identical delta profile to `theme-list` |
+| 12 | Background-list rows | 505/545/585 | 539/581/621 ink | **+45** | `background-list...png` ink tops (against native 494/536/576) |
+| 13 | info bar over the four bands | drawn (clock ink max 255) | absent (max 99 in the clock box) | state | `background-list/font-list/theme-list` clock box x 1500-1800, y 80-135 |
+
+Rows 1-4 are the column surface; 5-13 are the Theme-page band family. The depth-1 *page rows* produced no
+delta at all and were not touched (12.2).
+
+### 12.2 What was already right and was deliberately not touched
+
+Measured on the same pair, all within +/-2 px of the console:
+
+| element | console | native | note |
+|---|---|---|---|
+| depth-1 page row centres | 675/755/835/915/995 | 670/750/830/910/990 (ink tops) | focus 505, pitch 80, `9.3` confirmed on three pages |
+| depth-1 label pen | 625 ink | 623-625 ink | 565+57 = 622, exact |
+| depth-1 value column | 1296 ink | 1296 ink | rect x 1300 (`U6`'s 1301 applies to the authored column, ink agrees) |
+| focused label baseline | 492-523 ink | 495-515 ink | same 26-27 px cap, same baseline within 1 px |
+| category icon row | quad/pitch/brightness | unchanged | the region already passes 20.0-21.7 dB in 3 of 9 column states (root, network, friends) and 21.3 dB on all four pages |
+| settings focused row | no filled rectangle | no filled rectangle | `SETTINGS 12.6` holds for the native too |
+
+So "the console's items sit around/beside the band while ours stack below" is **not** what the frames say:
+the column rows, the depth-1 page rows and the 505/80 grid already coincide. The concentrated layout errors
+were the level-0 label pen, the Theme-page band family, and the faint neighbours' alpha.
+
+### 12.3 What changed (src/view.cpp, single writer)
+
+1. `labelX`: `level==0 ? (tile?173:99) : 57` -> `(tile?173:113)`. Tile rows keep 173 because `5.4` shows the
+   console's artwork-row label is set by its 300 px card, and this build's card is 320 px; the 20 px there
+   belongs to the card width (ITEM-ICONS), not to the label constant.
+2. Category title rect y 335 -> 330.
+3. Parent unfocused icon offset 110 -> 109.46 (the focused 262 step is unchanged).
+4. Depth-1 faint neighbour alpha 0.10 -> 0.067.
+5. `PanelBand` gained `groupBreakRow` (a choice list has no `MenuOption` divider flag, so the Theme list's
+   utility row is a measured index) and the Theme-page family gained its own band constants:
+   `kThemeBand` (x0 1324, zero 1744, text inset 17, fixed rows at 505, pitch 40, group gap 239, group break 1),
+   `kThemeLowerListBand` (same plane, no utility group: Color and Font), `kBackgroundBand` (same plane,
+   row origin 548), `kThemeBandStops` (the Theme band's own 56-peak profile from `SETTINGS 12.3`, not the
+   Screensaver band's 61-peak curve), and `pageBandForSetting()` keyed on the four Preferences keys
+   `appearance/theme|colour|background|font`. Anything else keeps `kChoiceBand` (the Display page's 1260/1690).
+6. The four Theme-page lists now draw that band even when their labels are this build's own (Color's list,
+   Background's list): the *plane* is the firmware's on all four frames, only the row set differs.
+7. The info bar is suppressed while any of the four bands is up, whether its labels are the firmware's or
+   this build's (all four console frames have no clock; this build drew one for the native-labelled lists).
+
+Not changed, with the reason in 12.6/12.7: the item plate, the artwork label 173, the transition numbers
+(incoming 210 / 1.1022 scale / receding bar), the depth-2 page grid and rules.
+
+### 12.4 Tier B per state, before and after
+
+Frame and worst (gating) region, `scorecard-20261028-012659` before, `scorecard-20261028-063514` after.
+PSNR dB / SSIM. States in roman were not touched by this change and reproduce their previous numbers.
+
+| state | frame before | frame after | worst region before | worst region after |
+|---|---|---|---|---|
+| root | 17.83 / 0.8213 | **17.86 / 0.8226** | item label row 10.99 / 0.3952 | 11.03 / 0.3957 |
+| column-user | 18.39 / 0.8438 | **18.42 / 0.8446** | item label row 11.62 / 0.4023 | 11.64 / 0.4027 |
+| column-settings | 18.65 / 0.8372 | **18.69 / 0.8385** | item label row 12.71 / 0.4550 | 12.80 / 0.4549 |
+| column-photo | 17.60 / 0.8334 | **17.62 / 0.8340** | item label row 10.52 / 0.3641 | 10.52 / 0.3641 |
+| column-music | 17.69 / 0.8374 | **17.71 / 0.8382** | item label row 10.68 / 0.3732 | 10.68 / 0.3732 |
+| column-video | 17.78 / 0.8327 | **17.80 / 0.8334** | item label row 10.58 / 0.4053 | 10.58 / 0.4053 |
+| column-network | 18.26 / 0.8440 | **18.31 / 0.8457** | item label row 11.06 / 0.4203 | 11.14 / 0.4301 |
+| column-psn | 8.81 / 0.6141 | **8.82 / 0.6146** | item label row 10.29 / 0.4256 | 10.29 / 0.4241 |
+| column-friends | 17.75 / 0.8462 | **17.80 / 0.8479** | item label row 10.13 / 0.4459 | 10.13 / 0.4442 |
+| page-settings-system | 18.49 / 0.8518 | **18.50 / 0.8533** | page rows 16.26 / 0.7395 | 16.26 / 0.7397 |
+| page-settings-network | 17.95 / 0.8623 | **17.96 / 0.8639** | page rows 15.53 / 0.7364 | 15.53 / 0.7364 |
+| page-settings-video | 18.27 / 0.8478 | **18.28 / 0.8496** | page rows 15.93 / 0.7202 | 15.93 / 0.7203 |
+| page-settings-theme | 17.87 / 0.8339 | **17.88 / 0.8356** | page rows 15.27 / 0.7069 | 15.27 / 0.7071 |
+| theme-list | 18.47 / 0.8492 | **18.92 / 0.8592** | band rows 17.23 / 0.7376 | 16.96 / 0.7412 |
+| color-list | 18.42 / 0.8388 | **19.05 / 0.8583** | chip column 18.81 / 0.7846 | 19.43 / 0.8164 |
+| background-list | 18.02 / 0.8383 | **18.72 / 0.8601** | band rows 16.26 / 0.6584 | 17.27 / 0.7034 |
+| font-list | 17.63 / 0.8270 | **18.19 / 0.8472** | band rows 15.83 / 0.5085 | 16.11 / 0.5308 |
+| options-panel | 18.83 / 0.8690 | **18.84 / 0.8701** | options panel 19.46 / 0.8324 | 19.46 / 0.8324 |
+| osk | 25.95 / 0.8856 | **25.95 / 0.8857** | osk panel 21.18 / 0.7695 | 21.18 / 0.7695 |
+| page-network-status-list | 16.84 / 0.8335 | **16.84 / 0.8335** | status rows 12.02 / 0.5804 | 12.02 / 0.5804 |
+| page-network-test-error | 15.36 / 0.7783 | **15.36 / 0.7783** | message body 9.16 / 0.2567 | 9.16 / 0.2567 |
+| page-network-connection-settings | 15.44 / 0.7774 | **15.44 / 0.7774** | message body 9.64 / 0.3163 | 9.64 / 0.3163 |
+
+Region detail that the table compresses:
+
+- `background-list` is the largest gain: band column 18.77 -> **20.33 / 0.8909 (PASS, 18.00 / 0.8800)** and
+  band rows +1.01 dB / +0.045 SSIM. `font-list` band column 18.79 -> 19.95 / 0.8715. `color-list` band column
+  18.54 -> 19.53 / 0.8664, chip column 18.81 -> 19.43 / 0.8164.
+- `theme-list` is the only state whose band regions lost PSNR: band column 19.87 -> 19.57 (+0.0025 SSIM), band
+  rows 17.23 -> 16.96 (+0.0036 SSIM), while its frame gained 0.45 dB / +0.0100. The cause is measured and is
+  not the band: the parent page behind the band renders 20-21 luma brighter than the console's (native 99 at
+  x 1300 y 100 against the console's 78), so a correctly placed band is still too bright. The three sibling
+  lists gained +1.0 to +1.6 dB from the same geometry because their old panel fill was worse.
+- The category icon row gained 0.12-0.38 dB in every column state (title y) and 0.22 dB / +0.0149 SSIM in
+  every page state (faint alpha).
+- `column-friends` and `column-psn` lost 0.0017 / 0.0015 SSIM on the item label row (10.13 and 10.29 dB
+  unchanged). Both are content mismatches (a short native label against a different console string), so the
+  +14 px pen helps root/network/settings/user and is a wash there; the pen itself is measured (row 1).
+- No state flipped from FAIL to PASS overall: Tier B is still 0/22, because each failing state still has at
+  least one failing region (9 `item label row`, 4 `page rows`, 3 `band rows`, the status rows, the two message
+  bodies, the osk panel, the options panel and the color chip column = 22).
+
+### 12.5 Gates
+
+- Canonical layers: `bun work/ab-layers.ts --capture --exe C:\dev\xmb\out\native-xmb\re-ps3-native.exe`
+  -> **PASS 6/6** with the text-presence line (`text presence: 1677 bright pixels in the clock crop
+  (minimum 900) PASS`): frame 18.31 (base 18.29, +0.02) / 0.8356, top background 20.25 (+0.00), category icon
+  row 21.20 (+0.27) / 0.9029, item label row 11.95 (+0.00), clock text 11.39, info bar 14.98.
+- Named states (`ab-layers.ts --states`): **2/12 pass** after the change against 1/1 for the one state that was
+  re-run on the pre-change exe (`steam-game-root` inf/1.0000). This is expected and reported, not repaired:
+  those references are deterministic self-baselines at 55 dB / 0.9995, and this change deliberately moves the
+  level-0 label pen in every state, the faint neighbours on every page and the four band planes. Measured
+  drift: steam-game-root 27.48/0.9771 (item column 23.51/0.9500), xmb-notification 27.48/0.9771,
+  xmb-volume-hud 27.66/0.9778, continue-watching-empty 32.15/0.9926 (dialog 29.02/0.9865),
+  continue-watching 52.31/0.9993, steam-store-sections 51.74/0.9992, jellyfin-signin 53.11/0.9995,
+  steam-all-games 53.07/0.9992, video-options-panel 54.50/0.9995, steam-not-installed 54.92/0.9995,
+  steam-download-page 55.80/0.9997 (PASS), subtitle-cue inf (PASS). They need a deliberate
+  `--states --save-reference` refresh by whoever owns those references; no reference was edited here.
+
+### 12.6 What remains wrong, and why
+
+1. **The dominant remaining error is the background, not the item layout.** A single per-channel gain fitted
+   on the pair (0.785 root, 0.762 page-settings-system, 0.772 theme-list) raises the whole frame from 17.86 to
+   20.12 dB (root, over the 20.00 icon-heavy budget), 18.50 to 21.51 and 18.92 to 22.18, and lifts
+   `page-settings-system`'s page rows from 16.26 to 18.76 dB (budget 18.00). The native's upper gradient is
+   about 1.25x the console's (1.23-1.30 over the 160x120 cells above y 360) and its ribbon sits lower and
+   wider (the native/console cell ratio is 1.7-2.0x over y 480-600 and 0.83-1.18x over y 600-720), i.e. an
+   exposure **and** a ribbon-phase difference. A fitted scalar is not a rendering constant and the ribbon's
+   phase is a live animation state, so this pass did not fake either; it is a background-shader/atlas
+   problem, not a layout one.
+2. **Text metrics, not layout.** On the depth-1 pages the native label "System Name" inks 202 px wide against
+   the console's 218 px (8 %), and the unfocused row ink peaks at 202-207 luma against the console's 148-175.
+   Both are font-stack/rasteriser properties (view.cpp only chooses the size and the alpha), so no layout
+   constant fixes them.
+3. **The Theme band's fill over a too-bright page** (12.4): geometry and profile now match the frame
+   (contribution 25-39 luma against the console's 25-38 at x 1340-1620), the page behind does not.
+4. **Choice-list *contents*, outside this fence.** Color draws 6 text rows against the console's 12 unlabelled
+   chips (`SETTINGS 12.4b`), and Background has no `Brightness` submenu row; both come from
+   `settings_menu.cpp`'s choice model, which this pass does not edit.
+5. **Transition-only numbers stay open.** `5.2`/`5.3`'s receding bar (d 2483.53, 217.4 px pitch, y 268/257),
+   the incoming column (774.09 = 565+210 at 1.1022x) and `5.5`'s parent-label transform cannot be validated
+   by a settled frame, and every parity cell is settled; they need a burst-pair comparison, and a wrong guess
+   would move pixels no reference measures.
+6. **Depth-2 pages** (`page-network-status-list`, status rows 12.02 dB) are drawn by
+   `dialogs.cpp`/`xmbml_view.cpp`: rules 199/879, pitch 40, labels right 939, values 979-980. Outside the
+   write fence of this pass.
+7. **The artwork-row label** (`tile?173`) stays; `5.4` shows the console's 718 is set by a 300 px card and
+   this build's card is 320 px.
+
+### 12.7 The "item plate" is the BG1 artwork plane, not a focus plate (corrects 10.1 and 11.1's naming)
+
+10.1 and 11.1 measure a rectangle at x 405-723, y 417-591 (319 x 175, centred on (564, 504)) over six
+console frames and call it the focused item's plate. The matched root frame falsifies that reading: at
+y 520 the console's luma is 52-53 from x 360 to x 500 with no step at x 405, i.e. the focused row of
+`root__original__day__1080p.png` carries no rectangle, and the same holds for every column reference whose
+focused row is a folder or a utility.
+
+What the six frames have in common is the opposite: their focused items have **no image**. 319 x 175 is
+1.82:1, the same shape as `4.2 #32`'s "about 300 x 180 at about (550, 490)" artwork tile, and the RCO calls
+the object `BG1` with `image = null` - the plane that *would* carry ICON0. So the rectangle is the empty
+artwork plane (the placeholder card drawn for an item with no ICON0), centred on the focus point, and it is
+not a selection plate. Consequences:
+
+- the native must **not** gain a plate behind every focused row (`SETTINGS 12.6`'s "no filled row" already
+  says this for settings); that would have been a large regression on this pair;
+- the native's missing element is narrower than 10.1 implied: an art-less *game* row should draw a
+  319 x 175 placeholder card, which this build draws as a small glyph instead. No scored state has such a
+  row (the Game column's rows there are folders and installed Steam entries with art), so it is recorded,
+  not implemented.
+
+No other source file was edited; no RCO, threshold, budget or reference was touched.
+
