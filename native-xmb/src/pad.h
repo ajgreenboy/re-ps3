@@ -27,6 +27,22 @@ struct Info { Kind kind=Kind::None; Transport transport=Transport::Unknown; int 
 void start();
 // The newest reading from any PlayStation controller, if one reported in the last 300 ms.
 bool latest(State& out);
+// ---- Scripted-run input gate (audit/PS-BUTTON.md) ----
+// A scripted capture must be deterministic: the script drives and a live controller must not. A run is scripted
+// when --script is present or XMB_INPUT_SCRIPT_ONLY=1; main.cpp calls setScriptOnly() once, before the View (and
+// so before pad::start()) exists. While the gate is on, latest() reports NO live state at all: a D-pad
+// direction, stick axis, trigger, button or PS bit from a physical controller is still parsed, observed and
+// counted, but never delivered, so View::pollController() cannot merge it into navigation and PsWatcher cannot
+// open the system menu with it. The controller itself keeps being read (info() still answers --pad-report and
+// the battery line still logs); only its influence on the shell is removed. Off by default: with no --script and
+// no XMB_INPUT_SCRIPT_ONLY, latest() behaves exactly as it did before this gate existed.
+void setScriptOnly(bool on);
+bool scriptOnly();
+// Live pad samples withheld because the run is scripted: one per latest() call that saw a live state carrying a
+// button bit, a trigger past 0.5 or a stick axis past the same 0.5 deadzone pollController uses. A scripted
+// sidecar publishes it as padEventsIgnored, so a capture proves the pad was not steering it. Always 0 in a
+// normal run. XMB_INPUT_TRACE=1 logs each decision this count is taken from, source=pad.
+quint64 ignoredEvents();
 // The identity, transport and battery of the controller behind latest(), on the same 300 ms freshness window.
 // False when no controller reported recently; out is left untouched then.
 bool info(Info& out);
