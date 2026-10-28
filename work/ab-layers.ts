@@ -40,8 +40,26 @@ type Layer = {
   captureBaseline?: Baseline;
 };
 type StateRegion = { name: string; crop: Rect };
-type PathStage = { catalogueId?: string; folderRowTitle?: string; folderRowId?: string };
+// A navigation stage. `categoryId` (first stage only) moves the cursor to another
+// column first; then the row is chosen by a catalogue id, a folder row resolved
+// from the parent page's dump, an explicit zero-based row index from the top of
+// the page, or a literal. `rowIndex` is the only form that needs no dump: it is
+// used for pages this build writes no dump for, and the sidecar assertion is the
+// oracle for the row it landed on.
+type PathStage = { categoryId?: string; catalogueId?: string; folderRowTitle?: string; folderRowId?: string; rowIndex?: number };
 type FolderRowExpect = { idPrefix: string; title: string; detail?: string; detailFormula?: string };
+// Extra sidecar assertions: an exact scalar, or one range/prefix/contains test.
+type SidecarTest = { gt?: number; ge?: number; lt?: number; le?: number; prefix?: string; contains?: string };
+type SidecarFieldExpect = string | number | boolean | SidecarTest;
+// A regex the capture's own log (XMB_LOG) must match, with an optional exact count.
+type LogExpect = { pattern: string; count?: number };
+// The Download Management page's own dump (<dump>.dl.json).
+type DownloadsExpect = {
+  count?: number;
+  error?: string;
+  message?: string;
+  rows?: Array<{ idPrefix?: string; title: string; state?: string; text?: string; detail?: string }>;
+};
 type StateExpect = {
   category?: string;
   depth?: number;
@@ -58,6 +76,10 @@ type StateExpect = {
   folderRowsDetailContains?: string;
   folderRows?: FolderRowExpect[];
   noStoreDump?: boolean;
+  pageKind?: string;
+  sidecar?: Record<string, SidecarFieldExpect>;
+  log?: LogExpect[];
+  downloads?: DownloadsExpect;
 };
 type StateRecipe = {
   name: string;
@@ -68,6 +90,14 @@ type StateRecipe = {
   waits: number;
   settleWaits?: number;
   path?: PathStage[];
+  // Extra environment for the capture. Values may contain ${repo}, which is
+  // replaced with the checkout root so a fixture path stays relative here.
+  env?: Record<string, string>;
+  // Script tokens inserted after the navigation (and the settle waits) and
+  // before the grab, e.g. TRIANGLE or NOTIFY=/VOLSET=; and tokens inserted
+  // after the grab and before quit, e.g. VOLRESTORE.
+  preGrab?: string[];
+  postGrab?: string[];
   expect: StateExpect;
   regions: StateRegion[];
 };
@@ -137,6 +167,29 @@ function isScore(value: unknown): value is Baseline {
     typeof (value as Baseline).psnr === 'number' && Number.isFinite((value as Baseline).psnr) &&
     typeof (value as Baseline).ssim === 'number' && Number.isFinite((value as Baseline).ssim) &&
     (value as Baseline).ssim >= -1 && (value as Baseline).ssim <= 1;
+}
+
+// Every --script token the native build accepts (src/main.cpp). A recipe may also
+// use the payload forms (NOTIFY=, VOLSET=, VOLKEY=, type=, idle=, burst=).
+const scriptKeys = new Set(['full', 'wait', 'LEFT', 'RIGHT', 'UP', 'DOWN', 'ENTER', 'ESC', 'PGUP', 'PGDN',
+  'BACKSPACE', 'PREV', 'NEXT', 'SHUFFLE', 'REPEAT', 'ZOOMIN', 'ZOOMOUT', 'RESETVIEW', 'ROTATELEFT', 'ROTATERIGHT',
+  'REFRESH', 'TRIANGLE', 'ps', 'pshold', 'VOLUP', 'VOLDOWN', 'MUTE', 'VOLRESTORE']);
+function isScriptToken(token: string) {
+  return scriptKeys.has(token) || /^size=\d+x\d+$/.test(token) || /^(NOTIFY|VOLSET|VOLKEY|type|idle|burst)=/.test(token);
+}
+function isSidecarTest(value: unknown): value is SidecarTest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== 1) return false;
+  const key = keys[0];
+  const inner = (value as Record<string, unknown>)[key];
+  if (key === 'prefix' || key === 'contains') return typeof inner === 'string';
+  if (['gt', 'ge', 'lt', 'le'].includes(key)) return typeof inner === 'number' && Number.isFinite(inner);
+  return false;
+}
+function isSidecarFieldExpect(value: unknown) {
+  return typeof value === 'string' || typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value)) || isSidecarTest(value);
 }
 
 function parseThresholds(path: string): Thresholds {
@@ -209,17 +262,42 @@ function parseThresholds(path: string): Thresholds {
         for (const [stageIndex, stage] of state.path.entries()) {
           if (!stage || typeof stage !== 'object')
             fail(`${path}: ${state.name}: path[${stageIndex}] is not an object`);
-          const keys = [stage.catalogueId, stage.folderRowTitle, stage.folderRowId].filter(Boolean).length;
+          const keys = [stage.catalogueId, stage.folderRowTitle, stage.folderRowId,
+            stage.rowIndex === undefined ? undefined : String(stage.rowIndex)].filter(value => value !== undefined).length;
           if (keys !== 1)
-            fail(`${path}: ${state.name}: path[${stageIndex}] must define exactly one of catalogueId, folderRowTitle, folderRowId`);
+            fail(`${path}: ${state.name}: path[${stageIndex}] must define exactly one of catalogueId, folderRowTitle, folderRowId, rowIndex`);
           for (const key of ['catalogueId', 'folderRowTitle', 'folderRowId'] as const)
             if (stage[key] !== undefined && (typeof stage[key] !== 'string' || !stage[key]))
               fail(`${path}: ${state.name}: path[${stageIndex}].${key} must be a non-empty string`);
-          if (stageIndex > 0 && stage.catalogueId !== undefined)
-            fail(`${path}: ${state.name}: path[${stageIndex}] must target a folder row, not the catalogue`);
+          if (stage.rowIndex !== undefined && (!Number.isSafeInteger(stage.rowIndex) || stage.rowIndex < 0 || stage.rowIndex > 5000))
+            fail(`${path}: ${state.name}: path[${stageIndex}].rowIndex must be an integer from 0 through 5000`);
+          if (stage.categoryId !== undefined && (typeof stage.categoryId !== 'string' || !stage.categoryId))
+            fail(`${path}: ${state.name}: path[${stageIndex}].categoryId must be a non-empty string`);
+          if (stageIndex > 0 && (stage.catalogueId !== undefined || stage.categoryId !== undefined))
+            fail(`${path}: ${state.name}: path[${stageIndex}] must target a row inside the page opened by the previous stage`);
         }
-        if (state.path[0].catalogueId === undefined)
-          fail(`${path}: ${state.name}: path[0] must select a catalogue entry (catalogueId)`);
+        if (state.path[0].catalogueId === undefined && state.path[0].rowIndex === undefined)
+          fail(`${path}: ${state.name}: path[0] must select a catalogue entry (catalogueId) or a rowIndex`);
+      }
+      if (state.env !== undefined) {
+        if (!state.env || typeof state.env !== 'object' || Array.isArray(state.env))
+          fail(`${path}: ${state.name}: env must be an object`);
+        for (const [key, value] of Object.entries(state.env)) {
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
+            fail(`${path}: ${state.name}: env key ${JSON.stringify(key)} is not a valid environment name`);
+          if (typeof value !== 'string')
+            fail(`${path}: ${state.name}: env.${key} must be a string`);
+        }
+      }
+      for (const listKey of ['preGrab', 'postGrab'] as const) {
+        const tokens = state[listKey];
+        if (tokens === undefined) continue;
+        if (!Array.isArray(tokens) || tokens.some(token => typeof token !== 'string' || !token))
+          fail(`${path}: ${state.name}: ${listKey} must be a string array`);
+        for (const token of tokens)
+          if (!isScriptToken(token))
+            fail(`${path}: ${state.name}: ${listKey} token ${JSON.stringify(token)} is not a script token `
+              + '(grab and quit are the harness\'s own, so they are rejected)');
       }
       if (!state.expect || typeof state.expect !== 'object' || Array.isArray(state.expect))
         fail(`${path}: ${state.name}: expect must be an object`);
@@ -246,6 +324,55 @@ function parseThresholds(path: string): Thresholds {
             fail(`${path}: ${state.name}: expect.folderRows.detailFormula must be a string`);
           if (row.detail !== undefined && row.detailFormula !== undefined)
             fail(`${path}: ${state.name}: expect.folderRows entry cannot set both detail and detailFormula`);
+        }
+      }
+      if (expect.pageKind !== undefined && (typeof expect.pageKind !== 'string' || !expect.pageKind))
+        fail(`${path}: ${state.name}: expect.pageKind must be a non-empty string`);
+      if (expect.sidecar !== undefined) {
+        if (!expect.sidecar || typeof expect.sidecar !== 'object' || Array.isArray(expect.sidecar))
+          fail(`${path}: ${state.name}: expect.sidecar must be an object`);
+        for (const [field, value] of Object.entries(expect.sidecar)) {
+          if (!/^[A-Za-z][A-Za-z0-9]*$/.test(field))
+            fail(`${path}: ${state.name}: expect.sidecar field ${JSON.stringify(field)} is not a sidecar key`);
+          if (!isSidecarFieldExpect(value))
+            fail(`${path}: ${state.name}: expect.sidecar.${field} must be a string, number, boolean, `
+              + 'or one of {gt,ge,lt,le,prefix,contains}');
+        }
+      }
+      if (expect.log !== undefined) {
+        if (!Array.isArray(expect.log) || !expect.log.length)
+          fail(`${path}: ${state.name}: expect.log must be a non-empty array`);
+        for (const entry of expect.log) {
+          if (!entry || typeof entry !== 'object' || typeof entry.pattern !== 'string' || !entry.pattern)
+            fail(`${path}: ${state.name}: expect.log entries must be {pattern,count?}`);
+          try { new RegExp(entry.pattern); } catch (error) {
+            fail(`${path}: ${state.name}: expect.log pattern ${JSON.stringify(entry.pattern)} is not a valid regex: `
+              + (error instanceof Error ? error.message : String(error)));
+          }
+          if (entry.count !== undefined && (!Number.isSafeInteger(entry.count) || entry.count < 1 || entry.count > 10000))
+            fail(`${path}: ${state.name}: expect.log.count must be a positive integer`);
+        }
+      }
+      if (expect.downloads !== undefined) {
+        const downloads = expect.downloads;
+        if (!downloads || typeof downloads !== 'object' || Array.isArray(downloads))
+          fail(`${path}: ${state.name}: expect.downloads must be an object`);
+        for (const key of ['count'] as const)
+          if (downloads[key] !== undefined && (!Number.isSafeInteger(downloads[key]) || downloads[key] < 0))
+            fail(`${path}: ${state.name}: expect.downloads.${key} must be a non-negative integer`);
+        for (const key of ['error', 'message'] as const)
+          if (downloads[key] !== undefined && typeof downloads[key] !== 'string')
+            fail(`${path}: ${state.name}: expect.downloads.${key} must be a string`);
+        if (downloads.rows !== undefined) {
+          if (!Array.isArray(downloads.rows) || !downloads.rows.length)
+            fail(`${path}: ${state.name}: expect.downloads.rows must be a non-empty array`);
+          for (const row of downloads.rows) {
+            if (!row || typeof row !== 'object' || typeof row.title !== 'string' || !row.title)
+              fail(`${path}: ${state.name}: expect.downloads.rows entries must be {title,...}`);
+            for (const key of ['idPrefix', 'state', 'text', 'detail'] as const)
+              if (row[key] !== undefined && typeof row[key] !== 'string')
+                fail(`${path}: ${state.name}: expect.downloads.rows.${key} must be a string`);
+          }
         }
       }
       if (!Array.isArray(state.regions) || !state.regions.length)
@@ -486,6 +613,7 @@ async function runStateProcess(t: Thresholds, opts: ReturnType<typeof parseArgs>
   const grabPath = join(captureDir, 'native.png');
   const dumpPath = join(captureDir, 'entries.json');
   const logPath = join(captureDir, 'native.stderr.log');
+  const messagePath = join(captureDir, 'native.messages.log');
   const finalTokens = tokens.map(token => token === '{grab}' ? `grab=${grabPath}` : token);
   const bgClock = opts.bgClock || t.capture.backgroundClock;
   const uiClock = opts.uiClock || t.capture.uiClock;
@@ -497,7 +625,12 @@ async function runStateProcess(t: Thresholds, opts: ReturnType<typeof parseArgs>
     ...process.env,
     XMB_DUMP_ENTRIES: dumpPath,
     XMB_STEAM_ARTWORK: '0',
+    // The Windows build has no console, so the app's own qInfo/qWarning lines go to
+    // XMB_LOG. Recipe log assertions read that file; the grep is unambiguous because
+    // every capture gets its own directory.
+    XMB_LOG: messagePath,
   } as Record<string, string | undefined>;
+  for (const [key, value] of Object.entries(recipe.env ?? {})) env[key] = value.replaceAll('${repo}', repo);
   if (opts.steamRoot) env.XMB_STEAM_ROOT = opts.steamRoot;
 
   if (!quiet) console.log(`  script   ${finalTokens.join(',')}`);
@@ -522,6 +655,25 @@ function gameEntries(dump: any): any[] {
   return game && Array.isArray(game.entries) ? game.entries : [];
 }
 
+// The catalogue dump lists every column in the shell's own order, so a recipe that
+// starts in another column can resolve its row (and the number of LEFT/RIGHT moves)
+// from the same discovery capture instead of hardcoded offsets.
+type Catalogue = { categories: string[]; rows: Map<string, Map<string, number>> };
+function catalogueFromDump(dump: any): Catalogue {
+  const categories: string[] = [];
+  const rows = new Map<string, Map<string, number>>();
+  for (const category of (Array.isArray(dump?.categories) ? dump.categories : [])) {
+    if (!category || typeof category.id !== 'string') continue;
+    categories.push(category.id);
+    const indices = new Map<string, number>();
+    (Array.isArray(category.entries) ? category.entries : []).forEach((entry: any, index: number) => {
+      if (entry && typeof entry.id === 'string' && !indices.has(entry.id)) indices.set(entry.id, index);
+    });
+    rows.set(category.id, indices);
+  }
+  return { categories, rows };
+}
+
 function familySharedCount(recipe: StateRecipe) {
   const file = resolveRepo(join(recipe.dataSeed, 'family-shared.json'));
   try {
@@ -543,7 +695,41 @@ function expectedDetailFormula(recipe: StateRecipe, formula: string, dump: any) 
   return undefined;
 }
 
-function checkStateExpect(recipe: StateRecipe, sidecar: any, dump: any, folder: any, store: any) {
+function sidecarTest(field: string, value: SidecarFieldExpect, actual: unknown, problems: string[]) {
+  const got = actual as any;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    if (got !== value) problems.push(`sidecar ${field}: expected ${JSON.stringify(value)}, got ${JSON.stringify(got)}`);
+    return;
+  }
+  const [operator, expected] = Object.entries(value)[0];
+  if (operator === 'prefix') {
+    if (typeof got !== 'string' || !got.startsWith(expected as string))
+      problems.push(`sidecar ${field}: expected a value starting with ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`);
+    return;
+  }
+  if (operator === 'contains') {
+    if (typeof got !== 'string' || !got.includes(expected as string))
+      problems.push(`sidecar ${field}: expected a value containing ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`);
+    return;
+  }
+  if (typeof got !== 'number' || !Number.isFinite(got)) {
+    problems.push(`sidecar ${field}: expected a number ${operator} ${expected}, got ${JSON.stringify(got)}`);
+    return;
+  }
+  const limit = expected as number;
+  const ok = operator === 'gt' ? got > limit : operator === 'ge' ? got >= limit
+    : operator === 'lt' ? got < limit : got <= limit;
+  if (!ok) problems.push(`sidecar ${field}: expected ${operator} ${limit}, got ${got}`);
+}
+
+function countPattern(text: string, pattern: RegExp) {
+  let count = 0;
+  for (const line of text.split(/\r?\n/)) if (pattern.test(line)) count++;
+  return count;
+}
+
+function checkStateExpect(recipe: StateRecipe, sidecar: any, dump: any, folder: any, store: any, dl: any,
+  messages: string) {
   const expect = recipe.expect;
   const problems: string[] = [];
   const actual: Record<string, any> = {
@@ -556,6 +742,22 @@ function checkStateExpect(recipe: StateRecipe, sidecar: any, dump: any, folder: 
   for (const key of ['category', 'depth', 'entryId', 'entryTitle', 'entryCount'] as const) {
     if (expect[key] !== undefined && actual[key] !== expect[key])
       problems.push(`${key}: expected ${JSON.stringify(expect[key])}, got ${JSON.stringify(actual[key])}`);
+  }
+  // The surfaces that are not a folder or a catalogue row (a dialog, the sign-in
+  // page, the options panel, a notification, a subtitle cue) are asserted through
+  // the grab sidecar's own fields, which the app writes at the grab instant.
+  if (expect.pageKind !== undefined && sidecar.pageKind !== expect.pageKind)
+    problems.push(`pageKind: expected ${JSON.stringify(expect.pageKind)}, got ${JSON.stringify(sidecar.pageKind)}`);
+  for (const [field, value] of Object.entries(expect.sidecar ?? {}))
+    sidecarTest(field, value, sidecar[field], problems);
+  for (const entry of expect.log ?? []) {
+    const pattern = new RegExp(entry.pattern);
+    const seen = countPattern(messages, pattern);
+    if (entry.count !== undefined) {
+      if (seen !== entry.count)
+        problems.push(`log ${JSON.stringify(entry.pattern)}: expected ${entry.count} matching line(s), got ${seen}`);
+    } else if (!seen)
+      problems.push(`log ${JSON.stringify(entry.pattern)}: no matching line`);
   }
   const entries = gameEntries(dump);
   for (const id of expect.catalogueHas ?? [])
@@ -628,12 +830,46 @@ function checkStateExpect(recipe: StateRecipe, sidecar: any, dump: any, folder: 
   }
   if (expect.noStoreDump && store)
     problems.push('a <dump>.store.json exists: a store request ran, so this state is not network-free and may not be deterministic');
+  // The Download Management page writes its own <dump>.dl.json, including its empty
+  // and error cases, so the page is checkable without reading pixels.
+  if (expect.downloads) {
+    const wanted = expect.downloads;
+    if (!dl) problems.push('expected the download page dump <dump>.dl.json but the page did not open');
+    else {
+      if (wanted.count !== undefined && dl.count !== wanted.count)
+        problems.push(`download page count: expected ${wanted.count}, got ${dl.count}`);
+      if (wanted.error !== undefined && String(dl.error ?? '') !== wanted.error)
+        problems.push(`download page error: expected ${JSON.stringify(wanted.error)}, got ${JSON.stringify(dl.error)}`);
+      if (wanted.message !== undefined && String(dl.message ?? '') !== wanted.message)
+        problems.push(`download page message: expected ${JSON.stringify(wanted.message)}, got ${JSON.stringify(dl.message)}`);
+      if (wanted.rows) {
+        const rows = Array.isArray(dl.rows) ? dl.rows : [];
+        if (rows.length !== wanted.rows.length)
+          problems.push(`download page rows: expected ${wanted.rows.length}, got ${rows.length}`
+            + (rows.length ? ` [${rows.map((row: any) => row.title).join(', ')}]` : ''));
+        else for (const [index, expected] of wanted.rows.entries()) {
+          const row = rows[index];
+          const where = `download row ${index}`;
+          if (expected.idPrefix !== undefined && !String(row.id).startsWith(expected.idPrefix))
+            problems.push(`${where} id: expected prefix ${JSON.stringify(expected.idPrefix)}, got ${JSON.stringify(row.id)}`);
+          if (row.title !== expected.title)
+            problems.push(`${where} title: expected ${JSON.stringify(expected.title)}, got ${JSON.stringify(row.title)}`);
+          for (const key of ['state', 'text', 'detail'] as const)
+            if (expected[key] !== undefined && String(row[key] ?? '') !== expected[key])
+              problems.push(`${where} ${key}: expected ${JSON.stringify(expected[key])}, got ${JSON.stringify(row[key])}`);
+        }
+      }
+      if (sidecar.entryCount !== dl.count && wanted.rows)
+        problems.push(`sidecar entryCount ${sidecar.entryCount} != download page rows ${dl.count}`);
+    }
+  }
   const summary = [
     `depth ${sidecar.depth}`,
     `category ${sidecar.category}`,
     `selection ${sidecar.selection}`,
     `rows ${sidecar.entryCount}`,
   ];
+  if (sidecar.pageKind) summary.push(`pageKind ${sidecar.pageKind}`);
   if (folder) summary.push(`folder ${folder.count}`);
   return { problems, summary: summary.join(', ') };
 }
@@ -645,39 +881,99 @@ function findState(thresholds: Thresholds, name: string) {
   return recipe;
 }
 
-// Walks a recipe's navigation path. The first stage is a catalogue row index; each
-// later stage is a row inside the page opened by the previous stage, resolved by
-// opening that page and reading its <dump>.folder.json row list.
+// How many UP taps are spent clamping a freshly entered column to its first row.
+// Every column is shorter than this (the tallest is Settings with 16 rows) and
+// vertical() clamps rather than wraps, so the count only has to exceed the tallest
+// column; the state assertion catches a column that outgrows it.
+const clampUp = 18;
+
+// One resolved navigation step: which column (when it changes) and which row index
+// on that page. `categoryId` is only set for a stage that starts in another column.
+type ResolvedStage = { categoryId?: string; index: number; label: string };
+
+// Builds the key tokens that walk a resolved path from the Game column root. The
+// FIRST stage without a categoryId reproduces the original Game-root recipes
+// exactly (DOWN x index, ENTER), so their stored references stay valid.
+function pathTokens(recipe: StateRecipe, stages: ResolvedStage[], catalogue: Catalogue | undefined) {
+  const tokens: string[] = [];
+  let current = 'game';
+  for (const [stageIndex, stage] of stages.entries()) {
+    if (stage.categoryId && stage.categoryId !== current) {
+      if (current !== 'game')
+        fail(`${recipe.name}: path moves from ${JSON.stringify(current)} to ${JSON.stringify(stage.categoryId)}; `
+          + 'the run starts in the Game column, so only a first stage may name another column');
+      const from = catalogue?.categories.indexOf('game') ?? -1;
+      const to = catalogue?.categories.indexOf(stage.categoryId);
+      if (from < 0 || to === undefined || to < 0)
+        fail(`${recipe.name}: column ${JSON.stringify(stage.categoryId)} is not in the catalogue dump`);
+      const delta = to - from;
+      // The shell starts in the Game column (the canonical capture asserts category=game),
+      // so the move is the column-index difference; horizontal() clamps at the ends.
+      tokens.push(...Array(Math.abs(delta)).fill(delta > 0 ? 'RIGHT' : 'LEFT'), 'wait', 'wait');
+      tokens.push(...Array(clampUp).fill('UP'), 'wait');
+      current = stage.categoryId;
+    }
+    tokens.push(...Array(stage.index).fill('DOWN'), 'ENTER');
+    if (stageIndex < stages.length - 1) tokens.push('wait', 'wait');
+  }
+  return tokens;
+}
+
+// Walks a recipe's navigation path. A catalogue stage is resolved from the
+// discovery dump of its column; each later stage is either an explicit zero-based
+// rowIndex (no dump exists for that page) or a row inside the page opened by the
+// previous stage, resolved by opening that page and reading its <dump>.folder.json.
 async function resolveStatePath(thresholds: Thresholds, opts: ReturnType<typeof parseArgs>, recipe: StateRecipe,
-  catalogueIndices: Map<string, number> | undefined): Promise<number[]> {
+  catalogue: Catalogue | undefined): Promise<ResolvedStage[]> {
   const path = recipe.path ?? [];
-  const indices: number[] = [];
-  if (!path.length) return indices;
-  const first = path[0].catalogueId!;
-  const rootIndex = catalogueIndices ? catalogueIndices.get(first) : undefined;
-  if (rootIndex === undefined)
-    fail(`${recipe.name}: catalogue has no entry ${JSON.stringify(first)}; Game column rows: [${catalogueIndices ? [...catalogueIndices.keys()].join(', ') : ''}]`);
-  indices.push(rootIndex);
+  const stages: ResolvedStage[] = [];
+  if (!path.length) return stages;
+  const first = path[0];
+  if (first.rowIndex !== undefined) {
+    stages.push({ categoryId: first.categoryId, index: first.rowIndex, label: `row ${first.rowIndex}` });
+  } else {
+    const category = first.categoryId ?? 'game';
+    const rows = catalogue?.rows.get(category);
+    const rootIndex = rows?.get(first.catalogueId!);
+    if (rootIndex === undefined)
+      fail(`${recipe.name}: catalogue has no entry ${JSON.stringify(first.catalogueId)} in column ${JSON.stringify(category)}; `
+        + `rows: [${rows ? [...rows.keys()].join(', ') : ''}]`);
+    stages.push({ categoryId: first.categoryId, index: rootIndex, label: `catalogue:${first.catalogueId}` });
+  }
   for (let stageIndex = 1; stageIndex < path.length; stageIndex++) {
-    const tokens = ['full', ...Array(recipe.waits).fill('wait')];
-    for (const index of indices) tokens.push(...Array(index).fill('DOWN'), 'ENTER', 'wait', 'wait');
-    tokens.push('wait', 'quit');
-    const run = await runStateProcess(thresholds, opts, recipe, tokens);
-    const folderPath = `${run.dumpPath}.folder.json`;
-    if (!existsSync(folderPath))
-      fail(`${recipe.name}: could not resolve path stage ${stageIndex}: no folder dump; evidence: ${run.captureDir}`);
-    const page = readJsonFile(folderPath);
-    const rows = Array.isArray(page.rows) ? page.rows : [];
     const stage = path[stageIndex];
+    if (stage.rowIndex !== undefined) {
+      stages.push({ index: stage.rowIndex, label: `row ${stage.rowIndex}` });
+      continue;
+    }
+    // A probe waits longer than a plain capture: it must navigate to a row that only
+    // exists once the asynchronous Steam/app content scan has rebuilt the column, and
+    // the scan lands at 1.5-2 s on a quiet machine and later under load.
+    const tokens = ['full', ...Array(recipe.waits).fill('wait'), ...pathTokens(recipe, stages, catalogue),
+      'wait', 'quit'];
+    // One probe can land before the page it opens has finished building - a script
+    // token is delivered when the app's event loop is idle, which on a busy machine
+    // can be well after the 300 ms interval - so a probe with no folder dump is
+    // retried once before the recipe is reported as unresolvable.
+    let page: any;
+    let run: StateProcess | undefined;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      run = await runStateProcess(thresholds, opts, recipe, tokens);
+      const folderPath = `${run.dumpPath}.folder.json`;
+      if (existsSync(folderPath)) { page = readJsonFile(folderPath); break; }
+      if (attempt === 1 && !quiet) console.log(`   probe ${stageIndex} produced no folder dump; retrying once`);
+    }
+    if (!page) fail(`${recipe.name}: could not resolve path stage ${stageIndex}: no folder dump; evidence: ${run?.captureDir}`);
+    const rows = Array.isArray(page.rows) ? page.rows : [];
     const index = stage.folderRowId
       ? rows.findIndex((row: any) => row.id === stage.folderRowId)
       : rows.findIndex((row: any) => row.title === stage.folderRowTitle);
     if (index < 0)
       fail(`${recipe.name}: page ${JSON.stringify(page.title)} (mode ${JSON.stringify(page.folder)}) has no row `
         + `${JSON.stringify(stage.folderRowTitle ?? stage.folderRowId)}; rows: [${rows.map((row: any) => row.title).join(', ')}]; evidence: ${run.captureDir}`);
-    indices.push(index);
+    stages.push({ index, label: `row:${stage.folderRowTitle ?? stage.folderRowId}` });
   }
-  return indices;
+  return stages;
 }
 
 async function runStates(thresholds: Thresholds, opts: ReturnType<typeof parseArgs>) {
@@ -687,29 +983,36 @@ async function runStates(thresholds: Thresholds, opts: ReturnType<typeof parseAr
   if (!recipes.length) fail(`${opts.thresholds}: defines no named states`);
   const jsonMode = opts.json && !opts.all;
 
-  // One Game-column discovery capture gives the root row indices; multi-stage
-  // recipes then open their parent pages to resolve the child row indices.
+  // One discovery capture per distinct data seed + environment: the catalogue dump
+  // depends on both (apps.json adds the custom rows, XMB_STEAM_ROOT decides the Game
+  // column), so a recipe is resolved against a dump captured with its own inputs.
   const pathRecipes = recipes.filter(recipe => (recipe.path?.length ?? 0) > 0);
-  let catalogueIndices: Map<string, number> | undefined;
-  if (pathRecipes.length) {
-    const discovery = pathRecipes[0];
-    const discoveryTokens = ['full', ...Array(discovery.waits + 6).fill('wait'), 'quit'];
-    if (!quiet) console.log('discovery: Game column catalogue from a root capture');
-    const run = await runStateProcess(thresholds, opts, discovery, discoveryTokens);
+  const catalogues = new Map<string, Catalogue>();
+  const signature = (recipe: StateRecipe) => `${recipe.dataSeed}|${JSON.stringify(recipe.env ?? {})}`;
+  const catalogueFor = async (recipe: StateRecipe) => {
+    const key = signature(recipe);
+    const cached = catalogues.get(key);
+    if (cached) return cached;
+    const discoveryTokens = ['full', ...Array(recipe.waits + 12).fill('wait'), 'quit'];
+    if (!quiet) console.log(`discovery: catalogue dump from ${recipe.dataSeed}`);
+    const run = await runStateProcess(thresholds, opts, recipe, discoveryTokens);
     const dump = readJsonFile(run.dumpPath);
-    const entries = gameEntries(dump);
-    catalogueIndices = new Map<string, number>();
-    entries.forEach((entry, index) => { if (!catalogueIndices!.has(entry.id)) catalogueIndices!.set(entry.id, index); });
+    const catalogue = catalogueFromDump(dump);
+    catalogues.set(key, catalogue);
     if (!quiet) {
-      console.log(`  Game rows ${entries.length} (installedSteam ${dump.installedSteam}, owned ${dump.owned})`);
+      console.log(`  Game rows ${gameEntries(dump).length} (installedSteam ${dump.installedSteam}, owned ${dump.owned})`);
+      console.log(`  columns   ${catalogue.categories.join(', ')}`);
       console.log(`  evidence  ${run.captureDir}`);
     }
-  }
-  const pathIndices = new Map<string, number[]>();
+    return catalogue;
+  };
+  const pathStages = new Map<string, ResolvedStage[]>();
   for (const recipe of pathRecipes) {
-    const indices = await resolveStatePath(thresholds, opts, recipe, catalogueIndices);
-    pathIndices.set(recipe.name, indices);
-    if (!quiet && indices.length > 1) console.log(`  route     ${recipe.name}: row indices [${indices.join(', ')}]`);
+    const catalogue = await catalogueFor(recipe);
+    const stages = await resolveStatePath(thresholds, opts, recipe, catalogue);
+    pathStages.set(recipe.name, stages);
+    if (!quiet && stages.length)
+      console.log(`  route     ${recipe.name}: ${stages.map(stage => stage.label + `[${stage.index}]`).join(' > ')}`);
   }
 
   const reports: any[] = [];
@@ -721,13 +1024,11 @@ async function runStates(thresholds: Thresholds, opts: ReturnType<typeof parseAr
     console.log(`  gate      PSNR >= ${self.psnrDb.toFixed(2)} dB, SSIM >= ${self.ssim.toFixed(4)} against each stored native reference`);
   }
   for (const recipe of recipes) {
-    const indices = pathIndices.get(recipe.name) ?? [];
-    const tokens = ['full', ...Array(recipe.waits).fill('wait')];
-    for (const [stageIndex, index] of indices.entries()) {
-      tokens.push(...Array(index).fill('DOWN'), 'ENTER');
-      if (stageIndex < indices.length - 1) tokens.push('wait', 'wait');
-    }
-    tokens.push(...Array(recipe.settleWaits ?? 3).fill('wait'), '{grab}', 'quit');
+    const stages = pathStages.get(recipe.name) ?? [];
+    const recipeCatalogue = catalogues.get(signature(recipe));
+    const tokens = ['full', ...Array(recipe.waits).fill('wait'), ...pathTokens(recipe, stages, recipeCatalogue),
+      ...Array(recipe.settleWaits ?? 3).fill('wait'),
+      ...(recipe.preGrab ?? []), '{grab}', ...(recipe.postGrab ?? []), 'quit'];
     // The grab token needs the absolute capture path: replace the placeholder.
     if (!jsonMode) console.log(`\n-- ${recipe.name}`);
     if (recipe.description && !jsonMode) console.log(`   ${recipe.description}`);
@@ -738,6 +1039,8 @@ async function runStates(thresholds: Thresholds, opts: ReturnType<typeof parseAr
     let dump: any;
     let folder: any;
     let store: any;
+    let dl: any;
+    let messages = '';
     let problems: string[] = [];
     let summary = '';
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -747,11 +1050,15 @@ async function runStates(thresholds: Thresholds, opts: ReturnType<typeof parseAr
       dump = existsSync(run.dumpPath) ? readJsonFile(run.dumpPath) : undefined;
       const folderPath = `${run.dumpPath}.folder.json`;
       const storePath = `${run.dumpPath}.store.json`;
+      const dlPath = `${run.dumpPath}.dl.json`;
       folder = existsSync(folderPath) ? readJsonFile(folderPath) : undefined;
       store = existsSync(storePath) ? readJsonFile(storePath) : undefined;
+      dl = existsSync(dlPath) ? readJsonFile(dlPath) : undefined;
+      messages = existsSync(join(run.captureDir, 'native.messages.log'))
+        ? readFileSync(join(run.captureDir, 'native.messages.log'), 'utf8') : '';
       if (!sidecar) fail(`${recipe.name}: no state sidecar ${sidecarPath}; capture evidence: ${run.captureDir}`);
       if (!dump) fail(`${recipe.name}: no catalogue dump ${run.dumpPath}; capture evidence: ${run.captureDir}`);
-      const checked = checkStateExpect(recipe, sidecar, dump, folder, store);
+      const checked = checkStateExpect(recipe, sidecar, dump, folder, store, dl, messages);
       problems = checked.problems;
       summary = checked.summary;
       if (!problems.length || attempt === 2) break;
@@ -765,7 +1072,7 @@ async function runStates(thresholds: Thresholds, opts: ReturnType<typeof parseAr
       captureDir: run.captureDir,
       grab: grabPath,
       reference: referencePath,
-      state: { category: sidecar.category, depth: sidecar.depth, selection: sidecar.selection, entryId: sidecar.entryId, entryTitle: sidecar.entryTitle, entryCount: sidecar.entryCount },
+      state: { category: sidecar.category, depth: sidecar.depth, selection: sidecar.selection, entryId: sidecar.entryId, entryTitle: sidecar.entryTitle, entryCount: sidecar.entryCount, pageKind: sidecar.pageKind },
       assertions: { ok: problems.length === 0, problems, summary },
     };
     if (problems.length) {
@@ -980,9 +1287,13 @@ async function main() {
 
   if (opts.listStates) {
     for (const state of thresholds.states ?? []) {
-      const route = (state.path ?? []).map(stage =>
-        stage.catalogueId ? `catalogue:${stage.catalogueId}` : `row:${stage.folderRowTitle ?? stage.folderRowId}`).join(' > ');
-      console.log(`${state.name.padEnd(22)} ${(route || 'root, no navigation').padEnd(52)} reference ${state.reference}`);
+      const route = (state.path ?? []).map(stage => {
+        const column = stage.categoryId ? `${stage.categoryId}/` : '';
+        if (stage.catalogueId) return `${column}catalogue:${stage.catalogueId}`;
+        if (stage.rowIndex !== undefined) return `${column}row:${stage.rowIndex}`;
+        return `${column}row:${stage.folderRowTitle ?? stage.folderRowId}`;
+      }).join(' > ');
+      console.log(`${state.name.padEnd(24)} ${(route || 'root, no navigation').padEnd(58)} reference ${state.reference}`);
     }
     return;
   }

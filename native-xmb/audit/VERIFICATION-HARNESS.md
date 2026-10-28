@@ -274,3 +274,255 @@ scratch, not part of the committed harness:
   (201-223 px instead of 262 px). Use the template track for absolute distances and the project tools for the
   independent start frames and brightness channel.
 - Scratch artifacts stay under `C:\dev\out\rpcs3-xmb-cap\`; only the results belong in the audit notes.
+
+## Phase 5 - verification and performance hardening (2026-10-27)
+
+Phase 5.1 gave every shipped surface a named state, 5.3 measured swap intervals from the frame trace,
+5.4 measured process start to first frame with the loader breakdown, and 5.5 added a churn soak. All
+of the evidence is local under `out/native-reference/layers/` and `out/native-reference/phase5/`; none
+of it is committed, and none of it is a firmware capture.
+
+### 5.1 Named states for the surfaces that had none
+
+`bun work/ab-layers.ts --list-states` now prints twelve recipes. The eight added here follow the four
+Steam states' contract exactly: a deterministic capture with every animation clock pinned, a state
+assertion that fails with exit 2 when the app is somewhere else, one or two scored regions against a
+deliberately saved native reference, and `--states --save-reference` as the only way to refresh it.
+
+| state | route from the Game-column root | assertions | regions |
+|---|---|---|---|
+| `xmb-notification` | none: `NOTIFY=Message received\|From Albert` before the grab | depth 0, `pageKind root`, sidecar `notificationCount 1`, `notificationTitle Message received`, `notificationIcon tex_notification_info`, `notificationRemainingMs > 0`; log `notify: enqueue Message received` | frame; plaque 1480,135,440,110 |
+| `xmb-volume-hud` | none: `VOLSET=25` before the grab, `VOLRESTORE` after it | depth 0, `pageKind root`; log `volume: VOLSET request 25% -> Windows reports 25% (muted 0)` | frame; hud 990,65,250,80 |
+| `video-options-panel` | Video > Video Library, then `TRIANGLE` | depth 1, `entryTitle Movies`, 3 rows, `pageKind folder`; log `shell: options opened category= video depth= 1 ... rows= 4 Open\|Information\|Sort By\|Close` | frame; panel 1300,430,620,300 |
+| `continue-watching` | Video > Continue Watching, from a seeded resume record | depth 1, 1 row, `pageKind continueWatching`, entry id prefix `continue:`, title `Top Level Clip.mp4`; log `continue watching: page opened with 1 row(s)` | frame; row 400,410,760,220 |
+| `continue-watching-empty` | Video > Continue Watching, no record | depth 0, `entryId continue`, `pageKind root`; log `continue watching: nothing to continue` | frame; dialog 240,190,1440,700 |
+| `subtitle-cue` | Video > Video Library > row 0, pause, then seek left to 0 | 1 row, title `Cue Test.mp4`; sidecar `mediaOpen`, `mediaPaused`, `mediaPosition <= 500`, `subtitleCue 1`, `subtitleTrackCount 1`, file contains `Cue Test.srt`, cue text contains `First cue`; log `subtitle: sidecar Cue Test.srt` | frame; cue band 210,650,1500,200 |
+| `jellyfin-signin` | TV/Video Services > the seeded `custom:jellyfin` registration | depth 1, 5 rows, `entryId jellyfin-signin:username`, `pageKind jellyfinSignIn`; sidecar `signInOpen true`, `signInState idle`, `signInError ""`, `focusedRow jellyfin-signin:username`, `modalWidget ""`; log `jellyfin: sign-in page opened ...` | frame; rows 400,300,900,620 |
+| `steam-download-page` | Network > Download Management, with the fixture Steam root from the recipe's `env` | depth 1, 4 rows, `entryId download:1001`; the page's own `.dl.json` asserts count 4, empty error and message, and each row's id prefix, title, state, text and detail; log `steam downloads: page opened with 4 row(s)` | frame; rows 400,430,800,520 |
+
+Every one of the eight was captured twice - once with `--state <name> --save-reference`, once with
+`--state <name>` against the reference just written - and every region of every state scored
+`PSNR infinity / SSIM 1.0000`, including the paused-media state and the page whose row list is built by
+a folder scan. The four Steam states were re-run on the same build and also scored infinity/1.0000
+against their old references, so this phase changed no existing gate.
+
+Four additions to the runner made those surfaces reachable:
+
+- A stage may name another column (`categoryId`). The move is the column-index difference from the Game
+  column the run starts in (the canonical capture already asserts the run starts there), followed by a
+  clamp to the new column's first row: `Shell::vertical`/`horizontal` clamp rather than wrap, so a
+  fixed number of `UP`s reaches row 0 whatever row the column was left on, and the row index stays
+  dump-derived instead of hardcoded.
+- A stage may be a zero-based `rowIndex` instead of a dump-resolved row, for pages this build writes no
+  dump for (a media library page). The sidecar assertion is the oracle for the row that was hit.
+- A recipe may set extra environment for its capture (`env`, with `${repo}` for a fixture path), script
+  tokens before the grab (`preGrab`: `TRIANGLE`, `NOTIFY=`, `VOLSET=`), and tokens after it
+  (`postGrab`: `VOLRESTORE`).
+- `expect` gained `pageKind`, a `sidecar` map (exact value, or `gt`/`ge`/`lt`/`le`/`prefix`/`contains`),
+  a `log` list of regexes matched against that capture's own `XMB_LOG` file, and a `downloads` block
+  for the Download Management page's `.dl.json` dump. Two of the states needed a log switch in the
+  fixture environment to make their own evidence visible: `XMB_NOTIFY_LOG=1` (the enqueue/show lines are
+  opt-in) and `XMB_SUBTITLE_LOG=1` (the sidecar discovery line is opt-in).
+
+The discovery capture is now per data seed and environment (`dataSeed` + `env`), because the catalogue
+dump depends on both: `apps.json` adds the `custom:` row the Jellyfin state opens, and `XMB_STEAM_ROOT`
+decides the Game column and the download page. `--all` therefore runs one discovery capture per distinct
+pair (six today) instead of one for everything.
+
+Two timing defences came out of running this on a loaded machine, and both only change *when* a capture
+settles, never what it shows, so no reference moved:
+
+- A path-resolution probe that produces no folder dump is retried once before the recipe is reported
+  unresolvable (the row a recipe targets only exists after the asynchronous Steam/app content scan has
+  rebuilt the column).
+- `steam-not-installed` now targets the All Games page's twelfth row by `rowIndex` instead of resolving
+  the `Not Installed` title from a probe dump. The recipe still asserts the resulting page (folder mode
+  `library`, title `Not Installed`, `owned - installed + familyShared` rows, every row `steam:` with a
+  "Not installed" detail), so a different row fails loudly with exit 2 - the index is pinned, the state
+  is still verified.
+
+**Open issue found on 2026-10-27 (not fixed - app side, outside this phase's write fence).** From about
+22:00 every scripted `DOWN` stopped being applied on the Game-column root: a capture whose only
+navigation is `DOWN` leaves `selection` at 0 while its `idleMilliseconds` shows the key was delivered,
+`UP`/`ESC`/column moves still work, and a following `ENTER` activates row 0 (`steam-store`). The same
+vertical move then started failing intermittently in other columns: at 22:30 a rerun of the eight new
+states passed five and failed `subtitle-cue` (its `DOWN` to Video Library was ignored, so `ENTER`
+opened Continue Watching), `steam-download-page` (its four `DOWN`s were ignored, landing on `manual`)
+and `jellyfin-signin` (the page opened with `Server URL` focused instead of `Username`). All eight had
+passed individually with their references saved and re-verified (infinity/1.0000) between 21:40 and
+22:10 the same evening, and `--all` was fully green at 21:08
+(`out/native-reference/phase5/all-2.log`, 12/12 states, exit 0) with the same executable
+(`C:\dev\out\native-phase3\re-ps3-native.exe`, 19:25:42, unchanged), so this is a runtime input/state
+regression or a machine-level interference effect rather than a harness change. Until it is understood,
+a state run that presses `DOWN` can fail its assertion (exit 2) even though its reference is correct;
+the retry only helps when the failure is a one-off.
+
+
+
+Fixtures (local, under `out/native-reference/phase5/`, never written by a run - each capture copies its
+seed into a temp directory first):
+
+- `media/Cue Test.mp4` and `media/Cue Test.srt`: a copy of `out/native-reference/video-library/Top Level
+  Clip.mp4` (20 s test pattern with a burned-in timecode) and a three-cue SRT whose first cue starts at
+  00:00:00.000 and ends at 00:00:05.000. The 0 s start is what makes the subtitle state deterministic:
+  pausing and then seeking left clamps the position to exactly 0, so the video frame, the `00:00 / 00:20`
+  controls and the first cue are identical on every run.
+- `subtitle-data/`: preferences pointing `library/video` at `media/`, plus the usual profiles and
+  settings files.
+- `resume-data/`: the same, plus one `media/resume` record - the shape the build writes itself
+  (`{"<sha1-24>":{"at":0,"dur":20000,"ms":2240,"path":"C:/.../Top Level Clip.mp4","title":"Top Level
+  Clip.mp4"}}`), with `at` zeroed so the 30-day age filter can never hide it.
+- `steam-dl/steamapps/appmanifest_1001..1004.acf`: the four synthetic manifests from the download-page
+  work (active 43% download, paused at 50%, queued, pending update), so the page's rows are fixture data
+  and not this machine's real Steam queue.
+- `pacing-1/`, `pacing-2/`, `startup.json`, `soak.json`, `all-1.log`, `all-2.log`: the measurement
+  outputs described below.
+
+What the states do not pin, stated so a pass is not read as more than it is:
+
+- `xmb-volume-hud` pins the level (25%) but not the endpoint's mute state: the HUD prints `Mute` instead
+  of `25%` when the default endpoint is muted. The recipe therefore asserts the app's own read-back line
+  `... (muted 0)` and fails loudly if the endpoint is muted at capture time rather than scoring a
+  different HUD silently. The capture sets the real Windows endpoint for about a second and puts it back
+  with `VOLRESTORE`; a killed capture can leave it at 25%.
+- The four Steam states still depend on this machine's Steam account (owned list, collections,
+  `family-shared.json` seed), and `xmb-notification`/`xmb-volume-hud`/`steam-download-page` still depend
+  on the real dev_flash, so those assertions fail loudly (exit 2) instead of scoring a different state.
+- The notification's remaining lifetime is asserted as "greater than zero", not as an exact number: the
+  plaque is the same once its 200 ms slide has settled, but the counter keeps running.
+- Nothing here is a firmware-fidelity claim. The references are deterministic native renders.
+
+### 5.3 Frame pacing at the display's current rate
+
+The paced measurement is the app's own frame trace, not the loop's `native frames:` line. That line
+reports frames per second over a 5 s window from the paint loop; the trace records every
+`QOpenGLWidget::frameSwapped` callback and every paint with its elapsed nanoseconds, so the swap
+intervals can be summarised directly.
+
+```powershell
+bun work/perf-harden.ts pacing --run out/native-reference/phase5/pacing-1 --json .../pacing.json
+bun work/perf-harden.ts pacing --trace <frames.txt> --log <log> --warmup-ms 2000
+```
+
+`pacing --run` launches the app with live animation clocks (no `--render-clock`, no
+`--background-clock`, because pinned clocks would remove exactly the background/ribbon/particle work
+being measured), a pinned UI clock, and a 32-token script that settles the Game root, opens the Video
+Library page, moves inside it, crosses back to the Game column and quits. It filters the first 2 s of
+samples (window creation, first shader and atlas use) and reports the swap-interval quantiles. Two runs
+were recorded on the phase-5 build:
+
+| run | samples | display | p50 | p95 | p99 | max | > 1.5 periods | > 2.5 periods |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `pacing-1` | 2585 swaps | 239.964 Hz (4.167 ms) | 4.211 ms | 7.136 ms | 8.932 ms | 82.914 ms | 211 | 16 |
+| `pacing-2` | 2416 swaps | 239.964 Hz (4.167 ms) | 4.318 ms | 8.077 ms | 11.487 ms | 65.743 ms | 367 | 30 |
+
+Paint CPU per frame from the same traces: p50 3.223 / 3.547 ms, p95 4.953 / 7.037 ms, p99 6.293 /
+8.094 ms; the moving-frame subset p95 6.787 / 9.355 ms. A p50 of one display period means the app is
+presenting every refresh when it keeps up; the tail is where the misses are.
+
+What a 120 Hz target needs: 8.333 ms per frame. `p95` fits in both runs (7.14 and 8.08 ms) but `p99`
+does not (8.93 and 11.49 ms), and the moving-frame paint CPU p95 in the second run (9.36 ms) is already
+over the budget on its own. So at 120 Hz this build would drop roughly one frame in a hundred to one in
+fifty, concentrated in the frames that rebuild UI while something moves. Getting inside 8.33 ms at p99
+needs: (1) the moving-frame paint CPU p99 cut by about 1-2 ms (the per-frame text/atlas and icon work),
+(2) the same at p50 for 120 Hz headroom (3.2-3.5 ms today leaves 4.8 ms, which is enough only if the
+tail is flat), and (3) the 65-83 ms outliers understood - they are single frames, not a rate problem,
+and are most likely first-use compilation or another process on this machine (the two runs differ by a
+factor of two in p99 while running the same script, and this machine was carrying three other harness
+sessions and several full-screen app runs during the measurements). At 60 Hz (16.67 ms) every sample
+except the outliers fits.
+
+Caveats that belong with the numbers: the trace measures swap callbacks with `swapInterval=1`, i.e. the
+app's CPU dispatch cadence, not physical panel presentation or GPU completion, and this machine has no
+120 Hz or 60 Hz TV output to test against - the display it ran on is 239.964 Hz, so 120 Hz is an
+arithmetic requirement here, not a measurement.
+
+### 5.4 Startup budget
+
+```powershell
+bun work/perf-harden.ts startup --runs 7 --json out/native-reference/phase5/startup.json
+```
+
+Each run launches the app on a fresh copy of the UI seed with `--no-intro`, captures Qt's own
+`%{time process}` timestamp on every log line, and sets `XMB_FRAME_TRACE` so the first
+`frame swap:` timestamp can be added to the View-construction timestamp. That gives process start to
+the first presented frame, and the loader milestones are read from the lines the app already writes.
+
+Seven runs on the phase-5 build (`C:\dev\out\native-phase3\re-ps3-native.exe`):
+
+| milestone | median | min | max |
+|---|---:|---:|---:|
+| catalog (XMBML settings projection resolved) | 25 ms | 24 ms | 32 ms |
+| XMBML Network column resolved | 23 ms | 22 ms | 29 ms |
+| text atlas (GL init, FreeType coverage) | 714 ms | 593 ms | 906 ms |
+| native renderer ready | 1005 ms | 902 ms | 1221 ms |
+| native display refresh (window shown) | 1506 ms | 1356 ms | 1623 ms |
+| **first frame** | **1497 ms** | **1354 ms** | **1617 ms** |
+| Steam content scan (async, after the first frame) | 1698 ms | 1553 ms | 1817 ms |
+| Steam owned library (Web API, async) | 2080 ms | 1943 ms | 2145 ms |
+
+What the budget says: the two firmware loaders are not the cost - the XMBML settings projection and
+the Network column together are under 50 ms, about 3% of the first frame. The cost is the GL context
+plus the glyph atlas (593-906 ms) and the first window show. The Steam scan and the owned-library fetch
+land about 200 ms and 600 ms *after* the first frame, so they do not gate the user-visible start; the
+Jellyfin client constructs without a request and logs no startup line, so its whole startup cost is
+inside the Shell constructor. Seven runs of the same binary span 1354-1617 ms; on a quiet machine
+measured earlier in the same session the same build presented at 1118-1268 ms, so the ~250 ms
+difference is this machine's load, not the build. The phase target was "under the current ~1 s"; at
+1.35-1.62 s under load and ~1.2 s quiet, this build is not inside 1 s, and the number to attack is the
+text atlas / GL init block, not the loaders.
+
+### 5.5 Soak
+
+`bun work/perf-harden.ts soak --minutes <n>` runs one process for n minutes of wall clock, samples the
+running process's working set, private bytes, handle count and CPU every 5 s, and reports the memory
+trend plus what the app itself logged as churn events (`media: directory result`, `continue watching:
+page opened`, `media queue: play`, `notify: enqueue`, `steam folder ...`, `motion: ...`). `--no-churn`
+drops the script and measures continuous rendering only.
+
+Why ten minutes and not thirty: a single scripted session is bounded by the Windows 32,767-character
+command line, and the app delivers a token when its event loop is idle rather than on the nominal 300 ms
+interval - measured here at 0.37-1.0 s per token (32 tokens in 20.5 s; 402 tokens in 151.8 s). A
+30-minute churn session would need roughly 6,000 tokens, about 30 KB with the route's commas, with no
+margin for the slower cadence. Ten minutes is what was attempted, and ten minutes of continuous
+rendering is what the numbers below cover.
+
+The churn session could not be sustained, and that is the result to report. Two long sessions on this
+build ended the same way:
+
+- A 2001-token churn session ran 203 s, rendered the whole time (`native frames` reports every 5 s at
+  194-238 fps), and then the process disappeared with exit 255. The app logged exactly one churn event:
+  the cycle's notification (its `notify: view slide/fade` lines run to 15.3 s). No `notify: expire` line
+  arrived at the 4 s lifetime, no column-move `motion:` line appeared, and no later script token had an
+  effect: every QTimer in the process stopped while the paint loop kept running. The same build consumes
+  a 32-token script normally (20.5 s) and a 402-token wait-only script normally (151.8 s) under the same
+  conditions, so the stall follows sustained interactive input, not script length. Two shorter repeat
+  attempts (76 and 97 tokens) consumed their tokens but logged no churn at all.
+- A ten-minute no-input session ended the same way: exit 255 at 208 s with the frame loop still healthy
+  at its last sample (228 fps) and no crash record - the app's own handler writes a symbolized stack to
+  `XMB_LOG`/`crash.log` and wrote none. This workspace had several other sessions running and reaping
+  `re-ps3-native` by name (the cleanup this project's ad-hoc runs use), so the most likely cause is an
+  external kill rather than an application fault. Either way it means long sessions cannot be trusted
+  on this machine right now.
+
+So no 10- or 30-minute churn session is claimed. The longest reliable window is 3.4 minutes, and both
+runs are reported over it (`soak.json` = churn attempt, `soak-idle.json` = continuous rendering with no
+input; one process each, 5 s samples of working set, private bytes, handles and CPU):
+
+| run | first sample | settled (after 60 s) | end | post-startup trend | handles (settled -> end) |
+|---|---:|---:|---:|---:|---:|
+| churn attempt (203 s) | 130.1 MB | 319.8 MB | 321.1 MB | +33 MB/h over 2.34 min | 2054 -> 2071 |
+| no input (208 s) | 130.2 MB | 274.5 MB | 274.8 MB | +7 MB/h over 2.42 min | 1524 -> 1514 |
+
+Read that as: the 130 MB startup ramp is asset decode and the first page builds (roughly +145 MB with
+one churn burst, +190 MB with a page build), after which the working set is flat to within noise
+(+33 MB/h on a 320 MB process is 0.1% per hour) and the handle count does not climb. It says nothing
+about a page-build leak over ten minutes, which is what a real churn soak would measure.
+
+What a future soak needs, in order: (1) diagnose why all Qt timers stop after sustained input while the
+paint loop is hot (a build-side question, outside this phase's write fence); (2) run the churn route for
+10-30 minutes on a machine where no other session reaps the executable; (3) only then read the memory
+trend as a leak signal. The pacing quantiles in 5.3 move between runs for the same environmental reason.
+
+
+
