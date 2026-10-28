@@ -14,6 +14,19 @@ Status revision 2026-10-27: NATIVE-06..NATIVE-12 add the seven native surfaces t
 subtitle/audio-track player panel, Continue Watching, the volume HUD and the in-XMB Jellyfin sign-in page.
 XMB-165 and XMB-201 were re-read against the source and now name the implemented part.
 
+Status revision 2026-10-28: **the statuses below are as of HEAD `9545047`** for the rows this revision
+touched, and as of their own dated revision for the rest. The completion ledger is
+[PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1 (88 items: 15 done / 44 partly / 28 not
+started / 1 obsolete) and the fidelity instrument is [PARITY-SCORECARD.md](PARITY-SCORECARD.md); this
+catalogue indexes *features*, so a `Partial` here is not a parity score and a `Not implemented` is not a
+statement that no code exists. Corrected rows: XMB-005 (local profiles exist), XMB-047 (theme selection
+works), XMB-053 (the stored name reaches System Information), XMB-086 (Auto-Off darkens instead of
+closing), XMB-108/115/132 (read-only host reports exist), XMB-275 (the Download Management page ships as
+NATIVE-06) and XMB-284 (the trophy verdict is "no backend", not "unimplemented"). XMB-289 gains the
+Steam-backed Friends rows. Rows describing the Settings *pages* keep `Not implemented as a complete
+original workflow` deliberately: the pages still differ from the firmware's row sets, and
+`audit/SETTINGS-FIRMWARE.md` measures the gap rather than closing it.
+
 ## About the XMB™ menu
 
 Required backend: Menu state, input routing, overlays, text entry, concurrent activities.
@@ -31,7 +44,7 @@ Required backend: Profiles, session ownership, user-scoped storage, login lifecy
 
 | ID | Original topic or action | Native status | Reference |
 |---|---|---|---|
-| XMB-005 | Users category | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/users.html) |
+| XMB-005 | Users category | Partial: the Users column exists with local profile create/select and the active name persisted (`src/profiles.*`, ISA ISC-13); no login/logout, rename/delete, avatar, startup selection or user-scoped data at the app level | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/users.html) |
 | XMB-006 | Turning off the system | Partial: the PS menu closes the native application after one confirmation; it does not power off the host | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/turnoff.html) |
 | XMB-007 | Creating new users | Partial: local profiles implemented; PS3 session/account semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/newuser.html) |
 | XMB-008 | Logging in | Partial: local profiles implemented; PS3 session/account semantics incomplete | [Guide](https://manuals.playstation.net/document/en/ps3/current/users/login.html) |
@@ -80,13 +93,13 @@ Required backend: Typed settings, capability queries, transaction/rollback, devi
 | XMB-044 | Chat Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/index.html) |
 | XMB-045 | Chat Settings → Voice/Video Chat Start | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/chat.html) |
 | XMB-046 | Theme Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/themesettings.html) |
-| XMB-047 | Theme Settings → Theme | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/themesettings.html) |
+| XMB-047 | Theme Settings → Theme | Partial: selecting a `.p3t` reads it in memory - still background, icon table and five cue roles - and lists the chosen theme by name; install/list/delete, dynamic RAF scenes and font/colour selections are open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/themesettings.html) |
 | XMB-048 | Theme Settings → Color / Colour | Partial: native adapter implemented; exact PS3 behavior and workflow coverage open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/themesettings.html) |
 | XMB-049 | Theme Settings → Background | Partial: native adapter implemented; exact PS3 behavior and workflow coverage open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/themesettings.html) |
 | XMB-050 | Theme Settings → Font | Partial: native adapter implemented; exact PS3 behavior and workflow coverage open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/themesettings.html) |
 | XMB-051 | System Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/index.html) |
 | XMB-052 | System Settings → Automatic Update | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/autodownload.html) |
-| XMB-053 | System Settings → System Name | Partial: native adapter implemented; exact PS3 behavior and workflow coverage open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/systemname.html) |
+| XMB-053 | System Settings → System Name | Partial: the name is stored and System Information now renders it instead of the Windows host name; no console account binding | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/systemname.html) |
 | XMB-054 | System Settings → System Language | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/systemlanguage.html) |
 | XMB-055 | System Settings → Character Set | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/characterset.html) |
 | XMB-056 | System Settings → Dictionary Type | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/dictionarytype.html) |
@@ -119,7 +132,7 @@ Required backend: Typed settings, capability queries, transaction/rollback, devi
 | XMB-083 | Date and Time Settings → Time Zone | Partial: native adapter implemented; exact PS3 behavior and workflow coverage open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/date.html) |
 | XMB-084 | Date and Time Settings → Daylight Saving | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/date.html) |
 | XMB-085 | Power Save Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/powersave.html) |
-| XMB-086 | Power Save Settings → System Auto-Off | Partial: closes native application; does not power off host | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/powersave.html) |
+| XMB-086 | Power Save Settings → System Auto-Off | Partial: Auto-Off now **darkens the display** instead of closing the app (`067d6f0`: `SC_MONITORPOWER` broadcast plus a `GUID_CONSOLE_DISPLAY_STATE` read-back, reversible); it does not power off the host | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/powersave.html) |
 | XMB-087 | Power Save Settings → Controller Auto-Off | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/powersave.html) |
 | XMB-088 | Accessory Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/index.html) |
 | XMB-089 | Accessory Settings → Calibrate Motion Controller | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/mccalibration.html) |
@@ -141,14 +154,14 @@ Required backend: Typed settings, capability queries, transaction/rollback, devi
 | XMB-105 | Printer Settings → Printer Manager | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/printersettings.html) |
 | XMB-106 | Printer Settings → Printer Selection | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/printersettings.html) |
 | XMB-107 | Display Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/index.html) |
-| XMB-108 | Display Settings → Video Output Settings | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/videooutput.html) |
+| XMB-108 | Display Settings → Video Output Settings | Partial: a read-only report of the host display/adapter through `host::displayReport`; no output mode or resolution control | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/videooutput.html) |
 | XMB-109 | Display Settings → Screensaver | Partial: five Display Settings choices persist and native dim/wake is replayed; firmware brightness curve, fade and wake parity open (ISC-45.3) | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/screensaver.html) |
 | XMB-110 | Display Settings → Cross Color Reduction Filter | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/crosscolor.html) |
 | XMB-111 | Display Settings → RGB Full Range (HDMI) | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/rgbfullrange.html) |
 | XMB-112 | Display Settings → Y Pb / Cb Pr / Cr Super-White (HDMI) | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/superwhite.html) |
 | XMB-113 | Display Settings → Deep Color/Colour Output (HDMI) | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/deepcolor.html) |
 | XMB-114 | Sound Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/index.html) |
-| XMB-115 | Sound Settings → Audio Output Settings | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/audiooutput.html) |
+| XMB-115 | Sound Settings → Audio Output Settings | Partial: a read-only report of the Windows default render endpoint; no PS3 output format or device selection | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/audiooutput.html) |
 | XMB-116 | Sound Settings → Audio Multi-Output | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/audiomulti.html) |
 | XMB-117 | Sound Settings → Key Tone | Partial: native adapter implemented; exact PS3 behavior and workflow coverage open | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/keytone.html) |
 | XMB-118 | Security Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/security.html) |
@@ -165,7 +178,7 @@ Required backend: Typed settings, capability queries, transaction/rollback, devi
 | XMB-129 | Remote Play Settings → Remote Start | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/remotestart.html) |
 | XMB-130 | Remote Play Settings → Audio Output Device | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/outputdevice.html) |
 | XMB-131 | Network Settings | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/index.html) |
-| XMB-132 | Network Settings → Settings and Connection Status List | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/statuslist.html) |
+| XMB-132 | Network Settings → Settings and Connection Status List | Partial: a read-only connection-status page (`host:network`); no configuration, enable/disable or connection test | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/statuslist.html) |
 | XMB-133 | Network Settings → Internet Connection | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/connect.html) |
 | XMB-134 | Network Settings → Internet Connection Settings (wired connection) | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/connectwired.html) |
 | XMB-135 | Network Settings → Internet Connection Settings (wireless connection) | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/settings/connectwireless.html) |
@@ -350,7 +363,7 @@ Required backend: Browser engine, downloads, discovery, network status, remote-p
 | XMB-272 | Internet Browser → Upload / Download | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/browser/upload.html) |
 | XMB-273 | Internet Browser → Internet Browser User Agreement | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/browser/eula.html) |
 | XMB-274 | Internet Search → Searching the Internet | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/search/search.html) |
-| XMB-275 | Download Management → Background Download | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/background/background.html) |
+| XMB-275 | Download Management → Background Download | Partial: the Network column's firmware `dlctrl` row opens a real page over Steam's **own** queue - rows, state text, progress counters or "no progress published", reload, per-row Information - with no pause/resume/start/cancel and no per-row progress bar (NATIVE-06; `b339422` added the stop/verify service calls, the shell hunk is unapplied) | [Guide](https://manuals.playstation.net/document/en/ps3/current/background/background.html) |
 
 ## PlayStation™Network
 
@@ -366,7 +379,7 @@ Required backend: Authenticated account/session, network service adapters, troph
 | XMB-281 | Account Management → Managing account information | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/accountinfo/accountinfo.html) |
 | XMB-282 | Account Management → About system activation | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/accountinfo/systemactivation.html) |
 | XMB-283 | What's New → About What's New | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/whatsnew/whatsnew.html) |
-| XMB-284 | Trophy Collection | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/trophy/trophy.html) |
+| XMB-284 | Trophy Collection | Not available, with the verdict recorded: there is no trophy backend - `TROPUSR.DAT` is encrypted and the local `dev_hdd0` has no trophy folder (`audit/SERVICES-BREADTH.md` 4.5). The row answers with the firmware's own unavailability rather than an empty collection; what remains is to show the written wording (ledger 6.3) | [Guide](https://manuals.playstation.net/document/en/ps3/current/trophy/trophy.html) |
 | XMB-285 | PlayStation®Plus → About PlayStation®Plus | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/plus/plus.html) |
 | XMB-286 | PlayStation®Store → PlayStation®Store overview | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/store/store.html) |
 | XMB-287 | PlayStation®Store → Using the wallet | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/store/wallet.html) |
@@ -378,7 +391,7 @@ Required backend: Presence, profiles, relationships, messaging, chat and media s
 
 | ID | Original topic or action | Native status | Reference |
 |---|---|---|---|
-| XMB-289 | Friends category | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/friends.html) |
+| XMB-289 | Friends category | Partial: the Friends column lists Steam friends and presence from the signed-in local client (NATIVE-02); the Sony Friends surface - requests, profiles, block list, messages - does not exist | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/friends.html) |
 | XMB-290 | Friends list | Group: child capabilities must be assessed independently | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/index.html) |
 | XMB-291 | Friends list → Adding to your Friends list | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/addfriend.html) |
 | XMB-292 | Friends list → Checking status | Not implemented as a complete original workflow | [Guide](https://manuals.playstation.net/document/en/ps3/current/friends/status.html) |

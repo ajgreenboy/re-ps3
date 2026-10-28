@@ -1,5 +1,14 @@
 # Native XMB recreation handoff
 
+> **Historical, 2026-10-23/24 - this is not the current handoff.** It survives as the record of the first
+> application slice (the procedural-wave checkpoint, the initial asset decode and the reference-observation
+> constraint). Everything it calls current has been replaced: the current handoff is
+> [HANDOFF-2026-10-28.md](HANDOFF-2026-10-28.md) (tree at `9545047`), the plan of record is
+> [PHASES-2026-10-28.md](PHASES-2026-10-28.md) (completion ledger: 15 done / 44 partly / 28 not started /
+> 1 obsolete), per-feature status is [audit/FEATURE-CATALOG.md](audit/FEATURE-CATALOG.md), and the scored
+> gap register is [audit/FIRMWARE-PARITY-GAPS.md](audit/FIRMWARE-PARITY-GAPS.md). [audit/HANDOFF.md](audit/HANDOFF.md)
+> is the October 24 audit handoff and is historical in the same way; it was not updated by the 2026-10-28 pass.
+
 **Current plan to an exact match:** [HANDOFF-PHASES.md](HANDOFF-PHASES.md) — current state and remaining phases.
 See [MaXMB integration and handoff review](audit/MAXMB-INTEGRATION.md) for the October 25 continuation.
 The checkpoints below are historical; the procedural-wave descriptions no longer describe the current renderer.

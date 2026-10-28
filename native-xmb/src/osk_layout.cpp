@@ -863,11 +863,15 @@ QVector<OskAssertion> OskLayout::assertions() const {
         QStringLiteral("52 named; 48 default-surface; 4 auxiliary (%1)").arg(auxiliaryTextures.join(QStringLiteral(", "))));
     add(QStringLiteral("texturesResolved"), texturesResolved && cost.texturesResolved == 52,
         QStringLiteral("%1/52 names in the RCO image table, %2 decoded through Assets::image").arg(cost.texturesResolved).arg(cost.texturesDecoded), firmware);
-    add(QStringLiteral("texturesDecoded"), false,
-        firmware ? QStringLiteral("%1/52 decoded; the %2 GIM pixel-format 0x5 names need a text fallback in the draw slice")
-                       .arg(cost.texturesDecoded).arg(52 - cost.texturesDecoded)
+    // The 14 GIM pixel-format 0x5 pictures turned out to be palette-less 8-bit alpha masks (they carry
+    // no type-0x05 palette block anywhere in dev_flash), and Assets::decodeGim now decodes them as
+    // white + coverage, so every named texture decodes: this is a real assertion, not an informational
+    // skip, and it fails if a future container adds a format the decoder still cannot read.
+    add(QStringLiteral("texturesDecoded"), cost.texturesDecoded == cost.texturesResolved && cost.texturesResolved > 0,
+        firmware ? QStringLiteral("%1/%2 decoded (RGBA8888, DXT5 and the palette-less 8-bit coverage masks)")
+                       .arg(cost.texturesDecoded).arg(cost.texturesResolved)
                  : QStringLiteral("not applicable (no dev-flash; no texture decode attempted)"),
-        false);
+        firmware);
     add(QStringLiteral("captions"), captions.space == QStringLiteral("Space") && captions.backspace == QStringLiteral("Backspace") &&
                                       captions.inputMode == QStringLiteral("Input Mode") && captions.enter == QStringLiteral("Enter") &&
                                       captions.prediction == QStringLiteral("Prediction") && captions.modeLower == QStringLiteral("a") &&

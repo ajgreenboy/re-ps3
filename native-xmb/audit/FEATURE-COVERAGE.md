@@ -9,6 +9,14 @@ as observations made here.
 > **Re-checked 2026-10-27**, after the features below landed: the ISC-17 correction block, the ISC-16
 > resume sentence and the two "next work" items were updated, and nothing else in this audit's verdicts
 > changed. The ISC-13/14/15/20 findings still match the source at HEAD `81958e4`.
+>
+> **Re-checked again 2026-10-28 at HEAD `9545047`** for the rows this week touched. Verdicts for
+> ISC-15, ISC-16 and ISC-17 are unchanged. Corrected in place with date stamps: ISC-17's closing verdict
+> (subtitles are no longer "absent"), ISC-14's screensaver and preference-key counts, and ISC-13's
+> "preferences are global" statement (the module is profile-scoped now; the shell still is not). The
+> completion ledger is [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1 and the fidelity
+> instrument is [PARITY-SCORECARD.md](PARITY-SCORECARD.md); this audit's verdicts are scoped to the six
+> ISC criteria it names, not to the ledger.
 
 ## Method and evidence classes
 
@@ -77,8 +85,11 @@ it drops to partial.
 - Settings persistence: `src/preferences.cpp:48-102`. Version 1 JSON, atomic
   commits, validated values, preserved invalid/newer file (writes disabled,
   error reported), per-key change signal, legacy INI migration for four keys.
-- 22 accepted keys, listed by the validation/typing rules in
-  `src/preferences.cpp:27-47`; defaults `:13-26`; consumers applied at
+- 22 accepted keys at the time of this audit; **24 distinct key literals at HEAD** (`2026-10-28`:
+  `appearance/*`, `audio/*`, `clock/*`, `display/*`, `library/*`, `media/*`, `photo/*`,
+  `power/idleMinutes`, `system/name`), listed by the validation/typing rules in
+  `src/preferences.cpp`; the count grew with `display/screensaverMinutes` and is now per-profile
+  (ISC-13 above); defaults `:13-26`; consumers applied at
   `src/shell.cpp:807-815` and read throughout `src/settings_menu.cpp` and
   `src/view.cpp`.
 
@@ -106,10 +117,13 @@ it drops to partial.
 - No rename, delete, avatar/icon editing, console account, logout or automatic
   login control. The service surface is create/select only
   (`src/profiles.h:17-43`); `FUNCTIONS.md:34-37` lists these as required.
-- Preferences are global, not user-scoped: `src/profiles.h:15` states it, and
-  there is exactly one `Preferences` instance (`src/shell.cpp:112,371-374`).
-  Switching users changes the active name and nothing else. `library/photo`,
-  `library/music`, `library/video` and every setting are shared.
+- ~~Preferences are global, not user-scoped~~ **Corrected 2026-10-28** (`c11d8d1`): the `Preferences`
+  module now stores values per profile (`Preferences::setProfile`, document version 2, a v1->v2
+  migration, `sharedKeys()` for the five console-wide keys), so the *module* is no longer global. The
+  *application* still behaves as this audit described: there is exactly one `Preferences` instance and
+  the shell never calls `setProfile` (the adoption hunk is PHASES-2026-10-28 item 3.6/15.1), so
+  switching users still changes the active name and nothing else, and `library/photo`,
+  `library/music`, `library/video` and every setting stay shared.
 - The active user is drawn in only one place: a subtitle under the Trophy
   Collection and PS3 saved-data rows (`src/shell.cpp:853-856`,
   `src/view.cpp:887-898`). It is not in the info bar
@@ -218,8 +232,12 @@ definitions in `src/settings_menu.cpp:55-140`.
 **Untested or missing.**
 
 - Display backend is one boolean plus host reports: no TV type, output
-  resolution/refresh control, RGB range, deep colour, super-white, cross-colour
-  filter or screensaver.
+  resolution/refresh control, RGB range, deep colour, super-white or cross-colour
+  filter. **Corrected 2026-10-28**: a screensaver now exists - Display Settings
+  offers five choices (5/10/20/30 minutes or Do Not Use) persisted as
+  `display/screensaverMinutes`, with the native dim/wake replay (ISC-45 to 45.4;
+  `src/settings_menu.cpp` `screensaver()`); the firmware brightness curve and fade
+  are still unmeasured (ISC-45.3 open).
 - Input settings backend does not exist: no controller assignment, vibration,
   key repeat interval/speed, keyboard type or mouse settings; repeat timing is a
   constant.
@@ -457,9 +475,15 @@ stays partial.
 - Not re-run in this audit; no recorded video run is referenced in
   `audit/MEDIA-CONTINUATION.md` beyond the generic media-player replays.
 
-**Verdict: partial.** Browsing, playback, seek, queue and volume work; subtitles
-are explicitly required by the criterion and absent, as is the rest of the
-original video control surface.
+**Verdict: partial.** Browsing, playback, seek, queue and volume work, and sidecar
+subtitle files are discovered, parsed, drawn and selectable, so the original
+"subtitles absent" reason for this verdict no longer applies (corrected
+2026-10-28; superseded text kept above). The criterion stays partial because
+embedded and disc subtitle streams are not read, Jellyfin-side subtitles are not
+fetched, a switch between two real audio tracks is unproven, and the rest of the
+original video control surface (chapters, scene search, A-B repeat, frame step,
+screen mode) is absent. Per-feature wording: `audit/SUBTITLES.md`,
+`XMB-201` in `audit/FEATURE-CATALOG.md`.
 
 ## ISC-20: game launch backend and return lifecycle
 
@@ -548,12 +572,12 @@ launch-return capture exists, so the criterion stays partial.
 
 ## Settings row ledger (ISC-13/14 support)
 
-Distinct accepted keys: 22 (`src/preferences.cpp:27-47`). Three are media-library
-folder paths set by the host folder picker; of the 19 remaining keys exposed as
-settings rows, 18 are consumed by a rendered surface or service and 1
-(`system/name`) is cosmetic. Two further controls write the Windows audio
-endpoint and are intentionally not persisted (`host/volume`, `host/muted`,
-`src/settings_menu.cpp:147-148`, `src/shell.cpp:622-626`).
+Distinct accepted keys: 22 at the time of this audit; **24 key literals at HEAD** (2026-10-28; the
+additions include `display/screensaverMinutes`, and the values are now per-profile in the module -
+see ISC-13). Three are media-library folder paths set by the host folder picker; of the remaining keys
+exposed as settings rows, all but one (`system/name`, wired but only echoed in its own row at the time)
+are consumed by a rendered surface or service. Two further controls write the Windows audio endpoint
+and are intentionally not persisted (`host/volume`, `host/muted`).
 
 | Group (row count) | Real persisted | Writes host | Read-only report | Unavailable placeholder |
 |---|---|---|---|---|
@@ -565,7 +589,7 @@ endpoint and are intentionally not persisted (`host/volume`, `host/muted`,
 | Music (3) | 3 (generic, not original page) | - | - | - |
 | Video (3) | 3 (generic, not original page) | - | - | - |
 | Photo (3) | 3 | - | - | - |
-| Display (3) | 1 | - | 1 | 1 |
+| Display (3) | 2 (`display/screensaverMinutes`, `display/fullscreen`) | - | 1 (video output report) | - |
 | Power Save (2) | 1 | - | - | 1 |
 | Accessory (2) | - | - | 1 (instructions) | 1 |
 | Chat (3) | - | - | - | 3 |
@@ -578,7 +602,13 @@ endpoint and are intentionally not persisted (`host/volume`, `host/muted`,
 Notes: the theme background/wallpaper interaction described under ISC-14 means
 `appearance/wallpaper` can be stored and invisible while a static theme
 background is active. The "System Volume"/"Mute" rows are real host writes, not
-PS3 audio configuration.
+PS3 audio configuration. **Updated 2026-10-28:** the Display row was
+1 persisted / 1 read-only / 1 unavailable when this ledger was built; at HEAD the
+third row is Full Screen (persisted) and the unavailable placeholder is gone, so
+the "no screensaver" statement under ISC-14 is superseded. The other group counts
+are the 2026-10-25 definitions and were not re-counted at HEAD (the Settings pages
+are being rebuilt under PHASES-2026-10-28 Phase 11, so a re-count now would be
+obsolete on landing).
 
 ## Documentation drift found while auditing
 
@@ -595,6 +625,13 @@ PS3 audio configuration.
   repeat plus shuffle is implemented (`src/playback_queue.cpp`).
 - This audit was asked to read `paf/steam_*.cpp`; that path does not exist. The
   Steam sources are `src/steam_*.cpp`.
+- **2026-10-28 pass.** `audit/FUNCTIONS.md`, `audit/MEDIA-CONTINUATION.md` and
+  `audit/PHASE-CONTINUATION.md` presented their gap tables as current state; they now open with a
+  historical banner and a pointer to this register and to `PHASES-2026-10-28.md`. FUNCTIONS' two
+  findings above (photo zoom/pan, three-mode repeat) are therefore read as historical, not live.
+  `audit/FEATURE-CATALOG.md` XMB-275/XMB-284/XMB-005/XMB-289 were corrected with dated wording, and
+  `HANDOFF-2026-10-27.md` was superseded by `HANDOFF-2026-10-28.md`. `native-xmb/README.md` still
+  points at the 2026-10-27 handoff; it is outside that pass's write fence and needs its own edit.
 
 ## What a demo would not survive
 
@@ -605,9 +642,10 @@ Ordered by how likely a user probing the app is to hit them.
    (`src/settings_menu.cpp:68-140`), with System Settings itself at 10 of 12
    rows unavailable. Anyone opening Network, Chat, Security, Remote Play,
    Printer or System Update finds rows that only report or refuse.
-2. **Rename the console, then look at System Information.** The new name is
-   stored but never shown; the page reports the Windows host name
-   (`src/settings_menu.cpp:198` vs `src/host.cpp:102`).
+2. **Rename the console, then look at System Information.** *Fixed 2026-10-28:* this used to be the
+   demo failure - the name was stored and System Information reported the Windows host name. The
+   stored `system/name` is now passed to `host::systemInformation` (see Update 2 below), so the page
+   shows what the user set; the remaining gap is that no GUI capture of it exists yet.
 3. **Video Settings is Music Settings.** Three generic rows where the reference
    expects language, captions, upscaler, HDMI, dynamic-range and refresh rows;
    the same for Music Settings vs CD import/crossfade/normalizer/bitmapping.
@@ -654,11 +692,13 @@ Ordered by how likely a user probing the app is to hit them.
    Files: `src/preferences.cpp:27-47`, `src/settings_menu.cpp` (new Game/System
    backend row), `src/main.cpp:500-501`.
 2. **Per-profile storage and a real user lifecycle (closes most of ISC-13).**
-   Move preferences and library paths under the active profile directory,
-   migrate the shared document, and add rename/delete plus a startup user
-   selection and confirmation flow; handle corrupt-file recovery in the UI.
-   Files: `src/profiles.cpp/.h`, `src/shell.cpp:371-374,842-856`,
-   `src/preferences.cpp:48`, `src/main.cpp:145`.
+   *Updated 2026-10-28:* the storage half landed in `c11d8d1` - `Preferences` is
+   per-profile with a v1->v2 document migration and `setProfile`, and the account
+   switch has a two-step confirmation with a dry run (`b339422`). What remains is
+   the adoption in the shell (one writer), a visible switch in the Users column and
+   info bar, rename/delete, and corrupt-file recovery in the UI.
+   Files: `src/profiles.cpp/.h`, `src/shell.cpp`, `src/preferences.cpp`,
+   `src/main.cpp`; ledger row 3.6.
 3. **Media metadata and the original control panel (raises ISC-15/16/17).**
    Read tags and embedded artwork off-thread into `MediaEntry`, read EXIF for
    photos, and add a Triangle control-panel overlay that owns rotate, zoom,
@@ -666,12 +706,13 @@ Ordered by how likely a user probing the app is to hit them.
    `src/media_library.cpp/.h`, `src/shell.cpp:533-550,704-806`,
    `src/view.cpp` overlay region, `src/settings_menu.cpp`.
 4. **Settings schema fidelity and capability binding (raises ISC-14).**
-   Replace the borrowed three-row media pages with the original group schemas;
-   convert every placeholder row into a typed value with allowed values,
-   default, side effects and an explicit unavailable reason; make System
-   Information read `system/name`; document which rows write the host. Files:
-   `src/settings_menu.cpp:48-142`, `src/preferences.cpp:27-47`,
-   `src/host.cpp:89-112`.
+   *Updated 2026-10-28:* the schema is no longer unknown - `audit/SETTINGS-FIRMWARE.md`
+   (`4bbff6e`) lists the firmware row set for all 16 groups, the two page classes and 29
+   numbered diffs, and PHASES-2026-10-28 Phase 11 is the work. The listed steps stand:
+   replace the borrowed three-row media pages, convert every placeholder row into a
+   typed value with an explicit unavailable reason, and make System Information read
+   `system/name` (done - see Update 2). Files: `src/settings_menu.cpp`,
+   `src/preferences.cpp`, `src/host.cpp`, `audit/SETTINGS-FIRMWARE.md`.
 5. **Video/audio capability layer and evidence (raises ISC-16/17).** Sidecar
    subtitles, the player panel and resume/Continue Watching landed 2026-10-26
    (audit/SUBTITLES.md, MEDIA-CONTROLS.md). What remains: embedded subtitle and
@@ -696,8 +737,12 @@ Ordered by how likely a user probing the app is to hit them.
 > the library on return, and suppresses the idle auto-close while a title runs
 > (`Shell::gameRunning`). Verified by launching `cmd.exe /c timeout 4` from an imported entry:
 > log shows `launch: ... (tracked)` then `returned from Probe App exit 1 normal`. Steam launches
-> are still detached through `steam.exe -applaunch`, and a configured backend preference is still
-> missing, so ISC-20 stays partial.
+> are handed to `steam.exe -applaunch` (no parent process) and watched through Steam's registry
+> `Apps\<id>\Running` state, and a configured backend preference is still missing, so ISC-20 stays
+> partial. **Update 3 (2026-10-28, `b339422`):** the stop half now exists in the service layer -
+> `steamStopArguments` (`+app_stop` shape), `steamVerifyStop` with a bounded `console_log` tail and a
+> two-step account-switch confirmation state machine with a dry run - but the shell hunks are
+> unapplied, so no real launch/quit has been observed. The ledger's row 6.1 carries the same status.
 > **Update 2:** the cosmetic `system/name` field is wired: `host::systemInformation` now takes the
 > stored name (`Preferences` key `system/name`) and only falls back to `QHostInfo::localHostName()`
 > when it is empty; Settings > System Information renders the value the user set. Verified by code

@@ -1,4 +1,15 @@
-# Native media continuation — 2026-10-25
+# Native media continuation - 2026-10-25
+
+> **Historical pass record - 2026-10-25, banner added 2026-10-28.** This file records one media slice
+> (owned playback queue, photo viewport, the controls that reached them). It is not current state: the
+> later media work is in [SUBTITLES.md](SUBTITLES.md) (sidecar subtitles and the player panel),
+> [MEDIA-CONTROLS.md](MEDIA-CONTROLS.md) (Continue Watching and resume records) and
+> [MEDIA-PANELS-FIRMWARE.md](MEDIA-PANELS-FIRMWARE.md) (what the firmware's video/music/photo panels and
+> volume display actually are). Superseded claims inside this file: the zoom percentage is a native
+> affordance the firmware does not have (no numeric zoom exists - MEDIA-PANELS-FIRMWARE 7.4); the
+> "original panel" gap it implies is now specified rather than unknown; and background playback, which
+> this pass left absent, is still absent (ledger rows A3/8.2). Current status: the ledger in
+> [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1; scored gap: [FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md).
 
 ## Implemented
 

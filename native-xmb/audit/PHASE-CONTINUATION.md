@@ -1,4 +1,13 @@
-# Broader phase continuation — 2026-10-26
+# Broader phase continuation - 2026-10-26
+
+> **Historical pass record - 2026-10-26, banner added 2026-10-28.** This records the phase-5/6 slice
+> (app registration editor, video controls, idle dimming) at the tree of that day. It is not current
+> state, and two of its statements are superseded: the idle path now **darkens the display instead of
+> closing the app** (`067d6f0`, `audit/SESSION-POWER.md` 4.1 - the "Auto-Off closes native XMB" wording
+> below is the 2026-10-26 behaviour), and Jellyfin is no longer a POC service but a native browser/player
+> with DPAPI remembered sign-in and playback reporting (`3e5bcdf`, `audit/JELLYFIN-NATIVE.md`). The
+> screensaver dimming it describes still exists and is unchanged. Current status: the ledger in
+> [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1; plan of record: the same document.
 
 ## Scope and status
 
