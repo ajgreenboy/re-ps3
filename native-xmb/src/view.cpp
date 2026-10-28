@@ -337,7 +337,7 @@ in vec2 uv;out vec4 colour;uniform sampler2D layer;uniform float dimOpacity;
 void main(){colour=dimOpacity>0.0?vec4(0,0,0,dimOpacity):texture(layer,uv);})"; // premultiplied; linear filtering at half scale = 2x2 box filter
     if(!uiComposite_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) || !uiComposite_.addShaderFromSourceCode(QOpenGLShader::Fragment,compositeFragment) || !uiComposite_.link())
         qCritical().noquote()<<"UI composite shader failed:"<<uiComposite_.log();
-    particles_.init(*this);
+    particles_.init(*this,assets_);
     if(introEnabled_)coldboot_.init(*this,assets_);
     if(!monthImage_.isNull()) {
         monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
@@ -453,7 +453,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),[this,seconds,originalParticles](int width,int height){
         // Second firmware pass: the same dust drawn into the glare source so the mip blur blooms it
         // (particles_second). Re-running the sim for the same `seconds` advances no steps.
-        if(originalParticles)particles_.render(*this,seconds,width,height);
+        if(originalParticles)particles_.renderGlare(*this,seconds,width,height);
     });
 }
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
@@ -1206,7 +1206,10 @@ void View::drawScene(QPainter& p) {
             const auto& cat=categories[i];const double distance=i-categoryPosition_;
             const bool open=i==shell_.category();
             const double level0X=kColumnX+distance*200+10*std::clamp(distance,-1.,1.);
-            const double x=open || distance<0?level0X-childAmount*262:level0X+(kColumnX-40+distance*186-level0X)*childAmount;
+            // Open-page recession (traced 2026-10-27, RPCS3 burst): the bar keeps its 200-unit pitch at the
+            // recorded parent distance 2857.2, i.e. 200*2700/2857.2 = 189.0 px (measured 190.5 px in frames);
+            // the old 186 was a fit. The 0.945 scale is the same recession.
+            const double x=open || distance<0?level0X-childAmount*262:level0X+(kColumnX-40+distance*189.0-level0X)*childAmount;
             const double focus=std::max(0.,1.-std::abs(distance));
             const double opacity=(open?1.:(1.-childAmount)+(distance>0?.1*childAmount:0.))*(shell_.message().isEmpty()?1.:.18);
             p.save();p.setOpacity(opacity);
