@@ -121,7 +121,7 @@ count. Row artwork, title position and spacing are the installed-PKG layout, so 
 share one presentation. F5 or **Refresh Game Library** rescans.
 
 Steam uses one folder rather than a folder per subset: **Not Installed** holds every owned title that is not on
-disk plus any family-shared titles from `<native-data>/family-shared.json` (275 rows here: 272 owned and 3
+disk plus any family-shared titles from `<native-data>/family-shared.json` (275 rows here: 272 owned titles that are not installed, plus 3
 family-shared, alongside the 10 installed titles inline). The earlier **Installed Games** and **Family Shared**
 folder rows are gone. Opening **Not Installed** pushes an ordinary XMB page of rows; OK hands `steam://install/<id>`
 to Steam, which performs the download.
