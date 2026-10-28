@@ -41,8 +41,6 @@ constexpr int kBodySize=24,kTitleSize=23,kInfoRowSize=22;
 // the glyph box through drawImage's alpha bounds.
 constexpr double kHintX=1155.,kHintInkTop=889.,kHintGlyphSize=22.,kHintLabelGap=8.,kHintGroupGap=22.;
 constexpr int kHintSize=21;
-// A modal box has no measured hint baseline; its row sits this far under the plate, at the same x.
-constexpr double kHintBoxGap=22.;
 // D3 inline line: left at the level-1 item-label column, ink centre y 504, ink height 20 px (~24-28 px
 // font). 628 is the measured ink origin of the firmware's own line; the native label column's ink starts
 // at 624, so the line is the reference's, not a re-fit of it.
@@ -50,11 +48,50 @@ constexpr double kInlineX=628.,kInlineCentreY=504.;
 constexpr int kInlineSize=26;
 // D4 keeps the analog clock face while the info bar's plate and date are hidden: centre ~(1776,93).
 constexpr double kClockX=1776.,kClockY=93.;
-// ---- Native fit (no local frame shows a modal box; audit 2.1 "Screen position and size") ----------
-// The width is the one real anchor: tex_msgdialog_bar is 960 px wide and TRACED 0x00343FFC assigns it to
-// exactly two bar objects, drawn here at the box's own width instead of stretched to 1920.
-constexpr double kBoxWidth=960.,kBoxTop=250.;
-constexpr double kBoxTitleX=28.,kBoxTitleY=22.,kBoxBodyTop=96.;
+// ---- The confirm box: measured on the 2026-10-28 firmware frame -----------------------------------
+// Reference: out/parity-references/dialog__original__day__1080p.png (RPCS3 4.93, 1920x1080, one day pin;
+// the console's delete confirmation, body "The installed game will be deleted. / Are you sure you want to
+// continue?", Yes/No with No focused). Until this frame existed the whole box was a native fit (audit
+// section 5, 7.6); every value below is now a single-pixel measurement of that frame, with the measuring
+// method named. The frame's plate is a light wash, not the dark tile the RCO suggested: see the audit's
+// 2026-10-28 section for the arithmetic.
+// Plate: edge steps at x 480 (87.7 -> 101.3) and x 798 (96.2 -> 81.4), y 452 (82.8 -> 93.4) and y 627
+// (80.5 -> 69.0) on a 2 px antialiased edge, so the core rect is x 480..798 x y 452..627 (319 x 176).
+// Fill: white at 43/255. The measured lightening over the background fits (255 - bg) * 0.17 in every
+// channel on both the plate's left and right edge (bg 100/76/43 -> +24/+28/+35; bg 85/61/28 -> +29/+33/+39),
+// i.e. a 0.17 white wash. The 12x12 tex_msgdialog_bg tile (flat RGB 54/56/54, alpha 116) mixed normally
+// would darken the plate instead; the frame does not show it here.
+constexpr double kBoxPlateX=480.,kBoxPlateY=452.,kBoxPlateWidth=319.,kBoxPlateHeight=176.;
+constexpr int kBoxPlateAlpha=43;
+// The plate's content is the item's own icon at 56x56, centred on it (ink x 612..667, y 512..567, centre
+// 639.5/539.5 = the plate's own centre). The frame's glyph is the console's corrupted-data icon; the native
+// draws the row the message belongs to, the same source the page header uses.
+constexpr double kBoxIconSize=56.;
+// Body: ink starts at x 1074 and at y 476, line 2 at y 510 (pitch 34), cap height 23 px at the page's own
+// 24 px. The frame's wrap (395 px then 411 px, with " Are" not fitting after "deleted.") bounds the text
+// column to 411..440 px; 424 is inside that bound.
+constexpr double kBoxTextX=1074.,kBoxTextTop=471.,kBoxTextWidth=424.;
+constexpr double kBoxPitch=34.;
+constexpr double kBoxChoiceGap=120.;
+// Choices: "Yes" ink 1183..1221 x 584..601, "No" ink 1341..1376 x 582..602 (the focus halo adds the top
+// and bottom rows). 120 px apart, and the pair is centred on the body column (its centre is 1279.5, the
+// 1074..1484 text block's own centre), not on the screen.
+constexpr double kBoxChoiceTop=579.;
+constexpr int kBoxChoiceSize=22;
+// The captured box focuses No: the console's default answer, and the non-destructive one. The native's box
+// has one accept path (Shell::activate, see the comment in drawMessageBox), so this is the drawn default.
+constexpr int kBoxFocusChoice=1;
+// Footer: the captured box keeps a footer band under the box - one flat full-width 1 px rule at y 879
+// (RGB 200/192/183 over an RGB 78/52/22 background = white at 177/255, uniform from x 20 to x 1900, so not
+// the centre-bright 960 px tex_msgdialog_bar) and the Enter/Back hints at ink y 897..916.
+constexpr double kBoxFooterRuleY=879.;
+constexpr int kBoxFooterRuleAlpha=177;
+constexpr double kBoxFooterInkTop=897.;
+// Hint x: the X glyph's ink starts at 726 and its label at 762; the O glyph's ink at 1155 and its label at
+// 1192 (the D4 row's own anchor), so the pair is drawn at these measured positions rather than stacked
+// from kHintX.
+constexpr double kBoxFooterGlyphX[2]={726.,1155.};
+constexpr double kBoxFooterLabelX[2]={762.,1192.};
 // Splits the shell's "Title\n\nbody" shape. A message with no heading leaves the heading empty and the
 // whole text is the body.
 QString takeHeading(QString& text) {
@@ -169,61 +206,100 @@ void View::drawInlineMessage(QPainter& p) {
     drawMessageText(p,{kInlineX,kInlineCentreY-24.,1100,48},messageShown_.text,kInlineSize,QColor(235,235,235));
 }
 
-// ---- D1 modal box ---------------------------------------------------------------------------------
+// ---- D1 confirm box (MEASURED 2026-10-28) ---------------------------------------------------------
 void View::drawMessageBox(QPainter& p) {
-    // The plate is read from the RCO at run time: tex_msgdialog_bg is a flat 12x12 tile, so one pixel is
-    // the whole fill and there are no nine-slice margins to recover (audit 2.1). It is the neutral grey
-    // wash the audit measured - RGB(54,56,54) at 116/255 over the XMB - and tex_msgdialog_bg2 is the
-    // opaque black the text block sits on. The literals are only the fallback for a dev_flash that cannot
-    // be read. The box rect itself is a native fit (the firmware's vertices live in unresolved paf calls).
-    const QImage& wash=assets_.image("system_plugin","tex_msgdialog_bg");
-    const QImage& backing=assets_.image("system_plugin","tex_msgdialog_bg2");
-    const QColor washColour=wash.isNull()?QColor(54,56,54,116):wash.pixelColor(0,0);
-    const QColor backingColour=backing.isNull()?QColor(0,0,0,255):backing.pixelColor(0,0);
+    // The frame's box is a left icon plate plus a right text column, with the answers under the text and a
+    // footer band; there is no heading, no second bar and no dim. The old shape (a 960 px plate at y 250
+    // with the heading and a centred body inside it, two tex_msgdialog_bar rows and a Cross/Circle hint row
+    // under it) was the native fit this frame replaces.
     QString text=messageShown_.text;
-    const QString heading=takeHeading(text);
-    const double innerWidth=kBoxWidth-2*kBoxTitleX;
-    // The box is tall enough for its own text; the hint row stays on the measured baseline below it.
-    const int bodyLines=std::max(1,int(wrapMessage(text,innerWidth,kBodySize).size()));
-    const double textTop=kBoxTitleY-8.;
-    const double textBottom=kBoxBodyTop+(bodyLines-1)*kBodyPitch+kBodySize+14.;
-    const double boxHeight=std::max(220.,textBottom+28.);
-    const QRectF box(960.-kBoxWidth/2.,kBoxTop,kBoxWidth,boxHeight);
-    const double plate=dialogPlateEase_.value,content=dialogEase_.value;
-    if(plate>.002) {
-        p.save();p.setOpacity(plate);
-        p.fillRect(box,washColour);
-        // The opaque backing sits under the text block only (title through the last body line), which is
-        // what TRACED 0x00344094's second texture slot provides.
-        p.fillRect(QRectF(box.left()+kBoxTitleX-12.,box.top()+textTop,innerWidth+24.,textBottom-textTop),backingColour);
+    takeHeading(text);                       // the captured box has no heading line: the icon carries the item
+    const QRectF plate(kBoxPlateX,kBoxPlateY,kBoxPlateWidth,kBoxPlateHeight);
+    const double plateAlpha=dialogPlateEase_.value, content=dialogEase_.value;
+    if(plateAlpha>.002) {
+        // Flat white wash at the measured alpha. No nine-slice: the frame shows one uniform fill.
+        p.save();p.setPen(Qt::NoPen);p.setOpacity(plateAlpha);
+        p.fillRect(plate,QColor(255,255,255,kBoxPlateAlpha));
         p.restore();
-        // Exactly two bars, at the box's own width: tex_msgdialog_bar is 960x1 and centre-bright, so at
-        // 1:1 it ramps from nothing at the box edges to full at its centre. Stretching it to 1920 (what
-        // this build used to do for every rule) is wrong.
-        const QImage& bar=assets_.image("system_plugin","tex_msgdialog_bar");
-        if(!bar.isNull()) {
-            p.save();p.setOpacity(plate);
-            p.drawImage(QRectF(box.left(),box.top(),kBoxWidth,1),bar);
-            p.drawImage(QRectF(box.left(),box.bottom()-1.,kBoxWidth,1),bar);
-            p.restore();
+        // The plate carries the item the message belongs to, 56x56 and centred. Same source as the page
+        // header icon: the focused row, or its parent when the row is the empty-state marker ("23n").
+        const int depth=shell_.depth();
+        const auto& rows=shell_.entriesAt(depth);
+        const Entry* source=nullptr;
+        const int selection=shell_.selectionAt(depth);
+        if(selection>=0 && selection<rows.size())source=&rows[selection];
+        if(source && source->texture=="23n" && depth>0) {
+            const auto& parents=shell_.entriesAt(depth-1);
+            const int parent=shell_.selectionAt(depth-1);
+            if(parent>=0 && parent<parents.size())source=&parents[parent];
         }
+        if(source) {
+            const QPointF centre=plate.center();
+            drawImage(p,source->container,source->texture,
+                {centre.x()-kBoxIconSize/2.,centre.y()-kBoxIconSize/2.,kBoxIconSize,kBoxIconSize},plateAlpha);
+        }
+    }
+    // The footer band is part of the captured surface and fades with the box's own group.
+    if(plateAlpha>.002) {
+        p.save();p.setPen(Qt::NoPen);p.setOpacity(plateAlpha);
+        p.setBrush(QColor(255,255,255,kBoxFooterRuleAlpha));
+        p.drawRect(QRectF(0,kBoxFooterRuleY,1920,1));
+        p.restore();
     }
     if(content<=.002)return;
     p.save();
-    // The box's title is left inside the plate. No icon is drawn: system_plugin ships no dialog icon and
-    // which of the 100x100 tex_notification_* glyphs a box uses is UNPROVEN (audit 2.1).
-    if(!heading.isEmpty())
-        drawMessageText(p,{box.left()+kBoxTitleX,box.top()+kBoxTitleY,innerWidth,40},heading,kTitleSize,Qt::white);
-    // The body is centred under the title at the same size and pitch as the page's, wrapped to the plate's
-    // own inner width so a long message cannot run past the box.
-    drawMessageLines(p,text,box.top()+kBoxBodyTop,kBodyPitch,kBodySize,QColor(240,240,240),
-        box.left()+kBoxTitleX,innerWidth);
+    // Body: left-aligned at the measured column, one measured pitch. No heading, no centring.
+    const auto lines=wrapMessage(text,kBoxTextWidth,kBodySize);
+    double y=kBoxTextTop;
+    for(const auto& line:lines) {
+        if(!line.isEmpty())
+            drawMessageText(p,{kBoxTextX,y,kBoxTextWidth,qreal(kBodySize)+10.},line,kBodySize,
+                Qt::white,Qt::AlignLeft|Qt::AlignTop);
+        y+=kBoxPitch;
+    }
+    // Choices: the firmware's own msg_yes / msg_no as text, not glyph hints, 120 px apart and centred on
+    // the body column. The focused one carries the XMB's soft white halo; the other does not (measured:
+    // Yes has no halo, No's halo adds ~3 px above and below its ink).
+    // NOTE: Shell::activate still accepts on Cross whatever this draws, so the glow currently marks the
+    // console's default answer rather than a live selection - the shell needs a choice index for that
+    // (stated as the residual in audit/DIALOGS-FIRMWARE.md).
+    QFont choiceFont(shell_.fontFamily());choiceFont.setPixelSize(kBoxChoiceSize);
+    const auto advance=[&](const QString& value){
+        return textRenderer_.ready()?textRenderer_.measure(choiceFont,value):QFontMetrics(choiceFont).horizontalAdvance(value);
+    };
+    const QString choices[2]={assets_.text("system_plugin","msg_yes","Yes"),
+                              assets_.text("system_plugin","msg_no","No")};
+    const double pairWidth=advance(choices[0])+kBoxChoiceGap+advance(choices[1]);
+    // Centred on the text column, not on the body's longest line: the frame's pair centre is 1279.5, which
+    // is both the centre of its 1074..1484 ink block and (within 6.5 px) the centre of this 424 px column.
+    const double left=kBoxTextX+(kBoxTextWidth-pairWidth)/2.;
+    const double centres[2]={left+advance(choices[0])/2.,
+                             left+advance(choices[0])+kBoxChoiceGap+advance(choices[1])/2.};
+    for(int i=0;i<2;++i) {
+        const QRectF rect(centres[i]-150.,kBoxChoiceTop,300.,30.);
+        if(i==kBoxFocusChoice) {
+            if(textRenderer_.ready())
+                textRenderer_.draw(*this,p,rect,choices[i],choiceFont,Qt::white,
+                    Qt::AlignHCenter|Qt::AlignTop,1.,false,false);
+        }
+        drawMessageText(p,rect,choices[i],kBoxChoiceSize,Qt::white,Qt::AlignHCenter|Qt::AlignTop);
+    }
+    // Footer hints: the firmware's glyph + label pairs at the measured anchors (X Enter, O Back). A box has
+    // no Cross/Circle OK/Cancel pair: the frame's answers are the Yes/No text above, and Enter/Back are the
+    // verbs the footer advertises. They fade with the hint group (100 units, the RCO's own anim_*_show/hide).
+    const QString glyphs[2]={QStringLiteral("tex_cross"),QStringLiteral("tex_circle")};
+    const QString labels[2]={assets_.text("system_plugin","msg_enter","Enter"),
+                             assets_.text("system_plugin","msg_back","Back")};
+    {
+        p.save();p.setOpacity(dialogHintEase_.value);
+        for(int i=0;i<2;++i) {
+            drawImage(p,"system_plugin",glyphs[i],{kBoxFooterGlyphX[i],kBoxFooterInkTop,22.,22.});
+            drawMessageText(p,{kBoxFooterLabelX[i],kBoxFooterInkTop-2.,300.,26},labels[i],kHintSize,
+                QColor(235,235,235));
+        }
+        p.restore();
+    }
     p.restore();
-    // Two buttons: Cross accepts with the firmware's msg_ok, Circle cancels with msg_cancel, on the
-    // measured hint baseline. snd_decide for the accept is Shell::activate's box path.
-    drawHintRow(p,{{"tex_cross",assets_.text("system_plugin","msg_ok","OK")},
-                   {"tex_circle",assets_.text("system_plugin","msg_cancel","Cancel")}},
-        box.bottom()+kHintBoxGap,std::min(dialogHintEase_.value,content));
 }
 
 // ---- D2 error-code page ---------------------------------------------------------------------------

@@ -1005,3 +1005,204 @@ draws D4 with a ghost heading and no code, and reserves D2 for failures it class
 
 No source file was edited for this section. The frames stay under `C:\dev\out\rpcs3-ref2-2026-10-28\`
 (git-ignored).
+
+## 10. Dated correction - 2026-10-28: the two-button confirm box has a frame
+
+Section 5's first two rows ("two-button confirm box", "the box's plate rectangle at 1080p") and 9.5's
+"spec-only, unchanged" rows are closed here. Batch `rpcs3-gaps-2026-10-28` reached a real confirm box and
+imported it as `out/parity-references/dialog__original__day__1080p.png` (sha256 `ea7d5a98...0add`, the same
+bytes as `C:\dev\out\rpcs3-gaps-2026-10-28\stills\dialog__original__day__1080p.png`). The RCO and TRACED
+facts in 2.1 still stand; where the frame disagrees with a *measured* claim this section states the
+disagreement rather than reconciling it by guess.
+
+### 10.1 The frame
+
+Route: Game column > `Corrupted Data` > Triangle > Down (Start -> Delete) > Cross, then Circle - cancelled,
+never confirmed. One settled still, 1920x1080, no crop, no rescale. The surface replaces the info bar, so
+its own frame carries no clock (the console plate read `10/28 10:03 AM` on the frames either side).
+
+What it shows: one light plate at the left carrying the item's icon; the body as two left-aligned lines to
+its right; `Yes` / `No` under the body with `No` focused (soft white halo); a full-width footer rule at
+y 879 with `X Enter` and `O Back` under it. **No dim** anywhere in the frame, no heading, no
+`tex_msgdialog_bar` row, no page rule at y 197, no info bar and no clock.
+
+### 10.2 Measured geometry
+
+Every value below is a single-pixel read of the still. "Step" means the luma on the two pixels either side
+of an edge; edges are antialiased over 1-2 px, so rects are quoted to the nearest pixel.
+
+| Quantity | Measured | How it was read |
+|---|---|---|
+| plate rect | x 480..798, y 452..627 (**319 x 176**) | steps at x 480 (87.7 -> 101.3) and x 798 (96.2 -> 81.4); y 452 (82.8 -> 93.4) and y 627 (80.5 -> 69.0) |
+| plate fill | **white at 43/255 (0.17)**, uniform | over bg RGB(100,76,43) the delta is (+24,+28,+35); over bg RGB(85,61,28) it is (+29,+33,+39) - both fit `(255-bg)*0.17` in every channel |
+| icon on the plate | item glyph, ink **x 612..667, y 512..567 (56 x 56)**, centre (639.5, 539.5) = the plate's own centre | thresholded ink box |
+| body line 1 | ink x 1074..1468, **y 476..498** (395 x 23) | ink above local background |
+| body line 2 | ink x 1074..1484, **y 509..532** (411 x 24) | same |
+| body pitch | **34 px**, left-aligned at x 1074 | the two ink tops |
+| body wrap bound | 411..440 px (line 2 fits at 411; `" Are"` after `deleted.` would exceed the column) | line widths |
+| `Yes` | ink x 1183..1221, **y 584..601** (39 x 18) | ink box |
+| `No` | core ink (>240) x 1346..1374 (29 wide), ink with halo x 1341..1376, **y 582..602** | ink box at two thresholds |
+| answer gap / centre | **120 px between the two ink boxes**; pair centre **1279.5** = the body ink block's centre (1074..1484 -> 1279) | the two ink boxes |
+| focus halo | reaches 8 px left of the `No` ink and 3 px above/below (x 1336, y 579..605); peak 255; `Yes` has none | luma ring around each label |
+| footer rule | **y 879, 1 px, white at 177/255 (0.693)**, flat: 189 at x 20, 196 at x 960, 192 at x 1900 | RGB 200.6/192.6/183.5 over bg 77.9/51.6/21.9 |
+| footer hints | `X` glyph ink 726..743, label `Enter` 762..814; `O` glyph 1155..1174, label `Back` 1192..1240; ink **y 897..916** | ink boxes |
+| info bar / clock | **absent** - max luma 81.9 over x 1250..1920 y 60..140, 0 px above 150 | whole band |
+| dim | **none**. Against `frames/a31-dialog-cancelled.png` (same boot, after Circle) the background bands move by -0.41..+0.89 luma with both signs, i.e. the wave advanced; a veil would be a same-signed drop of tens of levels | five bands compared |
+
+### 10.3 Where the frame contradicts the earlier sections
+
+1. **Plate colour and blend (2.1, 7.2).** 2.1 read `tex_msgdialog_bg` as a normal-blended neutral grey
+   (RGB 54,56,54 at 116/255, "a neutral grey wash") and 7.2 rendered that. The frame's plate is *lighter*
+   than the background, not darker, and the per-channel fit above is a 0.17 white wash on both sides of the
+   plate. Two readings survive: the visible plane is a run-time light plane (2.1 already records that every
+   dialog plane is created in code), or the RCO tile is composited with a lightening blend. One still
+   cannot separate them, so the box now draws the measured wash and this document no longer claims the
+   tile's colour is what the screen shows.
+2. **The two bars (2.1, 7.2).** The frame has no bar row: the plate's top and bottom edges are the wash's
+   own antialiased edge (1-2 px, +11..+37 luma), not a 960 px centre-bright line. `tex_msgdialog_bar`'s
+   assignment to exactly two objects (TRACED 0x00343FFC) stays a fact about the dialog's object set, but it
+   is not visible on this surface. The one full-width bright line in the frame is the footer rule at y 879
+   and it is flat (189/196/192 at x 20/960/1900), so it is not that texture either.
+3. **The button row (2.1, 7.4 item 7).** The answers are the `msg_yes` / `msg_no` strings as *text*, not
+   `page_btnnavi` glyph+label pairs. The glyph pairs do appear in the frame - in the footer, as
+   `X`+`msg_enter` and `O`+`msg_back`.
+4. **The heading (7.2).** A box has no heading line. `Shell::showConfirm(title, body)` keeps its shape, but
+   the box draws only the body; the title is stripped and not drawn.
+5. **The box rect (5, 7.6).** It was the pass's one explicit native fit ("no local frame shows a modal
+   box"). It is now a measurement.
+6. **Which icon a box draws (2.1, 9.5).** Resolved for this box: the plate carries the *item's own* icon at
+   56x56, centred. 2.1's open question was which of the 100x100 `tex_notification_*` glyphs a message box
+   picks; the answer here is that this box carries no notification glyph at all.
+7. **Whose plane the plate is.** The frame cannot say whether the 319x176 plane is the D1 box's own plate
+   or the host delete page's icon plane (2.6: `expage_fdelete_dialog` holds `filedel_dialog_icon`,
+   `filedel_dialog_info` and `filedel_dialog_msgdialog`, the plane that hosts the D1 box as a child; all of
+   their stored pos/size are 0). The native has no delete page, so this build draws the plate as part of
+   the box. A second capture of a box on a page with no icon plane would separate the two.
+
+### 10.4 What changed
+
+`src/dialogs.cpp` only - the metric block for the box and `View::drawMessageBox`:
+
+- the plate is the measured rect and the measured white wash (no nine-slice: one uniform fill), with the
+  focused row's own icon at 56x56 centred on it, from the same source the page header uses;
+- the heading is not drawn; the body is left-aligned at x 1074 on the measured 34 px pitch, white;
+- `Yes` / `No` are `msg_yes` / `msg_no`, 120 px apart, the pair centred on the text column, the focused
+  answer carrying the XMB's halo (`No`, the console's default answer);
+- the footer band is the measured flat 1 px rule plus `X Enter` / `O Back` at the measured anchors, fading
+  with the hint group;
+- the two `tex_msgdialog_bar` rows and the `msg_ok` / `msg_cancel` hint row are gone from this surface.
+
+`src/view.h` was **not** edited (this pass's fence allows it only for a new member, and the box needs none).
+Its one-line comment for `drawMessageBox` still reads "plate, two bars, two hints"; that comment is now
+stale and should be corrected by the pass that owns the header.
+
+### 10.5 Route
+
+**Reachable.** Video column > `Continue Watching` (with one remembered position) > Triangle > Down twice
+(the panel's Start -> Delete order puts `Remove from Continue Watching` there) > Cross. Evidence: the
+capture's sidecar (`pageKind continueWatching`, depth 1, row `continue:<sha1>`) and the capture itself,
+`out/native-dialog/after/box.png`. That is a real destructive-in-app action (it forgets a resume point), so
+the box is reached through the same kind of command the console's Delete row raises.
+
+**Not routeable, and why.** The console's own route is a *file delete* on a game item. This build has no
+file-deletion backend at all (by instruction, none was added in this pass) and no `Corrupted Data` row,
+because there is no corrupt game item on this host. So the console's body text and its icon cannot be
+reproduced by routing: they differ by construction, and the region numbers below measure shape and
+position, not content.
+
+**Also not routeable in this slice: the catalogue's `dialog` state.** Its route is
+`column video > catalogue:continue` over the empty seed, and its Tier A wants `continue watching: nothing to
+continue` at depth 0 - that is the *inline empty-state line* (`drawInlineMessage`), not the box. So
+`work/parity.ts --capture --score --state dialog` cannot see this pass's surface, and its number is
+unchanged (10.6). Pointing the catalogue's `dialog` route at the box is a catalogue edit
+(`work/parity-catalogue.json`: route stages, dataSeed, `expect`, `trace`), which this pass's fence forbids.
+
+**Behavioural residual.** The console's box is a two-choice selector: `No` is focused and `X Enter`
+activates the focused answer while `O Back` leaves. `Shell::activate` still accepts a Box unconditionally on
+Cross and `Shell::back` cancels, because the shell has no choice index. The drawn focus is therefore the
+console's default answer, not a live selection - pressing Cross performs the box's action whatever the glow
+says. Closing that needs a choice field in `Shell`, left/right handling and a per-choice accept: one
+`shell.cpp` change, outside this pass's fence, and the next thing to do on this surface.
+
+### 10.6 Verification
+
+Build: `build.ps1 -OutputDirectory C:\dev\out\native-dialog` (succeeded; only pre-existing warnings).
+Pins: `--render-clock 30 --ui-clock 2026-10-25T12:32:00 --focus-time 2000` (the parity defaults), a fresh
+seed copied from `out/native-dialogs/capture/box/data` on every run.
+
+`ab-compare.ts`, reference vs capture, before this pass and after it. The two frames have different
+backgrounds, so these bound shape and position, not pixels:
+
+| crop | before | after | delta |
+|---|---|---|---|
+| full frame `0,0,1920,1080` | 18.45 dB / 0.8316 | **19.77 dB / 0.8937** | +1.32 / +0.0621 |
+| `dialog` `240,190,1440,700` | 16.36 dB / 0.7104 | **18.12 dB / 0.8420** | +1.76 / +0.1316 |
+
+The `dialog` crop ends at y 890, so it holds the plate, the body, the answers and the footer rule, but not
+the hint labels at y 897; the footer hints are unscored by it. Run-to-run spread is +-0.01 dB.
+
+Native geometry against the frame, measured by differencing the box against the identical frame with the
+box dismissed (the wave cancels):
+
+| Quantity | Frame | Native now |
+|---|---|---|
+| body line 1 ink | y 476..498 | y 476..499 |
+| body line 2 ink | y 509..532 | y 510..533 |
+| `Yes` ink | x 1183..1221, y 584..601 | x 1192..1228, y 584..600 |
+| `No` ink | x 1341..1376 (core 1346..1374) | x 1352..1379 |
+| footer rule | y 879, delta +138 luma | y 879, delta +141.7 luma |
+| footer hints | 726..743 / 762..814 and 1155..1174 / 1192..1240, y 897..916 | 726..747 / 764..816 and 1155..1176 / 1194..1241, y 897..918 |
+
+Determinism: two captures of the settled box differ by at most 1 level per channel (PSNR 56.88 dB / SSIM
+0.9992) - rasterisation noise, no layout difference.
+
+Parity, as asked: `bun work/parity.ts --capture --score --state dialog --exe
+C:/dev/out/native-dialog/re-ps3-native.exe` -> `run-20261028-081714`, `scorecard-20261028-081743`. Tier A
+PASS, Tier C PASS, `frame` 18.08 dB / 0.8384 FAIL and `dialog` 16.42 dB / 0.7576 FAIL (budget 18.00/0.880).
+Both numbers are identical to section 16.4 because the state captures the inline line, not the box (10.5):
+this is the state's first honest number and it measures a surface this pass did not change.
+
+Canonical gate: `bun work/ab-layers.ts --capture --exe C:/dev/out/native-dialog/re-ps3-native.exe` -
+**PASS 6/6**, text presence 1677 bright pixels in the clock crop (minimum 900) PASS. Frame 18.48 / 0.8327,
+top background 20.25 / 0.9363, category icon row 21.20 / 0.9029, item label row 11.92 / 0.3891, clock text
+11.39 / 0.4500, info bar 14.98 / 0.7639 - every layer inside budget.
+
+Named states: none draws a Box (the box is raised only by `showConfirm`, whose single call site is the
+RemoveResume command; the two Continue Watching states capture the inline line and the populated page), so a
+change confined to `drawMessageBox` cannot move them. They nevertheless fail the 55 dB / 0.9995
+self-baseline they are gated at: `continue-watching-empty` 32.47 / 0.9903 frame and 29.34 / 0.9805 dialog,
+`continue-watching` 33.00 / 0.9934 frame and 22.06 / 0.9150 row. That predates this pass - 7.5 recorded the
+same two states failing against the then-current reference - and no reference was edited; re-baselining is
+the owner's call.
+
+### 10.7 What remains open
+
+- Whose plane the plate is (10.3.7), and what a box with no icon plane looks like.
+- The native's icon is the row's own glyph fitted to its alpha bounds inside the 56 px box, so a wide glyph
+  draws shorter than the frame's square one (the video clip measures ~55 x 40; the frame's corrupted-data
+  glyph fills 56 x 56).
+- The box's open/close fades stay TRACED only (200 / 1000 units): no 200+ fps burst of this box exists.
+  The same is true of the hint row's 100-unit fade.
+- The text column is *bounded* to 411..440 px by the frame's own wrap, not measured. 424 is inside the
+  bound and also sets the answer row's centre, which is why the drawn pair sits ~6 px right of the frame's
+  (1285.5 against 1279.5).
+- Whether the answer row belongs to the box or to its host page's `cmdbtn_*` buttons (2.6) is not decidable
+  from one frame.
+- `view.h`'s stale `drawMessageBox` comment (10.4).
+- The catalogue's `dialog` route still captures the inline line (10.5).
+
+### 10.8 Reproduction
+
+```
+build    & C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-dialog
+seed     copy out/native-dialogs/capture/box/data/{preferences.json,profiles.json,settings.ini}
+         (preferences carry one media/resume record for the video library's Top Level Clip.mp4)
+script   full,pause=4000,LEFT,wait,wait,LEFT,wait,wait,ENTER,wait,wait,TRIANGLE,wait,wait,
+         DOWN,wait,wait,DOWN,wait,wait,ENTER,wait,wait,wait,grab=<png>,quit
+pins     --render-clock 30 --ui-clock 2026-10-25T12:32:00 --focus-time 2000
+score    bun work/ab-compare.ts out/parity-references/dialog__original__day__1080p.png <png> 240,190,1440,700
+```
+
+The frame measurements were taken with numpy/PIL scripts kept under `out/native-dialog/` (git-ignored):
+`measure2.py`, `edges.py`, `elements.py`, `elements2.py`, `elements3.py`, `bars.py`, `blend.py`,
+`footer-check.py`, and on the native side `diff-after.py` and `measure-after2.py`.
