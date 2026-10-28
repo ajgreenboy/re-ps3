@@ -2,10 +2,14 @@
 
 #include "steam_owned.h"
 #include <QSettings>
+#include <QBuffer>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QProcess>
+#include <QSaveFile>
 #include <memory>
 
 #include <QJsonArray>
@@ -342,6 +346,321 @@ void SteamFriends::fail(quint64 generation,const QString& message) {
     friends_.clear();
     if(wasBusy)emit busyChanged(false);
     emit loaded({},message);
+}
+
+// ---- Friend avatars ------------------------------------------------------------------------
+// Bounded, keyless, cached. See the class comment in steam_friends.h for the contract and
+// audit/SERVICES-BREADTH.md for the evidence and the fallback rule.
+namespace {
+
+constexpr qsizetype MaxAvatarProfileBytes = 256 * 1024;
+constexpr qsizetype MaxAvatarBytes = 1024 * 1024;
+constexpr int MaxAvatarRedirects = 2;
+constexpr int MaxAvatarFetchesPerRefresh = 16;
+constexpr int MaxAvatarCachedDecodes = 64;
+constexpr int AvatarCacheDays = 30;
+constexpr int AvatarSide = 64;
+constexpr int MaxAvatarDimension = 1024;
+
+bool isHttps(const QUrl& url) {
+    return url.isValid() && url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0 &&
+           url.userInfo().isEmpty() && !url.authority().contains(QLatin1Char('@')) &&
+           (url.port(-1) == -1 || url.port(-1) == 443);
+}
+
+// The profile page is fetched from Steam Community only: no other host can answer the XML the
+// parser understands, so a redirect elsewhere is refused rather than followed.
+bool validProfileUrl(const QUrl& url) {
+    return isHttps(url) &&
+           url.host().compare(QStringLiteral("steamcommunity.com"), Qt::CaseInsensitive) == 0;
+}
+
+// Steam serves avatars from its own CDN; both the current steamstatic hosts and the older
+// akamaihd hosts that profiles still return for old accounts are accepted.
+bool validAvatarImageUrl(const QUrl& url) {
+    const QString host = url.host().toLower();
+    const bool cdnHost = host == QStringLiteral("steamstatic.com") ||
+                         host.endsWith(QStringLiteral(".steamstatic.com")) ||
+                         host == QStringLiteral("steamcdn-a.akamaihd.net") ||
+                         host == QStringLiteral("steamcommunity-a.akamaihd.net");
+    return isHttps(url) && cdnHost;
+}
+
+// <avatarMedium><![CDATA[https://...jpg]]></avatarMedium>; avatarMedium is preferred because the
+// fallback is drawn at 64x64. A private or malformed profile yields no URL, which is a fallback.
+QUrl avatarUrlFromProfile(const QByteArray& bytes) {
+    const QString text = QString::fromUtf8(bytes);
+    for (const QString& tag : {QStringLiteral("avatarMedium"), QStringLiteral("avatarFull")}) {
+        const QString open = QStringLiteral("<") + tag + QStringLiteral(">");
+        const int at = text.indexOf(open);
+        if (at < 0) continue;
+        const QString closeTag = QStringLiteral("</") + tag + QStringLiteral(">");
+        const int close = text.indexOf(closeTag, at + open.size());
+        if (close < 0) continue;
+        QString value = text.mid(at + open.size(), close - at - open.size()).trimmed();
+        value.remove(QStringLiteral("<![CDATA["));
+        value.remove(QStringLiteral("]]>"));
+        const QUrl url(value.trimmed());
+        if (validAvatarImageUrl(url)) return url;
+    }
+    return {};
+}
+
+// Decode with hard caps: 1 MiB, a known still-image format, at most 1024 px a side. Anything else
+// is not a friend avatar and is dropped rather than displayed.
+QImage decodeAvatarImage(const QByteArray& bytes) {
+    if (bytes.isEmpty() || bytes.size() > MaxAvatarBytes) return {};
+    QBuffer buffer;
+    buffer.setData(bytes);
+    if (!buffer.open(QIODevice::ReadOnly)) return {};
+    QImageReader reader(&buffer);
+    reader.setDecideFormatFromContent(true);
+    const QByteArray format = reader.format().toLower();
+    if (format != "jpeg" && format != "jpg" && format != "png" && format != "webp") return {};
+    const QSize size = reader.size();
+    if (!size.isValid() || size.width() <= 0 || size.height() <= 0 ||
+        size.width() > MaxAvatarDimension || size.height() > MaxAvatarDimension)
+        return {};
+    const QSize target = size.scaled(AvatarSide, AvatarSide, Qt::KeepAspectRatio);
+    if (target.isValid() && target != size) reader.setScaledSize(target);
+    const QImage image = reader.read();
+    if (image.isNull() || image.width() <= 0 || image.height() <= 0) return {};
+    if (image.width() > AvatarSide || image.height() > AvatarSide)
+        return image.scaled(AvatarSide, AvatarSide, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    return image;
+}
+
+bool saveAvatarImage(const QImage& image, const QString& path) {
+    if (image.isNull() || path.isEmpty()) return false;
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
+    QSaveFile file(path);
+    file.setDirectWriteFallback(false);
+    if (!file.open(QIODevice::WriteOnly)) return false;
+    if (!image.save(&file, "PNG") || !file.commit()) {
+        file.cancelWriting();
+        return false;
+    }
+    return true;
+}
+
+// A cached avatar is reused for 30 days: Steam users change pictures rarely, and this is what keeps
+// a friends refresh from becoming one request per contact on every entry into the column.
+bool avatarCacheFresh(const QString& path) {
+    const QFileInfo info(path);
+    if (path.isEmpty() || !info.isFile() || info.size() <= 0) return false;
+    return info.lastModified().daysTo(QDateTime::currentDateTime()) <= AvatarCacheDays;
+}
+
+} // namespace
+
+SteamFriendAvatars::SteamFriendAvatars(QString cacheDirectory, QObject* parent)
+    : QObject(parent), cacheDirectory_(QDir::cleanPath(cacheDirectory.trimmed())),
+      network_(new QNetworkAccessManager(this)) {}
+
+SteamFriendAvatars::~SteamFriendAvatars() {
+    ++generation_;
+    pendingIds_.clear();
+    cancelRequests();
+}
+
+QString SteamFriendAvatars::cachePath(QString cacheDirectory, const QString& steamId) {
+    if (!validSteamId(steamId) || cacheDirectory.trimmed().isEmpty()) return {};
+    return QDir::cleanPath(QDir(cacheDirectory).absoluteFilePath(steamId + QStringLiteral(".image")));
+}
+
+QUrl SteamFriendAvatars::avatarUrlForProfileXml(const QByteArray& profileXml) {
+    return avatarUrlFromProfile(profileXml);
+}
+
+QHash<QString, QImage> SteamFriendAvatars::cachedAvatars(QString cacheDirectory,
+                                                         const QStringList& steamIds,
+                                                         int maximumDecodes) {
+    QHash<QString, QImage> images;
+    const int limit = std::clamp(maximumDecodes, 0, MaxAvatarCachedDecodes);
+    int decoded = 0;
+    for (const QString& candidate : steamIds) {
+        if (decoded >= limit) break;
+        const QString path = cachePath(cacheDirectory, candidate.trimmed());
+        if (path.isEmpty() || !QFileInfo::exists(path)) continue;
+        QImageReader reader(path);
+        const QSize size = reader.size();
+        if (!size.isValid() || size.width() <= 0 || size.height() <= 0 ||
+            size.width() > MaxAvatarDimension || size.height() > MaxAvatarDimension)
+            continue;
+        const QSize target = size.scaled(AvatarSide, AvatarSide, Qt::KeepAspectRatio);
+        if (target.isValid() && target != size) reader.setScaledSize(target);
+        const QImage image = reader.read();
+        if (image.isNull()) continue;
+        images.insert(candidate.trimmed(), image);
+        ++decoded;
+    }
+    return images;
+}
+
+bool SteamFriendAvatars::isCurrent(quint64 generation) const { return generation == generation_; }
+
+void SteamFriendAvatars::cancelRequests() {
+    const auto pending = replies_;
+    replies_.clear();
+    for (auto* reply : pending)
+        if (reply) reply->abort();
+}
+
+void SteamFriendAvatars::refresh(QStringList steamIds) {
+    ++generation_;
+    const quint64 generation = generation_;
+    cancelRequests();
+    pendingIds_.clear();
+    activeJobs_ = 0;
+    QSet<QString> seen;
+    for (const QString& candidate : steamIds) {
+        const QString steamId = candidate.trimmed();
+        if (!validSteamId(steamId) || seen.contains(steamId)) continue;
+        seen.insert(steamId);
+        if (avatarCacheFresh(cachePath(cacheDirectory_, steamId))) continue; // reuse the cached picture
+        pendingIds_.append(steamId);
+        if (pendingIds_.size() >= MaxAvatarFetchesPerRefresh) break;
+    }
+    pump(generation);
+}
+
+void SteamFriendAvatars::pump(quint64 generation) {
+    if (!isCurrent(generation)) return;
+    while (activeJobs_ < 2 && !pendingIds_.isEmpty()) {
+        const QString steamId = pendingIds_.takeFirst();
+        ++activeJobs_;
+        startProfile(steamId, generation);
+    }
+}
+
+void SteamFriendAvatars::startProfile(const QString& steamId, quint64 generation) {
+    QUrl url(QStringLiteral("https://steamcommunity.com/profiles/") + steamId);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("xml"), QStringLiteral("1"));
+    url.setQuery(query);
+    if (!validProfileUrl(url)) {
+        finishJob(steamId, generation);
+        return;
+    }
+    get(steamId, false, url, generation, 0,
+        [this, steamId, generation](const QByteArray& bytes, const QByteArray&, int status, int error) {
+            if (!isCurrent(generation)) return;
+            if (error != 0 || status < 200 || status >= 300 || bytes.isEmpty() ||
+                bytes.size() > MaxAvatarProfileBytes) {
+                finishJob(steamId, generation);
+                return;
+            }
+            const QUrl avatar = avatarUrlFromProfile(bytes);
+            if (!avatar.isValid()) {
+                finishJob(steamId, generation);
+                return;
+            }
+            startImage(steamId, avatar, generation);
+        });
+}
+
+void SteamFriendAvatars::startImage(const QString& steamId, const QUrl& url, quint64 generation) {
+    if (!validAvatarImageUrl(url)) {
+        finishJob(steamId, generation);
+        return;
+    }
+    get(steamId, true, url, generation, 0,
+        [this, steamId, generation](const QByteArray& bytes, const QByteArray& contentType, int status,
+                                    int error) {
+            if (!isCurrent(generation)) return;
+            if (error != 0 || status < 200 || status >= 300 || bytes.isEmpty() ||
+                bytes.size() > MaxAvatarBytes ||
+                !contentType.trimmed().toLower().startsWith(QByteArrayLiteral("image/"))) {
+                finishJob(steamId, generation);
+                return;
+            }
+            storeAvatar(steamId, generation, bytes);
+        });
+}
+
+void SteamFriendAvatars::get(const QString& steamId, bool imageRequest, const QUrl& url,
+                             quint64 generation, int redirectCount, ResponseHandler handler) {
+    if (!isCurrent(generation) || !(imageRequest ? validAvatarImageUrl(url) : validProfileUrl(url))) {
+        if (isCurrent(generation)) handler({}, {}, 0, static_cast<int>(QNetworkReply::ProtocolFailure));
+        return;
+    }
+    const qsizetype maximumBytes = imageRequest ? MaxAvatarBytes : MaxAvatarProfileBytes;
+    QNetworkRequest request(url);
+    request.setTransferTimeout(RequestTimeoutMs);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setAttribute(QNetworkRequest::AuthenticationReuseAttribute, QNetworkRequest::Manual);
+    request.setAttribute(QNetworkRequest::CookieLoadControlAttribute, QNetworkRequest::Manual);
+    request.setAttribute(QNetworkRequest::CookieSaveControlAttribute, QNetworkRequest::Manual);
+    auto* reply = network_->get(request);
+    replies_.append(reply);
+    reply->setReadBufferSize(maximumBytes + 1);
+    auto responseBytes = std::make_shared<QByteArray>();
+    auto* deadline = new QTimer(reply);
+    deadline->setSingleShot(true);
+    connect(deadline, &QTimer::timeout, reply, &QNetworkReply::abort);
+    deadline->start(RequestTimeoutMs);
+    connect(reply, &QNetworkReply::readyRead, this, [reply, responseBytes, maximumBytes] {
+        const qint64 remaining = qint64(maximumBytes) + 1 - responseBytes->size();
+        if (remaining <= 0) {
+            reply->abort();
+            return;
+        }
+        responseBytes->append(reply->read(remaining));
+        if (responseBytes->size() > maximumBytes) reply->abort();
+    });
+    connect(reply, &QNetworkReply::metaDataChanged, this, [reply, maximumBytes] {
+        bool validLength = false;
+        const qint64 length = reply->header(QNetworkRequest::ContentLengthHeader).toLongLong(&validLength);
+        if (validLength && length > maximumBytes) reply->abort();
+    });
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, responseBytes, steamId, generation, url, imageRequest, redirectCount,
+             maximumBytes, handler = std::move(handler)]() mutable {
+        replies_.removeAll(reply);
+        const QByteArray tail = reply->readAll();
+        const bool tooLarge = responseBytes->size() > maximumBytes ||
+                              tail.size() > qint64(maximumBytes) - responseBytes->size();
+        if (!tooLarge) responseBytes->append(tail);
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const int error = static_cast<int>(reply->error());
+        const QByteArray contentType = reply->header(QNetworkRequest::ContentTypeHeader).toByteArray();
+        const QUrl redirect = reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
+        reply->deleteLater();
+        if (!isCurrent(generation)) return;
+        if (tooLarge) {
+            handler({}, {}, status, static_cast<int>(QNetworkReply::UnknownNetworkError));
+            return;
+        }
+        if (redirect.isValid() && !redirect.isEmpty()) {
+            const QUrl target = url.resolved(redirect);
+            const bool allowed = imageRequest ? validAvatarImageUrl(target) : validProfileUrl(target);
+            if (redirectCount >= MaxAvatarRedirects || !allowed) {
+                handler({}, {}, status, static_cast<int>(QNetworkReply::ProtocolFailure));
+                return;
+            }
+            get(steamId, imageRequest, target, generation, redirectCount + 1, std::move(handler));
+            return;
+        }
+        handler(*responseBytes, contentType, status, error);
+    });
+}
+
+void SteamFriendAvatars::storeAvatar(const QString& steamId, quint64 generation,
+                                     const QByteArray& bytes) {
+    const QImage image = decodeAvatarImage(bytes);
+    const QString path = cachePath(cacheDirectory_, steamId);
+    if (image.isNull() || path.isEmpty() || !saveAvatarImage(image, path)) {
+        finishJob(steamId, generation);
+        return;
+    }
+    finishJob(steamId, generation, image);
+}
+
+void SteamFriendAvatars::finishJob(const QString& steamId, quint64 generation, QImage image) {
+    if (!isCurrent(generation)) return;
+    if (activeJobs_ > 0) --activeJobs_;
+    if (!image.isNull()) emit loaded(steamId, std::move(image));
+    if (isCurrent(generation)) pump(generation);
 }
 
 } // namespace xmb

@@ -81,3 +81,67 @@ The reports/importer do not open a window or require dev_flash. Reports contain 
 - Builds, screenshots, state JSON, CLI reports and probe files stay in `out/native-reference/steam-integration/`. The first `fixture-ui.log` capture attempt had malformed PowerShell token concatenation; use `fixture-ui-valid.log` and `real-ui.log` instead.
 
 Next: set a Web API key to exercise the owned/collections path end to end, run an actual install -> launch -> return lifecycle, connect a permitted friends account locally, cache real avatars, support per-game ICON0/PIC1 overrides, add an editor for manifests, then implement Jellyfin as a proper authenticated service/player. Large libraries, disconnect/reconnect, controller use and sustained performance still need runtime evidence.
+
+## 2026-10-27: services breadth (account switch, launch/quit, avatars, trophies)
+
+Phase 6 of [PHASES-2026-10-27.md](../PHASES-2026-10-27.md), in the Steam modules only. All evidence and the
+exact `shell.cpp`/`shell.h` hunks are in [SERVICES-BREADTH.md](SERVICES-BREADTH.md); nothing in `shell.*`,
+`view.*`, `main.cpp`, `CMakeLists.txt` or the harness was edited by this pass.
+
+- **Account switch UI (6.1).** `steam_accounts.*` gains the UI-facing layer over the existing switch plan:
+  `steamSwitchPlanFor()` returns a `SteamSwitchPrompt` with two confirmation steps, the two labels per step,
+  the one-line promise `Steam must restart; unsaved XMB state is unaffected.`, an outcome line that never
+  claims a sign-in, and a blocked step for the already-active / no-executable / no-account cases.
+  `SteamSwitchConfirmation` is the two-step state machine (nothing advances to `Ready` before both steps
+  accept, and a cancelled model can never be ready), and `steamSwitchDryRun()` walks it while recording only
+  the command lines. A headless driver proved all of it: three prompts, 25 assertions, commands exactly
+  `steam.exe -shutdown` then `steam.exe` with `executed=0`. No client was restarted. The shell hunk adds a
+  Game-column **Steam Account** page, the two-step confirmation page and the handoff (launch only after both
+  steps; the 5 s relaunch delay and its reason are documented).
+- **Launch/quit lifecycle (6.1b).** `+app_stop <id>` is now built and validated in one place
+  (`steamStopArguments`: decimal, non-zero, at most ten digits, at most `0xffffffff`), and
+  `steam_library.*` reads the client's own return channel: `steamConsoleLogTail()` (only
+  `<root>/logs/console_log.txt`, 64 KiB default, 1 MiB hard cap, offset -1 = tail, rotation reported) and
+  `steamVerifyStop()`, which matches the exact command line after a snapshot offset and treats a following
+  `command not found` as a rejection. Against this machine's real 508,319-byte log the reader finds the
+  2026-10-26 probe at byte 499,462:
+  `ExecCommandLine: ""C:\Program Files (x86)\Steam\steam.exe" +app_stop 999999999"`, with no
+  `command not found: app_stop` anywhere in the file. Synthetic logs cover delivery, a different id, a
+  snapshot taken after the line, rejection, rotation, a missing log and both size caps (17 assertions).
+  **New finding:** on 2026-10-27 the client was signed out (`ActiveProcess\ActiveUser = 0`) and the same
+  invocation wrote nothing to the log at all - `+apps_running` (exit 0), `+app_status` and `+app_stop` all
+  returned immediately without a line - so the console channel needs a signed-in client, and a missing line
+  is not proof of a bad command. The registry stays the primary stop confirmation; the log is secondary and
+  is reported, never treated as the outcome. Stopping a real running title, the registry-clear timing, and
+  unsaved-progress behaviour still need a live title.
+- **Friends avatars (6.2).** `SteamFriendAvatars` (in `steam_friends.*`) turns the SteamIDs the friends list
+  already returns into Steam's own public avatar: the public profile XML is read (https,
+  `steamcommunity.com` only, 256 KiB, 8 s), the `<avatarMedium>`/`<avatarFull>` URL is accepted only on
+  Steam's CDN hosts, the image is fetched bounded (1 MiB, `Content-Type: image/...`), decoded with format and
+  dimension caps (1024 px, JPEG/PNG/WebP), scaled to 64x64 and cached as PNG at
+  `<data>/cache/steam/avatars/<steamid>.image`; a cached file is reused for 30 days, at most 16 are fetched
+  per refresh, two at a time. A missing, private, failed or oversized avatar leaves no file and the row
+  keeps the firmware's `tex_Avatar_Default`: the fallback is a real icon, never a placeholder picture. A real
+  avatar was downloaded and cached (64x64, an 8,194-byte PNG) and a second refresh did not re-fetch; offline
+  cases (oversized, corrupt, missing, `http`, foreign host, private profile) all fall back (16 assertions).
+  The shell hunk fills `Entry::artwork` in `rebuildFriends()`; **no view change is needed**, because
+  `view.cpp` already draws entry artwork at the friend row's icon quad with the presence dot on top.
+- **Trophies (6.3): no backend.** The PS3 trophy model is a per-user
+  `dev_hdd0/home/<userid>/trophy/<NPCOMMID>/` directory whose definitions (`TROPCONF.SFM`, a plain XML body
+  after a signature header, with `ttype` P/G/S/B) and icons (`ICON0.PNG`, `TROPxxx.PNG`) are readable, while
+  the earned state and timestamps live in the encrypted, signed `TROPUSR.DAT`. This machine's RPCS3
+  `dev_hdd0` has no `trophy` directory at all, and a definitions-only list would show every trophy as
+  unearned - a false claim. PSN sync has no backend, and Steam achievements are a different system. The row
+  stays unavailable with wording that says exactly that (in the new audit file).
+- **Honest rows (6.4/6.5).** The Network column's manual / browser / search / Remote Play rows already
+  decided `Unavailable` but only logged the reason; the PSN column, My Channels and disc titles had no
+  user-facing reason at all. Exact sentences for each, plus the hunks that surface `Entry::value` on the
+  `Unavailable` path (so the reason reaches both the screen and the catalogue dump), are in
+  [SERVICES-BREADTH.md](SERVICES-BREADTH.md) sections 5 and 6. No row asks for a login, invents a purchase,
+  or claims a disc drive.
+
+Verification for this pass: `build.ps1 -OutputDirectory C:\dev\out\native-steam6` exit 0 with no warnings
+from the three Steam translation units, and `work\ab-layers.ts --all --exe
+C:/dev/out/native-steam6/re-ps3-native.exe` = stored pair 6/6, canonical capture 6/6, named states 4/4,
+`whole set: PASS`.
+
