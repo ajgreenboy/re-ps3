@@ -304,3 +304,252 @@ two are visually near-identical, which is why this is recorded as a note rather 
 * Did not open `out/rpcs3-gaps-2026-10-28/`'s tap burst frame by frame; the PS-tap findings come from two
   still frames.
 * Did not touch any source, harness, tooling or reference file. The only write is this document.
+
+---
+
+## 9. Container resolution for buckets B and C (2026-10-28, lookup-layer pass)
+
+Scope: make every firmware image this audit's B and C buckets name resolvable by an explicit, correct
+container, and prove it headless. Evidence class is **R** throughout (a command and its result), except
+where a size is read straight out of the firmware's image table and is marked **M**.
+
+What changed, and what did not. `src/assets.cpp` / `src/assets.h` gained the resolution below;
+`src/main.cpp` gained `--image-audit` (CLI only). No drawing file was touched: `view.cpp`, `dialogs.cpp`,
+`shell.*`, `ribbon.cpp`, `hdr.cpp`, the build files, the harness, budgets and references are unchanged.
+Rendering on the canonical frame is unchanged too (9.6).
+
+**Headline.** 409 image names (45 from bucket B, 364 from bucket C; 53 inventory rows, with C34 expanded
+to its 148 named images) were resolved against the firmware: **395 decode in an explicit container, 0
+decode failures, 14 do not resolve because the container this audit's own row names does not ship that
+name** (real owners in 9.4). Exactly **one requested pair in the whole native source is unresolved at a
+drawing site** - `system_plugin:tex_controller` at `view.cpp:2130` and `:2153` - and it now resolves to
+`impose_plugin` through a recorded rule.
+
+### 9.1 How a name resolves now
+
+1. **The pair is the key.** `image(container,name)` reads the requested container, and a name alone is
+   never a resolution: **179 of the 356 unique inventory names exist in two or more containers**
+   (`tex_psn` in 6, `tex_indi_message` in 5, `tex_aa_plane` in 13, `tex_cp_stop` in 8; M, from the 122
+   image tables). Those copies are sometimes one picture (`tex_battery` exports byte-identical from
+   `impose_plugin` and `deviceconf_plugin`) and sometimes not (`tex_music` is the flat note, the wrench
+   note and a glass note in three containers - `TEXTURE-COVERAGE.md` 7.1), so a name-only fallback can
+   draw the wrong art. The pair is the only key that is right in both cases.
+2. **One migration table.** `kContainerOverrides` in `assets.cpp` holds 10 rules, keyed by
+   (requested container, name), all `system_plugin -> impose_plugin`. A rule fires only when the requested
+   container has no such image, so it can fill a null draw but can never replace a picture that already
+   resolves. No drawing site changes.
+3. **A wrong container is no longer silent.** The first ask of such a pair logs one line and caches the
+   pixels; later asks are silent:
+   `assets: system_plugin/tex_controller is absent from system_plugin - using known owner impose_plugin (container override)`.
+   A pair with no local copy and no rule keeps its existing warning, now naming the rule absence:
+   `Named image is absent from RCO and no container-override rule names an owner`.
+4. **An explicit provenance path** exists for the drawing writers: `iconImage(container,name,ImageHit*)`
+   returns the same pixels as `image()` plus the container actually read and whether a rule migrated it;
+   `imageContainers(name)` lists every RCO that holds a name. `--image-audit` uses both.
+5. **`bestImage` is unchanged in policy.** The same-art allow-list is still exactly
+   `{tex_psn, tex_video, tex_photo}` behind the pixel gate (the audit prints the list, so it cannot drift
+   unnoticed). A rule-resolved picture skips the largest-same-name upgrade search: its owner was chosen by
+   (container, name), so searching all 122 RCOs for a bigger copy would only add evidence-free swaps.
+
+### 9.2 The container map - name -> the container that actually ships it
+
+Every row below decoded (**R**). The decoded size is the picture's own size; pixel count is width x height
+and is printed per name by the command in 9.6. "Count" is the number of inventory names in that container.
+
+| Container (owner) | Count | Names and decoded sizes |
+|---|---:|---|
+| `auth_plugin` | 2 | tex_bar_security_icon 46x46, tex_bar_security_shadow_icon 46x46 |
+| `deviceconf_plugin` | 7 | tex_battery 45x105, tex_bt_state_base 36x36, tex_bt_state_on 36x36, tex_level_meter_blue 12x30, tex_level_meter_grey 12x30, tex_level_meter_red 12x30, tex_level_meter_yellow 12x30 |
+| `explore_category_friend` | 8 | tex_indi_AFK 28x28, tex_indi_Game 38x24, tex_indi_Me 300x44, tex_indi_Message 42x30, tex_indi_NewRoom 44x44, tex_indi_None 28x28, tex_indi_Sign_in 28x28, tex_indi_Sign_out 28x28 |
+| `explore_category_game` | 1 | tex_aa_plane 6x6 |
+| `explore_category_music` | 1 | tex_aa_plane 6x6 |
+| `explore_category_network` | 5 | tex_dl_dst_game 43x28, tex_dl_dst_music 43x28, tex_dl_dst_photo 43x28, tex_dl_dst_video 43x28, tex_aa_plane 6x6 |
+| `explore_category_photo` | 7 | tex_3D 110x28, tex_screenshot 128x128, tex_multiangle 110x28, tex_download_music 128x128, tex_download_photo 128x128, tex_download_video 128x128, tex_aa_plane 6x6 |
+| `explore_category_psn` | 9 | trophy_tex_grade_platinum 28x28, trophy_tex_grade_gold 28x28, trophy_tex_grade_silver 28x28, trophy_tex_grade_bronze 28x28, trophy_tex_grade_hidden 28x28, trophy_tex_default 232x128, trophy_tex_capsule 178x178, trophy_tex_addon 48x48, tex_aa_plane 6x6 |
+| `explore_category_sysconf` | 1 | tex_aa_plane 6x6 |
+| `explore_category_tv` | 1 | tex_aa_plane 6x6 |
+| `explore_category_video` | 8 | tex_divx 110x28, tex_wmv 110x28, tex_avc 110x28, tex_mpg1 110x28, tex_mpg2 110x28, tex_mpg4 110x28, tex_mjpg 120x28, tex_aa_plane 6x6 |
+| `explore_plugin_full` | 33 | tex_video 46x46, tex_photo 46x46, tex_cp_stop 90x60, tex_cp_prev 90x60, tex_cp_next 90x60, tex_searchb_status 74x74, tex_searchf_status 74x74, tex_stop_status 74x74, tex_prev_status 74x74, tex_next_status 74x74, tex_indi_AFK 28x28, tex_indi_Game 38x24, tex_indi_Me 300x44, tex_indi_Message 42x30, tex_indi_NewRoom 44x44, tex_indi_None 28x28, tex_indi_Sign_in 28x28, tex_indi_Sign_out 28x28, tex_track_0 46x68, tex_track_1 46x68, tex_track_2 46x68, tex_track_3 46x68, tex_track_4 46x68, tex_track_5 46x68, tex_track_6 46x68, tex_track_7 46x68, tex_track_8 46x68, tex_track_9 46x68, tex_track_base 240x240, tex_Sign_Up 178x178, tex_Signing_In 178x178, tex_ps_plus_invitation 160x160, tex_psplus_icon 58x58 |
+| `impose_plugin` | 8 | tex_controller_number 164x54, tex_red 18x17, tex_controller 36x25, tex_battery 45x105, tex_battery_shadow 45x105, tex_charge_arrow 24x28, tex_charge_arrow_shadow 24x28, tex_error_batsu 15x13 |
+| `netconf_plugin` | 4 | tex_infobar_icon 46x46, tex_infobar_initial_setting_icon 46x46, tex_network_connect_icon 480x266, tex_arrow_left 31x29 |
+| `oskfullkeypanel_plugin` | 21 | BUTTON_BASE_WHITE 144x54, BUTTON_BASE_BLUE_GRAY 144x54, BUTTON_BASE_B 144x54, BUTTON_BASE_G 144x54, BUTTON_BASE_O 72x54, BUTTON_BASE_P 72x54, BUTTON_BASE_E 72x54, BUTTON_BASE_SHORT 72x54, BUTTON_FORCUS 198x36, LABEL_UP 72x54, LABEL_DOWN 72x54, LABEL_LEFT 72x54, LABEL_RIGHT 72x54, EN_LABEL_DELETE 140x44, EN_LABEL_SPACE 140x44, EN_LABEL_RETURN 140x44, EN_LABEL_MODE 140x44, EN_LABEL_CLOSE 140x44, MODE_GUIDE_ALPHABET 29x30, MODE_GUIDE_ALPHABET_CAP 29x30, LIST_WINDOW_FOCUS 42x42 |
+| `premo_plugin` | 9 | tex_circle 30x30, tex_cross 30x30, tex_triangle 30x30, tex_rectangle 30x30, tex_circle_shadow 40x40, tex_cross_shadow 40x40, tex_triangle_shadow 40x40, tex_rectangle_shadow 40x40, tex_premo_bar 46x46 |
+| `qgl/icontex` | 2 | 1n 128x128, 35n 128x128 (DDS through the QGL path, not an RCO image) |
+| `sysconf_plugin` | 54 | tex_cable_avmulti 156x250, tex_cable_component 156x250, tex_cable_composite 156x250, tex_cable_d 156x250, tex_cable_dsub 156x250, tex_cable_hdmi 156x250, tex_cable_pin_lr 156x250, tex_cable_s 156x250, tex_cable_scart 156x250, tex_cable_spdif 156x250, tex_logo_amg 202x75, tex_logo_atok 162x162, tex_logo_atrac 184x32, tex_logo_divx 200x70, tex_logo_dnas 33x35, tex_logo_dnas_sd 24x28, tex_logo_dolby_digital 212x48, tex_logo_dolby_truehd 212x48, tex_logo_dts 204x76, tex_logo_ezitext 281x95, tex_logo_flash 180x310, tex_logo_java 98x194, tex_logo_ps 44x35, tex_logo_ps_sd 26x22, tex_logo_qgames 200x140, tex_logo_rsa 124x162, tex_bar_bddvd_icon 46x46, tex_bar_bddvd_shadow_icon 46x46, tex_bar_console_icon 46x46, tex_bar_console_shadow_icon 46x46, tex_bar_device_icon 46x46, tex_bar_device_shadow_icon 46x46, tex_bar_display_icon 46x46, tex_bar_display_shadow_icon 46x46, tex_bar_game_icon 46x46, tex_bar_game_shadow_icon 46x46, tex_bar_init_icon 46x46, tex_bar_init_shadow_icon 46x46, tex_bar_music_icon 46x46, tex_bar_music_shadow_icon 46x46, tex_bar_network_icon 46x46, tex_bar_network_shadow_icon 46x46, tex_bar_power_icon 46x46, tex_bar_power_shadow_icon 46x46, tex_bar_remote_icon 46x46, tex_bar_remote_shadow_icon 46x46, tex_bar_security_icon 46x46, tex_bar_security_shadow_icon 46x46, tex_bar_sound_icon 46x46, tex_bar_sound_shadow_icon 46x46, tex_bar_theme_icon 46x46, tex_bar_theme_shadow_icon 46x46, tex_bar_time_icon 46x46, tex_bar_time_shadow_icon 46x46 |
+| `system_plugin` | 53 | tex_msgdialog_bg 12x12, tex_msgdialog_bg2 12x12, tex_msgdialog_bg_deep 12x12, tex_msgdialog_bar 960x1, tex_optionmenu_bg 536x216, tex_optionmenu_line 4x216, tex_optionmenu_base 536x216, tex_optionmenu_game 536x1, tex_default_text_field 27x27, tex_default_text_field_focus 27x27, tex_battery_indicator 30x30, tex_rectangle 30x30, tex_triangle 30x30, tex_busy 36x36, tex_busy_s 8x36, tex_busy_l 8x36, tex_busy_shadow 46x46, tex_arrow_left 31x29, tex_default_scroll_base 18x8, tex_default_scroll_base_shadow 15x21, tex_default_scroll_slider 18x8, tex_default_scroll_arrow_up 24x24, tex_default_scroll_arrow_up_shadow 15x16, tex_default_scroll_arrow_down 24x24, tex_default_scroll_arrow_down_shadow 15x16, tex_default_check 44x252, tex_3x3_focus 69x70, tex_3x3_shadow 45x45, tex_line 337x4, tex_line_shadow 346x20, tex_common_dialog 46x46, tex_common_dialog_shadow 46x46, tex_operation_guide_base 48x48, tex_operation_guide_base_shadow 50x50, tex_pointer_arrow 53x54, tex_pointer_click 53x54, tex_pointer_finger 53x54, tex_pointer_grab 53x54, tex_pointer_hand 53x54, tex_pointer_pen 53x54, tex_arrow_up 25x12, tex_arrow_up_shadow 32x20, tex_arrow_down 25x12, tex_arrow_down_shadow 32x20, tex_arrow_left 31x29, tex_arrow_left_shadow 18x19, tex_arrow_right 31x29, tex_arrow_right_shadow 18x19, tex_default_spin_arrow_up 9x9, tex_default_spin_arrow_up_shadow 21x21, tex_default_spin_arrow_down 9x9, tex_default_spin_arrow_down_shadow 21x21, tex_temporary_icon 54x54 |
+| `xmb_ingame` | 10 | tex_user 128x128, tex_photo 128x128, tex_music 128x128, tex_video 128x128, tex_game 128x128, tex_network 128x128, tex_friend 128x128, tex_sysconf 128x128, tex_tv 128x128, tex_psn 128x128 |
+| `xmb_plugin_normal` | 3 | tex_indi_message 32x32, tex_indi_chat 32x32, tex_indi_plus 32x32 |
+
+A name appears twice in a row where two inventory rows name it: `system_plugin:tex_arrow_left` is both C13
+and C21, so that row's 53 counts 52 distinct pictures. Every other row's count is distinct names.
+
+`oskpanel_plugin` (C34) has **148 named images, all decoded** (**R**); that is one container-level row, so
+its names are listed here rather than in the table above. All 148:
+BASE_NOTIFY, BASE_SYMBOL, BLANK_TEXTURE, BUTTON_BASE_B, BUTTON_BASE_B_S, BUTTON_BASE_G, BUTTON_BASE_O,
+BUTTON_BASE_P, BUTTON_BASE_SHORT, BUTTON_BASE_WHITE, BUTTON_FORCUS, BUTTON_HENKAN, CANDIDATE_WINDOW0x0,
+CANDIDATE_WINDOW0x1, CANDIDATE_WINDOW0x2, CANDIDATE_WINDOW1x0, CANDIDATE_WINDOW1x1, CANDIDATE_WINDOW1x2,
+CANDIDATE_WINDOW2x0, CANDIDATE_WINDOW2x1, CANDIDATE_WINDOW2x2, CH_S_LABEL_CLOSE, CH_S_LABEL_MODE,
+CH_T_LABEL_CLOSE, CH_T_LABEL_MODE, COPY_TEXT_FRAME, DA_LABEL_CLOSE, DA_LABEL_MODE, DU_LABEL_CLOSE,
+DU_LABEL_MODE, EN_LABEL_CLOSE, EN_LABEL_MODE, FI_LABEL_CLOSE, FI_LABEL_MODE, FOCUS_SYMBOL,
+FR_LABEL_CLOSE, FR_LABEL_MODE, GE_LABEL_CLOSE, GE_LABEL_MODE, IT_LABEL_CLOSE, IT_LABEL_MODE,
+JP_LABEL_CLOSE, JP_LABEL_MODE, KB_MODE_BASE, KB_MODE_GUIDE_A, KB_MODE_GUIDE_CH_CJ, KB_MODE_GUIDE_CH_PY,
+KB_MODE_GUIDE_CH_ZH, KB_MODE_GUIDE_EN, KB_MODE_GUIDE_JP_HIRA, KB_MODE_GUIDE_JP_KANA, KB_MODE_GUIDE_KO,
+KB_MODE_GUIDE_RU, KEYTOP_COPY, KEYTOP_PASTE, KO_LABEL_CLOSE, KO_LABEL_MODE, LABEL_BS, LABEL_DOWN,
+LABEL_L1, LABEL_LEFT, LABEL_R1, LABEL_RIGHT, LABEL_SELECT, LABEL_SPACE, LABEL_SQUARE, LABEL_START,
+LABEL_TRIANGLE, LABEL_UP, LBTN_FOCUS, LIST_WINDOW_FOCUS, LIST_WINDOW_GUIDE, LR2_HELP, MENU_BASE_0x0,
+MENU_BASE_0x1, MENU_BASE_0x2, MENU_BASE_1x0, MENU_BASE_1x1, MENU_BASE_1x2, MENU_BASE_2x0, MENU_BASE_2x1,
+MENU_BASE_2x2, MENU_FOCUS, MODE_BASE, MODE_FULLKEY, MODE_GUIDE_AL, MODE_GUIDE_AL2, MODE_GUIDE_AL_Z,
+MODE_GUIDE_AL_Z2, MODE_GUIDE_CH_CJ, MODE_GUIDE_CH_PY, MODE_GUIDE_CH_ZH, MODE_GUIDE_EN, MODE_GUIDE_EN2,
+MODE_GUIDE_EN3, MODE_GUIDE_EN4, MODE_GUIDE_EN5, MODE_GUIDE_EXAL, MODE_GUIDE_EXAL2, MODE_GUIDE_JP_HIRA,
+MODE_GUIDE_JP_KANA, MODE_GUIDE_KO, MODE_GUIDE_NM_H, MODE_GUIDE_NM_Z, MODE_GUIDE_RU, MODE_GUIDE_RU2,
+MODE_GUIDE_RU3, MODE_GUIDE_RU4, MODE_GUIDE_RU5, MODE_GUIDE_URL, MODE_MENU, MODE_SYMBOL, MODE_SYMBOL_PICT,
+NO_LABEL_CLOSE, NO_LABEL_MODE, PL_LABEL_CLOSE, PL_LABEL_MODE, POINTER, PO_LABEL_CLOSE, PO_LABEL_MODE,
+RU_LABEL_CLOSE, RU_LABEL_MODE, SBTN_FOCUS, SCROLL_BASE, SCROLL_BASE_SYMBOL, SCROLL_KNOB,
+SCROLL_KNOB_SYMBOL, SP_LABEL_CLOSE, SP_LABEL_MODE, SW_LABEL_CLOSE, SW_LABEL_MODE, TEX_RETURN,
+TR_LABEL_CLOSE, TR_LABEL_MODE, aA, aaAaAA, dakuon, han-shift, tbase1x0, tbase1x1, tbase1x2, tbase2x0,
+tbase2x1, tbase2x2, tbase2x3, tbase3x0, tbase3x1, tbase3x2.
+
+Sizes: the 86 format-0x5 coverage masks are the 29x30 / 42x42 / 72x54 / 140x44 / 144x30 classes
+(`TEXTURE-COVERAGE.md` 1.3); the remaining pictures range from 1x1 (`CANDIDATE_WINDOW1x1`) to 240x240.
+The container is not drawn by this build, so its names are resolved (the point of this pass) but have no
+surface yet.
+
+`tex_aa_plane` is also present in `filecopy_plugin`, `friendml_plugin`, `friendml_plugin_game` and
+`ps3_savedata_plugin` in addition to the rows above (13 containers total; **M**), which is why the C41
+inventory expands to every `explore_category_*` container and reports the two that do not ship it.
+
+### 9.3 The override table (10 rules, one place)
+
+Keyed by (requested container, name). A rule fires only when the requested container has no such image
+(9.1); it can fill a null draw, never replace a resolved picture.
+
+| # | Requested pair | Owner | Evidence |
+|---:|---|---|---|
+| 1 | `system_plugin/tex_controller` | `impose_plugin` | C1; the copy this build draws at `view.cpp:2130` and `:2153` |
+| 2 | `system_plugin/tex_controller_number` | `impose_plugin` | B7/C7; the four slot numbers |
+| 3 | `system_plugin/tex_controller_shadow` | `impose_plugin` | C1; the pad glyph's shadow |
+| 4 | `system_plugin/tex_red` | `impose_plugin` | B7/C7; the red slot plate |
+| 5 | `system_plugin/tex_battery` | `impose_plugin` | C7; the charge cell (deviceconf_plugin's tex_battery is accessory battery art, not this cell) |
+| 6 | `system_plugin/tex_battery_shadow` | `impose_plugin` | C7 |
+| 7 | `system_plugin/tex_charge_arrow` | `impose_plugin` | C7 |
+| 8 | `system_plugin/tex_charge_arrow_shadow` | `impose_plugin` | C7 |
+| 9 | `system_plugin/tex_error_batsu` | `impose_plugin` | C7 |
+| 10 | `system_plugin/tex_error_batsu_shadow` | `impose_plugin` | C7 |
+
+Only rule 1 fires in the current tree; the other nine are the PS menu's controller-panel family, recorded
+so a drawing site cannot ask `system_plugin` for art that never lived there. They are deliberately keyed by
+the pair, not the name: `tex_battery` is byte-identical in `deviceconf_plugin` and `impose_plugin` (a
+name-only rule would work there but prove nothing), while `tex_music` is three different pictures under one
+name (a name-only rule would be wrong elsewhere), and `tex_red` exists only in `impose_plugin`.
+
+Why the migration is safe: a scan of every literal (container,name) pair passed to
+`image()`/`bestImage()`/`drawImage()` in `src/` - 20 pairs - finds **19 that resolve in the requested
+container and exactly one that does not**, `system_plugin/tex_controller` (**R**). A migration can only
+change a pair that currently returns a null image, so no already-drawn pixel can move. Pairs whose
+container/name come from tables (`shell.cpp` category rows, the OSK layout) are the A-row work and the
+OSK layout assertion, not this scan.
+
+### 9.4 What still resolves to nothing, and why
+
+14 names. Every one is an inventory attribution in this document, not a missing asset: the name decodes
+in a container the command names. No name in the B/C inventory is absent from all 122 RCOs.
+
+| # | Name | Container this audit's row names | Real owner(s) | Why it does not resolve |
+|---:|---|---|---|---|
+| 1-11 | `tex_track_0` .. `tex_track_9`, `tex_track_base` | `explore_category_music` | `explore_plugin_full` only | C27 names the music container, which has no `tex_track_*`; the badge art ships only in `explore_plugin_full` (46x68, base 240x240) |
+| 12 | `tex_3D` | `explore_category_video` | `explore_category_photo`, `explore_plugin_full` | C26 lists a 3D badge on video rows; that container never ships it |
+| 13 | `tex_aa_plane` | `explore_category_friend` | 8 `explore_category_*` containers, `explore_plugin_full`, 4 more plugins | C41's "11 containers" over-claims: `explore_category_friend` has no edge plane |
+| 14 | `tex_aa_plane` | `explore_category_user` | (same as row 13) | as row 13 |
+
+Consequence for the drawing wave: C26's `tex_3D` should be asked of `explore_category_photo` (or
+`explore_plugin_full`) if a video badge is ever drawn, and C27's track badges must be asked of
+`explore_plugin_full`. Nothing else in B or C needs an override; the pair is correct everywhere else.
+
+### 9.5 Corrections to the inventory this pass measured
+
+These are places where the resolution pass disagrees with this document's own rows. They are recorded
+here rather than edited into sections 4/5, which stay the 2026-10-28 analysis.
+
+| # | Section 4/5 says | Measured |
+|---|---|---|
+| Y1 | C1 `impose_plugin:tex_controller` is 31x31 | the texture is **36x25** (900 px); 31x31 is the drawn slot after `drawImage` fits the visible alpha bounds |
+| Y2 | B7 four 17x17 slots, four font digits | the slot geometry is 17x17 per the measured frame; `tex_controller_number` is **164x54** (a four-digit strip) and `tex_red` is **18x17** |
+| Y3 | B9 "every OSK key face, 66x50" | 66x50 is the drawn cell; the textures are **144x54** (`BUTTON_BASE_WHITE`, `_BLUE_GRAY`, `_B`, `_G`) and **72x54** (`_O`, `_P`, `_E`, `_SHORT`), `BUTTON_FORCUS` 198x36 |
+| Y4 | C14 `tex_default_scroll_base`, `_slider`, `_arrow_up`, `_arrow_down` + 4 shadows | the names are **`tex_default_scroll_arrow_up`/`_down`**, and the family is 7 objects with **3** shadows (there is no slider shadow): 18x8, 18x8, 24x24, 24x24, 15x21, 15x16, 15x16 |
+| Y5 | C26 `explore_category_video:tex_3D` | that container has no `tex_3D`; see 9.4 row 12 |
+| Y6 | C27 `explore_category_music:tex_track_0.._9`, `tex_track_base` | that container has none of them; `explore_plugin_full` has all eleven; see 9.4 rows 1-11 |
+| Y7 | C33 `tex_bar_*_icon` + `_shadow_icon` "(17)" | 14 bar families x 2 = **28** names (bddvd, console, device, display, game, init, music, network, power, remote, security, sound, theme, time) |
+| Y8 | C34 "86 masks + 148 images" (234) | the container has **148 named images** in total; the 86 format-0x5 masks are a subset of them (`TEXTURE-COVERAGE.md` 1.3) |
+| Y9 | C41 `explore_category_*:tex_aa_plane` (11 containers) | **8 of the 10** `explore_category_*` containers ship it (not friend/user); **13** containers overall (M) |
+| Y10 | C15 `system_plugin:tex_default_check` as a check mark | the texture is **44x252**, a vertical strip of checks, not one 44x44 glyph |
+| Y11 | B8/C25 the eight `tex_indi_*` presence marks | sizes are per state: 28x28 (AFK, None, Sign_in, Sign_out), 38x24 (Game), 42x30 (Message), 44x44 (NewRoom), and `tex_indi_Me` is **300x44** (a word plate), not a 32x32 mark |
+| Y12 | C7 the battery-notice art | `tex_battery`/`_shadow` are **45x105**, `tex_charge_arrow`/`_shadow` 24x28, `tex_error_batsu` 15x13 |
+| Y13 | C36 the PSN states | `tex_Sign_Up`/`tex_Signing_In` 178x178, `tex_ps_plus_invitation` 160x160, `tex_psplus_icon` 58x58 |
+
+### 9.6 The command, the counts and the gate
+
+The verification is one command (exit 0) and writes the table where it can be read headless:
+
+```powershell
+C:\dev\out\native-assets\re-ps3-native.exe --dev-flash C:\dev\rpcs3\bin\dev_flash --image-audit C:\dev\out\image-audit.txt
+# without the last argument the same table goes to stdout:  ... --image-audit > C:\dev\out\image-audit.txt
+```
+
+It prints 432 lines: 23 header/rule/note/probe lines, 409 name rows, and this final count (**R**):
+
+```
+# image-audit: 409 names in 53 inventory rows: 395 decoded, 14 unresolved
+  (14 requested from a container that ships them elsewhere, 0 absent from every RCO, 0 decode failures);
+  1 migrated by a container-override rule
+# image-audit: owner containers: auth_plugin 2, deviceconf_plugin 7, explore_category_friend 8,
+  explore_category_game 1, explore_category_music 1, explore_category_network 5, explore_category_photo 7,
+  explore_category_psn 9, explore_category_sysconf 1, explore_category_tv 1, explore_category_video 8,
+  explore_plugin_full 33, impose_plugin 8, netconf_plugin 4, oskfullkeypanel_plugin 21, oskpanel_plugin 148,
+  premo_plugin 9, qgl/icontex 2, sysconf_plugin 54, system_plugin 53, xmb_ingame 10, xmb_plugin_normal 3
+```
+
+The migration line is emitted once, at the first ask, and cached afterwards (**R**, run log):
+
+```
+assets: system_plugin/tex_controller is absent from system_plugin - using known owner impose_plugin (container override)
+```
+
+Pixel gate (**R**, printed by the same command as the allow-list probes):
+
+| Allow-list name | Source | Chosen | Gate |
+|---|---|---:|---|
+| `xmb_plugin_normal:tex_psn` | 128x128 | 128x128 | n/a (source >= 96 px) |
+| `explore_plugin_full:tex_video` | 46x46 | `xmb_ingame` 128x128 | pass |
+| `explore_plugin_full:tex_photo` | 46x46 | `xmb_ingame` 128x128 | pass |
+
+The allow-list is exactly those three names; the command prints it every run, so a future addition is
+visible rather than assumed.
+
+Build and gate (**R**). `native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-assets` builds the exe
+this table was produced from. The canonical gate:
+
+```powershell
+bun work/ab-layers.ts --capture --exe C:\dev\out\native-assets\re-ps3-native.exe
+  text presence: 1668 bright pixels in the clock crop (minimum 900) PASS
+  frame 18.76 / top background 21.06 / category icon row 21.62 / item label row 11.99 / clock 11.41 / info bar 15.05
+  PASS: 6/6 layers within budget
+```
+
+Every layer delta is +0.00 dB and +0.0000 SSIM against the stored capture baselines, so the lookup change
+did not move the canonical frame. The only surfaces where pixels can now appear where nothing was drawn
+before are the PS menu controller row and the PS-tap plate (C1); no stored gate layer or named-state
+reference covers them, which is why the gate is unchanged.
+
+**Mapping decisions, recorded.**
+
+1. Resolution is by (container, name), never by name alone: 179 of 356 inventory names exist in two or
+   more containers (9.1), so a name-only table would be a coin flip.
+2. The migration lives in the lookup, not in the drawing sites: `view.cpp`/`dialogs.cpp` are fenced, and
+   a rule fires only on an absent pair, so no existing draw can change (9.3).
+3. `bestImage`'s same-art allow-list stays exactly `{tex_psn, tex_video, tex_photo}` behind the pixel
+   gate; a rule-resolved picture skips the same-name upgrade search rather than being re-judged by it.
+4. `iconImage()`/`imageContainers()` are additive: the drawing writers get an explicit provenance path
+   without a redesign of the asset system, and the old `image()`/`bestImage()` signatures are unchanged.
+5. The audit inventory is this document's own B/C rows (abbreviations included), so the command can
+   contradict the document - and it does, in 9.5 - instead of quietly using a corrected list.
+

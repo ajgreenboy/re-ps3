@@ -13,6 +13,40 @@ class Assets final {
 public:
     explicit Assets(QString flashRoot);
     const QImage& image(const QString& container, const QString& name);
+    // ---- Container resolution (audit/ICON-GAP-AUDIT.md bucket B/C icon wave) -------------------------
+    // An image name is not a resolution: the same name can exist in several RCOs, sometimes as different
+    // artwork (tex_music is the flat note in explore_plugin_full, the wrench note in explore_category_sysconf
+    // and a glass note in xmb_ingame - audit/TEXTURE-COVERAGE.md 7.1). image() therefore reads the
+    // container it is given, and the only cross-container move it makes is a recorded container-override
+    // rule (kContainerOverrides in assets.cpp): when the requested (container,name) is absent and a rule
+    // names a container that actually ships that name, the owner's pixels are used and the migration is
+    // logged once. A pair with no rule and no local copy still resolves to nothing, but it now warns
+    // instead of returning silently.
+    //
+    // ImageHit reports where a lookup's pixels came from. iconImage() is the explicit drawing entry point
+    // (same pixels as image(), plus the provenance) so an icon site can prove its container is correct.
+    struct ImageHit {
+        QString requestedContainer, container, name; // container: the RCO the pixels were read from
+        bool migrated = false;    // container != requestedContainer
+        bool knownOwner = false;  // a container-override rule named the owner
+    };
+    const QImage& iconImage(const QString& container, const QString& name, ImageHit* hit=nullptr);
+    // Every vsh/resource RCO that holds name (sorted; local analysis, index built once).
+    QStringList imageContainers(const QString& name);
+    // The container-override rule's owner for a requested pair, or an empty string.
+    QString knownOwner(const QString& container, const QString& name) const;
+    // The override table as "requested/name -> owner (evidence)" lines, for --image-audit.
+    QStringList containerOverrideRules() const;
+    // The names bestImage may upgrade across containers; exactly three, each behind the pixel gate.
+    QStringList sameArtAllowList() const;
+    // bestImage's decision for a pair (the --image-audit table's gate column). Call bestImage first.
+    struct BestDecision {
+        QString requestedContainer, container;
+        bool allowListed = false, gateApplied = false, upgraded = false;
+        QString reason;
+        int width = 0, height = 0;
+    };
+    BestDecision bestImageDecision(const QString& container, const QString& name) const;
     // The largest copy of an RCO image whose artwork is the same picture. Firmware ships many textures several
     // times (e.g. tex_psn 46 px in explore_plugin_full, 128 px in xmb_plugin_normal). A source smaller than 96 px
     // is upgraded to the largest same-name copy in any RCO only when the name is in the same-art allow-list AND
@@ -60,7 +94,14 @@ private:
     int decodedImages_=0;
     QHash<QString,QStringList> nameIndex_; // RCO image name -> containers holding it (built on first need)
     QHash<QString,QString> bestContainer_; // container/name -> equivalent container chosen (source when none)
+    QHash<QString,BestDecision> bestDecisions_; // container/name -> bestImage's last decision (audit)
     Container readContainer(const QString& name) const;
+    // The one lookup body behind image()/iconImage(): requested container, container-override rule, cache.
+    const QImage& loadImage(const QString& container,const QString& name,ImageHit* hit);
+    // Where a pair's pixels come from, without decoding: the requested container when it holds the name,
+    // else the override rule's owner when that owner holds it, else the requested container.
+    ImageHit hitFor(const QString& container,const QString& name) const;
+    void ensureNameIndex();
     QHash<QString,QString> readEnglish(const Container& container) const;
     // GIM decoder: RGBA8888 (0x3), DXT1/3/5 (0x8/0x9/0xA) and the indexed formats
     // INDEX4/INDEX8/INDEX16 (0x4/0x5/0x6) with the picture's palette block. Indexed

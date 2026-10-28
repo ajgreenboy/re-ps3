@@ -292,7 +292,31 @@ QString artMetrics(const ArtMatch& match) {
         .arg(match.alphaCorrelation,0,'f',2).arg(match.coverage*100,0,'f',0)
         .arg(match.colourCorrelation,0,'f',2).arg(match.aspect,0,'f',2);
 }
-}
+// ---- Known container overrides ------------------------------------------------------------------------------
+// The 4.93 RCO set reuses image names across containers, and a drawing site can ask for the container that
+// looks right rather than the one that ships the picture. A rule is deliberately narrow: it names the
+// requested pair, the container that actually contains that name, and the audit row that proves it. It
+// fires only when the requested container has no such image (Assets::loadImage), so it can fill a null draw
+// but can never replace a picture that already resolves. The table is the single place a wrong-container
+// call site is migrated; no drawing site needs to change. audit/ICON-GAP-AUDIT.md section 9 lists it.
+struct ContainerOverride { const char* requested; const char* name; const char* owner; const char* evidence; };
+const ContainerOverride kContainerOverrides[] = {
+    // The PS menu's controller row and the PS-tap plate asked system_plugin, which has never shipped a
+    // controller glyph; impose_plugin does (impose_battery_padicon). ICON-GAP-AUDIT C1 is the visible gap.
+    {"system_plugin","tex_controller","impose_plugin","ICON-GAP-AUDIT C1 (drawn: view.cpp:2130,2153)"},
+    // The rest of the PS menu's controller panel family: the four slot numbers, the red slot plate, the
+    // charge cell and its arrow. C7/B7 name the art; system_plugin has none of these six names.
+    {"system_plugin","tex_controller_number","impose_plugin","ICON-GAP-AUDIT B7/C7"},
+    {"system_plugin","tex_controller_shadow","impose_plugin","ICON-GAP-AUDIT C1 (shadow of the pad glyph)"},
+    {"system_plugin","tex_red","impose_plugin","ICON-GAP-AUDIT B7/C7"},
+    {"system_plugin","tex_battery","impose_plugin","ICON-GAP-AUDIT C7"},
+    {"system_plugin","tex_battery_shadow","impose_plugin","ICON-GAP-AUDIT C7"},
+    {"system_plugin","tex_charge_arrow","impose_plugin","ICON-GAP-AUDIT C7"},
+    {"system_plugin","tex_charge_arrow_shadow","impose_plugin","ICON-GAP-AUDIT C7"},
+    {"system_plugin","tex_error_batsu","impose_plugin","ICON-GAP-AUDIT C7"},
+    {"system_plugin","tex_error_batsu_shadow","impose_plugin","ICON-GAP-AUDIT C7"},
+};
+} // namespace
 Assets::Assets(QString flashRoot):root_(std::move(flashRoot)),font_("Segoe UI") {
     // Register every firmware font (all weights and coverage sets), keyed by file stem, e.g. "RD-B-LATIN".
     // Real bold/light/italic files then replace Qt's synthesised styles.
@@ -446,14 +470,38 @@ QImage Assets::decodeGimImage(const QByteArray& bytes) {
     }
 }
 const QImage& Assets::image(const QString& container,const QString& name) {
+    return loadImage(container,name,nullptr);
+}
+const QImage& Assets::iconImage(const QString& container,const QString& name,ImageHit* hit) {
+    return loadImage(container,name,hit);
+}
+Assets::ImageHit Assets::hitFor(const QString& container,const QString& name) const {
+    ImageHit hit;hit.requestedContainer=container;hit.container=container;hit.name=name;
+    if(container=="file" || container.startsWith("qgl/"))return hit;
+    const auto requested=containers_.constFind(container);
+    if(requested!=containers_.cend() && requested->entries.contains(name))return hit;
+    const QString owner=knownOwner(container,name);
+    if(!owner.isEmpty()) {
+        const auto candidate=containers_.constFind(owner);
+        if(candidate!=containers_.cend() && candidate->entries.contains(name)) {
+            hit.container=owner;hit.migrated=true;hit.knownOwner=true;
+        }
+    }
+    return hit;
+}
+const QImage& Assets::loadImage(const QString& container,const QString& name,ImageHit* hit) {
     const QString key=container+"/"+name;
-    if(const auto it=images_.find(key);it!=images_.end())return it->second;
+    if(const auto it=images_.find(key);it!=images_.end()) {
+        if(hit)*hit=hitFor(container,name);
+        return it->second;
+    }
     QImage image;
     try {
         if(container=="file") { // installed content (dev_hdd0 ICON0.PNG etc.), by absolute path
             image=QImage(name);
             if(image.isNull())throw std::runtime_error("image file could not be read");
             ++decodedImages_;
+            if(hit)*hit=hitFor(container,name);
             return images_.insert_or_assign(key,std::move(image)).first->second;
         }
         if(container.startsWith("qgl/")) {
@@ -465,11 +513,25 @@ const QImage& Assets::image(const QString& container,const QString& name) {
             if(image.isNull())throw std::runtime_error("DDS decoder returned no pixels");
             ++decodedImages_;
             qInfo().noquote()<<"assets: decoded"<<key<<image.size();
+            if(hit)*hit=hitFor(container,name);
             return images_.insert_or_assign(key,std::move(image)).first->second;
         }
         if(!containers_.contains(container))containers_.insert(container,readContainer(container));
-        const auto& c=containers_[container];
-        if(!c.entries.contains(name))throw std::runtime_error("Named image is absent from RCO");
+        // The requested container is authoritative. A rule in kContainerOverrides is consulted only when
+        // that container has no such name, so the migration can fill an empty draw but never changes one.
+        QString source=container;
+        if(!containers_[container].entries.contains(name)) {
+            const QString owner=knownOwner(container,name);
+            if(owner.isEmpty())
+                throw std::runtime_error("Named image is absent from RCO and no container-override rule names an owner");
+            if(!containers_.contains(owner))containers_.insert(owner,readContainer(owner));
+            if(!containers_[owner].entries.contains(name))
+                throw std::runtime_error(("Named image is absent from RCO; override owner "+owner+" does not ship it either").toStdString());
+            qWarning().noquote()<<QStringLiteral("assets: %1 is absent from %2 - using known owner %3 (container override)")
+                .arg(key,container,owner);
+            source=owner;
+        }
+        const auto& c=containers_[source];
         const quint64 extra=quint64(c.entries[name])+0x28;
         const auto format=u16(c.tables,extra);
         const auto compression=u16(c.tables,extra+2)&255;
@@ -485,19 +547,45 @@ const QImage& Assets::image(const QString& container,const QString& name) {
         ++decodedImages_;
         qInfo().noquote()<<"assets: decoded"<<key<<image.size();
     } catch(const std::exception& e) { qWarning().noquote()<<"assets:"<<key<<e.what(); }
+    if(hit)*hit=hitFor(container,name);
     return images_.insert_or_assign(key,std::move(image)).first->second;
 }
 const QImage& Assets::bestImage(const QString& container,const QString& name) {
     const QImage& base=image(container,name);
-    if(container.startsWith("qgl/") || container=="file" || (!base.isNull() && std::max(base.width(),base.height())>=96))return base;
     const QString key=container+"/"+name;
-    if(const auto it=bestContainer_.constFind(key);it!=bestContainer_.cend())return image(it.value(),name);
-    if(nameIndex_.isEmpty()) {
-        for(const auto& file:QDir(QDir(root_).filePath("vsh/resource")).entryInfoList({"*.rco"},QDir::Files,QDir::Name)) {
-            try { for(const auto& entry:readContainer(file.completeBaseName()).entries.keys())nameIndex_[entry].push_back(file.completeBaseName()); }
-            catch(const std::exception&) {}
-        }
+    // A picture image() resolved through a container-override rule is authoritative: the owner was chosen by
+    // name+container, so no "largest same-name copy" search is needed (and no 122-container scan on first draw).
+    const auto requestedContainer=containers_.constFind(container);
+    const bool overrideResolved=!base.isNull() && !container.startsWith("qgl/") && container!="file"
+        && requestedContainer!=containers_.cend() && !requestedContainer->entries.contains(name)
+        && !knownOwner(container,name).isEmpty();
+    if(container.startsWith("qgl/") || container=="file" || overrideResolved
+       || (!base.isNull() && std::max(base.width(),base.height())>=96)) {
+        BestDecision decision;
+        decision.requestedContainer=container;decision.container=container;
+        decision.allowListed=sameArtNames().contains(name);
+        if(overrideResolved)
+            decision.reason=QStringLiteral("resolved by container-override rule %1 -> %2 (no upgrade searched)")
+                .arg(container,knownOwner(container,name));
+        else decision.reason=base.isNull()?QStringLiteral("undecoded source with no larger copy")
+            :QStringLiteral("source already at or above 96 px (no upgrade attempted)");
+        decision.width=base.width();decision.height=base.height();
+        bestDecisions_.insert(key,decision);
+        return base;
     }
+    if(const auto it=bestContainer_.constFind(key);it!=bestContainer_.cend()) {
+        const QImage& cached=image(it.value(),name);
+        BestDecision decision;
+        decision.requestedContainer=container;decision.container=it.value();
+        decision.allowListed=sameArtNames().contains(name);
+        decision.upgraded=it.value()!=container;
+        decision.gateApplied=decision.upgraded; // an upgrade only ever happens through the pixel gate
+        decision.reason=QStringLiteral("cached choice");
+        decision.width=cached.width();decision.height=cached.height();
+        bestDecisions_.insert(key,decision);
+        return cached;
+    }
+    ensureNameIndex();
     const QString traceSetting=qEnvironmentVariable("XMB_BESTIMAGE_TRACE");
     bool traceThis=false;
     if(!traceSetting.isEmpty()) {
@@ -547,6 +635,24 @@ const QImage& Assets::bestImage(const QString& container,const QString& name) {
         best=candidate;bestArea=otherArea;bestMatch=match;
     }
     bestContainer_.insert(key,best);
+    {
+        BestDecision decision;
+        decision.requestedContainer=container;decision.container=best;
+        decision.allowListed=allowListed;
+        decision.gateApplied=allowListed && !base.isNull() && largerCopies>0;
+        decision.upgraded=best!=container;
+        decision.width=image(best,name).width();decision.height=image(best,name).height();
+        if(best!=container)
+            decision.reason=base.isNull()?QStringLiteral("source undecoded; largest same-name copy")
+                :QStringLiteral("same artwork confirmed (pixel gate passed)");
+        else if(allowListed)
+            decision.reason=largerCopies?QStringLiteral("allow-listed, pixel gate rejected every larger copy")
+                :QStringLiteral("allow-listed, no larger same-name copy");
+        else
+            decision.reason=largerCopies?QStringLiteral("not allow-listed; larger same-name copies rejected")
+                :QStringLiteral("no larger same-name copy");
+        bestDecisions_.insert(key,decision);
+    }
     if(best!=container) {
         const QString reason=base.isNull()?QStringLiteral("source undecoded, largest same-name copy")
             :QStringLiteral("same artwork confirmed (%1)").arg(artMetrics(bestMatch));
@@ -563,6 +669,37 @@ const QImage& Assets::bestImage(const QString& container,const QString& name) {
             .arg(largerCopies?QStringLiteral("no equivalent copy"):QStringLiteral("no larger same-name copy"));
     }
     return image(best,name);
+}
+QString Assets::knownOwner(const QString& container,const QString& name) const {
+    for(const auto& rule:kContainerOverrides)
+        if(container==QLatin1String(rule.requested) && name==QLatin1String(rule.name))
+            return QString::fromLatin1(rule.owner);
+    return {};
+}
+QStringList Assets::sameArtAllowList() const { return sameArtNames(); }
+QStringList Assets::containerOverrideRules() const {
+    QStringList rules;
+    for(const auto& rule:kContainerOverrides)
+        rules<<QStringLiteral("%1/%2 -> %3 (%4)")
+            .arg(QString::fromLatin1(rule.requested),QString::fromLatin1(rule.name),
+                 QString::fromLatin1(rule.owner),QString::fromLatin1(rule.evidence));
+    return rules;
+}
+void Assets::ensureNameIndex() {
+    if(!nameIndex_.isEmpty())return;
+    for(const auto& file:QDir(QDir(root_).filePath("vsh/resource")).entryInfoList({"*.rco"},QDir::Files,QDir::Name)) {
+        try { for(const auto& entry:readContainer(file.completeBaseName()).entries.keys())nameIndex_[entry].push_back(file.completeBaseName()); }
+        catch(const std::exception&) {}
+    }
+}
+QStringList Assets::imageContainers(const QString& name) {
+    ensureNameIndex();
+    QStringList owners=nameIndex_.value(name);
+    owners.sort();
+    return owners;
+}
+Assets::BestDecision Assets::bestImageDecision(const QString& container,const QString& name) const {
+    return bestDecisions_.value(container+"/"+name);
 }
 QByteArray Assets::qglFile(const QString& archive,const QString& name) {
     if(!qrcs_.contains(archive)) {
