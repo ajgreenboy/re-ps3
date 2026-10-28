@@ -1,4 +1,5 @@
 #include "p3t.h"
+#include "assets.h"
 #include <QDebug>
 #include <QFile>
 #include <QSet>
@@ -83,31 +84,6 @@ QByteArray inflate(const QByteArray& packed) {
         if(!out.isEmpty())return out;
     }
     return packed;
-}
-// PSP "faststorage" order: 16-byte x 8-row tiles.
-QByteArray unswizzle(const QByteArray& in,qsizetype pitch,qsizetype rows) {
-    QByteArray out(in.size(),'\0');qsizetype src=0;
-    for(qsizetype ty=0;ty<rows;ty+=8)for(qsizetype tx=0;tx<pitch;tx+=16)for(qsizetype y=ty;y<std::min(ty+8,rows);++y) {
-        const qsizetype d=y*pitch+tx,n=std::min({qsizetype(16),out.size()-d,in.size()-src});
-        if(n>0)std::copy_n(in.constData()+src,n,out.data()+d);
-        src+=16;
-    }
-    return out;
-}
-// GIM pixel formats 0..3 (RGB565, RGBA5551, RGBA4444, RGBA8888) to RGBA8888.
-QByteArray expand(int format,const QByteArray& px,qsizetype count,bool big) {
-    QByteArray out(4*count,'\0');
-    if(format==3){std::copy_n(px.constData(),std::min(px.size(),out.size()),out.data());return out;}
-    for(qsizetype i=0;i<count && 2*i+2<=px.size();++i) {
-        const auto* b=reinterpret_cast<const uchar*>(px.constData()+2*i);
-        const quint32 v=big?(b[0]<<8|b[1]):(b[1]<<8|b[0]);
-        quint32 r,g,bl,a;
-        if(format==0){r=(v&31)*255/31;g=((v>>5)&63)*255/63;bl=((v>>11)&31)*255/31;a=255;}
-        else if(format==1){r=(v&31)*255/31;g=((v>>5)&31)*255/31;bl=((v>>10)&31)*255/31;a=v>>15?255:0;}
-        else {r=(v&15)*17;g=((v>>4)&15)*17;bl=((v>>8)&15)*17;a=(v>>12)*17;}
-        out[4*i]=char(r);out[4*i+1]=char(g);out[4*i+2]=char(bl);out[4*i+3]=char(a);
-    }
-    return out;
 }
 }
 
@@ -566,57 +542,17 @@ void P3t::trace() const {
         <<"instructions"<<scene.script.instructions<<"names"<<scene.script.names;
 }
 
+// One GIM decoder for the whole application. Theme pictures used to go through a private parser here, which
+// returned a null image whenever an indexed picture (format 0x4/0x5/0x6) had no palette block - the same
+// palette-less form the shared decoder reads as an 8-bit alpha coverage mask. A user theme whose icon, pointer
+// or notification is such a mask therefore rendered nothing even though the RCO path could read it. Delegating
+// keeps one reader for every GIM in the process: RGBA8888, DXT1/3/5 and the indexed formats with or without a
+// palette. A payload that is not a GIM fails the shared decoder's byte-order check, so it still yields null;
+// little-endian ("MIG.") PSP GIMs are not supported by the PS3 decoder and no local theme carries one
+// (audit/THEMES.md section 8).
 QImage P3t::gim(const QByteArray& g) {
-    if(g.size()<16)return {};
-    const bool big=g.startsWith(".GIM");
-    if(!big && !g.startsWith("MIG."))return {};
-    const auto r16=[&](qsizetype at)->qint64{if(at<0 || at+2>g.size())return -1;const auto* b=reinterpret_cast<const uchar*>(g.constData()+at);return big?(b[0]<<8|b[1]):(b[1]<<8|b[0]);};
-    const auto r32=[&](qsizetype at)->qint64{if(at<0 || at+4>g.size())return -1;return big?qFromBigEndian<quint32>(g.constData()+at):qFromLittleEndian<quint32>(g.constData()+at);};
-    qsizetype image=-1,palette=-1;
-    QVector<QPair<qsizetype,qsizetype>> blocks{{16,g.size()}};int guard=0;
-    while(!blocks.isEmpty()) {
-        auto [off,end]=blocks.takeLast();
-        while(off+16<=end) {
-            if(++guard>10000)return {};
-            const qint64 kind=r16(off),size=r32(off+4),dataAt=r32(off+12);
-            if(kind<0 || size<0 || dataAt<0)break;
-            if(kind==2 || kind==3)blocks.push_back({off+dataAt,std::min<qsizetype>(off+size,g.size())});
-            else if(kind==4 && image<0)image=off+dataAt;
-            else if(kind==5 && palette<0)palette=off+dataAt;
-            if(size==0)break;
-            off+=size;
-        }
-    }
-    if(image<0)return {};
-    struct Header{int format=0,order=0;qsizetype width=0,height=0,start=0,stop=0;};
-    const auto header=[&](qsizetype at){return Header{int(r16(at+4)),int(r16(at+6)),qsizetype(r16(at+8)),qsizetype(r16(at+10)),at+qsizetype(r32(at+0x1C)),at+qsizetype(r32(at+0x20))};};
-    const auto h=header(image);
-    if(h.width<=0 || h.height<=0 || h.width>4096 || h.height>4096 || h.format<0 || h.format>5)return {};
-    QByteArray data=clip(g,h.start,h.stop);
-    const qsizetype pitch=data.size()/h.height;
-    if(h.order==1)data=unswizzle(data,pitch,h.height);
-    QImage out(int(h.width),int(h.height),QImage::Format_RGBA8888);
-    if(h.format==4 || h.format==5) {
-        if(palette<0)return {};
-        const auto p=header(palette);
-        const auto colours=expand(p.format,clip(g,p.start,p.stop),std::clamp<qsizetype>(p.width,0,256),big);
-        for(qsizetype y=0;y<h.height;++y) {
-            auto* row=out.scanLine(int(y));const qsizetype base=y*pitch;
-            for(qsizetype x=0;x<h.width;++x) {
-                const qsizetype at=base+(h.format==4?x>>1:x);
-                const int byte=at<data.size()?quint8(data[at]):0;
-                const qsizetype index=h.format==4?(byte>>(4*(x&1)))&15:byte;
-                for(int c=0;c<4;++c)row[4*x+c]=4*index+c<colours.size()?uchar(colours[4*index+c]):0;
-            }
-        }
-    } else {
-        const qsizetype bpp=h.format==3?4:2;
-        for(qsizetype y=0;y<h.height;++y) {
-            const auto rgba=expand(h.format,clip(data,y*pitch,y*pitch+h.width*bpp),h.width,big);
-            std::copy_n(rgba.constData(),rgba.size(),reinterpret_cast<char*>(out.scanLine(int(y))));
-        }
-    }
-    return out;
+    if(g.isEmpty())return {};
+    return Assets::decodeGimImage(g);
 }
 
 QByteArray P3t::vagToWav(const QByteArray& left,const QByteArray& right) {

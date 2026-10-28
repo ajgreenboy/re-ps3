@@ -127,7 +127,8 @@ public:
     quint32 containerVersion() const { return containerVersion_; }
     bool hasScene() const { return scene_.valid; }
     const Raf& scene() const { return scene_; }
-    // The first image of a GIM (direct colour, 4/8-bit palettes, swizzled or not).
+    // The first image of a GIM, decoded by the same reader RCO images use (RGBA8888, DXT1/3/5, indexed with
+    // a palette, and the palette-less indexed coverage masks a user theme may carry). Null when not a GIM.
     static QImage gim(const QByteArray& data);
     // PlayStation ADPCM (VAG, 28 samples per 16-byte block) as a WAV; with right, the two make a stereo sound.
     static QByteArray vagToWav(const QByteArray& left,const QByteArray& right={});
