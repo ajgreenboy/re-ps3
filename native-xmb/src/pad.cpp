@@ -1,5 +1,6 @@
 #include "pad.h"
 #include <QDebug>
+#include <QStringList>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -27,6 +28,106 @@ constexpr quint16 up=0x1,down=0x2,left=0x4,right=0x8,startButton=0x10,selectButt
 // 1 charging, 2 full, 0xa/0xb/0xf error/out-of-range (SDL_hidapi_ps5.c and Linux hid-playstation). DualShock 4:
 // byte 29, low nibble = 0-11 level, bit 4 = cable connected (SDL_hidapi_ps4.c; Linux hid-sony).
 constexpr size_t kDualSenseBatteryByte=52, kDs4BatteryByte=29;
+
+// ---- Scripted-run input gate (pad.h, audit/PS-BUTTON.md) ----
+// The pad keeps being read in a scripted run; it just cannot reach the shell. The reader threads still store
+// the newest report (so --pad-report and the battery line keep working), and latest() is the single place
+// where a live state is either delivered or withheld.
+std::atomic_bool scriptOnlyMode{false};
+std::atomic<quint64> ignoredPadEvents{0};
+
+// XMB_INPUT_TRACE=1 logs each input decision. Read once; on unless the value is empty or 0.
+bool inputTrace() {
+    static const bool on=[]{
+        const QString value=qEnvironmentVariable("XMB_INPUT_TRACE");
+        return !value.isEmpty() && value!="0";
+    }();
+    return on;
+}
+
+// What View::pollController() makes of a state: the D-pad directions the report's hat carries, the left stick
+// past the same 0.5 deadzone pollController maps onto the D-pad, the buttons it acts on, and the triggers it
+// ramps the volume with (pad y is +down, as the HID report sends it). Empty means the state could not have
+// moved or pressed anything, so a scripted run counts and logs only states that could have steered it.
+QString padAction(const State& s) {
+    struct Named { quint16 bit; const char* name; };
+    static const Named named[]={
+        {up,"dpad-up"},{down,"dpad-down"},{left,"dpad-left"},{right,"dpad-right"},
+        {cross,"cross"},{circle,"circle"},{square,"square"},{triangle,"triangle"},
+        {l1,"l1"},{r1,"r1"},{startButton,"start"},{selectButton,"select"},{l3,"l3"},{r3,"r3"},{ps,"ps"}};
+    QStringList parts;
+    for(const auto& entry:named)if(s.buttons&entry.bit)parts<<QString::fromLatin1(entry.name);
+    if(s.ly<-.5f)parts<<QStringLiteral("stick-up");
+    else if(s.ly>.5f)parts<<QStringLiteral("stick-down");
+    if(s.lx<-.5f)parts<<QStringLiteral("stick-left");
+    else if(s.lx>.5f)parts<<QStringLiteral("stick-right");
+    if(s.l2>.5f)parts<<QStringLiteral("l2");
+    if(s.r2>.5f)parts<<QStringLiteral("r2");
+    return parts.join(QChar('+'));
+}
+
+// Bounded by design: a decision is logged when the action changes and otherwise at most once a second, so a
+// stick held for a minute is a handful of lines with a running count, not thousands of lines.
+struct TraceMark { std::chrono::steady_clock::time_point at{}; QString action; };
+TraceMark traceMark;
+bool traceDue(const QString& action) {
+    const auto now=std::chrono::steady_clock::now();
+    if(action==traceMark.action && now-traceMark.at<std::chrono::milliseconds(1000))return false;
+    traceMark.action=action;traceMark.at=now;return true;
+}
+
+// Local diagnostic (unset in a normal run): XMB_PAD_FAKE pretends a controller is being held, so the live path
+// and the scripted gate can both be proved without moving hardware. Tokens are comma separated:
+// up|down|left|right, cross|circle|square|triangle|l1|r1|start|select|l3|r3|ps, and lx=|ly=|rx=|ry=|l2=|r2=
+// with floating-point values (pad sign: +ly is down). It is sampled exactly like a real controller, so a
+// scripted run ignores it too.
+struct Fake { bool active=false; State state; };
+Fake parseFake(const QString& spec) {
+    Fake fake;
+    if(spec.trimmed().isEmpty())return fake;
+    fake.active=true;
+    const auto number=[&](const QString& token,int at){
+        bool ok=false;const float value=token.mid(at).toFloat(&ok);
+        if(!ok)qWarning().noquote()<<"input: XMB_PAD_FAKE:"<<token<<"is not a number";
+        return ok?value:0.f;
+    };
+    for(const QString& raw:spec.split(',')) {
+        const QString token=raw.trimmed().toLower();
+        if(token.isEmpty())continue;
+        if(token=="up")fake.state.buttons|=up;
+        else if(token=="down")fake.state.buttons|=down;
+        else if(token=="left")fake.state.buttons|=left;
+        else if(token=="right")fake.state.buttons|=right;
+        else if(token=="cross")fake.state.buttons|=cross;
+        else if(token=="circle")fake.state.buttons|=circle;
+        else if(token=="square")fake.state.buttons|=square;
+        else if(token=="triangle")fake.state.buttons|=triangle;
+        else if(token=="l1")fake.state.buttons|=l1;
+        else if(token=="r1")fake.state.buttons|=r1;
+        else if(token=="start")fake.state.buttons|=startButton;
+        else if(token=="select")fake.state.buttons|=selectButton;
+        else if(token=="l3")fake.state.buttons|=l3;
+        else if(token=="r3")fake.state.buttons|=r3;
+        else if(token=="ps")fake.state.buttons|=ps;
+        else if(token.startsWith("lx="))fake.state.lx=number(token,3);
+        else if(token.startsWith("ly="))fake.state.ly=number(token,3);
+        else if(token.startsWith("rx="))fake.state.rx=number(token,3);
+        else if(token.startsWith("ry="))fake.state.ry=number(token,3);
+        else if(token.startsWith("l2="))fake.state.l2=number(token,3);
+        else if(token.startsWith("r2="))fake.state.r2=number(token,3);
+        else qWarning().noquote()<<"input: XMB_PAD_FAKE: unknown token"<<raw;
+    }
+    qInfo().noquote()<<QString("input: diagnostic XMB_PAD_FAKE=%1 -> buttons=0x%2 lx=%3 ly=%4 rx=%5 ry=%6 l2=%7 r2=%8")
+        .arg(spec).arg(fake.state.buttons,0,16).arg(fake.state.lx).arg(fake.state.ly).arg(fake.state.rx)
+        .arg(fake.state.ry).arg(fake.state.l2).arg(fake.state.r2);
+    return fake;
+}
+const Fake& fakeState() {
+    static const Fake fake=parseFake(qEnvironmentVariable("XMB_PAD_FAKE"));
+    return fake;
+}
+// The PS bit as last observed in a scripted run, so a press and a release are each logged once.
+bool lastPsSeen=false;
 
 std::mutex mutex;
 State newest;
@@ -201,9 +302,45 @@ void start() {
 }
 bool latest(State& out) {
     const std::lock_guard lock(mutex);
-    if(newestAt==std::chrono::steady_clock::time_point{} || std::chrono::steady_clock::now()-newestAt>std::chrono::milliseconds(300))return false;
-    out=newest;return true;
+    // XMB_PAD_FAKE stands in for a controller, so the live path and the scripted gate can be proved with no
+    // hardware movement. It is a diagnostic: unset in every normal run.
+    const Fake& fake=fakeState();
+    State sample;
+    if(fake.active)sample=fake.state;
+    else {
+        if(newestAt==std::chrono::steady_clock::time_point{} || std::chrono::steady_clock::now()-newestAt>std::chrono::milliseconds(300))return false;
+        sample=newest;
+    }
+    const QString action=padAction(sample);
+    if(scriptOnlyMode.load()) {
+        // PS is observed and logged - a press and its release, once each - but it is withheld with everything
+        // else: PsWatcher consumes the bit to open the system menu, which is navigation. A scripted run drives
+        // the watcher only through View::replayPsTap()/replayPsHold(), i.e. through its own ps/pshold tokens.
+        const bool psNow=(sample.buttons&ps)!=0;
+        if(psNow!=lastPsSeen) {
+            qInfo().noquote()<<(psNow?QStringLiteral("input: PS press observed on the pad; ignored (scripted run)")
+                                    :QStringLiteral("input: PS release observed on the pad; ignored (scripted run)"));
+            lastPsSeen=psNow;
+        }
+        if(!action.isEmpty()) {
+            const quint64 count=ignoredPadEvents.fetch_add(1)+1;
+            if(inputTrace() && traceDue(action))
+                qInfo().noquote()<<QString("input: trace source=pad action=%1 accepted=0 ignored=%2 (scripted run)")
+                    .arg(action).arg(count);
+        }
+        return false;
+    }
+    if(inputTrace() && !action.isEmpty() && traceDue(action))
+        qInfo().noquote()<<QString("input: trace source=pad action=%1 accepted=1").arg(action);
+    out=sample;return true;
 }
+void setScriptOnly(bool on) {
+    if(scriptOnlyMode.exchange(on)==on)return;
+    if(on)qInfo().noquote()<<QStringLiteral("input: scripted run; live pad events ignored (XMB_INPUT_SCRIPT_ONLY)");
+    else qInfo().noquote()<<QStringLiteral("input: live pad events accepted (no --script, XMB_INPUT_SCRIPT_ONLY unset)");
+}
+bool scriptOnly() { return scriptOnlyMode.load(); }
+quint64 ignoredEvents() { return ignoredPadEvents.load(); }
 bool info(Info& out) {
     const std::lock_guard lock(mutex);
     if(newestAt==std::chrono::steady_clock::time_point{} || std::chrono::steady_clock::now()-newestAt>std::chrono::milliseconds(300))return false;

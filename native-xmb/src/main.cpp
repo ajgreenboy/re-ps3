@@ -73,6 +73,62 @@ static LONG WINAPI writeCrashStack(EXCEPTION_POINTERS* info) {
 }
 #endif
 
+namespace {
+// XMB_INPUT_TRACE=1 logs each input decision (audit/PS-BUTTON.md): source=script|pad|keyboard, the action, and
+// whether the shell accepted it. Script decisions are logged by the token loop below and pad decisions by
+// pad.cpp; this filter logs a navigation key when the shell dispatches it. Keyboard input is never gated - the
+// script drives the shell through the view's own key handling, so a real keyboard keeps working in a scripted
+// run and only the live pad is withheld.
+bool inputTraceEnabled() {
+    static const bool on=[]{
+        const QString value=qEnvironmentVariable("XMB_INPUT_TRACE");
+        return !value.isEmpty() && value!="0";
+    }();
+    return on;
+}
+QString keyboardAction(int key) {
+    switch(key) {
+    case Qt::Key_Left:return QStringLiteral("LEFT");
+    case Qt::Key_Right:return QStringLiteral("RIGHT");
+    case Qt::Key_Up:return QStringLiteral("UP");
+    case Qt::Key_Down:return QStringLiteral("DOWN");
+    case Qt::Key_Return:case Qt::Key_Enter:return QStringLiteral("ENTER");
+    case Qt::Key_Escape:return QStringLiteral("ESC");
+    case Qt::Key_Backspace:return QStringLiteral("BACKSPACE");
+    case Qt::Key_Space:return QStringLiteral("SPACE");
+    case Qt::Key_PageUp:return QStringLiteral("PGUP");
+    case Qt::Key_PageDown:return QStringLiteral("PGDN");
+    case Qt::Key_BracketLeft:return QStringLiteral("PREV");
+    case Qt::Key_BracketRight:return QStringLiteral("NEXT");
+    case Qt::Key_M:return QStringLiteral("SHUFFLE");
+    case Qt::Key_R:return QStringLiteral("REPEAT");
+    case Qt::Key_T:return QStringLiteral("TRIANGLE");
+    case Qt::Key_F5:return QStringLiteral("REFRESH");
+    case Qt::Key_F10:return QStringLiteral("F10");
+    case Qt::Key_F11:return QStringLiteral("F11");
+    case Qt::Key_Plus:return QStringLiteral("ZOOMIN");
+    case Qt::Key_Minus:return QStringLiteral("ZOOMOUT");
+    case Qt::Key_0:return QStringLiteral("RESETVIEW");
+    case Qt::Key_Q:return QStringLiteral("ROTATELEFT");
+    case Qt::Key_E:return QStringLiteral("ROTATERIGHT");
+    default:return {};
+    }
+}
+class KeyboardTrace final : public QObject {
+public:
+    using QObject::QObject;
+protected:
+    bool eventFilter(QObject*,QEvent* event) override {
+        if(event->type()!=QEvent::KeyPress)return false;
+        const auto* key=static_cast<QKeyEvent*>(event);
+        if(key->isAutoRepeat())return false;   // one line per press, not one per repeat
+        const QString action=keyboardAction(key->key());
+        if(!action.isEmpty())qInfo().noquote()<<QString("input: trace source=keyboard action=%1 accepted=1").arg(action);
+        return false;
+    }
+};
+}
+
 int main(int argc,char** argv) {
 #ifdef Q_OS_WIN
     SetUnhandledExceptionFilter(writeCrashStack);
@@ -665,6 +721,21 @@ int main(int argc,char** argv) {
             }
         return failures?1:0;
     }
+    // ---- Scripted-run input gate (audit/PS-BUTTON.md) ----
+    // A scripted capture must be deterministic: the script drives and a live controller must not. One pad whose
+    // left stick rested off centre reported a held direction on every poll and undid every scripted DOWN (188
+    // vertical(-1) calls in one capture), so --script - or XMB_INPUT_SCRIPT_ONLY=1 on a run without it - turns
+    // the gate on. pad::setScriptOnly() then withholds every live sample from the shell and the PS watcher and
+    // counts what it withheld (the sidecar's padEventsIgnored); with neither flag the pad behaves exactly as
+    // before. The gate is set here because the View's constructor starts the pad reader and the PS watcher.
+    const bool scriptOnlyEnv=qEnvironmentVariable("XMB_INPUT_SCRIPT_ONLY")=="1";
+    const bool scriptedRun=parser.isSet("script") || scriptOnlyEnv;
+    xmb::pad::setScriptOnly(scriptedRun);
+    if(inputTraceEnabled())
+        qInfo().noquote()<<QString("input: trace gate scripted=%1 trigger=%2")
+            .arg(scriptedRun?1:0)
+            .arg(parser.isSet("script")?QStringLiteral("--script")
+                :scriptOnlyEnv?QStringLiteral("XMB_INPUT_SCRIPT_ONLY"):QStringLiteral("none"));
     xmb::Shell shell(data,assets);
     // ---- Kiosk / launcher mode (Phase 4.2) ----
     // --kiosk is the appliance recipe: one frameless fullscreen window on one display, straight to the XMB. It
@@ -765,6 +836,10 @@ int main(int argc,char** argv) {
         QObject::connect(timer,&QTimer::timeout,&app,[&app,&window,&shell,view,tokens,timer,tap]{
             if(tokens->isEmpty()){timer->stop();return;}
             const QString token=tokens->takeFirst().trimmed();
+            // XMB_INPUT_TRACE=1: the script is one of the two input sources the shell can hear in a scripted
+            // run (the other is the keyboard). Logging the token as it is applied is what makes the trace
+            // read as one decision list: source=script here, source=pad from the withheld live controller.
+            if(inputTraceEnabled())qInfo().noquote()<<QString("input: trace source=script action=%1 accepted=1").arg(token);
             static const QHash<QString,int> keys{{"LEFT",Qt::Key_Left},{"RIGHT",Qt::Key_Right},{"UP",Qt::Key_Up},{"DOWN",Qt::Key_Down},
                 {"ENTER",Qt::Key_Return},{"ESC",Qt::Key_Escape},{"PGUP",Qt::Key_PageUp},{"PGDN",Qt::Key_PageDown},{"BACKSPACE",Qt::Key_Backspace},
                 {"PREV",Qt::Key_BracketLeft},{"NEXT",Qt::Key_BracketRight},{"SHUFFLE",Qt::Key_M},{"REPEAT",Qt::Key_R},
@@ -850,6 +925,10 @@ int main(int argc,char** argv) {
                     // state Windows reported (-1 = never observed). The capture cannot power a monitor, so these are
                     // the sidecar's honest record; audit/SESSION-POWER.md.
                     {"displayOffRequested",xmb::host::displayOffRequested()},{"displayState",xmb::host::displayState()},
+                    // Input integrity (audit/PS-BUTTON.md): in a scripted run, how many live pad samples the gate
+                    // withheld and whether the gate was on. A deterministic capture reports a nonzero count while
+                    // its frame and selection are still the script's own; a normal run runs the pad as before.
+                    {"padEventsIgnored",double(xmb::pad::ignoredEvents())},{"inputScriptOnly",xmb::pad::scriptOnly()},
                     // Kiosk evidence (Phase 4.2): the window state at grab time. IsFullScreen is the widget's own
                     // state; the no-title-bar proof is the window rect/style read by the test's own Win32 query.
                     {"fullscreen",window.isFullScreen()},{"windowWidth",window.width()},{"windowHeight",window.height()},
@@ -906,6 +985,14 @@ int main(int argc,char** argv) {
             }
         });
         QTimer::singleShot(2500,timer,[timer]{timer->start();});
+    }
+    // XMB_INPUT_TRACE=1 also records real keyboard input. The filter must outlive app.exec(), so it owns the
+    // whole run once installed; the script's own replayKeyTap() calls the view directly and is logged as
+    // source=script by the token loop instead, so the two sources never double-report one key.
+    std::unique_ptr<KeyboardTrace> keyboardTrace;
+    if(inputTraceEnabled()) {
+        keyboardTrace=std::make_unique<KeyboardTrace>();
+        app.installEventFilter(keyboardTrace.get());
     }
     return app.exec();
 }
