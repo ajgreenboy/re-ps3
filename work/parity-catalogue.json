@@ -627,7 +627,7 @@
         "pageKind": "folder",
         "log": [{ "pattern": "shell: options opened" }]
       },
-      "trace": [{ "pattern": "shell: options opened .*Open\\|Information\\|Sort By\\|Close" }],
+      "trace": [{ "pattern": "shell: options opened .*rows= 5 Sort By\\|Open\\|Copy\\|Delete\\|Information" }],
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "options panel", "crop": [1300, 430, 620, 300], "required": true }
