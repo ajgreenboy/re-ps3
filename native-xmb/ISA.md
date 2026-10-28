@@ -303,3 +303,10 @@ Back restoring selection. The broad transition-parity criterion remains unchecke
 - ISC-20 (still partial): source review 2026-10-26 - tracked `QProcess` for RPCS3 and imported apps with exit/crash report, library rescan and idle suppression (`Shell::startTracked` / `Shell::gameRunning`), Steam registry watcher (`Shell::startSteamTracked` / `Shell::pollSteamGame`), Quit Game and the PS system menu (`Shell::psMenuActivate`), and a focus-independent PS watcher (`src/ps_watcher.*`). No configured backend preference and no recorded real launch-return capture, so the criterion stays open; see audit/FEATURE-COVERAGE.md (ISC-20).
 
 - ISC-11/16/17 (partial evidence, 2026-10-27): nine firmware cues decoded and six slots mapped, no firmware latency reference (audit/INTERACTION-AUDIO.md); resume records migrated and Continue Watching listed, playlists still absent (audit/MEDIA-CONTROLS.md "Continue Watching"); sidecar SRT/VTT subtitles with an in-player panel and a verified read-back, embedded/disc subtitles still absent (audit/SUBTITLES.md). Criteria stay unchecked for the reasons in the note above; none of these notes is a completion claim.
+> **Evidence 2026-10-27 (scripted ten-minute session, ISC-29 not yet ticked):** a 2,405-token scripted
+> navigation session (240 moves interleaved with waits, full screen) ran on the current build for ten
+> minutes: WorkingSet 284 MB at start, 285 MB at 5 min, 230 MB at 10 min (no growth trend; the drop is
+> the loader freeing startup allocations), frame rate 190-234 fps throughout, zero crash/freeze lines and
+> zero image-decode failures in `out/native-reference/store/stability3/stderr.txt`. This is scripted, not
+> human, interaction and covers the XMB surfaces only, so the criterion stays open for a human session
+> that crosses media playback, a launched title and the PS menu.
