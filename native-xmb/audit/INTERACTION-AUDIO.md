@@ -325,3 +325,383 @@ four layers match the baseline exactly. `PASS: 6/6 layers within budget`.
 
 No other repository file was edited by this work. Build/run logs and captures
 were written under `C:\dev\out\native-audio` for evidence only.
+
+## 10. Phase 14.4 / P8 first slice (2026-10-27)
+
+Scope: turn the audio layer from a fit into a measured component where the local
+4.93 modules carry the value, and give the gate a bounded way to assert a cue
+decision without listening. The player files are the only code edited; the shell
+call sites are reported as hunks in 10.3 for the passes that own `shell.cpp`.
+
+Status: the firmware's single cue gain is now measured at **1.0 (unity)**, the
+cue player exposes a bounded `playAt(cue, ms)` decision API, and the trace emits
+one machine-readable line per decision (including retrigger and no-device
+decisions). ISC-11 stays open only for what still needs a firmware recording or a
+decompiled paf sound-context: start latency, cross-cue mixing, and the debounce
+rule.
+
+### 10.1 The single firmware cue gain is measured: 1.0 (unity)
+
+Section 2 said the wrapper's single volume constant "was not recovered from the
+packed PRX". It is recovered now. The decrypted module set in
+`C:\dev\xmb\fw493\vsh_module` is a plain big-endian ELF64 with
+`file offset = VA + 0xF0` for the code segment.
+
+`explore_plugin.prx`, wrapper `FUN_001fdf4c` (VA `0x1fdf4c`):
+
+```
+VA 0x1fdf68: 3d 20 00 27   lis r9, 0x27
+VA 0x1fdf6c: c0 29 20 00   lfs f1, 0x2000(r9)     ; f1 = *(float*)0x272000
+VA 0x1fdf70: <bl>          play(f1, context, name, ..., 0)
+```
+
+VA `0x272000` maps to file `0x2720f0` and contains `3f 80 00 00`, i.e.
+**float 1.0**. `sysconf_plugin.prx` has its own wrapper at VA `0x6f8c` which does
+`lis r9, 0x15` / `lfs f1, -21648(r9)` (`0x150000 - 0x5490 = 0x14ab70`); file
+`0x14ac60` also contains `3f 80 00 00`. Two independent modules, one value:
+unity.
+
+Consequences for the native mix:
+
+- The reference per-cue level is entirely the level baked into the VAG PCM; there
+  is no per-cue gain or pan, which the 28-byte descriptor already showed.
+- `interaction_audio.cpp` now names the constant
+  `kFirmwareCueGain = 1.0f` with that provenance and applies it once per sink
+  (`Impl::gain() = clamp(userVolume * kFirmwareCueGain)`). At the default 60 %
+  user volume the sink gain is 0.600000, so the audible result is unchanged from
+  the previous build; what changed is that the constant is now a measurement
+  rather than an unstated 1.0.
+- The XMB volume preference (default 60, `src/preferences.cpp:65`) is the only
+  remaining user scale. It is a native UI control, not a firmware cue constant.
+
+### 10.2 Player internals changed
+
+`src/interaction_audio.h`:
+
+1. **`Cue::Trophy` appended** (seventh slot). Existing indices keep their
+   meaning. `snd_trophy` was already decoded but unreachable; it now has a cue
+   value for the shell's trophy-notification hook (10.3, H5).
+2. **`Decision`** enum: `Played`, `RetriggerSkipped`, `Disabled`, `Silent`,
+   `SourceUnavailable`, `OutputUnavailable`, `Rejected`.
+3. **`playAt(Cue, qint64 atMs)`** — the bounded, testable entry point. Rejects a
+   negative or greater-than-24 h timestamp (`kMaximumTimeMs`) and an invalid cue
+   value without touching the retrigger history. `play(cue)` is exactly
+   `playAt(cue, clock.elapsed())`. Time is monotonic by contract; a backwards
+   timestamp reads as age 0, so it can only be suppressed, never used to bypass
+   the guard.
+4. **`cueName()` / `decisionName()`** static names so a gate does not hard-code
+   strings.
+
+`src/interaction_audio.cpp`:
+
+5. **One trace line per decision**, not only per play. The trace now covers
+   `disabled`, `silent`, `source-unavailable`, `output-unavailable`, `rejected`,
+   `retrigger-skip`, and `play`. This is what makes the decision path assertable
+   on a machine with no audio device: the decision is logged before output is
+   opened.
+6. **Trace grammar** (Qt log, i.e. stderr; parse with
+   `^interaction audio: cue (\w+) t=(\d+)ms decision=([a-z-]+)`):
+   ```
+   interaction audio: cue <Name> t=<ms>ms decision=<name>[ <key=value>...]
+   ```
+   `play` carries `source= rate= channels= bytes= peak= rms= duration= guard=
+   output=`; `retrigger-skip` carries `age= guard= source=`; the refusals carry
+   `reason=` or `volume=`.
+7. **`XMB_AUDIO_TRACE` now requires the value `1`** (and `XMB_AUDIO_LOG=1` still
+   works). Previously any set value enabled tracing, so `XMB_AUDIO_TRACE=0`
+   switched it *on*. Verified off below.
+8. **Clip duration rounds up** (`ceil(frames*1000/rate)`): the 1 876-frame
+   tick is 39.08 ms, so the guard is 40 ms, never 39. This only ever delays a
+   retrigger by the sub-millisecond remainder of the sample.
+9. **Same-cue retrigger guard re-verified**, now through the decision API:
+   guard = clip duration for Confirm/Back/Error/Options/Accept/Trophy, and
+   `max(45 ms, clip duration)` for Move (45 ms floor remains a fit; see 10.5).
+   A different cue still interrupts the current one. History is cleared on a
+   theme-sound change. The startup line reports the gain, and every decision
+   reports its own guard.
+10. **All decoded cue measurements are unchanged**: cursor/decide/option
+    7 504 PCM bytes, peak 0.093811, RMS 0.007040; cancel 7 504 bytes, peak
+    0.041595; system_ok 57 792 bytes, 301 ms; system_ng 153 664 bytes, 801 ms;
+    trophy 96 040 bytes mono, 1 001 ms; snd_error still silent and unplayed.
+
+What was deliberately **not** changed: no per-cue gain, no normalization, no
+pan, and no software mixer. The RCO has no gain/pan to restore and the firmware
+gain is unity, so adding any would be a change away from the reference. Cross-cue
+mixing remains unimplemented because no artifact yet proves the firmware
+overlaps cues (10.5).
+
+### 10.3 Cue call-site hunks for `src/shell.cpp` (owned elsewhere)
+
+Line numbers are this tree's (`shell.cpp` is 2 780 lines); apply by context if
+the in-flight shell pass has moved them. `Cue::Trophy` exists only after this
+slice, so H5 must land with (or after) this change.
+
+#### Existing call sites (no diff; verdict per firmware evidence)
+
+| # | file:function | line | action | cue | evidence | verdict |
+|---|---------------|------|--------|-----|----------|---------|
+| 1 | `shell.cpp:Shell::horizontal` | 1405 | category move | Move (`snd_cursor`) | `snd_cursor` in focus handlers (explore 9245/9318); `snd_category_decide` is not referenced by `explore_plugin.prx` at all | keep |
+| 2 | `shell.cpp:Shell::vertical` | 1412 | row move | Move (`snd_cursor`) | same | keep |
+| 3 | `shell.cpp:Shell::activate` | 1422 | message box confirm | Confirm (`snd_decide`) | `snd_decide` at explore 33256/34446/34899-34914 | keep |
+| 4 | `shell.cpp:Shell::activate` | 1428 | dismiss a message | Accept (`snd_system_ok`) | `snd_system_ok` on module-action completion (explore 22617/38936); dismiss is a guess | keep, guess |
+| 5 | `shell.cpp:Shell::activate` | 1432-1433 | entry press | Error / Options / Confirm | Error `snd_system_ng` has code refs (10.4); Options `snd_option` has code refs in sysconf (10.4); Confirm traced | H1 + H2 |
+| 6 | `shell.cpp:Shell::toggleOptions` | 1724 | open in-player panel | Options (`snd_option`) | label/role + sysconf code refs | keep |
+| 7 | `shell.cpp:Shell::toggleOptions` | 1739 | open item panel | Options | same | keep |
+| 8 | `shell.cpp:Shell::optionsMove` | 1750 | panel cursor | Move | `snd_cursor` focus evidence | keep |
+| 9 | `shell.cpp:Shell::optionsActivate` | 1761 | unavailable option | Error | `snd_system_ng` code refs | keep |
+| 10 | `shell.cpp:Shell::optionsActivate` | 1776 | Information row | Confirm | generic decide | keep, guess |
+| 11 | `shell.cpp:Shell::optionsActivate` | 1785 | open Sort By submenu | Options | open-menu role | keep |
+| 12 | `shell.cpp:Shell::optionsActivate` | 1794 | sort applied | Confirm | generic decide | keep, guess |
+| 13 | `shell.cpp:Shell::optionsActivate` | 1808 | open remove-confirm box | Options | open-surface guess | keep, guess |
+| 14 | `shell.cpp:Shell::optionsActivate` | 1815 | Jellyfin restart | Confirm | generic decide | keep, guess |
+| 15 | `shell.cpp:Shell::optionsClose` | 1846 | back out of submenu | Back (`snd_cancel`) | `snd_cancel` on close (explore 26546) | keep |
+| 16 | `shell.cpp:Shell::dismissOptions` | 1856 | close panel | Back | same | keep |
+| 17 | `shell.cpp:Shell::chooseSubtitleTrack` | 2050 | track off / change | Back / Confirm | no decoded call site | keep, guess |
+| 18 | `shell.cpp:Shell::chooseAudioTrack` | 2089 | track switch | Confirm | no decoded call site | keep, guess |
+| 19 | `shell.cpp:Shell::back` | 2201 | page / media / message back | Back (`snd_cancel`) | `snd_cancel` on close | keep |
+| 20 | `shell.cpp:Shell::promoteNotification` | 1343 | trophy popup appears | **Trophy (`snd_trophy`)** | np_trophy_util notification carries `sound=snd_trophy` (10.4) | **H5** |
+| 21 | `shell.cpp:Shell::activate` (`Action::SetSetting`) | 1437-1449 | commit a stored value | **Accept (`snd_system_ok`)** | module-action completion (explore 22617/38936) | **H1/H2/H3/H4** |
+
+Already-correct-but-unwired slots:
+
+- `snd_category_decide`: stdout the same PCM as `snd_cursor` (section 1), so
+  whatever the firmware uses it for, the native Move cue is audibly identical.
+  No reference in `explore_plugin.prx`; references live in
+  `category_setting_plugin.prx`, `basic_plugins.prx`, `sysconf_plugin.prx` and
+  `vshmain_ext.prx`, which fits a category-*setting* change rather than the XMB
+  icon move. No hunk; a separate `Cue` would be indistinguishable.
+- `snd_error`: must stay unmapped (silent source, section 3).
+- `snd_trophy`: H5 gives it the only native surface that exists; nothing raises
+  a trophy notification today (no `Shell::notify` caller passes a trophy icon),
+  so the hook is dormant but correct when a trophy source lands.
+- The in-player panel's Repeat and Shuffle toggles
+  (`OptionCommand::RepeatMode`, `ToggleShuffle`) currently play no cue. They are
+  outside the audit's six XMB slots and there is no decoded call site for a
+  repeat/shuffle sound, so no hunk is proposed; adding one would be a guess.
+
+#### H1 — a value write plays Accept after it commits
+
+```diff
+--- a/native-xmb/src/shell.cpp
++++ b/native-xmb/src/shell.cpp
+@@ -1447,7 +1447,11 @@ void Shell::activate() {
+-        if(preferences_.setValue(entry.setting,entry.option) && !pages_.isEmpty())pages_.removeLast();break;
++        if(preferences_.setValue(entry.setting,entry.option)) {
++            interactionAudio_.play(InteractionAudio::Cue::Accept);
++            if(!pages_.isEmpty())pages_.removeLast();
++        } else interactionAudio_.play(InteractionAudio::Cue::Error); // the write was rejected: a guess
++        break;
+```
+
+The up-front `Confirm` must not also fire, or the 301 ms `snd_system_ok` would
+cut off the decide tick in the same activation. H2 is the other half:
+
+```diff
+@@ -1430,8 +1430,12 @@ void Shell::activate() {
+     if(entries().isEmpty() || loading_)return;
+     const auto entry=entries()[selection()];
+-    interactionAudio_.play(entry.action==Action::Unavailable?InteractionAudio::Cue::Error:
+-        entry.action==Action::SettingChoices?InteractionAudio::Cue::Options:InteractionAudio::Cue::Confirm);
++    // Committing a value is the firmware's module-action path: snd_system_ok when
++    // the action completes (explore_plugin.prx FUN_00030954 and FUN_00062e6c both
++    // call it there). SetSetting is therefore silent here and plays Cue::Accept
++    // after its write below.
++    if(entry.action!=Action::SetSetting)
++        interactionAudio_.play(entry.action==Action::Unavailable?InteractionAudio::Cue::Error:
++            entry.action==Action::SettingChoices?InteractionAudio::Cue::Options:InteractionAudio::Cue::Confirm);
+     switch(entry.action) {
+```
+
+#### H3 — host (computer) settings use the same commit rule
+
+```diff
+@@ -1444,7 +1444,9 @@ void Shell::activate() {
+             const bool ok=entry.setting=="host/volume"?host::setMasterVolume(entry.option.toInt()):host::setMasterMuted(entry.option.toBool());
+-            if(!ok)showMessage("The system volume could not be changed.",MessageKind::Page);else if(!pages_.isEmpty())pages_.removeLast();
++            if(!ok){interactionAudio_.play(InteractionAudio::Cue::Error);showMessage("The system volume could not be changed.",MessageKind::Page);}
++            else {interactionAudio_.play(InteractionAudio::Cue::Accept);if(!pages_.isEmpty())pages_.removeLast();}
+             break;
+         }
+```
+
+The failure branch is a guess: no failed host write was decoded, so `snd_system_ng`
+is chosen for symmetry with the unavailable-action cue.
+
+#### H4 — clearing back to the system theme is also a commit
+
+```diff
+@@ -1439,7 +1439,10 @@ void Shell::activate() {
+         if(entry.setting=="appearance/theme" && entry.option.toString().isEmpty() && backgroundMode()==2 && wallpaper().isEmpty()) {
+             // Back to the system's theme with no wallpaper of the user's own: the original background returns.
+-            if(preferences_.setValues({{"appearance/theme",QString{}},{"appearance/background",0}}) && !pages_.isEmpty())pages_.removeLast();
++            if(preferences_.setValues({{"appearance/theme",QString{}},{"appearance/background",0}})) {
++                interactionAudio_.play(InteractionAudio::Cue::Accept);
++                if(!pages_.isEmpty())pages_.removeLast();
++            } else interactionAudio_.play(InteractionAudio::Cue::Error);
+             break;
+         }
+```
+
+#### H5 — trophy notification plays `snd_trophy`
+
+```diff
+@@ -1345,6 +1345,10 @@ void Shell::promoteNotification() {
+     auto& front=notifications_.first();
+     front.expiresAt=notificationClock_.elapsed()+notificationLifetimeMs;
+     if(!notificationTimer_.isActive())notificationTimer_.start();
++    // Firmware: the trophy notification carries sound "snd_trophy"
++    // (np_trophy_util.prx builds plugin=system_plugin, sound=snd_trophy).
++    if(front.icon.startsWith("tex_notification_trophy_"))
++        interactionAudio_.play(InteractionAudio::Cue::Trophy);
+     if(notificationLog_)qInfo().noquote()<<"notify: show"<<front.title<<front.icon<<notificationLifetimeMs<<"ms";
+```
+
+`promoteNotification()` is the "popup actually appears" moment, not enqueue, so a
+queued notification cannot sound early. `Shell::notify` already accepts the four
+`tex_notification_trophy_*` icons, which is what this matches.
+
+### 10.4 Firmware evidence for the two cues that were label-only
+
+The decrypted modules resolve the open questions from section 2 without a
+disassembler: strings live in the module's own `.rodata`, and the code that uses
+them materialises their VA with `lis` + `addi`. `snd_option`, `snd_system_ng`,
+`snd_trophy` and `snd_category_decide` all appear in decrypted modules:
+
+- `snd_option` — `sysconf_plugin.prx` string VA `0x13d308`, materialised at code
+  VAs `0x670cc`, `0x67188`, `0x6723c`, `0x6739c`; each passes it as the sound
+  argument of the option-menu command builder (`bl 0x5d740`), i.e. the cue is
+  attached to the option-menu action rather than played at that instruction.
+  Also referenced by `vshmain_ext`, `webbrowser`, `photoupload`, `netconf`,
+  `autoupdateconf`.
+- `snd_system_ng` — `explore_plugin.prx` strings at VAs `0x247c50`, `0x24af30`,
+  `0x253668`, `0x255608`, `0x25c240` with code references at `0x79dc4`,
+  `0x9d25c`, `0xe8f10`, `0x1691b8`, `0x28fbc`, `0xf7c48`, `0xf7c60`,
+  `0x185498`, `0x1854b4`, `0xa8060`, `0x12eeac`. At `0x79dc4` the code loads
+  `0x247c50` into r3 and calls the play wrapper directly
+  (`bl 0x1fdf4c`), so the XMB root module itself plays the negative cue.
+  `sysconf_plugin.prx` strings at VAs `0x1384a8`, `0x139b80`, `0x13a278`,
+  `0x13a578`, `0x13b980`, `0x144658`, `0x146c50` have code references at
+  `0x265d8`, `0x36e8c`, `0x3f338`, `0x3f6ec`, `0x41874`, `0x4d1e8`, `0x4e1d4`,
+  `0x4e2a8`, `0xad2b0`, `0x26864`; the site at `0x265d8` calls the module's
+  sound wrapper (`0x6f8c`), which loads the unity gain and plays.
+- `snd_trophy` — `np_trophy_util.prx` string VA `0x53380`, materialised at code
+  VA `0x92c4` and passed as the sound-name argument of a notification descriptor
+  call at `0x92e4`. The surrounding strings are the proof of role:
+  `system_plugin`, `np_trophy_util_notification`, `msg_trophy_obtain`,
+  `Trophy`, `snd_trophy`, `msg_error_trophy_obtain`, `tex_notification_info`.
+  A trophy notification *is* the `snd_trophy` surface.
+- `snd_category_decide` — referenced by `category_setting_plugin.prx`,
+  `basic_plugins.prx`, `sysconf_plugin.prx` and `vshmain_ext.prx`, but **not** by
+  `explore_plugin.prx`; no code reference in `vshmain_ext.prx` (address
+  materialisation scan found none). It is a category-settings sound, not the
+  XMB icon move, and it is bit-identical to `snd_cursor` anyway.
+
+These are raw-instruction code references. `snd_system_ng` in
+`explore_plugin.prx` reaches the same `FUN_001fdf4c` wrapper the decompiled dump
+shows, so `Cue::Error` is call-site evidence equal to section 2's four cues.
+`snd_option` (command-descriptor argument) and `snd_trophy` (notification-
+descriptor argument) are one step below that: the string is provably used by the
+module's code, but the play moment is a later consumer. Both are stronger than
+the label-only inference they replace, and both are labelled in 10.3.
+
+### 10.5 Scripted evidence (this machine has a real output device)
+
+Build:
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-audio
+```
+
+Result: `Built C:\dev\out\native-audio\re-ps3-native.exe`. Only the pre-existing
+`QtAudio::UnderrunError` deprecation warning remains in `interaction_audio.cpp`
+(`:506`); no new warning.
+
+Run (isolated data directory, key-tone default on, volume default 60):
+
+```
+$env:XMB_AUDIO_TRACE='1'
+re-ps3-native.exe --dev-flash C:\dev\rpcs3\bin\dev_flash `
+  --data-dir C:\dev\out\native-audio\run-data `
+  --script "full,wait,RIGHT,wait,DOWN,wait,ENTER,ENTER,ENTER,ESC,wait,RIGHT,wait,RIGHT,wait,DOWN,wait,ENTER,wait,ENTER,wait,TRIANGLE,wait,ESC,wait,quit"
+```
+
+The script goes Game → Network (two Moves), activates the unavailable Remote
+Play row (Error), dismisses its message (Accept), activates it again inside the
+801 ms guard (retrigger skip), backs out (Back), moves to Friends (three Moves),
+opens Players Met (Confirm), dismisses the information message (Accept), opens
+the options panel (Options) and closes it (Back). Exit 0. Trace
+(`C:\dev\out\native-audio\evidence\cue-trace.txt`):
+
+```
+interaction audio: firmware cue gain 1.000000 (measured: explore_plugin.prx VA 0x272000, sysconf_plugin.prx VA 0x14ab70), user volume 0.600000 -> sink gain 0.600000
+interaction audio: cue Move t=5363ms decision=play source=snd_cursor rate=48000 channels=2 bytes=7504 peak=0.093811 rms=0.007040 duration=40ms guard=45ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Move t=5988ms decision=play source=snd_cursor rate=48000 channels=2 bytes=7504 peak=0.093811 rms=0.007040 duration=40ms guard=45ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Error t=6609ms decision=play source=snd_system_ng rate=48000 channels=2 bytes=153664 peak=0.071014 rms=0.007258 duration=801ms guard=801ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Accept t=6921ms decision=play source=snd_system_ok rate=48000 channels=2 bytes=57792 peak=0.027313 rms=0.005894 duration=301ms guard=301ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Error t=7238ms decision=retrigger-skip age=629ms guard=801ms source=snd_system_ng
+interaction audio: cue Back t=7546ms decision=play source=snd_cancel rate=48000 channels=2 bytes=7504 peak=0.041595 rms=0.004050 duration=40ms guard=40ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Move t=8172ms decision=play source=snd_cursor rate=48000 channels=2 bytes=7504 peak=0.093811 rms=0.007040 duration=40ms guard=45ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Move t=8803ms decision=play source=snd_cursor rate=48000 channels=2 bytes=7504 peak=0.093811 rms=0.007040 duration=40ms guard=45ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Move t=9428ms decision=play source=snd_cursor rate=48000 channels=2 bytes=7504 peak=0.093811 rms=0.007040 duration=40ms guard=45ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Confirm t=10047ms decision=play source=snd_decide rate=48000 channels=2 bytes=7504 peak=0.093811 rms=0.007040 duration=40ms guard=40ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Accept t=10673ms decision=play source=snd_system_ok rate=48000 channels=2 bytes=57792 peak=0.027313 rms=0.005894 duration=301ms guard=301ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Options t=11297ms decision=play source=snd_option rate=48000 channels=2 bytes=7504 peak=0.093811 rms=0.007040 duration=40ms guard=40ms output=Speakers (3- DualSense Wireless Controller)
+interaction audio: cue Back t=11922ms decision=play source=snd_cancel rate=48000 channels=2 bytes=7504 peak=0.041595 rms=0.004050 duration=40ms guard=40ms output=Speakers (3- DualSense Wireless Controller)
+```
+
+All six existing cues are present (Move, Confirm, Back, Error, Options, Accept)
+plus one `retrigger-skip` (age 629 ms of the 801 ms `snd_system_ng` guard). This
+machine reports a real default output (`Speakers (3- DualSense Wireless
+Controller)`), so `decision=play` means `QAudioSink::start` ran, not just that
+the guard passed. On a machine with no output device the same lines appear with
+`decision=output-unavailable reason=no-device`, which still proves the cue
+selection and guard; that is why the decision is logged before the device is
+opened.
+
+`XMB_AUDIO_TRACE=0` was also run with `RIGHT`: 0 trace lines, exit 0, so the
+tightened env check is real.
+
+The one cue not exercised is `Trophy`: nothing raises a trophy notification in
+this build (see H5), so the hook is verified only by the startup decode of
+`snd_trophy` and by `available(Cue::Trophy)` being true. That is the honest
+limit of the reachable surface today.
+
+### 10.6 Gate
+
+```
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --capture --exe C:/dev/out/native-audio/re-ps3-native.exe
+```
+
+`PASS: 6/6 layers within budget` on the final binary (audio-only changes; the
+pixel path is untouched). Frame PSNR 18.30 vs baseline 18.02, SSIM 0.8323 vs
+0.8301; category icon row 20.92 vs 21.05, SSIM 0.8990 vs 0.8950; the other four
+layers match exactly.
+
+### 10.7 Remaining fits and what would close each
+
+| Fit | Current value | Why it is still a fit | Artifact that closes it |
+|-----|---------------|-----------------------|-------------------------|
+| Move retrigger floor | 45 ms | no firmware debounce value traced | decrypted `paf.prx`/`libpaf.sprx` implementation of `paf_paf_B93AFE7E` (the sound context it plays through), or a PS3 audio recording of held navigation |
+| Same-cue guard duration | decoded clip length (ceil) | firmware may queue rather than drop a retrigger | the same paf sound-context code, or a recording of a double press |
+| Cross-cue mixing | none (one `QAudioSink`, previous cue stopped) | whether the firmware overlaps cues is unproven | a PS3 recording with a long cue (trophy/system_ng) plus navigation, or the paf context's voice limit |
+| Start latency / device buffering | Qt default | no loopback measurement | WASAPI loopback capture of the native app running the same script |
+| Trophy cue timing | popup shown | the notification player's play point is not decoded, only the descriptor | decompiled consumer of `np_trophy_util_notification` in `system_plugin`/`vshmain` |
+| Failed host-write cue | Error (`snd_system_ng`) | no failed-write call site decoded | decompiled `sysconf_plugin.prx` write-failure branch (start at VAs `0x265d8`, `0x4d1e8`, `0xad2b0`) |
+| Dismiss-a-message cue | Accept (`snd_system_ok`) | box cancel path unproven (section 2) | decompiled message-box cancel handler in `explore_plugin.prx` |
+| Category-move cue | Move (`snd_cursor`) | `snd_category_decide` is bit-identical to `snd_cursor`, so there is nothing audible to measure | a decompiled `snd_category_decide` call site, only if the two waveforms ever diverge |
+| Absolute loudness on hardware | unity cue gain × user volume | gain is measured, hardware chain is not | a calibrated PS3 analog capture at a known system volume |
+
+No firmware duration needed implementing: durations are exact from the decoded
+frame counts (`frames / 48000`), and the guard now uses the ceiling of that
+value.
+
+### 10.8 Files touched by this slice
+
+- `src/interaction_audio.cpp`
+- `src/interaction_audio.h`
+- `audit/INTERACTION-AUDIO.md` (this section)
+
+`src/shell.cpp` was **not** edited; H1–H5 are for the pass that owns it. Evidence
+tooling and logs are outside the repository under
+`C:\dev\out\native-audio` (`prx_probe.py`, `prx_load.py`, `scan_refs.py`,
+`scan_call.py`, `dump2.py`, `evidence/cue-sequence.log`, `evidence/cue-trace.txt`).
