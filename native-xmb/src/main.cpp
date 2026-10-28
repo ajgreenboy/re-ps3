@@ -24,6 +24,7 @@
 #include "pad.h"
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QMap>
 #include <algorithm>
 #include <QFile>
 #include <QFileInfo>
@@ -127,6 +128,180 @@ protected:
         return false;
     }
 };
+// ---- --image-audit: the container resolution table for the ICON-GAP-AUDIT image inventory ----------------
+// One row per firmware image named in audit/ICON-GAP-AUDIT.md section 4 (bucket B) and section 5 (bucket C),
+// with the container the drawing site (or the audit row) asks for. "*" as the container expands to every
+// vsh/resource RCO with that prefix; "*" as the name list expands to every named image in that container.
+// Rows whose audit entry has no firmware image (B15, B16, C5, C10) are printed as notes and not counted.
+// Names are the firmware's exact image-table labels; where the audit abbreviated or mis-filed one - C14's
+// "tex_default_scroll_arrow_*", C26's explore_category_video:tex_3D, C27's explore_category_music:tex_track_*,
+// C33's 17-icon count, C41's container count - the table reports the real owner instead of hiding it.
+struct IconAuditRow { const char* bucket; const char* container; const char* names; };
+const IconAuditRow kIconAuditRows[] = {
+    {"B1","qgl/icontex","1n"},
+    {"B2","qgl/icontex","35n"},
+    {"B3","system_plugin","tex_msgdialog_bg tex_msgdialog_bg2 tex_msgdialog_bg_deep"},
+    {"B4","system_plugin","tex_msgdialog_bar"},
+    {"B5","system_plugin","tex_optionmenu_bg"},
+    {"B6","system_plugin","tex_optionmenu_line tex_optionmenu_base tex_optionmenu_game"},
+    {"B7","impose_plugin","tex_controller_number tex_red"},
+    {"B8","explore_category_friend","tex_indi_AFK tex_indi_Game tex_indi_Me tex_indi_Message tex_indi_NewRoom tex_indi_None tex_indi_Sign_in tex_indi_Sign_out"},
+    {"B9","oskfullkeypanel_plugin","BUTTON_BASE_WHITE BUTTON_BASE_BLUE_GRAY BUTTON_BASE_B BUTTON_BASE_G BUTTON_BASE_O BUTTON_BASE_P BUTTON_BASE_E BUTTON_BASE_SHORT BUTTON_FORCUS"},
+    {"B10","oskfullkeypanel_plugin","LABEL_UP LABEL_DOWN LABEL_LEFT LABEL_RIGHT"},
+    {"B11","oskfullkeypanel_plugin","EN_LABEL_DELETE EN_LABEL_SPACE EN_LABEL_RETURN EN_LABEL_MODE EN_LABEL_CLOSE MODE_GUIDE_ALPHABET MODE_GUIDE_ALPHABET_CAP LIST_WINDOW_FOCUS"},
+    {"B12","system_plugin","tex_default_text_field tex_default_text_field_focus"},
+    {"B13","explore_plugin_full","tex_video"},
+    {"B14","explore_plugin_full","tex_photo"},
+    {"C1","system_plugin","tex_controller"},
+    {"C2","xmb_plugin_normal","tex_indi_message"},
+    {"C3","xmb_plugin_normal","tex_indi_chat"},
+    {"C4","xmb_plugin_normal","tex_indi_plus"},
+    {"C6","system_plugin","tex_battery_indicator"},
+    {"C7","impose_plugin","tex_battery tex_battery_shadow tex_charge_arrow tex_charge_arrow_shadow tex_error_batsu"},
+    {"C8","system_plugin","tex_rectangle"},
+    {"C9","system_plugin","tex_triangle"},
+    {"C11","system_plugin","tex_busy tex_busy_s tex_busy_l tex_busy_shadow"},
+    {"C12","explore_plugin_full","tex_cp_stop tex_cp_prev tex_cp_next tex_searchb_status tex_searchf_status tex_stop_status tex_prev_status tex_next_status"},
+    {"C13","system_plugin","tex_arrow_left"},
+    {"C14","system_plugin","tex_default_scroll_base tex_default_scroll_base_shadow tex_default_scroll_slider tex_default_scroll_arrow_up tex_default_scroll_arrow_up_shadow tex_default_scroll_arrow_down tex_default_scroll_arrow_down_shadow"},
+    {"C15","system_plugin","tex_default_check"},
+    {"C16","system_plugin","tex_3x3_focus tex_3x3_shadow"},
+    {"C17","system_plugin","tex_line tex_line_shadow"},
+    {"C18","system_plugin","tex_common_dialog tex_common_dialog_shadow"},
+    {"C19","system_plugin","tex_operation_guide_base tex_operation_guide_base_shadow"},
+    {"C20","system_plugin","tex_pointer_arrow tex_pointer_click tex_pointer_finger tex_pointer_grab tex_pointer_hand tex_pointer_pen"},
+    {"C21","system_plugin","tex_arrow_up tex_arrow_up_shadow tex_arrow_down tex_arrow_down_shadow tex_arrow_left tex_arrow_left_shadow tex_arrow_right tex_arrow_right_shadow"},
+    {"C22","system_plugin","tex_default_spin_arrow_up tex_default_spin_arrow_up_shadow tex_default_spin_arrow_down tex_default_spin_arrow_down_shadow"},
+    {"C23","system_plugin","tex_temporary_icon"},
+    {"C25","explore_plugin_full","tex_indi_AFK tex_indi_Game tex_indi_Me tex_indi_Message tex_indi_NewRoom tex_indi_None tex_indi_Sign_in tex_indi_Sign_out"},
+    {"C26","explore_category_video","tex_3D tex_divx tex_wmv tex_avc tex_mpg1 tex_mpg2 tex_mpg4 tex_mjpg"},
+    {"C27","explore_category_music","tex_track_0 tex_track_1 tex_track_2 tex_track_3 tex_track_4 tex_track_5 tex_track_6 tex_track_7 tex_track_8 tex_track_9 tex_track_base"},
+    {"C27","explore_plugin_full","tex_track_0 tex_track_1 tex_track_2 tex_track_3 tex_track_4 tex_track_5 tex_track_6 tex_track_7 tex_track_8 tex_track_9 tex_track_base"},
+    {"C28","explore_category_photo","tex_3D tex_screenshot tex_multiangle tex_download_music tex_download_photo tex_download_video"},
+    {"C29","explore_category_psn","trophy_tex_grade_platinum trophy_tex_grade_gold trophy_tex_grade_silver trophy_tex_grade_bronze trophy_tex_grade_hidden trophy_tex_default trophy_tex_capsule trophy_tex_addon"},
+    {"C30","explore_category_network","tex_dl_dst_game tex_dl_dst_music tex_dl_dst_photo tex_dl_dst_video"},
+    {"C31","sysconf_plugin","tex_cable_avmulti tex_cable_component tex_cable_composite tex_cable_d tex_cable_dsub tex_cable_hdmi tex_cable_pin_lr tex_cable_s tex_cable_scart tex_cable_spdif"},
+    {"C32","sysconf_plugin","tex_logo_amg tex_logo_atok tex_logo_atrac tex_logo_divx tex_logo_dnas tex_logo_dnas_sd tex_logo_dolby_digital tex_logo_dolby_truehd tex_logo_dts tex_logo_ezitext tex_logo_flash tex_logo_java tex_logo_ps tex_logo_ps_sd tex_logo_qgames tex_logo_rsa"},
+    {"C33","sysconf_plugin","tex_bar_bddvd_icon tex_bar_bddvd_shadow_icon tex_bar_console_icon tex_bar_console_shadow_icon tex_bar_device_icon tex_bar_device_shadow_icon tex_bar_display_icon tex_bar_display_shadow_icon tex_bar_game_icon tex_bar_game_shadow_icon tex_bar_init_icon tex_bar_init_shadow_icon tex_bar_music_icon tex_bar_music_shadow_icon tex_bar_network_icon tex_bar_network_shadow_icon tex_bar_power_icon tex_bar_power_shadow_icon tex_bar_remote_icon tex_bar_remote_shadow_icon tex_bar_security_icon tex_bar_security_shadow_icon tex_bar_sound_icon tex_bar_sound_shadow_icon tex_bar_theme_icon tex_bar_theme_shadow_icon tex_bar_time_icon tex_bar_time_shadow_icon"},
+    {"C34","oskpanel_plugin","*"},
+    {"C35","xmb_ingame","tex_user tex_photo tex_music tex_video tex_game tex_network tex_friend tex_sysconf tex_tv tex_psn"},
+    {"C36","explore_plugin_full","tex_Sign_Up tex_Signing_In tex_ps_plus_invitation tex_psplus_icon"},
+    {"C37","premo_plugin","tex_circle tex_cross tex_triangle tex_rectangle tex_circle_shadow tex_cross_shadow tex_triangle_shadow tex_rectangle_shadow tex_premo_bar"},
+    {"C38","deviceconf_plugin","tex_battery tex_bt_state_base tex_bt_state_on tex_level_meter_blue tex_level_meter_grey tex_level_meter_red tex_level_meter_yellow"},
+    {"C39","auth_plugin","tex_bar_security_icon tex_bar_security_shadow_icon"},
+    {"C40","netconf_plugin","tex_infobar_icon tex_infobar_initial_setting_icon tex_network_connect_icon tex_arrow_left"},
+    {"C41","*explore_category_","tex_aa_plane"},
+};
+int runImageAudit(xmb::Assets& assets,const QString& outputPath) {
+    QFile file;
+    if(!outputPath.isEmpty()) {
+        file.setFileName(outputPath);
+        if(!file.open(QIODevice::WriteOnly|QIODevice::Text)){qCritical()<<file.errorString();return 2;}
+    }
+    const auto writeLine=[&](const QString& line){
+        if(file.isOpen()){file.write(line.toUtf8()+'\n');return;}
+        // A GUI-subsystem build has no console, so Qt's message handler goes to the debugger instead of a
+        // redirected stdout: write the bytes ourselves so `--image-audit > table.txt` works headless.
+        const QByteArray bytes=line.toUtf8()+'\n';
+        std::fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);
+        std::fflush(stdout);
+    };
+    const QStringList allow=assets.sameArtAllowList();
+    const QStringList rules=assets.containerOverrideRules();
+    int total=0,decoded=0,migrated=0,absent=0,wrongContainer=0,decodeFailed=0;
+    QMap<QString,int> perContainer;
+    writeLine(QStringLiteral("# image-audit: inventory = ICON-GAP-AUDIT.md bucket B + bucket C; each line is name container decoded(w,h) pixels"));
+    writeLine(QStringLiteral("# image-audit: same-art allow-list = %1 (%2 names; bestImage's pixel gate applies to these only)").arg(allow.join(", ")).arg(allow.size()));
+    writeLine(QStringLiteral("# image-audit: container-override rules = %1").arg(rules.size()));
+    for(const auto& rule:rules)writeLine(QStringLiteral("#   %1").arg(rule));
+    for(const auto& row:kIconAuditRows) {
+        QStringList containers;
+        const QString containerSpec=QString::fromLatin1(row.container);
+        if(containerSpec.startsWith('*')) {
+            const QString prefix=containerSpec.mid(1);
+            for(const auto& entry:QDir(QDir(assets.root()).filePath("vsh/resource")).entryInfoList({"*.rco"},QDir::Files,QDir::Name))
+                if(entry.completeBaseName().startsWith(prefix))containers<<entry.completeBaseName();
+        } else containers<<containerSpec;
+        for(const auto& container:containers) {
+            QStringList names;
+            const QString nameSpec=QString::fromLatin1(row.names);
+            if(nameSpec=="*") {
+                try { names=assets.imageNames(container); } catch(const std::exception&) { names.clear(); }
+                names.sort();
+            } else names=nameSpec.split(' ',Qt::SkipEmptyParts);
+            for(const auto& name:names) {
+                ++total;
+                xmb::Assets::ImageHit hit;
+                const QImage& image=assets.iconImage(container,name,&hit);
+                const bool ok=!image.isNull();
+                QString gate=QStringLiteral("n/a");
+                if(allow.contains(name)) {
+                    assets.bestImage(container,name);
+                    const auto decision=assets.bestImageDecision(container,name);
+                    if(decision.upgraded)
+                        gate=QStringLiteral("pass->%1 %2x%3").arg(decision.container).arg(decision.width).arg(decision.height);
+                    else if(decision.gateApplied)gate=QStringLiteral("reject(kept source)");
+                    else if(!image.isNull() && std::max(image.width(),image.height())>=96)
+                        gate=QStringLiteral("n/a(source>=96px)");
+                    else gate=QStringLiteral("n/a(no larger copy)");
+                }
+                QString line;
+                if(ok) {
+                    ++decoded;
+                    ++perContainer[hit.container];
+                    if(hit.migrated)++migrated;
+                    line=QStringLiteral("%1 %2 %3 %4x%5 %6 requested=%7 alias=%8 gate=%9")
+                        .arg(QString::fromLatin1(row.bucket),name,hit.container)
+                        .arg(image.width()).arg(image.height())
+                        .arg(qint64(image.width())*image.height())
+                        .arg(container,hit.migrated?QStringLiteral("yes"):QStringLiteral("no"),gate);
+                } else {
+                    const QStringList owners=assets.imageContainers(name);
+                    QString why;
+                    if(owners.isEmpty()){++absent;why=QStringLiteral("absent-from-all-122-RCOs");}
+                    else if(owners.contains(container)){++decodeFailed;why=QStringLiteral("decode-failed");}
+                    else {++wrongContainer;why=QStringLiteral("absent-from-")+container+QStringLiteral(";exists-in=")+owners.join(',');}
+                    line=QStringLiteral("%1 %2 - - 0 requested=%3 alias=no gate=%4 reason=%5")
+                        .arg(QString::fromLatin1(row.bucket)).arg(name).arg(container).arg(gate).arg(why);
+                }
+                writeLine(line);
+            }
+        }
+    }
+    QStringList ownerLines;
+    for(auto it=perContainer.cbegin();it!=perContainer.cend();++it)
+        ownerLines<<QStringLiteral("%1 %2").arg(it.key()).arg(it.value());
+    writeLine(QStringLiteral("# image-audit: %1 names in %2 inventory rows: %3 decoded, %4 unresolved (%5 requested from a container that ships them elsewhere, %6 absent from every RCO, %7 decode failures); %8 migrated by a container-override rule")
+        .arg(total).arg(int(sizeof(kIconAuditRows)/sizeof(kIconAuditRows[0]))).arg(decoded).arg(total-decoded)
+        .arg(wrongContainer).arg(absent).arg(decodeFailed).arg(migrated));
+    writeLine(QStringLiteral("# image-audit: owner containers: %1").arg(ownerLines.join(", ")));
+    writeLine(QStringLiteral("# image-audit: note B15 - no firmware image: the analog clock face is drawn by vsh.elf (no RCO image object)"));
+    writeLine(QStringLiteral("# image-audit: note B16 - no firmware image: the in-player current-item dot has no mbox_* object"));
+    writeLine(QStringLiteral("# image-audit: note C5  - no firmware image: the avatar slot's image= is null (signed-in user data, not an RCO)"));
+    writeLine(QStringLiteral("# image-audit: note C10 - not an RCO image: the selected theme's .p3t info/icon goes through P3t, not Assets"));
+    writeLine(QStringLiteral("# image-audit: note C24 - same object as B3 (system_plugin:tex_msgdialog_bg_deep); counted once"));
+    const auto probe=[&](const QString& container,const QString& name) {
+        const QImage& source=assets.image(container,name);
+        const QImage& chosen=assets.bestImage(container,name);
+        const auto decision=assets.bestImageDecision(container,name);
+        QString gate;
+        if(decision.upgraded)
+            gate=QStringLiteral("pass->%1 %2x%3").arg(decision.container).arg(decision.width).arg(decision.height);
+        else if(decision.gateApplied)gate=QStringLiteral("reject(kept source)");
+        else if(!source.isNull() && std::max(source.width(),source.height())>=96)gate=QStringLiteral("n/a(source>=96px)");
+        else gate=QStringLiteral("n/a(no larger copy)");
+        writeLine(QStringLiteral("# image-audit: allow-list probe %1/%2 source=%3 chosen=%4 gate=%5 (%6)")
+            .arg(container,name,
+                 source.isNull()?QStringLiteral("undecoded"):QStringLiteral("%1x%2").arg(source.width()).arg(source.height()),
+                 chosen.isNull()?QStringLiteral("undecoded"):QStringLiteral("%1x%2").arg(chosen.width()).arg(chosen.height()),
+                 gate,decision.reason));
+    };
+    probe(QStringLiteral("xmb_plugin_normal"),QStringLiteral("tex_psn"));
+    probe(QStringLiteral("explore_plugin_full"),QStringLiteral("tex_video"));
+    probe(QStringLiteral("explore_plugin_full"),QStringLiteral("tex_photo"));
+    if(file.isOpen())file.close();
+    return 0;
+}
 }
 
 int main(int argc,char** argv) {
@@ -176,6 +351,7 @@ int main(int argc,char** argv) {
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
     parser.addOption({"rco-tree","Write the RCO object model (objects, animations, typed properties) of named containers (<name>[,<name>...][@file]; * = every vsh/resource RCO) and exit","spec"});
+    parser.addOption({"image-audit","Print the container resolution table for the ICON-GAP-AUDIT bucket B/C image inventory and exit ([file] instead of stdout is accepted as a positional argument)"});
     parser.addOption({"month-sheet","Write a local contact sheet of the qgl/lines month_bg day/night textures and exit","image-file"});
     parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
     parser.addOption({"decode-fp","Decode RSX fragment-program captures (archive:lib/x.fpo@dir) into named parameter values and exit","spec"});
@@ -608,6 +784,14 @@ int main(int argc,char** argv) {
             .arg(QString::number(double(cost.nanoseconds)/1e6,'f',2)).arg(total.elapsed()));
         if(out.isOpen())out.close();
         return failures?1:0;
+    }
+    if(parser.isSet("image-audit")) {
+        // Headless resolution table (audit/ICON-GAP-AUDIT.md section 9): every image name the B/C inventory
+        // names, the container that actually ships it, its decoded size and pixel count, the container the
+        // call site asked for, whether a container-override rule migrated it, and the bestImage gate result
+        // for the three allow-listed names. An optional positional argument writes the table to a file
+        // instead of stdout (a GUI-subsystem build has no console to print to).
+        return runImageAudit(assets,parser.positionalArguments().value(0));
     }
 
     if(parser.isSet("month-sheet")) { // local analysis only: firmware-derived pixels, keep out of Git
