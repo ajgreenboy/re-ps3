@@ -771,3 +771,239 @@ taken.
   published in the manifest).
 
 No source was edited for this section.
+
+---
+
+## 10. Phase 11.1 applied: the settings row sets (2026-10-27/28)
+
+Status: implemented in `src/settings_menu.{h,cpp}` and `src/xmbml_view.{h,cpp}`. The two `shell.cpp`
+hunks that install the resolved column are written out in 10.6 and were **not** applied in the
+repository (`shell.cpp`/`shell.h` belong to core); a scratch build outside the tree applied them and
+its evidence is 10.3. Scope: row sets, row order and label provenance only. No page-class, choice-list,
+cue or value-rendering change: `choices()`, `openChoices()` and `valueText()` are byte-identical to the
+previous revision.
+
+### 10.1 What the slice changed
+
+| file | change |
+|---|---|
+| `src/xmbml_view.h` | `XmbmlColumnRow` gains `child`, `chPos`, `foLbl2Alpha`, `barAction` and the `segment()`/`hasSecondLabel()` helpers; `resolveSegmentView()` is declared |
+| `src/xmbml_view.cpp` | the table lookup, table-field read and label/fallback resolution are factored into `tableFor`/`readTableAttributes`/`resolveRowLabels` and shared by both readers; `resolveSegmentView()` flattens a segment view one level (its child Queries' item rows, in the segment view's own order) |
+| `src/settings_menu.h` | new: declares `settingsColumnEntries(builtin, assets)` |
+| `src/settings_menu.cpp` | the Settings column resolver, the three segment pages, the firmware row tables for the one-level pages, the native-only row table, and the `<XMB_DUMP_ENTRIES>.settings-<page>.json` dump hook |
+
+The reader refactor is behaviour-preserving by construction (same code moved) and by evidence: the
+Network column still resolves to the same five rows with the same ids, titles and sources in the new
+build (`network/manual/Remote Play/Internet Browser/Internet Search/Download Management`).
+
+### 10.2 The Settings column: 16 rows, firmware order, two omitted
+
+`category_sysconf.xml`'s root view names `#seg_fixed_items` (one query, expanded to 18 tables), so the
+resolver walks 18 rows and keeps 16. From the hunked build's log:
+
+```
+xmbml: settings column omits edy ( the Japan-only Edy Viewer: the sysconf plugin gates it and this build has no page for it )
+xmbml: settings column omits console_qa ( Debug Settings: QA consoles only )
+xmbml: settings column resolved 16 rows from category_sysconf.xml (queries 1, expanded 1, sha256 2d286e4e1a30): listed 16, omitted 2, rco titles 18 in 3 ms
+```
+
+The 16 rows in order, with the definition's own detail (the `fo_lbl2_alpha` effect on the last three):
+
+```
+ id        title                     detail
+ update    System Update             Updates the system software on this system.
+ game      Game Settings             (none - child=segment, fo_lbl2_alpha=0)
+ video     Video Settings            Adjusts settings for video.
+ music     Music Settings            Adjusts settings for music.
+ chat      Chat Settings             Adjusts settings for chat.
+ system    System Settings           Adjusts settings for this PS3(TM) system.
+ theme     Theme Settings            Adjusts settings related to the appearance of the XMB(TM) screen.
+ date      Date and Time Settings    Adjusts date and time settings.
+ power     Power Save Settings       Adjusts settings to reduce power usage by this system.
+ device    Accessory Settings        (none - child=segment, fo_lbl2_alpha=0)
+ print     Printer Settings          Adjusts settings for printers that are connected to this system.
+ display   Display Settings          Adjusts settings for video output.
+ sound     Sound Settings            Adjusts settings for audio output.
+ security  Security Settings         Adjusts parental control settings.
+ remote    Remote Play Settings      Adjusts settings for remote play. ...
+ network   Network Settings          (none - child=segment, fo_lbl2_alpha=0)
+```
+
+Every row's `Entry::source` is now `rco`; before this change the field was empty for the whole column.
+The three folder rows keep `Action::SettingsPage` and their existing page values (`game`, `device`,
+`network`), which is what makes them open the segment pages in 10.4 without a new action.
+
+**D1 is half a row-set fix and half a rendering fix, and only the first half is applied.** Deleting the
+`qgl/icontex` normal-map pass, as D1 asks, is a visible regression with today's renderer: the RCO
+`tex_*` icons draw through `View::drawItemGlyph`'s white item-glyph material, while the frame's brass
+settings icon is the `icons.cpp` icon program, which addresses `qgl/icontex` by numeric id. Evidence:
+`out/native-settings-column-shadow/column-hunk.png` (the hunk without the material bridge: System Update
+is a white outline) against `out/native-settings-rows/after-settings-column.png` (the same row in brass).
+The resolver does put the definition's icon in `Entry::texture` and the dump reports it, so the data half
+is done; the material bridge (the numeric pass) stays, with a comment naming the missing hunk, until the
+icon program takes a named RCO texture (Phase 11.4/13).
+
+The info-line suppression is visible and measured: with the resolved column, focusing Game Settings
+leaves the row with no second line (`out/native-settings-column-shadow/column-game-focused.png`); the
+previous build prints "Adjusts settings for games." there
+(`out/native-settings-before/before-column-game-focused.png`).
+
+### 10.3 The three two-level pages
+
+`resolveSegmentView()` reads each segment view's child Queries in document order and then each group
+view's items. A row this build cannot act on is listed with the RCO's own explanation (the
+"list-unavailable" disposition), so the pages are the console's row sets.
+
+| page | rows (firmware order) | native action |
+|---|---|---|
+| Game Settings (`seg_game`) | `PSP(TM) Remaster - Screen Mode`, `... 3D Display`, `... Ad Hoc Mode Channel`, `... Ad Hoc Mode`, `PS - Upscaler`, `PS - Smoothing` (6) | all `Unavailable` (no PSP/PS2 emulation) |
+| Accessory Settings (`seg_device`) | `Calibrate Motion Controller`, `Reassign Controllers`, `Controller Vibration Function`, `Register BD Remote Control`, `Manage Bluetooth(R) Devices`, `Camera Device Settings`, `Audio Device Settings`, `Voice Changer`, `Keyboard Type`, `Keyboard Entry Method`, `Key Repeat Interval`, `Key Repeat Speed`, `Mouse Type`, `Pointer Speed` (14) | all `Unavailable` (the accessory stack is Windows/HID's) |
+| Network Settings (`seg_network`) | `Settings and Connection Status List`, `Internet Connection`, `Internet Connection Settings`, `Internet Connection Test`, `Media Server Connection` (5) | the status list is `Information` (the host's own report); the rest `Unavailable` |
+
+Logged left-outs (Accessory only): `pd_usbhdset_setting` (only exists with a Sony wireless stereo
+headset connected), `pd_keybind` (Japanese kana input only), and `pd_keyboard_input` a second time (the
+two keyboard-input groups are mutually exclusive, so it is listed once, from `seg_device_kbim_hantai`).
+
+Network is **five** rows, not four: the definition's fixed group is the four the brief counts (status
+list first), and `seg_network_dlnaconf` adds the conditional `Media Server Connection` that D10 moves
+here from System Settings. Dropping it would delete the row from both pages.
+
+### 10.4 The one-level pages
+
+Measured rows from the 2026-10-28 batch (9.2) are used where they exist; the rest are the RCO sub-page
+sets of 5.2-5.16. "Native-only" rows are marked in the code, in the page dump (`nativeOnly: true`) and
+here. `Video`/`Music` now carry the firmware rows **and** the three native media settings at the end.
+
+| page | rows | disposition |
+|---|---|---|
+| Theme | `Theme`, `Color`, `Background`, `Font` (4) | the four firmware rows bind their existing choice lists; `Select Theme` and `Select Wallpaper` stay as native-only rows at the end (D11): folding them into the Theme/Background rows needs the choice page class (11.3) |
+| Date and Time | `Date and Time`, `Set Automatically`, `Date Format`, `Time Format`, `Time Zone`, `Daylight Saving` (6) | added `Set Automatically` and `Daylight Saving` (D12); the three format rows keep their settings |
+| System | `System Language`, `System Name`, `Format Utility`, `Backup Utility`, `Restore Default Settings`, `Restore PS3(TM) System`, `Install Other OS`, `System Information`, `About PlayStation(R)3 (PS3(TM))` (9) | `Keyboard Type`/`Keyboard Entry Method` moved to Accessory (D9), `Media Server Connection` moved to Network (D10); the missing ~17 rows and the frame order are still D8 |
+| Sound | `Audio Output Settings`, `Audio Multi-Output`, `Key Tone` (3) | `System Volume`, `Mute`, `XMB Volume`, `XMB Mute` removed (D16); host/XMB volume is still on the media volume keys (`view.cpp` volume path), so nothing lost a function |
+| Display | `Video Output Settings`, `Screensaver`, `Cross Color Reduction Filter`, `RGB Full Range (HDMI)`, `Y Pb/Cb Pr/Cr Super-White (HDMI)`, `Deep Color Output (HDMI)` (6) | `TV Type` and `Full Screen` removed (D15); F11 still toggles fullscreen, so the row was not the only surface |
+| Security | `Change Password`, `BD - Parental Control`, `BD/DVD - Parental Control Region Code`, `DVD - Parental Control`, `Parental Control`, `Internet Browser Start Control` (6) | the 9.2 measured set; the four rows below the old single row are added (D17) |
+| Remote Play | `Register Device`, `Registered Device List`, `Custom Connection Settings`, `Remote Start`, `Audio Output Device` (5) | the 9.2 measured set (D18) |
+| Printer | `Printer Selection`, `Printer Manager` (2) | unchanged |
+| Power Save | `System Auto-Off`, `Controller Auto-Off` (2) | unchanged (D20's second level is still open) |
+| Chat | `Voice/Video Chat Start`, `Audio Device Settings`, `Camera Device Settings` (3) | unchanged |
+| Video | `BD - Menu Language`, `BD - Audio Language`, `BD - Subtitle Language`, `BD - Internet Connection`, `DVD - Menu Language`, `DVD - Audio Language`, `DVD - Subtitle Language` (7 measured) + `Repeat`, `Shuffle`, `Volume` (native-only) | the rows below the seventh are unmeasured (9.2 note 4) and are not invented; the three media settings stay at the end (D6 partly closed) |
+| Music | `Audio CD Import`, `Crossfade Playback`, `Output Frequency`, `Bitmapping`, `Dynamic Normalizer` (5 measured) + `Repeat`, `Shuffle`, `Volume` (native-only) | D7 partly closed |
+| System Update | unchanged (2 rows, `software_update_plugin`) | U8 still open |
+| Photo Settings | unchanged | the page is this build's own; the sysconf inventory has no photo page |
+
+No label is synthesised from the row id any more: every row names its `msg_*` key in a table
+(`RowSpec`), and the "msg_"+id helper is gone.
+
+### 10.5 Page dumps
+
+Every settings page opened in a scripted run writes `<XMB_DUMP_ENTRIES>.settings-<page>.json`: page id,
+title, the rows (id, title, detail, action, setting, value, texture, source, nativeOnly), the
+definition's own row records (`firmware`) and the logged left-outs (`skipped`). Row counts in
+`C:\dev\out\native-settings-rows`: column 16 (shadow build), game 6, device 14, network 5, theme 6,
+date 6, system 9, sound 3, display 6, security 6, remote 5, print 2, power 2, chat 3, video 10 (7 + 3),
+music 8 (5 + 3).
+
+### 10.6 The shell hunks (exact)
+
+`shell.cpp` needs two hunks and `shell.h` none. Both were compiled and captured in a scratch copy at
+`C:\dev\out\native-settings-column-shadow`; they are not applied in the repository.
+
+**Hunk 1 - the include**, after `#include "shell.h"`:
+
+```cpp
+#include "settings_menu.h"
+```
+
+**Hunk 2 - the column**, replacing the block that starts
+`// Bind the current native settings projection to original XMBML resource` and ends with the
+`normalMaps` loop (`shell.cpp` ~1062-1087), i.e. the old projection *and* the icon override:
+
+```cpp
+    // The Settings column is the firmware's own definition (Phase 11.1, audit/SETTINGS-FIRMWARE.md
+    // 1.1-1.2): category_sysconf.xml's root view names #seg_fixed_items, whose 18 tables give the
+    // column's rows in document order. The 16 rows a retail console shows keep that order, with the
+    // RCO's own title, info line and tex_* icon; edy and console_qa are omitted with a logged reason,
+    // and the three child=segment rows lose their second label line (fo_lbl2_alpha=0). The resolver
+    // keeps each id's native action, value and setting, so every page and theme icon still applies.
+    if(const auto rows=settingsColumnEntries(categories_[1].entries,assets_);!rows.isEmpty())
+        categories_[1].entries=rows;
+    else qWarning().noquote()<<"xmbml: settings column keeps its built-in rows";
+    // D1's remaining half is a rendering change, not a row-set one: Entry::texture now carries the
+    // definition's tex_* name (the resolver put it there and the entry dump reports it), but that path
+    // draws through View::drawItemGlyph's white item-glyph material, while the frame's brass settings
+    // icon is the icons.cpp icon program, which addresses qgl/icontex by numeric id. Until the icon
+    // program takes a named RCO texture (Phase 11.4 / 13), these ids keep the frame's material; the
+    // resolved names stay in the dump for that hunk. Deleting this pass today turns every Settings
+    // column icon into a white outline (captured in out/native-settings-column-shadow/column-hunk.png).
+    const QMap<QString,int> normalMaps{{"update",9},{"game",14},{"video",10},{"music",12},
+        {"system",13},{"theme",24},{"date",15},{"power",57},{"device",16},{"display",17},
+        {"sound",18},{"security",19},{"remote",21},{"network",20}};
+    for(auto& entry:categories_[1].entries)if(normalMaps.contains(entry.id)) {
+        entry.container="qgl/icontex";entry.texture=QString::number(normalMaps[entry.id])+"n";
+    }
+```
+
+The page push needs **no** hunk: the column rows already carry `Action::SettingsPage` with `game`,
+`device` and `network`, and `Shell::openSettings` (in `settings_menu.cpp`) now builds those three as the
+segment pages. `shell.h` is untouched.
+
+### 10.7 Verification
+
+Build: `& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-settings-rows` (clean at
+`/W4 /permissive- /utf-8`; no warning comes from `settings_menu.cpp` or `xmbml_view.cpp`). Binary
+`C:\dev\out\native-settings-rows\re-ps3-native.exe`, 3,518,464 bytes, 2026-10-27 22:35.
+
+Column dump: from the hunked shadow build (10.2); the deliverable's own column dump shows the same 16
+ids/titles/order with the old detail values, because the hunk is not applied in the repository.
+
+Page dumps: `<XMB_DUMP_ENTRIES>.settings-*` for column, game, device, network and the twelve one-level
+pages, opened one per scripted run (`--script "full,<waits>,LEFT x5,DOWN x n,ENTER,wait,grab=...,quit"`).
+
+Captures, clocks pinned at `--render-clock 30 --background-clock 2026-10-25T10:00:00 --ui-clock
+2026-10-25T12:32:00 --focus-time 2000`:
+
+- `out/native-settings-before/before-game-page2.png` - the previous build's Game Settings page: one row,
+  `Game/Other Features`, no detail.
+- `out/native-settings-rows/after-game-page.png` - the new page: six rows, the first
+  `PSP(TM) Remaster - Screen Mode` with the RCO's two-line explanation.
+- `out/native-settings-rows/after-device-page.png` - Accessory Settings, 14 rows, `Calibrate Motion
+  Controller` focused first.
+- `out/native-settings-rows/after-network-page.png` - Network Settings, 5 rows, `Settings and Connection
+  Status List` first and focused.
+- `out/native-settings-before/before-column-game-focused.png` and
+  `out/native-settings-column-shadow/column-game-focused.png` - the info line present/absent on the
+  Game Settings row (D3).
+- `out/native-settings-rows/after-settings-column.png` and
+  `out/native-settings-column-shadow/column-hunk.png` - the material difference described in 10.2.
+
+Gate: `bun work\ab-layers.ts --capture --exe C:/dev/out/native-settings-rows/re-ps3-native.exe` ->
+`PASS: 6/6 layers within budget` (frame 18.28/.8315, top background 20.25/.9363, category icon row
+20.92/.8990, item label row 11.91/.3918, clock text 11.35/.4102, info bar 14.73/.6100). No named state
+covers a settings page or the Settings column (`--list-states` has twelve states, all Game/Video/
+Network/root), so this slice cannot move a named state. `--states` was run for the record on the same
+build: `states: 1/12 pass`, and every failure is outside this slice - the stored self-baselines are stale
+against the icon material another session changed (frames 42-45 dB), the dialog state is the in-flight
+dialogs pass (14.28 dB), and the Jellyfin sign-in state now reports six rows instead of five (its
+`entryCount: expected 5, got 6` assertion, another session's page). Nothing was re-baselined.
+
+Capture note for future scripted runs: while the XMB owns the foreground, the DualSense attached to this
+machine reports a held D-pad up, and `View::pollController` turns that into a `vertical(-1)` every
+repeat tick (measured: 182 in one run), which cancels every scripted `DOWN`. Handing the foreground to
+the shell window with the Alt-key trick before the navigation tokens (`SetForegroundWindow` alone is
+refused by the foreground lock) makes navigation deterministic; the scripted keys still reach the view
+because `View::replayKeyTap` dispatches straight to `keyPressEvent`.
+
+### 10.8 Still open after this slice
+
+- **D1** material routing for a named RCO icon (10.2) - the one visible regression the hunk avoids.
+- **D6/D7** Video's rows below the seventh (unmeasured), and the `Repeat`/`Shuffle`/`Volume` native rows
+  that no longer have a firmware row of their own page.
+- **D8** System's missing rows and frame order; **D12** the Date and Time row's clock *value* (the
+  measured frame shows `27/10/2026 21:43` in the value column; this slice left the value alone).
+- **D13** the 110 firmware time zones (the list is still host IANA ids).
+- **D20** System Auto-Off's two-timer page; **D21** the settings row icon (`tex_sett` at 18/28 px needs
+  the `view.cpp` size hunk); **D22** the current-choice dot (needs 11.3's travelling plate to replace
+  it, otherwise the current choice would be unmarked); **D24** row pitch and focused-row expansion;
+  **D27-D29** confirm/apply/result pages and the commit cue.
+- The choice page class (11.3) - none of this slice binds a new choice list.
+

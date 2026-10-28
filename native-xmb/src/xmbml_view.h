@@ -128,7 +128,19 @@ struct XmbmlColumnRow {
     QString title,icon,detail;
     FieldSource titleSource=FieldSource::None,iconSource=FieldSource::None,detailSource=FieldSource::None;
     QString moduleName,moduleAction;
+    // The row's own <Table> attributes the settings pages are defined by (audit/SETTINGS-FIRMWARE.md
+    // 1.1): the firmware writes the three two-level folder rows as child=segment / ch_pos=1, and it
+    // suppresses their second label line with fo_lbl2_alpha=0. These are the strings verbatim, empty
+    // when the row's table has no such pair, so the caller decides what they mean.
+    QString child;        // "segment" on Game/Accessory/Network Settings
+    QString chPos;        // "1" on those three rows
+    QString foLbl2Alpha;  // "0": this row has no second label line (no native info line)
+    QString barAction;    // "none": the XMB bar itself does nothing on Cross, a plugin takes over
     bool hasTable=false;
+    bool segment() const { return child==QLatin1String("segment"); }
+    // The definition's second label line is drawn unless its alpha is exactly 0 (fo_lbl2_alpha=0);
+    // a row whose table says nothing keeps today's behaviour.
+    bool hasSecondLabel() const { return foLbl2Alpha!=QLatin1String("0"); }
     bool inGameOnly=false;  // sel://localhost/ingame: only the in-game XMB shows the row
     bool folder=false;      // the row opens another list (a child <Query>, or a folder class)
     bool dynamic=false;     // no local view: the provider produces the row's content at run time
@@ -169,6 +181,19 @@ using XmbmlTextResolver = std::function<QString(const QString& container,const Q
 // back with error set, which is the per-column fallback the caller keeps its built-in rows for.
 XmbmlResolvedColumn resolveCategoryColumn(const QString& category,const XmbmlTextResolver& text,
                                          const XmbmlResolveOptions& options=XmbmlResolveOptions{});
+
+// Resolve a *segment* view: Settings' seg_game, seg_device and seg_network are what the column's three
+// child=segment rows open, and their <Items> are child Queries naming the group views the page lists
+// (seg_game -> seg_game_fixed_upper|middle|lower, seg_device -> its six groups, seg_network ->
+// seg_network_fixed and seg_network_dlnaconf). The column reader deliberately stops at the folder row;
+// this is the one level below it: each group view's <Items> become rows, in the segment view's own item
+// order and then each group's item order, with the same table lookup, text resolution, fallbacks and id
+// aliasing the column reader uses. `queryKey` names the group ("seg_game_fixed_upper"), `viewId` is the
+// group view, and `segment()`/`hasSecondLabel()` carry that group's own table attributes.
+// A group whose view is absent or empty is counted in `skipped`, never invented.
+XmbmlResolvedColumn resolveSegmentView(const QString& category,const QString& viewId,
+                                       const XmbmlTextResolver& text,
+                                       const XmbmlResolveOptions& options=XmbmlResolveOptions{});
 
 // The absolute path resolveCategoryColumn used for `category` (for the caller's log line).
 QString categoryColumnPath(const QString& category,const XmbmlResolveOptions& options=XmbmlResolveOptions{});

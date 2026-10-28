@@ -1407,10 +1407,8 @@ void Shell::horizontal(int delta) {
 void Shell::vertical(int delta) {
     touch();
     if(mediaOpen_){if(photoOpen() && !photo_.isNull()){photoRotation_=(photoRotation_+delta*90+360)%360;showPhoto();}return;}
-    qWarning() << "DIAG vertical" << delta << "message" << !message_.isEmpty() << "kind" << int(messageKind_) << "loading" << loading_ << "sel" << selection() << "entries" << entries().size() << "cat" << category_;
     if(!message_.isEmpty() || loading_)return;
     const int previous=selection();currentSelection()=std::clamp(selection()+delta,0,std::max(0,int(entries().size())-1));
-    qWarning() << "DIAG vertical after" << selection();
     if(previous!=selection())interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
 }
 void Shell::activate() {
