@@ -1189,3 +1189,114 @@ conditional, Information last, no scroll, Down clamps. Sounds: four trusted cues
 guessed assignments unchanged, refused-row cue now reachable. Open timing: brief's "100 units" contradicts
 E2 and is not applied. Still open: the `BG1` rect, the text cap height/paddings, the nested-level box on
 screen, and the harness reference/log refresh that the view pass owes.
+
+---
+
+# G. Dated correction - 2026-10-28 capture batch 2: the menu clock, measured
+
+Evidence added after F was written: a second targeted RPCS3 batch on the same 4.93 XMB, one session in two
+boots, 1920x1080 (`C:\dev\out\rpcs3-ref2-2026-10-28\`, `MANIFEST.md`): 251 stills, 22,149 burst frames in
+19 bursts, crop bursts at 131-235 fps, **clock scale 100 %**. Nothing above is deleted; A6, A7, E1 and E2
+keep their 2026-10-27 text. Frame paths are relative to the capture root. This part answers A7 and E2
+(timing), corrects two of E1/E2's readings, and leaves A6's `BG1` rectangle where it was.
+
+## G1. A7/E2 superseded: the ~190 ms partial reading is now a measured ramp
+
+Both readings, because the second only makes sense against the first:
+
+| reading | evidence | what it said |
+|---|---|---|
+| **E2, 2026-10-27/28 (54.1 / 54.8 fps, full frame)** | `dialogs/options-open-burst2/f_0000692.png` is ~192 ms after the key and still at partial alpha; `options-close-burst2/f_0000610.png` is ~110 ms after the key and still partial | the open is **not** a ~100 ms fade (A7's inference is unsupported), the close is **not** an instant destroy. Exact durations stay open |
+| **batch 2, 2026-10-28 (135.2 / 175.9 fps, 1:1 crop)** | `menus/menu-open-crop2/` (432 f, 135.2 fps), `menus/menu-close-crop2/` (563 f, 175.9 fps), ROI 1520,300-1840,440 | open: **starts +115...150 ms** after the key, **ramps 245-255 ms**, at rest by **+360...410 ms**; close: **starts +9 ms**, **ramps 200 ms**, at rest by +215 ms |
+
+The second reading supersedes the first as a number and confirms it as a shape: E2's "still partial at
+~192 ms" lands inside the measured 115-150 + 245-255 window, and E2's "visible fade, not a destroy" is
+exactly the 200 ms close. The reason the batch-1 burst could not settle it is the rate - a full-frame
+`BitBlt` caps at 54-64 fps, so the ramp's start and end are both inside its sampling error. The crop bursts
+resolve it because they are 1:1 and never rescaled.
+
+What this does to A7 and to the code:
+
+- **A7's "the open should be about half the current duration [100 units]" is dead in both halves.** The
+  open is 360-410 ms to rest, i.e. **longer** than the native's 200 ms, not half of it. C1 item 8 (drop
+  `moveMilliseconds` to 100) must not be applied on any reading of this evidence.
+- **The native has no key-to-start latency.** The firmware waits 115-150 ms before the band begins to
+  move; the native starts on the same frame as the key (`optionsOpenEase_.retarget` at
+  `src/view.cpp:690`). That is a visible difference of about a fifth of a second and is not a duration
+  constant - it is a delay the animation model does not have.
+- **The close is a fade, not a page destroy.** A7's second half ("closing is a destroy, not an animation")
+  stays contradicted, now with a duration: 9 ms late, 200 ms ramp.
+- **`moveMilliseconds` = 200 ms is right for the close and about 150-200 ms short for the open.** If the
+  two edges must share one constant, 350 ms fits the open (115 start + 245 ramp) and overruns the close by
+  150 ms; the honest implementation has two timings, which is a view change, not a constant change.
+
+## G2. The band's endpoints, and two corrections to E1/E2
+
+**Endpoints** (re-measured on the settled still, cross-checked against batch 1's frame):
+
+| quantity | value | frame |
+|---|---|---|
+| left edge | **x = 1330**: the fill begins there (33-34 luma at y 100), with the bright 1 px step at the same x as the info-bar plate's left edge (1329) | `menus/game-menu-open-check.png` |
+| profile at y 100 | 67 @1330 (edge), 47 @1340, 55 @1400, 43 @1500, 26 @1600, 5 @1680, 3 @1690, 2 @1700, 0 @1900 | same |
+| profile at y 30 | 45 @1340, 53 @1400, 42 @1500, 25 @1600, 5 @1680, 3 @1690, 2 @1700, 0 @1900 | same |
+| geometric zero | **about 1690-1700**; nothing measurable right of 1750 | same |
+| vertical extent | full height, y 0-1079 | same |
+| batch-1 cross-check | `dialogs/options-open-01.png` at y 30: 15 / 36 / 50 / 59 / 46 / 27 / 5 / 3 / 2 / 0 at the same x samples | within 2 luma of the batch-2 frame |
+
+So E1's "left edge ~1330, fading out by ~1690" is confirmed independently, and 1330..1690-1700 is the
+band's span. F6's hunk (`x0=1330`, `1690` fade end) is right on both ends.
+
+Two corrections:
+
+- **`menus/game-menu-rest.png` is not the menu at rest.** It scans as the **closed** state: luma <=1 at
+  x 1340-1900 on y 30 / 100 / 300, an identical profile to `menus/game-menu-closed-check.png`. The settled
+  menu is **`menus/game-menu-open-check.png`** (55 luma at x 1400 on y 100). The frame worth citing for
+  E1's numbers from this batch is therefore the `-open-check` still, not the `-rest` one; the numbers
+  themselves are unaffected.
+- **E2's row-set claim is wrong in one direction.** E2 said the mid-alpha frame shows `Sort By` and
+  `Group Content` "which the settled frame does not", and read that as the fade compositing more than the
+  final row set. Both settled frames carry five rows: batch 2's `game-menu-open-check.png` has ink bands
+  301-323 and 341-362 (`Sort By`, `Group Content`) plus 539-560, 581-598, 621-638 (`Start`, `Delete`,
+  `Information`), and **batch 1's own `dialogs/options-open-01.png` has the same five bands**
+  (301-318, 341-358, 539-560, 581-598, 621-638, re-measured). The settled menu has two groups separated by
+  a gap, not three rows; what changes during the fade is contrast, not the row set. This agrees with
+  `MANIFEST` section 4.3 ("a gap, then `Start`, `Delete`, `Information`").
+
+**Row pitch, stated with its uncertainty.** Ink tops are 539 / 581 / 621 for the action group - steps of 42
+and 40 - and the ink bottoms are 560 / 598 / 638 - steps of 38 and 40. E1's 38 and the batch's 38 both sit
+inside that window. The honest value is **40 +/- 2 px**, with the two batches bracketing it; a 1 px claim
+is not supported by these frames, and cap-height differences between rows move the ink tops more than the
+baselines move. F6's `560 + 38*i` is inside the bracket.
+
+## G3. The row dims before the plate
+
+New, and it is a drawing rule rather than a timing number: on close the row **ink** drops below luma 180
+**within one frame (<9 ms at 176 fps)**, while the **plate** keeps fading for the following ~200 ms
+(`menus/menu-close-crop2/`). Text and band are therefore not one alpha channel in the firmware.
+
+What that means for C1 and F6: F6's hunk draws text and band from the same `alpha` (the label colour is
+`255*(.78+.22*focus)` and the band's `fillRect` both ride the panel's alpha). Reproducing the measured
+behaviour needs the text to snap to dim on the first frame of a close and the band to keep its ramp - i.e.
+a second alpha for the text, or the same rule the settings rows show (text brightness is its own channel).
+No hunk is written here for it; it is recorded because it is now measured rather than assumed.
+
+## G4. What batch 2 does to E1's still-unmeasured list
+
+| E1 item | after batch 2 |
+|---|---|
+| the `BG1` highlight rectangle inside the band | **still unmeasured**. The batch measures the plate on the XMB *column* (`error/column-corrupted-focused.png`, x 405-731, y about 420-560, `GEOMETRY-ROOT.md` 10.1) and shows that a focused *settings* row has no filled rectangle at all (`SETTINGS-FIRMWARE.md` 12.6) - but no frame isolates a plate inside this band |
+| text cap height and row paddings | still open; the ink bands are measured, the glyph height is not |
+| the panel's top/bottom | answered as "full height" (G2) - there is no box edge |
+| Down x4 clamp | unchanged from E1 |
+| nested-level box on screen | still no frame; `Sort By` / `Group Content` are rows of level 0, not an open level 1 |
+
+## G5. Still open after batch 2
+
+- The `BG1` rectangle inside the band (G4).
+- The text cap height, row paddings and the exact 38-vs-40 pitch (G2).
+- The nested menu level's on-screen box.
+- Cue audio for open, move, confirm and close: still no audio channel (`MANIFEST` section 5 no. 6). A8's
+  cue table is unchanged and still rests on the RCO label names plus the traced `snd_*` call sites.
+- The harness reference/log refresh that F7 owes (unchanged; no source was edited by this part).
+
+No source, threshold or reference was touched for this section.

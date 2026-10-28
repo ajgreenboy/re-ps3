@@ -1001,3 +1001,64 @@ window open; the analysis would then be the same `motion-track.ts` / `region-lum
 category band, with the frame count as the discriminator.
 
 No source, threshold or reference was touched by this section.
+
+---
+
+# PAGE-MOVE dated note 2 - 2026-10-28 capture batch 2: do the high-frame-rate bursts bear on the composite question?
+
+The second targeted batch (`C:\dev\out\rpcs3-ref2-2026-10-28\`, `MANIFEST.md`) is the one that answered the
+*instrument* half of batch 1's objection. It has 22,149 burst frames in 19 bursts, and the new capability is
+**1:1 crop bursts at 130.2-234.9 fps** with per-frame millisecond timestamps, at clock scale 100 % - against
+batch 1's 54.1-54.8 fps full-frame ceiling. The manifest names fifteen of the nineteen bursts; by kind:
+
+| kind | bursts (named in `MANIFEST.md` 4.1-4.4) | what moves |
+|---|---|---|
+| message / error pages | `error/launch-burst/`, `corrupt-launch-burst/`, `update2-launch-burst/`, `update-via-internet-burst/`, `ictest2-burst/`, `ictest3-burst/`, `ictest5-fail/` (234.9 fps) | a text fade and a page cross-fade |
+| menu and band fades | `menus/menu-open-crop2/`, `menu-close-crop2/`, `menu-open-crop/`, `menu-close-crop/`, `bands/theme-band-open2/`, `theme-band-close2/`, `screensaver-band-close/` | a band's alpha |
+| a focus move | `bands/bg1-focus-move/` (602 f, 143.5 fps, crop `450,380,1000,650`, Down at 901 and 2503 ms) | a row's focus between two settings rows |
+
+**They still do not bear on the composite question.** Four reasons, each checkable:
+
+1. **No burst crosses a page boundary.** Every burst above is an overlay, a message page or a focus move.
+   The transition this document is about - a category page opening (the 262 px bar recede plus the item
+   move) - is not in any of them. The batch's page evidence is stills (`depth2/*`, `nav/*`, `nav2/*`),
+   which cannot time anything.
+2. **Wrong channel.** The tracked quantity is band alpha (the ROI luma ramps in `menus/*-crop2`) and, in
+   `bg1-focus-move`, a row's focus. Section 7's composite question is whether the captured 18-step screen
+   motion is the 12-frame item move plus the ~29-frame distance/brightness channel. An alpha fade and a
+   single focus step carry neither of those two channels, so they cannot separate them.
+3. **Still no `_Eye` decode.** Section 7's closing condition is "one frame-indexed burst that decodes `_Eye`
+   as well as screen x". This batch is PNGs plus `frames.csv` (ms, file), no `XMB_FP_DUMP` window - the
+   cheap half of the record is there, the decoded half is not.
+4. **The crops exclude the discriminating region by construction.** The three crop rects are
+   `1150,150,770,700`, `620,450,740,170` and `450,380,1000,650`. The first two start at y 150 / y 450 and
+   cover 740-770 px of width; the third starts at y 380. **None covers the category bar at y about 120, and
+   none is full width**, so the 262 px recede - the channel that would decide reading 1 - is outside all of
+   them. Only `bg1-focus-move`'s rect even contains the item rows, and its motion is a focus step.
+
+**What the batch does change is the instrument, and that is worth recording here.**
+
+- Batch 1's note item 4 ("the rate is only just enough, and untested for this surface") is **retired**: a
+  crop burst now runs at 2-4x a 60 Hz animation's frame rate, 1:1, with the clock at 100 %, so a page move
+  would present 2-4 samples per rendered frame instead of under one.
+- `bands/bg1-focus-move/` is the project's first **timestamped screen-space row-transition record** (602
+  frames, 143.5 fps, focus moving between `Theme Settings` and `Date and Time Settings` at 901-972 ms). It
+  proves the rig can resolve a per-frame row move, which is the same measurement class the page-move
+  x-channel needs. It does not answer the composite question, because a 40/80 px row step is not a 262 px
+  bar recede plus an item move.
+- The threaded-key runner is proven at 235 fps across a key press (`error/ictest5-fail/`), which is exactly
+  what batch 1's pre-thread runner failed at (`menus/menu-open-crop/` vs `menu-open-crop2/`: the key hold
+  gapped the capture loop at 175.7 fps and the crop2 run holds 135.2 fps continuously). A page-move burst no
+  longer needs a workaround for that.
+
+**The burst that would settle it** is now cheap to specify: park on a category, open `XMB_FP_DUMP`, press
+Cross at 500 ms, and capture **full width** - ideally two crops, the category bar (`0,60,1920,160`) and the
+item column (`300,380,700,700`) - at 130 fps or better, for both an open and a close. The discriminator is
+the count of distinct samples in the bar's x (or in `_Eye.z`), not the alpha.
+
+**Effect on this document:** none. Section 7's conclusion stands unchanged - the bar re-layout is traced at
+200 ms mode 5, the 139.7 fps capture counted 18 steps (300 ms at 60 Hz), and the conflict is resolved only
+by reading 1 (a composite of the 12-frame item move and the slower bar recede) or by a page-move path
+outside the traced code. This batch supplies no page-move burst, so nothing here moves.
+
+No source, threshold or reference was touched by this section.
