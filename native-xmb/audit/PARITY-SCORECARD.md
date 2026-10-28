@@ -1603,3 +1603,33 @@ Data, the app holds Steam rows - so it remains a labelled partial comparison, bu
 A fresh Tier B run on a **text-bearing** build is required before any score is quoted: the batch that filled
 these cells was measured against a build whose glyphs were missing, so its text-region numbers are structural
 only (see the harness text-presence guard added the same day).
+## 15. First scorecard on a text-bearing build with the matched corpus (2026-10-28 06:26Z)
+
+Run `run-20261028-011604`, scorecard `scorecard-20261028-012659`, executable
+`native-bands2/re-ps3-native.exe` sha256 `94e57264…c29c54`. This is the first Tier B run where the harness
+proves the frame contains text (the clock-ink guard added the same day) and where the references carry the same
+clock, theme and preset the app renders.
+
+**Tier A: 35/35 capturable states PASS** - every reachable state's dump, sidecar and log oracles hold, including
+the six routes that failed on the 2026-10-27 scorecard because of the live-pad `DOWN` defect.
+
+**Tier B: 0/35 pass, 22 states measured, 13 without a reference.** The numbers are now genuine comparisons
+rather than pin mismatches:
+
+| state class | example frame | example worst region | budget |
+|---|---|---|---|
+| icon-heavy column | 17.6-19.0 dB / 0.83-0.86 SSIM | category icon row 20.7-21.7 / 0.92-0.94 (often passing) | 20.0 / 0.90 |
+| text-heavy page | 18.0-18.8 dB / 0.84-0.86 | page rows 15.9 / 0.72 | 18.0 / 0.85 |
+| composite band | 17.6-18.6 dB / 0.83-0.87 | band rows 15.8-17.2 / 0.51-0.74 | 18.0 / 0.88 |
+
+The pattern is consistent and actionable: **whole-frame scores are near the budgets (most within 1-2 dB and
+0.02-0.05 SSIM), the per-region failures are concentrated in the row/list geometry and in the band's text rows**,
+which is the console's item layout around the icon band versus the native column's stacked rows
+(SCORECARD 11.4-11.5), not a texture or material gap. `osk` passes its frame (25.95/0.8856) and fails only its
+panel region (21.18/0.7695); `options-panel` fails its panel region (19.46/0.8324) because the console route on
+this rig differs from the native route.
+
+Tier C is 9/35: the states whose route has no scripted transition are `n/a` by construction, not failures.
+
+Nothing was re-budgeted to make a cell pass: the provisional budgets of section 6 stand. The next fidelity work
+is the row/list geometry the region numbers point at, not a budget change.
