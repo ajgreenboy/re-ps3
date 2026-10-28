@@ -2048,3 +2048,277 @@ text-renderer pass to refresh.
   wiring the row to the firmware list is the 11.7d slice.
 - The band's row text size, the per-list origin and the dim factor stay as 13.3/13.7 left them; this pass
   draws nothing.
+
+---
+
+## 15. Dated measurement pass - 2026-10-28: what sets the band's left edge, its row origin, its type size, and the dim
+
+Read-only pass on the two existing firmware batches, no new capture, no RPCS3 run, no source edit. It closes
+four of the seven items on 12.8/13.7's list with numbers, and states which one is not closable from local
+artifacts.
+
+Tooling (helpers outside the repo, `C:\dev\work\`): `m.py` (RGB -> Rec.709 luma, then column/row mean
+profiles and ink-run detection), `align.py` (two frames' profiles aligned on a chosen x), `dim.py` (a
+two-frame luma ratio over a fixed ROI with a threshold mask), `series.py` (a fixed ROI across a burst of
+crop frames, using each burst's own `rect.txt` origin). Python is the bundled runtime
+(`C:\Users\Albert\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe`, Pillow 12.3.0).
+Frame paths are relative to `C:\dev\out\rpcs3-ref2-2026-10-28\` (`b2`) or `C:\dev\out\rpcs3-ref-2026-10-28\`
+(`b1`); every image is 1920x1080.
+
+### 15.1 The left edge is per page, and the page's RCO structure splits it exactly
+
+Command (per frame): `m.py profx <frame> 1200 1420 95 105 3` - the 10-row mean luma per column at y 95..105,
+where the page behind is black, so the first lit column is the band's own edge. The border is a 1 px step in
+every frame (background 0.0-0.7 luma, then 14-15, then 31-34).
+
+| list (parent page) | items | left border x | frame |
+|---|---:|---|---|
+| Screensaver (Display) | 5 | **1260-1261** | `bands/screensaver-band-rest.png` |
+| Screensaver (Display), second session | 5 | **1260-1261** | `b1/settings/screensaver-list-rest.png` |
+| Date Format (Date and Time) | 3 | **1260-1261** | `b1/settings/dateformat-list-rest.png` |
+| Time Format (Date and Time) | 2 | **1260-1261** | `b1/settings/timeformat-list-rest.png` |
+| Theme (Theme) | 4 | **1324-1325** | `lists/theme-list-rest.png` |
+| Theme (Theme), second session | 4 | **1324-1325** | `b1/settings/theme-choice.png` |
+| Background (Theme) | 4 rows | **1324-1325** | `lists/background-list-rest.png` |
+| Background (Theme), second session | 4 rows | **1324-1325** | `b1/settings/background-choice.png` |
+| Font (Theme) | 3 | **1324-1325** | `lists/font-list-rest.png` |
+| Font (Theme), second session | 3 | **1324-1325** | `b1/settings/font-choice.png` |
+| Color (Theme) | 12 chips | **1324-1325** | `lists/color-list-rest.png` |
+| Color (Theme), second session | 12 chips | **1324-1325** | `b1/settings/color-choice.png` |
+| Options menu (Triangle) | 3-5 rows | **1320** (b1 and b2) | `b1/dialogs/options-open-01.png`, `menus/game-menu-open-check.png` |
+
+So the item menu's band is 4 px left of the Theme family's, not 6 px right of it: 10.3's 1330 was measured
+on `menus/game-menu-open-check.png` with the fill threshold, and the 1 px border of that frame is at 1320
+(0.0 -> 14.1 -> 31.2 at 1319-1321, fill 50.2 by 1344). `menus/game-menu-rest.png` is a mid-close frame (only
+a 1 px edge at 1329 survives, peak 89) and must not be used as a rest measurement.
+
+**The two values are one shape, translated.** `align.py` on `bands/screensaver-band-rest.png` at x0 1260
+against `lists/theme-list-rest.png` at x0 1324, y 90..110:
+
+| k (px from the border) | 0 | 30 | 60 | 90 | 120 | 180 | 240 | 300 | 360 | 420 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Screensaver luma | 14.1 | 52.3 | 56.1 | 54.3 | 51.0 | 43.2 | 34.2 | 20.1 | 4.1 | 1.0 |
+| Theme luma | 14.6 | 53.3 | 56.6 | 54.8 | 51.5 | 43.6 | 34.7 | 20.6 | 5.0 | 1.2 |
+| delta | -0.5 | -0.9 | -0.5 | -0.6 | -0.4 | -0.3 | -0.5 | -0.5 | -1.0 | -0.2 |
+
+The whole 420 px profile, the gradient peak (56.1/56.6 at k 60) and the geometric zero agree within 1 luma
+after a **64 px** shift. So the band is one authored shape whose left border is a per-page constant; the
+right-hand fade is not independent data.
+
+**What the frames rule out** (all with more than two samples):
+
+- **Item count.** 5, 3 and 2 items all sit at 1260; 3, 4 and 12 items all sit at 1324. Count does not move it.
+- **Row text extent / content width.** The two bands are the same profile under a pure translation while
+  their longest labels differ by ~40 px ("After 20 Minutes" 1275-1450 vs "Classic"/"Air Paint" 1340-1417).
+  A content-sized band would change width; this one does not.
+- **The parent page's value column.** It is at x 1295-1301 on both pages (`m.py inkcol` on
+  `bands/theme-page-ready.png` and `bands/display-page-rest.png`), so it cannot explain a 64 px difference.
+- **Scroll position or focus index.** See 15.2: the rows never move with focus.
+- **The session's theme or wallpaper.** Same session, same background: Screensaver 1260, Theme 1324.
+
+**What it does correlate with, 1:1 and without exception: the page object's own child list in
+`sysconf_plugin.rco`.**
+
+| page object | children in the RCO | band x |
+|---|---|---|
+| `page_display_config_screensaverstartup` | `plane_*` + `_BG0` + `_BG1` + `_LowerMenu` + 5 `MItem` | 1260 |
+| `page_date_time_config_date_format` | same shape, 3 `MItem` | 1260 |
+| `page_date_time_config_time_format` | same shape, 2 `MItem` | 1260 |
+| `page_theme_config_theme` | **none** - the page entry has no children at all | 1324 |
+| `page_theme_config_color` | **none** | 1324 |
+| `page_theme_config_background` | **none** | 1324 |
+| `page_theme_config_font` | **none** | 1324 |
+
+(`C:\dev\out\rco-dump\sysconf.txt`, `page_theme_config*` at lines 844-849, `page_display_config_screensaverstartup`
+at 1178-1184, `page_date_time_config_date_format` at 869.) The four Theme pages ship as empty pages because
+their lists are runtime data (colours, wallpapers, fonts, installed themes), which is why 11.7b could not
+build them from RCO labels; the band for them is built by a different path and carries a different anchor.
+
+**Where the number is not.** It is not authored data that can be read: a scan of all 2247 objects in
+`sysconf.txt` for any non-zero `posX`/`posY` returns **zero hits** (`Select-String -Pattern 'posX=(-?[1-9]|-)'`).
+Every page, plane and MList in that container carries `posX=0 posY=0 width=0 height=0`, and the MLists'
+`unknown29/unknown30` pair is 0x37f/0x380 on 123 of them - including every Display and Date-and-Time choice
+page checked - so no field distinguishes a 1260 page from a 1324 page.
+
+**Proven:** the band is one fixed shape; its left border takes exactly two values inside `sysconf_plugin`
+(1260-1261 and 1324-1325), and the split follows the page's RCO structure with no exception over 7 lists and
+2 sessions. **Not proven, and not provable locally:** which code path computes it. There is no
+`sysconf_plugin.prx` decompile in the tree (`out/native-reference/` holds `explore_plugin_all.c`,
+`xmb_plugin_all.c` and `paf-range.c` only), so the step from "empty page object" to "1324" is unmeasured.
+The missing artifact is a `sysconf_plugin.prx` decompile of the choice-page open path (the function that
+creates the page and places its list), or a band capture on a *structured* page whose list is built at run
+time for another reason. Until then 15.1's rule is a classification, not a derivation, and 11.8's
+`x0 = 1260` stays correct for the Display/Date-and-Time pages only.
+
+### 15.2 The row origin is per list; the rows never move
+
+Command (per frame): `m.py inkrow <frame> <textLeft> <textLeft+30> 200 1000 140` - the ink runs of the
+first glyph of each row, in a 30 px window at the row's own text column (1276 for a 1260 band, 1341 for a
+1324 band). Text peak is 229 (unfocused) / 255 (the current row, which carries a glow); the band fill is
+< 60 and the dimmed parent page behind the band is below 140 in this window, so the runs are rows.
+
+| list | rows (ink tops, px) | pitch | first row | current row | frame |
+|---|---|---|---:|---:|---|
+| Screensaver | 418, 458, **498**, 538, 578 | 40 | 418 | 498 | `bands/screensaver-band-rest.png` |
+| Screensaver, b1 | 418, 458, **498**, 538, 578 | 40 | 418 | 498 | `b1/settings/screensaver-list-rest.png` |
+| Date Format | 458, **498**, 538 | 40 | 458 | 498 | `b1/settings/dateformat-list-rest.png` |
+| Time Format | 458, **498** | 40 | 458 | 498 | `b1/settings/timeformat-list-rest.png` |
+| Font | **498**, 538, 578 | 40 | 498 | 498 | `lists/font-list-rest.png` |
+| Theme | 261, **501**, 541, 581 | 40 | 261 (`Install`) | 501 (`Original`) | `lists/theme-list-rest.png` |
+| Background | 381, **541**, 581, 621 | 40 | 381 (`Brightness`) | 541 (`Original`) | `lists/background-list-rest.png` |
+| Color | label line 494-523, chips 531, 571, 611, ... 931 | 40 | 531 | 531 | `lists/color-list-rest.png` |
+
+Corrections and answers:
+
+- **Not a scroll offset.** The list is a fixed grid and the focus plate travels: `lists/background-list-down1`
+  through `-down9` all show rows at 381/541/581/621 (`m.py inkrow ... 1341 1371`), and the highlight moves
+  541 -> 579 -> 619 and clamps at `Wallpaper`; `lists/theme-list-down1` through `-down6` all show
+  261/501/541/577-581. No row moves by even 1 px across nine focus steps.
+- **Not a heading offset.** No heading is drawn in any band. The Theme list's `Install` and the Background
+  list's `Brightness` are **rows** on the same 40 px grid (both carry the right-hand chevron of a submenu
+  row), separated from the value block by a whole number of pitches: **6 x 40 = 240 px** (261 -> 501) for
+  Theme, **4 x 40 = 160 px** (381 -> 541) for Background. 12.4e's "~233 px" and "~43 px" are the same two
+  gaps measured off the *glow-inclusive* tops of the current row (494 and 537); the grid gaps are 240 and
+  40 px.
+- **A current-value label line exists on exactly one list.** Color draws the current value above the column
+  (ink 494..523, reading `Original`, which does not follow focus) and starts its chips at 531. No other
+  captured list draws one, so it is not the general origin rule.
+- **The origin is per-list authored spacing.** Six different origins (418, 458, 498, 261/501, 381/541,
+  531). Five of the seven lists put the *current* row's ink top at 498-501, which is why 11.8's
+  `first = 505-(rows-1)*20` looked right; the Background list breaks it by exactly one pitch (541) and the
+  Color list by 33. A single formula cannot reproduce the set, and the frames contain nothing that varies
+  with the 43 px - the difference is between two lists of the *same page*, same item count (4 rows) and
+  same submenu-row shape.
+
+**Proven:** rows are a per-list fixed grid at a 40 px pitch, no heading, no scroll, no single origin.
+**Open:** what places the grid (a per-list authored y in the plugin's own table, or a computation over the
+row count). Missing artifact: the same `sysconf_plugin.prx` decompile as 15.1, or a capture of a list whose
+length is just past the band's capacity so that the vertical centring rule would reveal itself.
+
+**Consequence for the tree's current parameter sets.** `src/view.cpp` now carries the per-list origins this
+section measures (`kThemeBand` `rowCentre=505` with `groupGap=239`, `groupBreakRow=1`; the Background set
+`rowCentre=548`). Two of the three numbers below are off, and the anchor itself is fine:
+
+| parameter | tree | measured | basis |
+|---|---:|---:|---|
+| Theme value block -> Background value block | 548 - 505 = **43** | **40** (exactly one pitch: 501 -> 541) | both lists' non-focused rows share one 40 px grid phase: `Install` 261 and `Brightness` 381 are both 21 mod 40, and Theme's 541/581 and Background's 581/621 agree exactly, so a one-pitch difference cannot be 43 |
+| `groupGap` (Theme's submenu row to the value block) | 239 | **240** (6 x 40, 261 -> 501) | `lists/theme-list-rest.png` |
+| `rowCentre` (the band's row anchor) | 505 | the current row's cap centre measures 506.5 (Screensaver, ink 498..515) and 507.5 (Font, ink 498..517), so the anchor is within ~2 px | `bands/screensaver-band-rest.png`, `lists/font-list-rest.png` |
+
+So the pitch and the group gap are confirmed by the frames, and the Theme/Background offset should be **545**,
+not 548, if `rowCentre` is kept as the em-box centre. The one number the frames cannot explain is the 3 px
+phase between the two page families' grids (Display/Date-and-Time ink tops are 18 mod 40, the Theme
+family's 21 mod 40): it is either an authored per-page y or a metric difference between the two drawing
+paths, and it is what makes the Display band's first row land at 418 and the Theme band's at 381.
+
+### 15.3 The band row's type size: cap 18 px, em about 24 px, and no RCO style selects it
+
+Command: `m.py inkrow <frame> 1276 1300 570 600 120` (and the same on the Theme band at x 1341).
+
+| quantity | value | frame |
+|---|---|---|
+| cap height | **18 px** (`Do Not Use`, D at 578..595; `Classic`, C at 541..558; `After 5 Minutes`, A at 418..435) | `bands/screensaver-band-rest.png`, `lists/theme-list-rest.png` |
+| ascender height | 18 px (`Classic`, 'l' cap-to-baseline; the face's ascender and cap are equal here) | `lists/theme-list-rest.png` |
+| ink width, `After 5 Minutes` | **176 px** (1275..1450, 16 chars) -> 11.0 px/char | `bands/screensaver-band-rest.png` |
+| ink width, `After 10 Minutes` | 192 px (1275..1466) | same |
+| ink width, `Do Not Use` | 130 px (1277..1406, 10 chars) -> 13.0 px/char | same |
+| ink width, `Classic` | 78 px (1340..1417, 7 chars) -> 11.1 px/char | `lists/theme-list-rest.png` |
+| inter-word ink gap | 11-12 px (o->N at 1306..1318, t->U at 1355..1366) | same |
+
+Two independent size estimates agree on **about 24 px em**: the inter-word gap plus the bearings puts the
+space advance at 12-13 px, and the firmware's own space is 13.4 px at 27 px (`audit/TEXT-RENDERER.md` 5,
+PAF 26.6 advance), giving em 24-26; the 16-character string sums to about 7.3 em in the face's own
+advances, giving em 24.1 from 176 px. Cap/em is then 0.75, which is a normal cap ratio. So the band row is
+**em ~24 px, cap 18 px**, and the native's 23 px (`SETTINGS 3.2`, `13.3`) is about 1 px small - its cap
+lands at ~16.6 px and `After 5 Minutes` comes out ~8 px short.
+
+**No RCO text style matches, because no style is attached to a band row at all.** A choice page's rows are
+`MItem` objects and an `MItem` carries only a text reference:
+
+```
+MItem item_display_config_5min @625552 +24B text=text#882:msg_5min="After 5 Minutes" altText=null
+```
+
+(`C:\dev\out\rco-dump\sysconf.txt:1183`; the whole row block is 1183-1187.) There is no font, size, colour,
+spacing or shadow field on it.
+The only named list-text material in the local tree is `Text fullkey_list_text`
+(`oskfullkeypanel_plugin`, `+232B`), and it carries the *same* block as every other Text object:
+`size=10 topRed=1 ... shadowX=4 shadowY=-5 shadowRed=0.25` - identical to the 1304-of-1305 default
+recorded in `src/text_renderer.cpp:855`. So the RCO cannot distinguish a "fullkey list" style from a menu
+style: **the band row's px size is a module constant, not authored data**, and the number to reproduce is
+15.3's em 24 / cap 18.
+
+**The repository's own raster, measured.** The built tree's text self-check runs headlessly and prints the
+raster's advance at every UI size:
+
+```
+XMB_TEXT_CHECK=1 re-ps3-native.exe --dev-flash C:\dev\rpcs3\bin\dev_flash --measure-reference <out>
+text check: PASS metric-size-27 "Game Data Utility"  PAF 234.92 px vs shaped 234.84 px
+text check: PASS metric-size-23 "Display All"        PAF 119.55 px vs shaped 119.42 px
+text check: PASS metric-size-22 "System Information" PAF 211.44 px vs shaped 211.28 px
+text check: PASS metric-size-19 "Sort By"            PAF  69.73 px vs shaped  69.66 px
+text check: PASS metric-size-16 "This build cannot play it" PAF 191.13 px vs shaped 191.05 px
+```
+
+(binary `out/native-textrevert/re-ps3-native.exe`, 2026-10-27 23:58; the PAF column is the firmware's
+unhinted 26.6 advance sum, so this is the raster's advance *authority*, not Qt's). At 23 px it shapes
+10.87 px/char on an 11-character string, against the firmware band's 11.0 px/char on `After 5 Minutes` - the
+same order, which is why 23 px looked plausible, but it is not a same-string check. **That check is still
+missing:** the self-check samples a fixed string list (no arbitrary string), and every band-capable build
+after 2026-10-27 11:58 renders no glyphs - `out/native-band/cap/band-screensaver.png` has **zero ink above
+120 luma** anywhere in the band's row region, which is the glyphless-tree regression H6/H5 already record.
+The missing artifact is a text-bearing build of the current tree (band code plus a working compositor), or a
+one-line mode that shapes an arbitrary string.
+
+### 15.4 The dim: one alpha, about 0.40, and the spread is capture timing
+
+Command: `m.py mean <frame> <labelX0> <labelX1> 490 524` for the luma peak of the parent page's surviving
+row, and the same on `1020 1200 490 524` for the background behind it; `dim.py` for the masked ratios.
+When a band is up, the parent page keeps exactly one row - the one that was activated, at its old y - and
+that row's **label and description** stay while its **value is suppressed** (max luma 2.9 at x 1290..1322
+against 255 in the closed frame, on all four Theme lists).
+
+| sample (band over page) | label peak | /255 | background patch mean | frame |
+|---|---:|---:|---:|---|
+| Screensaver over Display, b2 | **104.0** | **0.408** | 2.5 | `bands/screensaver-band-rest.png` |
+| Date Format over Date and Time, b1 | **103.1** | **0.404** | 1.5 | `b1/settings/dateformat-list-rest.png` |
+| Theme over Theme, b1 | **107.3** | **0.421** | 2.1 | `b1/settings/theme-choice.png` |
+| Time Format over Date and Time, b1 | 121.8 | 0.478 | 34.8 | `b1/settings/timeformat-list-rest.png` |
+| Color over Theme, b2 | 121.6 | 0.477 | 2.3 | `lists/color-list-rest.png` |
+| Screensaver over Display, b1 | 136.6 | 0.536 | 6.4 | `b1/settings/screensaver-list-rest.png` |
+| Background over Theme, b2 | 152.6 | 0.599 | 2.5 | `lists/background-list-rest.png` |
+| Font over Theme, b2 | 153.5 | 0.602 | 3.3 | `lists/font-list-rest.png` |
+| Theme over Theme, b2 (same page and band as 0.421) | 250.0 | **0.980** | 2.3 | `lists/theme-list-rest.png` |
+| Options menu over the Game column, b1 | 178.6 | 0.700 | 22.7 | `b1/dialogs/options-open-01.png` |
+
+The last-but-one row is the key: **the same page with the same band reads 0.42 in one session and 0.98 in
+another**, so the difference between samples cannot be per-page. It is *when the still was grabbed*: the
+band and its dim do not arrive together. `series.py` on `bands/theme-band-open2` (539 crop frames at
+158.9 fps, crop origin 1150,150) shows the parent page's content decaying after the band is already
+drawn - value-column peak 255 at f_0790, then 200.9 (f_0798), 191.3, 171.4, 148.6, 121.9, 108.1, 99.8,
+66.1 (f_0949) and flat from there - a ramp of about 150 ms that starts *after* the band's own 62 ms start
+and 270 ms ramp (12.3). A still taken inside that window reads high; one taken before it reads 0.98.
+
+**Conclusion: a single constant is defensible, and it is the minimum over the settled samples - 0.404 /
+0.408 / 0.421, i.e. alpha 0.40 +/- 0.01.** The 0.48-0.60 samples are mid-ramp stills, not per-page values.
+The native's `contentDim = 0.52` and 13.2's 0.408-0.535 fit are both too bright; 0.40 is the number, and a
+future capture must sample at least 1 s after the key to see it. The mechanism is a page-layer alpha, not a
+plate over the frame: the wallpaper and the category band do not move (13.2), and the surviving row's white
+text lands at 104 = 0.408 x 255 over a black page.
+
+### 15.5 Status after this pass
+
+| item | status |
+|---|---|
+| 12.8 "what sets a band's left edge (1260 vs 1324)" | **CLASSIFIED** (15.1): one shape, two per-page constants, split 1:1 with the page's RCO structure over 7 lists; the computing code is not in any local artifact |
+| 12.8 "the band's row origin (494 vs 537)" | **CLOSED as per-list** (15.2): fixed grid, 40 px pitch, six origins, the 43 px is one pitch; no rule reproduces the set from local data |
+| 12.8 "the band's rendered font size and cap height" | **CLOSED** (15.3): cap 18 px, em about 24 px; no RCO style is attached to a row at all |
+| 12.8 "the dim alpha behind a band" | **CLOSED** (15.4): alpha 0.40 +/- 0.01, single constant; the spread is the 150 ms ramp |
+| 13.2's `contentDim = 0.52` | superseded by 15.4's 0.40 |
+| 13.3's row metrics for the band | unchanged (x 1276 / 1341, pitch 40); the type size it drew at (23 px) is 1 px small |
+| 15.2's "no single origin" | stands; 11.8's `first = 505-(rows-1)*20` must not come back |
+
+Not opened here: the U5/U3 commit cue audio, the timer lists behind System Auto-Off / Controller Auto-Off,
+and the `software_update_plugin` RCO - all unchanged from 12.8.
+
+No source file was edited for this section; no RCO, threshold or reference was touched.

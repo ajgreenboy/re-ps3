@@ -805,3 +805,92 @@ Display band is 64 px further left. So:
 - 3.7's 560x82 authored vs 591x58 drawn plate: still measured, still unexplained.
 
 No source file was edited for this section.
+
+---
+
+## 11. Dated measurement pass - 2026-10-28: the BG1 plate rectangle over five columns, and the focused label's cap height
+
+Read-only pass on the two existing batches, no new capture, no RPCS3 run, no source edit. It refines 10.1's
+single-frame plate rectangle and answers the cap-height half of 10.4. Tools: `C:\dev\work\m.py` (Rec.709
+luma, column/row profiles, ink runs) at the bundled Python; frame paths are relative to
+`C:\dev\out\rpcs3-ref2-2026-10-28\` (`b2`) or `C:\dev\out\rpcs3-ref-2026-10-28\` (`b1`), all 1920x1080.
+
+### 11.1 The plate is 319 x 175, not 326 x 140
+
+Command (per frame): `m.py profx <frame> 396 416 495 515 2` for the left edge, `712 736` for the right,
+`m.py profy <frame> 440 470 400 432 2` for the top and `575 605` for the bottom. Each edge is a 1 px step
+between the page background and the plate fill, so the plate's rectangle is exact to the pixel:
+
+| frame | left | right | top | bottom | plate |
+|---|---|---|---|---|---|
+| `nav/col-00-game.png` | **405** (2.7 -> 25.1 -> 50.2) | **723** (54.1 -> 29.6 -> 7.7) | **417** (1.6 -> 24.8 -> 39.6) | **591** (33.0 -> 24.6 -> 8.9) | 319 x 175 |
+| `nav/game-01-down.png` | 405 | 723 | 417 | - | 319 x |
+| `nav/game-02-down.png` | 405 | 723 | 417 | 592 | 319 x 176 |
+| `nav/colL-3.png` | 405 | 723 | 417 | 592 | 319 x 176 |
+| `b2/error/column-corrupted-focused.png` | 405 (48.0 -> 68.3) | 723 | 417 | 592 | 319 x 176 |
+| `b2/nav2/game-column-back.png` | 405 | 724 | 417 | - | 319 x |
+
+So the focused item's plate is **x 405-723 (319 px wide), y 417-591 (175 px tall)**, centred on **(564, 504)**
+- the focus point the vertex captures give as (565, 505) (3.2, 4.2 #15). That centre is why the rectangle is
+not the row band: it straddles 505 by +-88 px vertically and starts 160 px left of the label column, so it
+sits behind the icon *and* the label (10.1's reading is right; only its numbers are off).
+
+**Corrections to 10.1:** width 326 -> **319**, height 140 -> **175**, and the rectangle 420..560 ->
+**417..591**. 10.1 measured one frame with a threshold above a bright part of the wave, which cut the plate's
+lower half; the five frames above agree within 1 px and include two where the wave does not reach the plate.
+
+**Fill and edges.** At x 440-470 the fill is a vertical gradient: **40.5 luma at y 420, 54.4 at y 510, 31.6 at
+y 590** (the row above the plate reads 5.1 mean, so there is no plate there). ROI mean inside the rectangle is
+55.5 (max 233.9, the icon); the edges are 1 px antialiased steps with no rounded corner detected at 1 px
+resolution, i.e. a hard-edged rectangle, not a rounded card. The plate is the only filled rectangle on this
+surface - the settings pages have none (SETTINGS 12.6) - so 10.1's "two focus languages" verdict stands with a
+corrected shape.
+
+### 11.2 The focused label's cap height is 26 px at both depths
+
+Command: `m.py inkrow <frame> <x0> <x1> <y0> <y1> 120` over the first glyph only.
+
+| surface | glyph | ink | cap height | frame |
+|---|---|---|---:|---|
+| depth 0, focused item label | `C` of `Corrupted Data`, x 758-795 | 492..517 | **26 px** | `b2/error/column-corrupted-focused.png` |
+| depth 1, focused page row | `C` of `Color`, x 624-660 | 492..517 | **26 px** | `b2/bands/theme-page-ready.png` |
+| depth 1, unfocused page row | `T` of `Theme`, x 624-660 (dim text, thr 60) | 317..341 | 25 px | same |
+
+So the focused row's text cap height is **26 px** and it is the same at depth 0 and depth 1: the label size
+does not change with depth, only its x (565 + 57 at level > 0, 4.2 #34) and brightness do. 4.2 #35's "label
+ink height 492..519 (27 px row band)" is the same measurement including one row of antialiasing; the cap
+itself is 26 px, and the focused item's full label bbox at depth 0 is x 752-1127, y 481-533 (the 481/533 are
+the halo, the ink is 492..517).
+
+**Consequence for a view:** the plate is 319 x 175 centred on the focus point, and the label it backs is a
+26 px cap. Any renderer that sizes the plate from the label's ink box (10.1's "its width does not track the
+artwork") will be wrong in both axes; the plate is a fixed-size rectangle centred on (565, 505).
+
+### 11.3 One correction to 10.3: the options-menu endpoint is 1320, not 1330
+
+10.3's three band endpoints table lists the options menu at **1330**. Re-measured with the same 1 px border
+method as 15.1 (`m.py profx <frame> 1300 1345 95 105 3`, the 10-row mean at y 95..105, page black behind):
+
+| frame | 1 px border | fill peak |
+|---|---|---|
+| `b1/dialogs/options-open-01.png` | **1320** (0.0 -> 15.2 -> 32.3) | 62.4 |
+| `b2/menus/game-menu-open-check.png` | **1320** (0.0 -> 14.1 -> 31.2) | 50.2 by x 1344 |
+| `b2/menus/game-menu-open-check2.png` | **1320** | 49.3 by x 1344 |
+| `b2/menus/game-menu-rest.png` | 1329, peak 89, then 1-3 luma | **mid-close frame, not a rest measurement** |
+
+So the item menu and the Theme-family choice band are **4 px apart** (1320 vs 1324), not 6 px in the other
+direction, and 10.3's "the item menu and the Theme band sit within 6 px of each other (1330 / 1324)" becomes
+"within 4 px (1320 / 1324)". The claim 10.3 exists to support is unchanged, and slightly strengthened: the
+three band surfaces are 1260, 1320 and 1324, so there is still no single band-origin constant, and the
+native's `x0 = 1320` (`view.cpp` item band, SETTINGS 13.3) is exact for the options menu.
+
+### 11.4 What this does not settle
+
+- 3.7's authored 560x82 info-bar plane against the drawn 591x58 plate is untouched; the plate above is a
+  different object (`BG1` of the item column, `image=null`), and its size is still not in the RCO.
+- The same plate over a **non-black backdrop** (video, a bright wallpaper) is unmeasured: every frame here
+  has the plate over the column's own dark backdrop.
+- The plate's alpha over content: the fill values are composite luma, not an alpha; separating them needs a
+  frame pair with and without the plate over a known background, which does not exist.
+
+No source file was edited for this section.
