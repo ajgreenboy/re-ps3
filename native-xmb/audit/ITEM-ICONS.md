@@ -512,3 +512,179 @@ C:\dev\out\native-foldericon\re-ps3-native.exe --dev-flash C:\dev\rpcs3\bin\dev_
 bun work\ab-layers.ts --capture --exe C:/dev/out/native-foldericon/re-ps3-native.exe   # PASS 6/6
 bun work\ab-layers.ts --states  --exe C:/dev/out/native-foldericon/re-ps3-native.exe   # self-baselines need a refresh (5)
 ```
+
+## Phase 2.1/2.2, 2026-10-27: glass routing and the four-preset ICONS.mnu schedule
+
+Bounded to `src/icons.cpp`, `src/icons.h` and this section. `src/view.cpp` needed no icon-queue change.
+
+Two things landed together because they are one material:
+
+1. **The material now follows the firmware's clock keyframes** (2.2). It used to cross-fade `override/day`
+   and `override/night` with the *background's* night/day blend, a value fitted for `back_colours0`, not for
+   the icons. `custom_render_plugin` registers one ICONS.mnu override per preset and blends between them with
+   the same keyframe table LINE1 uses (`FUN_00011600`, `audit/PIPELINE.md` "Ribbon presets"):
+   night held to 01:00, to yoake by 05:00, held to 07:00, to day by 11:00, held to 13:00, to higure by
+   17:00, held to 19:00, back to night by 23:00. `dev_flash` carries all four files. Only three keys differ
+   between them, all traced from the files themselves:
+
+   | key | night | yoake | day | higure |
+   |---|---:|---:|---:|---:|
+   | LIT1 ANG X | 92.4901 | 357.462 | 289.969 | 184.98 |
+   | LIT2 ANG X | 84.9909 | 352.462 | 289.969 | 179.981 |
+   | TIME COLOR MIX | 0.61799 | 0.555496 | 0.486059 | 0.555496 |
+   | GLASS | 0.0624733 | 0.0952192 | 0.152523 | 0.0952192 |
+
+   The month palette is unchanged and is the material's colour source: `_ChangingColor` is the repeat-bilinear
+   `widgets/other/amb.bmp` sample at the time of day and the seasonal month fraction (ICON-MATERIAL-CLOCK.md).
+   The glass program has no tint uniform, so Original's month RGB tint (`View::renderBackground`'s fitted 0.45)
+   stays on the opaque fallback only; it is an opaque-material stand-in for the same colour the glass path
+   takes from amb.bmp.
+
+2. **The glass program is the normal material wherever the icon draws at full state brightness** (2.1), and the
+   opaque theme material is the fallback: for a dimmed icon, and for every icon when the firmware programs or
+   the dif/env textures cannot be loaded. Selection is `Icon::brightness` (`_Ambiant.w`): glass at 1.0, opaque
+   below. The captured states map to: item icons in the open column and rows inside a page (1.0) glass; the
+   focused category icon (1.0) glass; unfocused category icons (0.698) and parent columns behind a page
+   (0.247/0.698) opaque. `XMB_ICON_FIRMWARE=1` (or the DEBUG/UCODE diagnostics) still forces glass for every
+   icon, `XMB_ICON_PRESET_LINEAR=1` restores the old single cross-fade.
+
+   With the glass program in use, `_Ambiant.w` reaches the final alpha: `icons_no_ss_no_shad.fpo`'s emit is
+   `h[0].w = normalmap.a * fc[54].w` (translated GLSL, `--dump-cg`), i.e. envmap alpha x `_Ambiant.w`, which is
+   the captured semantics (contradiction 2 above). The dimmed classes keep the opaque material's RGB dimming
+   for the measured reason in the 2026-10-26 section, not because the semantics are wrong.
+
+### Per-layer numbers
+
+Canonical capture, `work/ab-layers.ts --capture`, one run per configuration, this pass:
+
+| layer | before this pass | after (default) | delta |
+|---|---|---|---|
+| frame | 18.28 / 0.8285 | 18.28 / 0.8288 | +0.00 / +0.0003 |
+| top background | 20.22 / 0.9336 | 20.22 / 0.9336 | 0 / 0 |
+| category icon row | 20.89 / 0.8939 | **20.89 / 0.8966** | +0.00 / **+0.0027** |
+| item label row | 11.94 / 0.3909 | 11.94 / 0.3909 | 0 / 0 |
+| clock text | 11.39 / 0.4105 | 11.39 / 0.4105 | 0 / 0 |
+| info bar | 14.78 / 0.6117 | 14.78 / 0.6117 | 0 / 0 |
+
+PASS 6/6 (budget 0.5 dB / 0.004). Only the icon band moves, by design; the text layers are byte-identical.
+
+Sub-crops of the band, 180x180 boxes at the captured icon centres (475,190) / (275,200) / (675,200):
+
+| crop | before (all opaque) | after (routed) | all glass (`XMB_ICON_FIRMWARE=1`) |
+|---|---|---|---|
+| focused icon (565,280) | 19.48 / 0.8955 | glass 19.41 / **0.9103** | 19.41 / 0.9103 |
+| left unfocused (365,290) | 19.62 / 0.7930 | opaque 19.62 / 0.7930 | 18.57 / 0.7920 |
+| right unfocused (765,290) | 22.16 / 0.9517 | opaque 22.16 / 0.9517 | 20.67 / 0.9526 |
+
+So the band gain is the focused icon's SSIM (+0.0148 on its own crop), and the dimmed rows keep the material
+that measures better for them.
+
+### The A/Bs behind the routing
+
+Same executable, one canonical capture per configuration:
+
+| configuration | category icon row | note |
+|---|---|---|
+| routed (default) | 20.89 / 0.8966 | glass at 1.0, opaque dimmed |
+| all glass (`XMB_ICON_FIRMWARE=1`) | 20.04 / 0.8963 | **-0.85 dB**, SSIM -0.0003 |
+| routed, four presets (default) | 20.89 / 0.8966 | |
+| routed, `XMB_ICON_PRESET_LINEAR=1` | 20.90 / 0.8973 | -0.01 dB / -0.0007 vs the traced schedule |
+| all opaque, before this pass | 20.89 / 0.8939 | |
+
+Three conclusions:
+
+- **The dimmed glass class is deferred, not rejected.** All-glass loses 0.85 dB on the band and 1.0-1.4 dB on
+  the two unfocused icons, because a translucent icon shows the frame behind it and that frame is still
+  brighter than the reference at the same hour (ICON-MATERIAL-CLOCK.md's open item: no arbitrary darkening
+  multiplier was introduced). A diagnostic that normalises each candidate by the gain measured on a
+  background box beside the icons (`430,330,60,40`) - never on an icon - puts the two paths within the
+  budget and keeps the SSIM gain:
+
+  | background-normalised | icon band | focused icon | left unfocused | right unfocused |
+  |---|---|---|---|---|
+  | all opaque | 23.56 / 0.9103 | 21.15 / 0.9141 | 22.40 / 0.8125 | 32.17 / 0.9746 |
+  | all glass | 23.31 / **0.9153** | 22.03 / 0.9293 | 21.60 / 0.8143 | 31.04 / 0.9852 |
+
+  That is the evidence that the remaining dimmed-glass gap is the background layer, not the icon material;
+  it is a diagnostic, not a gate, so the shipped routing stays with the measured-better material per state.
+- **The four-preset schedule is neutral** (-0.01 dB / -0.0007 SSIM against the fitted linear blend). Kept: it
+  replaces a fit keyed to another layer's blend with the firmware's own keyframes and the four override files,
+  and the 0.0007 SSIM is inside the 0.004 budget. The fitted blend scoring marginally better is consistent
+  with two fits cancelling: the background it keys off is itself fitted to this reference frame.
+- **The constants are not the gap.** Running the glass path on the firmware's own captured fragment constants
+  (`XMB_ICON_UCODE=fpdump7/fp_0199...ucode`, the focused item icon, night preset) scores 19.93 / 0.8909,
+  i.e. worse than the derived day constants (20.11 / 0.8975 at the time of that run); the capture is a night
+  draw, so this only proves the derived values are the better of the two available constant sets.
+
+### Item icons: the only RPCS3 frame with icontex bullets cannot score the material
+
+`out/native-reference/rpcs3-settled.png` is a 1920x1080 RPCS3 frame of the Display Settings page (25/10 0:58)
+and the only local reference with icontex item icons: the focused bullet at (565,505) and the rows below at the
+same 80 px pitch the native uses. The native reaches the same state with
+`LEFT x5, DOWN x11, ENTER` from the Game root. The comparison cannot attribute a material difference because
+the page content and the visible bullet size differ (the reference's focused bullet is about 50 px, the native
+draws the captured 85.05 quad with a glyph that fills more of it), so both paths stay far from the frame:
+
+| crop | opaque | glass |
+|---|---|---|
+| bullet column strip 540,460,50,340 | 11.98 / 0.3946 | 12.08 / 0.3969 |
+| focused bullet 520,460,90,90 | 9.52 / 0.1480 | 9.49 / 0.1352 |
+| rows at 565,680 / 565,760 | 14.89 / 0.6152, 12.61 / 0.3749 | 14.69 / 0.6326, 14.73 / 0.3768 |
+
+The item-icon class is therefore scored by the category icons at the same `_Ambiant.w` 1.0 - same program,
+same dif/env/normal-map assets, same constants (the capture shows every icon draw sharing them) - and that is
+where the +0.0148 SSIM on the focused icon comes from. The size question (captured quad vs visible glyph) is
+the open item in this file's section 7 and is unchanged by this pass.
+
+### Open: the `_Ambiant.w` alpha probe does not fit a simple alpha model
+
+Forcing `_Ambiant.w` to 1 on the glass path (`XMB_ICON_ALPHA_ONE`, a temporary switch, removed) changes the
+unfocused globe by at most 9 levels and *not* in the direction a pure alpha change predicts: the globe's left
+bar reads 203.6 at 0.698 and 194.9 at 1.0, while `XMB_ICON_DEBUG=4` (`h[0].rgb * 0.25`) gives a surface of 208
+and the background beside it is 123. An alpha blend from 0.698 to 1.0 would have to move 182 -> 208. So the
+glass surface's RGB and its alpha are coupled in a way this build does not reproduce yet. It does not affect
+shipped pixels (dimmed icons take the opaque material) and it is why the dimmed glass class stays deferred.
+
+### Visible artefact to watch: chromatic fringe over a bright ribbon
+
+On the Display page at 0:58 the focused bullet sits directly over the ribbon's bright band and the glass
+refraction (`REFR R/G/B` -0.032/-0.038/-0.048 x `REFR SCL` 11.5655, per channel) shows a purple/green fringe
+across the lower third of the icon. It is the firmware's own per-channel refraction of a high-contrast edge,
+and the reference frame for that page has the ribbon lower, so the frame cannot say whether the firmware
+fringes the same way; there is no captured state with an icon over the ribbon. Recorded as an open visual
+item, not as a reason to reject the material: the gate that scores it (canonical band, focused icon SSIM
++0.0148) is green.
+
+### Named-state self-baselines need a deliberate refresh (harness not edited)
+
+The icon material changes every native render that contains a full-brightness icon, so the 55 dB self-baselines
+fail their frame region while their row regions stay exact:
+
+| state | frame | rows/sections |
+|---|---|---|
+| steam-game-root | 48.82 dB / 0.9996 | (none) |
+| steam-all-games | 50.59 dB / 0.9996 | inf / 1.0000 |
+| steam-store-sections | 50.59 dB / 0.9996 | inf / 1.0000 |
+| steam-not-installed | 50.59 dB / 0.9996 | inf / 1.0000 |
+
+These are regression gates, not fidelity numbers, so the references need a deliberate
+`work/ab-layers.ts --states --save-reference` by whoever owns the harness. The canonical gate is unaffected.
+
+### Reproduction for this pass
+
+```
+# build and canonical gate (fence: src/icons.cpp, src/icons.h, this file, TEXT-RENDERER.md)
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-render2
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --capture --exe C:/dev/out/native-render2/re-ps3-native.exe
+
+# A/B the material routing and the preset schedule (one binary, one capture each)
+$env:XMB_ICON_FIRMWARE="1"      # all glass
+$env:XMB_ICON_PRESET_LINEAR="1" # the old day/night cross-fade
+$env:XMB_ICON_UCODE="C:\dev\xmb\out\native-reference\fpdump7\fp_0199_cc03532936b16a27.ucode"  # captured constants
+
+# item icons: Display Settings page (category 1, row 11), night preset matching rpcs3-settled.png
+re-ps3-native.exe --dev-flash C:\dev\rpcs3\bin\dev_flash --data-dir <data> --render-clock 30 ^
+  --background-clock 2026-10-25T00:58:00 --ui-clock 2026-10-25T00:58:00 --focus-time 2000 ^
+  --script "full,wait,wait,LEFT,LEFT,LEFT,LEFT,LEFT,DOWN,DOWN,DOWN,DOWN,DOWN,DOWN,DOWN,DOWN,DOWN,DOWN,DOWN,ENTER,wait,wait,wait,wait,wait,grab=<png>,quit"
+```
+

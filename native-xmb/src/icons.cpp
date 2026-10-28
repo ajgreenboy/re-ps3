@@ -46,8 +46,29 @@ GLuint IconRenderer::normalMap(QOpenGLFunctions_3_3_Core& gl,const QString& name
 }
 
 float IconRenderer::value(const QString& key,float light) const {
-    const float night=night_.value(key),day=day_.value(key,night);
-    return night+(day-night)*light;
+    // The plugin registers one ICONS.mnu override per preset and blends between them along the clock
+    // keyframes (FUN_00011600, the same table LINE1 uses): night held to 01:00, to yoake by 05:00, held to
+    // 07:00, to day by 11:00, held to 13:00, to higure by 17:00, held to 19:00, back to night by 23:00.
+    // dev_flash carries override/{night,yoake,day,higure}/ICONS.mnu; only LITn ANG X, TIME COLOR MIX and
+    // GLASS differ between them. `light` is the background's night/day blend and is only a fallback for a
+    // render with no clock set, where the keyframes cannot be evaluated.
+    const float nightValue=night_.value(key,day_.value(key,0.f));
+    const float dayValue=day_.value(key,nightValue);
+    // A/B switch for the keyframe schedule: XMB_ICON_PRESET_LINEAR=1 restores the earlier single day/night
+    // cross-fade over the background's blend, so the four-preset schedule can be measured against it.
+    if(!clock_.isValid() || qEnvironmentVariableIsSet("XMB_ICON_PRESET_LINEAR"))
+        return nightValue+(dayValue-nightValue)*light;
+    const float yoakeValue=yoake_.value(key,dayValue),higureValue=higure_.value(key,dayValue);
+    const QTime time=clock_.time();
+    const double t=(time.hour()*3600+time.minute()*60+time.second())/86400.;
+    const struct { double at; float value; } keys[]={{0,nightValue},{1/24.,nightValue},{5/24.,yoakeValue},
+        {7/24.,yoakeValue},{11/24.,dayValue},{13/24.,dayValue},{17/24.,higureValue},{19/24.,higureValue},
+        {23/24.,nightValue},{1,nightValue}};
+    const double clamped=std::clamp(t,0.0,1.0);
+    for(size_t i=1;i<std::size(keys);++i)
+        if(clamped<keys[i].at)
+            return keys[i-1].value+(keys[i].value-keys[i-1].value)*float((clamped-keys[i-1].at)/(keys[i].at-keys[i-1].at));
+    return nightValue;
 }
 
 QVector3D IconRenderer::changingColour(const QDateTime& when) const {
@@ -75,6 +96,10 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
         if(vertexCg_.valid())fragmentCg_=CgProgram::load(assets.qglFile("icons","lib/icons/icons_no_ss_no_shad.fpo"),&error);
         day_=readMnu(assets.qglFile("icons","override/day/ICONS.mnu"));
         night_=readMnu(assets.qglFile("icons","override/night/ICONS.mnu"));
+        // The dawn and dusk presets the same clock schedule blends through; a build without them keeps the
+        // day/night pair (value() falls back per key).
+        try { yoake_=readMnu(assets.qglFile("icons","override/yoake/ICONS.mnu")); } catch(const std::exception&) {}
+        try { higure_=readMnu(assets.qglFile("icons","override/higure/ICONS.mnu")); } catch(const std::exception&) {}
         ambientPalette_=QImage::fromData(assets.qglFile("icons","widgets/other/amb.bmp"),"BMP");
     } catch(const std::exception& e) { error=e.what(); }
     if(!vertexCg_.valid() || !fragmentCg_.valid() || night_.isEmpty() || ambientPalette_.size()!=QSize(16,12)){qWarning().noquote()<<"icons: firmware programs/palette unavailable:"<<error;return false;}
@@ -94,9 +119,10 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) || !program_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment) || !program_.link()) {
         qWarning().noquote()<<"icons: link failed:"<<program_.log();return false;
     }
-    // The reconstructed background is not the glass shader's captured input surface: refraction can produce
-    // near-black interiors in Original as well as fixed colours. Use the opaque theme material normally;
-    // keep the firmware program available through the explicit diagnostics below.
+    // The opaque theme material is the fallback for a dimmed icon (see render()'s routing): with the frame behind
+    // the icon still brighter than the reference, the refracted result inherits that error, while the opaque
+    // material's RGB dimming measures closer at 0.698 (audit/ITEM-ICONS.md). The diagnostic switches above and
+    // XMB_ICON_FIRMWARE force the glass path for every icon.
     //
     // Lighting direction comes from the material, not from a hand-picked vector: in the captured constants of this
     // same program (fpdump7/fp_0199, the focused item icon) the two light vectors sit in columns 1 and 2 of
@@ -122,7 +148,8 @@ void main(){
     // Tint the surface, not its opacity; only shape coverage and page transitions fade.
     // Measured 2026-10-26: moving focus brightness to the alpha (the firmware's _Ambiant.w semantics) costs
     // 0.85 dB on the category-icon layer while this opaque material has no glass refraction, so the RGB
-    // dimming stays until the icon is drawn through the refractive path (audit/ITEM-ICONS.md).
+    // dimming stays here; the glass path above applies the firmware's alpha semantics instead
+    // (audit/ITEM-ICONS.md).
     colour=vec4(clamp(mix(vec3(1.),tint,tintStrength)*light,0.,1.),material.a*opacity);
 })";
     opaqueReady_=opaque_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) &&
@@ -161,9 +188,15 @@ void main(){
 
 void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& icons,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo) {
     if(!ready_ || icons.isEmpty())return;
-    const bool opaque=opaqueReady_ && fixedTint_.lengthSquared()>0 &&
-        !qEnvironmentVariableIsSet("XMB_ICON_DEBUG") && !qEnvironmentVariableIsSet("XMB_ICON_UCODE") &&
-        !qEnvironmentVariableIntValue("XMB_ICON_FIRMWARE");
+    // The OPAQUE theme material is the fallback, not the default: an icon whose state brightness is full takes the
+    // firmware's own glass program (quad.vpo + icons_no_ss_no_shad.fpo, refracting the finished frame through
+    // CookieCutter), and only a dimmed icon keeps the opaque stand-in. That is the measured routing: category icon
+    // band 20.90/0.8941 with every icon opaque, 20.04/0.8963 with every icon glass, and 20.89/0.8966 when the dimmed
+    // rows stay opaque and the full-brightness rows are glass, because the glass material agrees with the reference
+    // at _Ambiant.w 1 and overshoots at 0.698 (audit/ITEM-ICONS.md, phase 2.1).
+    const bool forcedGlass=qEnvironmentVariableIsSet("XMB_ICON_DEBUG") || qEnvironmentVariableIsSet("XMB_ICON_UCODE") ||
+        qEnvironmentVariableIntValue("XMB_ICON_FIRMWARE");
+    const bool opaqueMaterial=opaqueReady_ && fixedTint_.lengthSquared()>0;
     const double scale=pixelHeight/1080.;
     const double offsetX=(pixelWidth-1920*scale)/2; // wider-than-16:9 windows centre the 1920-wide layout
     // Light directions from ICONS.mnu angles (degrees).
@@ -227,11 +260,17 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
     for(const auto& icon:icons) {
         const GLuint normals=normalMap(gl,icon.normalMap);
         if(!normals || icon.opacity<=0)continue;
+        // Firmware glass wherever the icon draws at full state brightness (item icons in the open column, the
+        // focused category icon, rows inside a page). Dimmed icons - an unfocused category icon at 0.698 and a
+        // parent column behind a page at 0.247/0.698 - keep the opaque material: with the frame behind them
+        // still brighter than the reference (audit/ICON-MATERIAL-CLOCK.md) their refracted result inherits that
+        // error, and the measured cost there is 1.0-1.4 dB (audit/ITEM-ICONS.md).
+        const bool glass=forcedGlass || !opaqueMaterial || icon.brightness>=.999f;
         const double ndcX=icon.centre.x()/960.-1,ndcY=1-icon.centre.y()/540.;
         const double distance=icon.distance,worldX=ndcX*distance/kScaleX,worldY=ndcY*distance/kScaleY;
         // 1. CookieCutter: the frame behind the icon, 128x128 reference px, into the background map.
         const double cx=offsetX+icon.centre.x()*scale,cy=pixelHeight-icon.centre.y()*scale,half=64*scale;
-        if(!opaque) {
+        if(glass) {
             gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
             gl.glBlitFramebuffer(GLint(cx-half),GLint(cy-half),GLint(cx+half),GLint(cy+half),0,0,128,128,GL_COLOR_BUFFER_BIT,GL_LINEAR);
         }
@@ -243,7 +282,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         vc[258]=QVector4D(0,0,-1,float(distance-19.95));
         vc[259]=QVector4D(0,0,-1,float(distance));
         vc[467]=QVector4D(float(ndcX),float(ndcY),0,0);
-        if(opaque) {
+        if(!glass) {
             opaque_.bind();opaque_.setUniformValueArray("vc",vc.data(),int(vc.size()));
             const float peak=std::max({fixedTint_.x(),fixedTint_.y(),fixedTint_.z()});
             opaque_.setUniformValue("tint",fixedTint_/peak);opaque_.setUniformValue("brightness",float(icon.brightness));
@@ -256,6 +295,10 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
             gl.glDisable(GL_BLEND);opaque_.release();continue;
         }
         set("_Eye",{float(-worldX-400),float(-worldY),float(distance),float(icon.size)});
+        // _Ambiant.w is the captured state brightness (1 focused / open column, 0.698 unfocused, 0.247 behind a
+        // page). In this program it scales the final alpha - the emit is h[0].w = normalmap.a * fc[54].w, i.e.
+        // envmap alpha x _Ambiant.w - so a dimmed glass icon blends over the frame instead of darkening its RGB,
+        // which is the captured firmware semantics (audit/ITEM-ICONS.md contradiction 2).
         set("_Ambiant",{ambientColour.x(),ambientColour.y(),ambientColour.z(),float(icon.brightness)});
         if(qEnvironmentVariableIsSet("XMB_ICON_LOG_CONSTANTS")) {
             static bool reported=false;

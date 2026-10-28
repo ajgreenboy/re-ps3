@@ -554,3 +554,128 @@ before the sessions above; that is the only reason the distributions are this ti
   the union mask; its runtime value is still unrecovered.
 - `XMB_TEXT_MASK` and `XMB_TEXT_CHECK` are diagnostic switches only; neither is set by the capture
   harness, so the default path is the one measured above.
+
+## Phase 2.4/2.5, 2026-10-27: elision wired, metric authority at every size, caret, and the UI glare measurement
+
+Files touched: `src/view.cpp`, `src/text_renderer.cpp` and this section. `src/text_renderer.h` and
+`src/font_raster.*` did not need to change: `elideToWidth`, `measure` and `selfCheck` already had the contracts
+section 4 and section 2 documented, and the label loop is in `view.cpp`.
+
+Canonical gate after this change, `work/ab-layers.ts --capture --exe C:/dev/out/native-render2/re-ps3-native.exe`:
+frame 18.28 / 0.8288, top background 20.22 / 0.9336, category icon row 20.89 / 0.8966, item label row
+11.94 / 0.3909, clock text 11.39 / 0.4105, info bar 14.78 / 0.6117 (PASS 6/6). Every text layer is identical to
+the run before the change; the icon row differs because the icon material changed in the same build
+(ITEM-ICONS.md, phase 2.1/2.2). Two `--render-clock 30` captures of the final build hash equal
+(`SHA-256 CFD9644F...B1BAC`), so the elision and caret changes are deterministic.
+
+### 1. Elision is wired into the label loop (2.4)
+
+The hunk section 4 listed is landed at the focused/`labelRect` loop, with one difference: it runs only when
+the atlas renderer is ready, because that is also the condition under which the prefix's advances and the drawn
+glyph positions come from the same FreeType sum. The QPainter fallback keeps `QFontMetrics::elidedText`, since
+that path also draws with Qt.
+
+```cpp
+const qreal labelLimit=value.isEmpty()?1050.:640.;
+QString label=entry.title;
+TextRenderer::Elision elided;
+if(textRenderer_.ready()) {
+    elided=textRenderer_.elideToWidth(labelFont,entry.title,labelLimit);
+    if(elided.elided)label=elided.prefix;
+} else label=QFontMetrics(labelFont).elidedText(entry.title,Qt::ElideRight,int(labelLimit));
+...
+if(elided.elided)
+    text(QRectF(labelRect.left()+elided.ellipsisX,labelRect.top(),40,labelRect.height()),
+         QString(QChar(0x2026)),27,QColor(255,255,255,int(255*alpha)));
+```
+
+The sign-in field's value (21 px, 440 px limit) uses the same helper, with the ellipsis appended to the prefix
+because that field is a single left-aligned string rather than a label plus a positioned `label2_text_ellipsis`
+object. Both call sites are inert in the canonical state: no label at 1050/640/440 px overflows, so the prefix
+equals the full string and nothing is elided - which is why the text layers are byte-identical. The change
+matters where the firmware's rule matters: a long title now loses whole clusters from one metric authority and
+shows the ellipsis at the pen the firmware puts the separate Text object at, instead of substituting U+2026 with
+a second, platform metric engine.
+
+Proof that the wired path runs, not just the helper: `XMB_LABEL_LIMIT=<px>` overrides the label limit for a
+scripted capture (diagnostic only; unset = 1050/640). At 120 px the focused row's "Steam Store" renders as
+"Steam" plus a separate ellipsis draw at the prefix pen (`out/render2-work/grabs/elide.png`, crop 620,460); the
+same frame without the override shows "Steam Store". The gap before the dots is the em-wide U+2026 advance
+(section 4 measured it at 27.00 px), which is what the firmware reserves and why the helper sizes the prefix
+against `maxWidth - ellipsis`.
+
+### 2. Metric authority checked at every label size, not only the clock (2.4)
+
+`XMB_TEXT_CHECK=1` now reports one line per size the UI draws (the label loop 27, the sign-in field 26, panels
+23/22/21/20, page heading 19, subtitle cue 17, option note 16, PS-menu badge 14). Each compares the PAF 26.6
+advance sum for a representative string with the width the renderer shapes at that size:
+
+```
+text check: PASS metric-size-27 "Game Data Utility" PAF 234.95 px vs shaped 234.88 px (delta 0.06)
+text check: PASS metric-size-26 "PS3XMBpassword" PAF 235.84 px vs shaped 235.79 px (delta 0.05)
+text check: PASS metric-size-23 "Display All" PAF 119.53 px vs shaped 119.48 px (delta 0.05)
+text check: PASS metric-size-22 "System Information" PAF 211.46 px vs shaped 211.36 px (delta 0.10)
+text check: PASS metric-size-21 "Photo Settings" PAF 154.77 px vs shaped 154.72 px (delta 0.05)
+text check: PASS metric-size-20 "Charge Level" PAF 130.41 px vs shaped 130.38 px (delta 0.03)
+text check: PASS metric-size-19 "Sort By" PAF 69.73 px vs shaped 69.70 px (delta 0.04)
+text check: PASS metric-size-17 "A subtitle cue line" PAF 152.38 px vs shaped 152.28 px (delta 0.10)
+text check: PASS metric-size-16 "This build cannot play it" PAF 191.20 px vs shaped 191.09 px (delta 0.11)
+text check: PASS metric-size-14 "Triangle" PAF 55.75 px vs shaped 55.72 px (delta 0.03)
+```
+
+Delta 0.03-0.11 px over 7-26 glyphs at every size, so there is no size-dependent metric gap: the clock's
+agreement is not a property of 27 px. The remaining text-layer gap is string content and rasterisation, as
+section 5 concluded. The earlier `metric-authority` line stays (it compares the clock at the shaped face's own
+pixel size).
+
+### 3. Caret metrics decided (2.4)
+
+The OSK caret used `QFontMetricsF::horizontalAdvance` while the field's glyphs were placed by the renderer's
+FreeType advances. It now takes the same sum (`TextRenderer::measure`) and falls back to Qt metrics only when
+the atlas renderer is unavailable, i.e. when Qt also draws the glyphs. Assertion at the field's 26 px:
+
+```
+text check: PASS caret-metric prefix "PS3XMBp" advance 129.12 px vs Qt metrics 129.00 px
+```
+
+The caret's bar itself stays a fitted 2x36 scene px. No firmware caret/metrics trace exists (TEXT-RASTER.md
+leaves the pen-width trace open), so this is stated as a fit, not a port: the position is now metric-authoritative,
+the size is not.
+
+### 4. UI-layer glare: measured, decided against (2.5)
+
+Question: the firmware blooms its UI through the same glare chain; the native composites the UI layer after the
+tone map. A switch `XMB_UI_GLARE=<scale>` adds the resolved UI layer to the glare source inside `Hdr::finish`'s
+`extraGlare` callback (the same hook `particles_second` uses), so the text and panels go through the threshold,
+Gaussian and AccGlare passes with the scene. It samples the previous frame's resolve (the UI is drawn after the
+background in `paintGL`), which is stable in every scripted state; it is off by default.
+
+Canonical capture, one run per scale:
+
+| layer | no UI glare (shipped) | scale 0.15 | scale 0.35 | scale 1.0 |
+|---|---|---|---|---|
+| frame | 18.28 / 0.8288 | 18.23 / 0.8284 | 18.15 / 0.8275 | 17.83 / 0.8228 |
+| top background | 20.22 / 0.9336 | 20.22 / 0.9335 | 20.22 / 0.9335 | 20.20 / 0.9334 |
+| category icon row | 20.89 / 0.8966 | 20.85 / 0.8960 | 20.77 / 0.8946 | 20.43 / 0.8879 |
+| item label row | 11.94 / 0.3909 | 11.92 / 0.3916 | 11.88 / 0.3918 | 11.66 / 0.3879 |
+| clock text | 11.39 / 0.4105 | 11.38 / 0.4015 **FAIL** | 11.34 / 0.3910 **FAIL** | 11.07 / 0.3451 **FAIL** |
+| info bar | 14.78 / 0.6117 | 14.76 / 0.6078 | 14.70 / 0.6006 **FAIL** | 14.40 / 0.5767 **FAIL** |
+
+Decision: keep the UI out of the glare source. The text layers lose more than the label glow gains at every
+strength, and the loss is structural, not a level offset: clock SSIM falls 0.4105 -> 0.4015 at an eighth
+strength and 0.3451 at full strength, i.e. the halos blur the glyph edges the reference shows sharp. The item
+label row's small SSIM gain (+0.0007 at 0.15, +0.0009 at 0.35) is the focused label's own glow bloom and does
+not offset two failing gates. So the native's post-tone-map composite is closer to the reference than any feed
+of the UI into the glare chain, and the switch stays a documented measurement tool, off by default
+(`XMB_UI_GLARE` unset). The one thing the measurement cannot separate is a firmware UI drawn into the scene
+*before* the threshold with its own exposure; that would be a different pipeline, not this switch.
+
+Reproduction:
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-render2
+$env:XMB_UI_GLARE="0.35"   # or 0.15 / 1.0; unset = shipped path
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --capture --exe C:/dev/out/native-render2/re-ps3-native.exe
+$env:XMB_TEXT_CHECK="1"   # deterministic renderer assertions, including metric-size-* and caret-metric
+$env:XMB_LABEL_LIMIT="120" # elision probe: "Steam Store" renders as "Steam" + the separate ellipsis draw
+```

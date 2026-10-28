@@ -333,8 +333,8 @@ void main(){
 out vec2 uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);})";
     static const char* compositeFragment=R"(#version 330 core
-in vec2 uv;out vec4 colour;uniform sampler2D layer;uniform float dimOpacity;
-void main(){colour=dimOpacity>0.0?vec4(0,0,0,dimOpacity):texture(layer,uv);})"; // premultiplied; linear filtering at half scale = 2x2 box filter
+in vec2 uv;out vec4 colour;uniform sampler2D layer;uniform float dimOpacity;uniform float boost;
+void main(){colour=boost>0.0?texture(layer,uv)*boost:(dimOpacity>0.0?vec4(0,0,0,dimOpacity):texture(layer,uv));})"; // premultiplied; linear filtering at half scale = 2x2 box filter
     if(!uiComposite_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) || !uiComposite_.addShaderFromSourceCode(QOpenGLShader::Fragment,compositeFragment) || !uiComposite_.link())
         qCritical().noquote()<<"UI composite shader failed:"<<uiComposite_.log();
     particles_.init(*this,assets_);
@@ -454,6 +454,18 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         // Second firmware pass: the same dust drawn into the glare source so the mip blur blooms it
         // (particles_second). Re-running the sim for the same `seconds` advances no steps.
         if(originalParticles)particles_.renderGlare(*this,seconds,width,height);
+        // Measurement switch (audit: Phase 2.5): XMB_UI_GLARE=<scale> also adds the UI layer to the glare
+        // source, so text and panels bloom through the same Gaussian/accGlare chain the scene does. The layer
+        // texture is the previous frame's resolve (the UI is drawn after renderBackground in paintGL), which is
+        // stable in every scripted state, so the capture settles on the same result as a same-frame feed.
+        if(const float glareBoost=qEnvironmentVariable("XMB_UI_GLARE").toFloat();glareBoost>0 && uiResolved_ && uiComposite_.isLinked()) {
+            glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,uiResolved_->texture());
+            uiComposite_.bind();uiComposite_.setUniformValue("layer",0);uiComposite_.setUniformValue("dimOpacity",0.f);
+            uiComposite_.setUniformValue("boost",glareBoost);
+            glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE);
+            glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);glBindVertexArray(0);
+            glDisable(GL_BLEND);uiComposite_.release();glBindTexture(GL_TEXTURE_2D,0);
+        }
     });
 }
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
@@ -788,6 +800,7 @@ void View::paintGL() {
     glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
     uiComposite_.bind();uiComposite_.setUniformValue("layer",0);uiComposite_.setUniformValue("dimOpacity",0.f);
+    uiComposite_.setUniformValue("boost",0.f);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,uiResolved_->texture());
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);
     // Native approximation: dim the complete composed image; no host brightness or power changes.
@@ -1341,7 +1354,20 @@ void View::drawScene(QPainter& p) {
                 // Shell::valueText() exactly as before and no existing frame changes.
                 const auto value=active?(entry.fieldValue.isEmpty()?shell_.valueText(entry):entry.fieldValue):QString{};
                 QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(27);
-                const auto label=QFontMetrics(labelFont).elidedText(entry.title,Qt::ElideRight,value.isEmpty()?1050:640);
+                // Elision keeps the firmware's shape (audit/TEXT-RENDERER.md section 4): PAF draws a character
+                // range and explore_plugin positions a separate label2_text_ellipsis Text object after the last
+                // visible character, so the prefix and the ellipsis are two draws from one metric authority
+                // (TextRenderer::elideToWidth, the same unhinted advances that place the glyphs) instead of
+                // QFontMetrics substituting U+2026 into the string. The QPainter fallback keeps Qt's elision,
+                // because that path also draws the glyphs with Qt.
+                const qreal labelLimit=qEnvironmentVariableIsSet("XMB_LABEL_LIMIT")?
+                    qreal(qEnvironmentVariableIntValue("XMB_LABEL_LIMIT")):(value.isEmpty()?1050.:640.);
+                QString label=entry.title;
+                TextRenderer::Elision elided;
+                if(textRenderer_.ready()) {
+                    elided=textRenderer_.elideToWidth(labelFont,entry.title,labelLimit);
+                    if(elided.elided)label=elided.prefix;
+                } else label=QFontMetrics(labelFont).elidedText(entry.title,Qt::ElideRight,int(labelLimit));
                 const QRectF labelRect(labelX,y-28,value.isEmpty()?1100.:650.,56);
                 // The focused label carries a soft white glow that breathes (MaXMB observation, styles.css xmbLabelGlow:
                 // 3.4 s ease-in-out from a faint halo, about 0.35 of the peak, to the full bloom, starting faint when
@@ -1349,11 +1375,17 @@ void View::drawScene(QPainter& p) {
                 const double breath=.35+.65*(.5-.5*std::cos(2*std::numbers::pi*double(resting)/3400.));
                 if(focus>.5)glow(labelRect,label,27,(focus-.5)*2*breath*(entry.disabled?.45:1.));
                 text(labelRect,label,27,QColor(255,255,255,int(255*alpha)));
+                if(elided.elided)
+                    text(QRectF(labelRect.left()+elided.ellipsisX,labelRect.top(),40,labelRect.height()),
+                         QString(QChar(0x2026)),27,QColor(255,255,255,int(255*alpha)));
                 if(!value.isEmpty() && panelAmount<.5) {
                     QString shown=value;
                     if(entry.action==Action::JellyfinSignInField) {
                         QFont valueFont(shell_.fontFamily());valueFont.setPixelSize(21);
-                        shown=QFontMetrics(valueFont).elidedText(value,Qt::ElideRight,440);
+                        if(textRenderer_.ready()) {
+                            const auto clipped=textRenderer_.elideToWidth(valueFont,value,440);
+                            shown=clipped.elided?clipped.prefix+QString(QChar(0x2026)):value;
+                        } else shown=QFontMetrics(valueFont).elidedText(value,Qt::ElideRight,440);
                     }
                     text({1300+offset,y-25,440,50},shown,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
                 }
@@ -2136,11 +2168,17 @@ void View::drawOsk(QPainter& p) {
     // A masked field (the Jellyfin password) draws one bullet per character and measures the caret against those
     // bullets, so the position stays right without the characters being drawn anywhere.
     const QString composed=osk_.masked?QString(osk_.text.size(),QChar(0x2022)):osk_.text;
-    const QFontMetricsF fieldMetrics(fieldFont);
-    const double before=fieldMetrics.horizontalAdvance(composed.left(osk_.cursor));
+    // One metric authority: the caret sits at the pen advance of the composed prefix, measured with the same
+    // unhinted FreeType advances that place the field's glyphs (TextRenderer::measure). The QPainter fallback
+    // keeps Qt's metrics, which then also draw the glyphs. The caret's 2x36 px bar is a fitted size: the
+    // firmware's caret metrics are not recovered (audit/TEXT-RASTER.md leaves the pen-width trace open).
+    const auto fieldAdvance=[&](const QString& text) {
+        return textRenderer_.ready()?textRenderer_.measure(fieldFont,text):QFontMetricsF(fieldFont).horizontalAdvance(text);
+    };
+    const double before=fieldAdvance(composed.left(osk_.cursor));
     const double scroll=std::max(0.,before-896.);
     p.save();p.setClipRect(QRectF(512,330,900,60),Qt::IntersectClip);
-    label({512-scroll,330,std::max(900.,fieldMetrics.horizontalAdvance(composed)+4.),60},composed,26,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+    label({512-scroll,330,std::max(900.,fieldAdvance(composed)+4.),60},composed,26,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
     if((clock_.elapsed()/500)%2==0)p.fillRect(QRectF(512+before-scroll,342,2,36),QColor(140,220,120)); // blinking cursor
     p.restore();
     for(int row=0;row<4;++row)for(int column=0;column<10;++column) {
