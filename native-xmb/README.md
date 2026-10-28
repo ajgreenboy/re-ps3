@@ -260,10 +260,10 @@ The main category/menu catalog is currently curated from the reference. A comple
 XMBML/resource-driven catalog and localization are required before fidelity can
 be claimed.
 
-See the [forward phase plan](PHASES-2026-10-27.md), the [full feature/presentation audit and new handoff](audit/README.md),
+See the [forward phase plan](PHASES-2026-10-28.md), the [full feature/presentation audit and handoff](audit/README.md),
 [handoff](HANDOFF.md) and [completion criteria](ISA.md).
 
-**Current handoff (2026-10-27):** [HANDOFF-2026-10-27.md](HANDOFF-2026-10-27.md) - the tree at `0c8faee`,
+**Current handoff (2026-10-28):** [HANDOFF-2026-10-28.md](HANDOFF-2026-10-28.md) - supersedes [HANDOFF-2026-10-27.md](HANDOFF-2026-10-27.md) (the tree at `0c8faee`),
 with build/run/verify, today's gate result, the known gaps by surface, the config migration policy, the
 diagnostics design and the release checklist. Read it first; the install guide is [INSTALL.md](INSTALL.md).
 

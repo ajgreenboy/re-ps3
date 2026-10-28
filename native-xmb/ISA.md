@@ -2,7 +2,7 @@
 task: Complete native C++ recreation of PS3 XMB
 phase: execute
 progress: in-progress
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Native XMB ideal state
@@ -95,8 +95,8 @@ Use Steam and imported content as explicitly identified native providers for the
 - [x] ISC-40: An imported executable receives its structured argument array and produces the expected diagnostic marker.
 - [x] ISC-41: An imported Jellyfin URL appears as an app in the selected XMB category.
 - [x] ISC-41.1: Jellyfin playback and authentication work within the native app.
-- [x] ISC-42: All six built-in colour captures have a focused icon-interior luma above 130 in the named probe.
-- [x] ISC-42.1: The same icon-interior RGB differs by at most one channel level between day and night captures for each built-in colour.
+- [ ] ISC-42: All six built-in colour captures have a focused icon-interior luma above 130 in the named probe. (Re-opened 2026-10-27: verified 2026-10-25 on the opaque material; the glass material has been the full-brightness path since `23980a5` and the ICONS clock keyframes changed the tint since `9545047`, so the probe describes a superseded path. Re-run the six captures before re-ticking - see the reconciliation note below.)
+- [ ] ISC-42.1: The same icon-interior RGB differs by at most one channel level between day and night captures for each built-in colour. (Re-opened 2026-10-27 with ISC-42, same reason: the day/night material path changed after the measurement.)
 
 - [x] ISC-43: The integrated editor saves a renamed service registration while preserving its stable ID.
 - [x] ISC-43.1: Invalid editor upserts preserve malformed existing registry bytes.
@@ -139,9 +139,52 @@ Use Steam and imported content as explicitly identified native providers for the
 >   `View::drawSubtitle()`; audit/SUBTITLES.md). Unchecked because embedded/disc subtitle streams and Jellyfin
 >   subtitles are not read and a switch between real alternative audio tracks is unproven.
 
+### Reconciliation with the completion ledger (2026-10-27)
+
+The ledger is [PHASES-2026-10-28.md](PHASES-2026-10-28.md) section 1: **88 items - 15 done, 44 partly, 28
+not started, 1 obsolete**, audited against the tree at `6096dbf`. This ISA is the longer-horizon ideal
+state; it must not read as more complete than the ledger on any surface the ledger rates partly. This pass
+re-read every checked criterion against that ledger and against the commits after it, and made three
+changes:
+
+1. **Two ticks re-opened**: ISC-42 and ISC-42.1 (icon-interior luma and day/night channel equality). They
+   were verified on 2026-10-25 against the opaque icon material, which is no longer the full-brightness
+   path - `23980a5` made the firmware glass program the default wherever an icon draws at full
+   `_Ambiant.w`, and `9545047` blends the four ICONS clock keyframes instead of the fitted tint. The
+   ledger's rows 2.1/2.2 are `partly`, explicitly because "no icon-interior/edge gate exists to score
+   either path"; a tick whose probe no longer describes the shipping path is the claim the ledger forbids.
+   Re-run the six captures (`audit/CATEGORY-ICON-FIX.md` recipe) to re-tick.
+2. **Checked count**: **31 of 66** (was 33 of 66, cited in the 2026-10-27 handoff). Nothing else was
+   ticked: no criterion closed on this pass's evidence, and none of the newly landed surfaces (dialogs,
+   session/power, Steam accounts/downloads, the runtime RCO object model) closes a criterion as written.
+3. **Scope annotations** for ticks that are true but narrower than their ledger row - so a reader does not
+   read a tick as the whole row:
+
+| Criterion | Ledger row(s) and status | What the tick actually covers |
+|---|---|---|
+| ISC-1, ISC-2, ISC-3, ISC-4 | P1.3 done, P1.5 partly | A build, a clean launch, and firmware font/icon textures visibly used. Nested-object decode and mipmap/swizzle parity are open, and at HEAD a clean export does not compile because `src/settings_menu.h` is untracked (Phase 8.2). |
+| ISC-9.1, ISC-9.2, ISC-9.3 | P6.3 partly, P10.3 not started | A swap-callback p95 on one probe, rate-invariant easing, and pixel-identical settled self-references. ISC-9 itself (sustained pacing at 60/120 Hz) is unmeasured; the ledger has no pacing result. |
+| ISC-35, ISC-36 | 6.1 partly, 15.4 not started | Discovery/filtering and the installed-PKG presentation. No title has been launched and returned, so `Shell::startSteamTracked` is unproven end to end. |
+| ISC-38, ISC-38.1 | 6.2 partly | A real friend list and presence from the signed-in client, and the honest manual-refresh error. Avatars are fetched but not drawn (shell hunk C unapplied). |
+| ISC-39, 39.1, 40, 41, 41.1, 43, 43.1, 43.2 | 1.1/1.3/1.4/1.5 done, 1.2 partly, NATIVE-04 | The recorded registry/editor/Jellyfin checks. Jellyfin page/hero backdrops are not claimed (ledger 1.2 partly), and NATIVE-04's "done" is scoped to the recorded checks. |
+| ISC-44, 44.1 | no ledger row; P3.4/P6.3 partly | Hide/return on the native player and clamped seeks. No firmware player-panel parity. |
+| ISC-45, 45.1, 45.2, 45.4 | 4.1 done (Auto-Off), P6.3 partly | Screensaver choices, exact dim/wake, paused-idle and message suppression. ISC-45.3 stays open, and the 2026-10-26 dim/wake replay predates `067d6f0` (Auto-Off now darkens the display rather than quitting); re-play it if the idle path is touched. |
+| ISC-46-46.5 | 1.1/1.3/1.4/1.5 done, 1.2 partly | Real Jellyfin 12.4 sessions, direct/HLS, pause/seek/Back, sign-out, log containment. ISC-46.6 stays open: posters are fetched and cached (`3e5bcdf`) but no view path draws the page/hero backdrop (ledger 1.2 partly), so "verified" is not met. |
+
+Two further honesty notes, unchanged in direction:
+
+- **The documented state and the checksum state disagree on purpose.** The ledger's `partly` rows are not
+  an absence list (see the 2026-10-26 note); equally, a tick here is not a ledger `done`. The two documents
+  answer different questions: "is the criterion's whole sentence true" versus "did the item as planned
+  land".
+- **A fit is not a trace.** This ISA records measured and resource-derived behaviour separately
+  (Principles). The register's re-score and the page-move contradiction (`audit/PAGE-MOVE.md`, `3c0c87b`)
+  mean the 300 ms / mode 4 page move and the 186/189 px pitch are still fits and are still shipping; no
+  criterion here rests on them.
+
 ## Test Strategy
 
-Build logs establish compilation. Requested window observations establish specific visible states; source inspection alone does not close workflow criteria. Feature-specific runtime evidence is recorded in audit/HANDOFF.md and audit/VISUAL-BEHAVIOR.md; no new test suite is introduced.
+Build logs establish compilation. Requested window observations establish specific visible states; source inspection alone does not close workflow criteria. Feature-specific runtime evidence is recorded in audit/HANDOFF.md and audit/VISUAL-BEHAVIOR.md; no new test suite is introduced. Since 2026-10-27 the fidelity track has a second instrument (`work/parity.ts`, audit/PARITY-SCORECARD.md) whose Tier A/B/C passes are the only basis for a "1:1" claim on a screen; it does not close an ISC by itself.
 
 ## Features
 
@@ -151,9 +194,12 @@ Build logs establish compilation. Requested window observations establish specif
 | Assets | Assets/QrcArchive | Original material, wave and complete resource semantics |
 | Native services | Preferences/Profiles/MediaLibrary/InteractionAudio | Complete original workflows and capability bindings |
 | Feature audit | audit/ | Per-feature state variants and missing reference evidence |
+| Presentation fidelity | `work/parity.ts`, audit/PARITY-SCORECARD.md, audit/FIRMWARE-PARITY-GAPS.md | Matched references (Tier B) for every reachable screen, the page classes and the traced motion; the ledger's fidelity track and PHASES-2026-10-28 phases 9-13 |
 | Content providers | SteamLibrary/SteamFriends/SteamArtwork/ContentRegistry | Verified Steam lifecycle, connected friends, custom game artwork editor and embedded media services |
 
 ## Decisions
+
+- 2026-10-27: The plan of record is PHASES-2026-10-28.md, which audits PHASES-2026-10-27.md and PARITY-PHASES.md item by item (15 done / 44 partly / 28 not started / 1 obsolete). Consequence for this ISA: a checked criterion must not cover a surface the ledger rates partly, and evidence that predates a material change is stale evidence. ISC-42/42.1 are re-opened under that rule rather than re-interpreted.
 
 - 2026-10-26: refined: added typed native Jellyfin service registrations and reusable API/stream/player modules. Session tokens stay in memory and authenticated stream requests pass through a loopback gateway. Current routes were verified against the Jellyfin 12.4 schema and a real disposable server. See audit/JELLYFIN-NATIVE.md.
 
@@ -221,6 +267,22 @@ Build logs establish compilation. Requested window observations establish specif
 
 ## Changelog
 
+- 2026-10-27 | conjectured: the checked set could stay as it was while the ledger re-scored the plans.
+  refuted by: two ticks (ISC-42/42.1) rest on a material path that was replaced after their measurement,
+  and the ledger rates icon material `partly` for exactly that reason; a clean export of HEAD also fails
+  to compile (`src/settings_menu.h` untracked) while ISC-1's sentence assumes a reproducible build.
+  learned: a criterion's evidence has a shelf life tied to the code it measured; re-reading the ledger is
+  not optional bookkeeping.
+  criterion now: 31/66 checked, ISC-42/42.1 open with the re-run recipe named, every tick annotated where
+  its scope is narrower than its ledger row (reconciliation section above).
+
+- 2026-10-27 | evidence recorded for this pass, not re-executed: the product gate's last green run
+  (canonical capture 6/6 on the 2026-10-27 19:25 build, `out/native-phase3`) and the fidelity track's
+  first scorecard (`0/25` states at A+B+C, Tier A 22, Tier B 0, Tier C 9) are quoted in
+  HANDOFF-2026-10-28.md section 4; the dialogs verification (`6cf54a4`) records its own measured
+  native-vs-firmware table and deliberately invalidates the old `continue-watching-empty` reference. No
+  criterion closes on any of those runs.
+
 - 2026-10-26: Conjecture: idle dimming can be composed without changing the existing UI layers. Refuted-by: the first screenshot exposed a draw accidentally inserted in the background pass. Learned: apply the dim overlay only after shader icons and UI composition; corrected captures show full-frame 0.450688 RGB ratio and exact wake restoration. Criteria-now: ISC-45.1/45.2 verified for native behavior; ISC-45.3 remains open.
 
 
@@ -243,7 +305,7 @@ Build logs establish compilation. Requested window observations establish specif
 
 - ISC-38: 2026-10-26 live client report exits 0 with source steam-client: 46 friends, 12 online and one playing. A mismatched expected account returns zero contacts; native replay shows 49 entries and preserves selected friend on refresh. Build and artifact paths are in audit/STEAM-CLIENT-FRIENDS.md.
 
-- ISC-42/42.1: 2026-10-25 actual captures — all six focused-interior lumas are 178.49–201.93; maximum day/night channel difference is 0. Twelve captures and the Original wallpaper replay exit 0. See audit/CATEGORY-ICON-FIX.md for sample bounds and original RGB values.
+- ISC-42/42.1: 2026-10-25 actual captures — all six focused-interior lumas are 178.49–201.93; maximum day/night channel difference is 0. Twelve captures and the Original wallpaper replay exit 0. See audit/CATEGORY-ICON-FIX.md for sample bounds and original RGB values. **Superseded 2026-10-27**: this run measured the opaque icon material; the glass material became the full-brightness path in `23980a5` and the ICONS clock keyframes changed the tint in `9545047`, so the criterion is re-opened until the six captures are re-run against the current path (reconciliation note above).
 
 - ISC-35/36: 2026-10-25 actual discovery and visible replay — "Steam installed 10 imported apps 0 warnings 0"; metadata captures steam:2807960 and steam:202970. Disposable filter retains only steam:101; incomplete/missing/escaping cases are excluded. Capture review confirms direct PKG-style slots and no platform subtitle.
 - ISC-38.1: 2026-10-25 visible replay — manual refresh displays "Steam friends need a Steam Web API key". A live authenticated list remains unverified.

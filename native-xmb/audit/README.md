@@ -5,9 +5,36 @@ RPCS3 VSH recording. Project goal: a complete native C++ recreation.
 
 ## Read this set
 
-Current handoff (2026-10-27): [HANDOFF-2026-10-27.md](../HANDOFF-2026-10-27.md) - the tree at `0c8faee`,
-today's gate result, the known gaps by surface, the config migration policy, the [diagnose
-design](DIAGNOSE.md), the [install guide](../INSTALL.md) and the release checklist.
+Current handoff (2026-10-28): [HANDOFF-2026-10-28.md](../HANDOFF-2026-10-28.md) - the tree at `9545047`,
+what ships after the firmware-recovery week, the four gate instruments with their last recorded numbers,
+and where the work goes next. The plan of record is [PHASES-2026-10-28.md](../PHASES-2026-10-28.md)
+(phases 8-16, with the 88-item completion ledger: 15 done / 44 partly / 28 not started / 1 obsolete);
+ownership and write fences are in [WORKSPACES.md](../WORKSPACES.md). The previous handoff,
+[HANDOFF-2026-10-27.md](../HANDOFF-2026-10-27.md), is a dated snapshot of `0c8faee` and still carries the
+operational reference (build/run, config migration, crash reporting, release checklist, ground rules).
+
+Fidelity instrument and register (2026-10-27): [PARITY-SCORECARD.md](PARITY-SCORECARD.md) - the
+three-tier method, the 25-state / 600-cell corpus and the first scorecard (0/25 states at A+B+C; Tier A
+22, Tier B 0, Tier C 9) - and [FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md), re-scored in its
+section 1.1 with section 2.6 listing every surface that moved from free-hand to firmware-derived.
+
+Firmware recoveries (2026-10-27, all with measured specs):
+[dialogs and message boxes](DIALOGS-FIRMWARE.md) (`e4e3c23`, implemented in `e171263`),
+[item menu and information panel](ITEM-MENU-INFO-FIRMWARE.md) (`969c9ac`),
+[media playback panels and the volume display](MEDIA-PANELS-FIRMWARE.md) (`79f377d`),
+[the on-screen keyboard](OSK-FIRMWARE.md) (`68134a6`),
+[the settings pages](SETTINGS-FIRMWARE.md) (`4bbff6e`),
+[root and page geometry](GEOMETRY-ROOT.md) (`4bbff6e`),
+[the runtime RCO object model and materials](RCO-OBJECT-MODEL.md) (`6096dbf`) and
+[session and power behaviour](SESSION-POWER.md) (`067d6f0`).
+
+Firmware capture batch (2026-10-27/28): [capture batch 2026-10-28](CAPTURE-BATCH-2026-10-28.md) - one
+RPCS3 session of the real 4.93 XMB at 1920x1080 (135 stills, 9 timestamped bursts), with the session and
+input-config hash record, the wish-item coverage table (frame paths per audit row), the headline
+measurements, what could not be captured and why, and the `xRegistry.sys` caveat. It is the evidence
+behind the dated correction sections added to [DIALOGS](DIALOGS-FIRMWARE.md),
+[SETTINGS](SETTINGS-FIRMWARE.md), [ITEM-MENU/INFO](ITEM-MENU-INFO-FIRMWARE.md), [OSK](OSK-FIRMWARE.md),
+[GEOMETRY-ROOT](GEOMETRY-ROOT.md) and [PAGE-MOVE](PAGE-MOVE.md).
 
 Latest Friends continuation (2026-10-26): [signed-in Steam client connection](STEAM-CLIENT-FRIENDS.md), including the verified live list and external SDK build input.
 
@@ -23,7 +50,9 @@ sign-in inside the XMB](JELLYFIN-NATIVE.md) and [the PS button while a game runs
 This index itself is the October 24 set; per-feature status is in [FEATURE-CATALOG.md](FEATURE-CATALOG.md).
 
 1. [Functional analysis](FUNCTIONS.md): behavior, data ownership, state variants
-   and implementation requirements across every category.
+   and implementation requirements across every category. **Historical** since 2026-10-28: its
+   "current native gap" column is a 2026-10-24 assessment, kept for the requirement families it
+   enumerates, not for status.
 2. [Feature catalog](FEATURE-CATALOG.md): 307 indexed guide topics/actions,
    including 277 leaf entries, with links and native coverage status.
 3. [Visual and behavioral analysis](VISUAL-BEHAVIOR.md): shading, opacity, icon
@@ -64,6 +93,8 @@ The documents explicitly retain unmeasured and inaccessible reference details.
   read without modifying the firmware or emulated-console data.
 - The user supplied the screenshot and recording. Computer Use blocks RPCS3;
   analysis uses those supplied files, without another capture/control route.
+  Dated note (2026-10-27/28): the [capture batch](CAPTURE-BATCH-2026-10-28.md) drove RPCS3
+  directly with a scripted key/grab/burst runner, so that sentence describes the 2026-10-24 route.
 - [RCOMage layouts](https://github.com/kakaroto/RCOMage/blob/master/src/rcofile.h),
   [object definitions](https://github.com/kakaroto/RCOMage/blob/master/data/objattribdef-ps3.ini)
   and [animation definitions](https://github.com/kakaroto/RCOMage/blob/master/data/animattribdef-ps3.ini)

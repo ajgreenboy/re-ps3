@@ -1,5 +1,14 @@
 # Functional analysis and recreation requirements
 
+> **Historical snapshot - 2026-10-24, corrected 2026-10-28.** This document enumerates the firmware's
+> behavioural requirement families and what the native build lacked at the time. The requirement
+> families are still the right checklist; the **"Current native gap" column is not today's state**.
+> The current state is the completion ledger in [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1
+> (15 done / 44 partly / 28 not started / 1 obsolete), the per-feature status is
+> [FEATURE-CATALOG.md](FEATURE-CATALOG.md), and the scored presentation gap is
+> [FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md). Cells this pass could prove changed are marked
+> "(updated 2026-10-28)"; the rest are the 2026-10-24 assessment and were not re-read.
+
 ## 1. Shared shell behavior
 
 The shell is a stateful front end to multiple activities. A horizontal category
@@ -13,15 +22,15 @@ and simultaneous music with other activities in its
 |---|---|---|
 | Category bar | Conditional category visibility, ordered icons, per-category focus history | Ten curated categories; TV artwork/visibility remains incomplete |
 | Item lists | Content-specific rows, metadata, grouping, scrolling, selection retention and lazy loading | Basic lists and page history exist; grouping and content databases are incomplete |
-| Options menu | Triangle toggles actions appropriate to selection, media type, ownership and capability | No original context/options menu |
-| Control panel | Triangle toggles player-specific controls without confusing navigation focus | No original photo/music/video control panel |
+| Options menu | Triangle toggles actions appropriate to selection, media type, ownership and capability | (updated 2026-10-28) An item-level Triangle panel exists with Open/Information/Sort By and a real reorder (NATIVE-08), but it is a right-hand strip, not the firmware plate-backed floating box, and the other item commands are absent (FIRMWARE-PARITY-GAPS M3/B1) |
+| Control panel | Triangle toggles player-specific controls without confusing navigation focus | (updated 2026-10-28) A video player panel exists for subtitles, the reported audio tracks, Repeat and Shuffle (NATIVE-09); the firmware video/music/photo panels are specified but not drawn (MEDIA-PANELS-FIRMWARE) |
 | PS overlay | Return to XMB while an activity continues; resume/quit and restricted operations | Back currently stops media; separate foreground/background activity model missing |
 | Information panel | Clock, busy state, account/avatar, online friends, messages and news indicators | Clock implemented; other indicators largely absent |
 | Content grouping | Album/format/date/name grouping, sorting and Unknown metadata groups | No persistent metadata/group model |
 | Bulk operations | Mark/unmark items; confirm copy/delete; progress; cancel; refresh selected survivors | Not implemented |
-| Text keyboard | Layout, candidate/prediction dictionary, edit cursor, validation and controller navigation | Native desktop text dialogs are an adapter, not the PS3 keyboard |
-| Notifications | Queued appearance/dismissal, content-aware placement, sound and background operation | No general notification subsystem |
-| Error/progress dialogs | Owned operation, cancellation policy, retry, consistent return selection | Basic message overlay only |
+| Text keyboard | Layout, candidate/prediction dictionary, edit cursor, validation and controller navigation | (updated 2026-10-28) An in-XMB keyboard is drawn and driven by the pad (including masked password input); its layout module now reads the firmware RCO, but the draw is still free-hand and there is no prediction content (OSK-FIRMWARE 12) |
+| Notifications | Queued appearance/dismissal, content-aware placement, sound and background operation | (updated 2026-10-28) The `system_plugin` composite exists with a 4-entry FIFO, 4 s lifetime and 200 ms mode-5 slide (NATIVE-07); no sound, suppression or overlap policy |
+| Error/progress dialogs | Owned operation, cancellation policy, retry, consistent return selection | (updated 2026-10-28) Five message surfaces by kind (inline line, titled page, box, error-code and information pages) with measured geometry and RCO strings (DIALOGS-FIRMWARE 7); owned progress/cancel flows for list operations do not exist |
 | Media/device changes | USB/disc insertion/removal, permissions, missing files, storage changes | Flat async scans and manual refresh; device discovery/watch model missing |
 | Session lifecycle | Startup, user login/logout, clean shutdown, recovery and background work ownership | Basic launch/preferences; no full original lifecycle |
 
