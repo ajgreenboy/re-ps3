@@ -112,8 +112,11 @@ The corpus was captured against the build at `C:/dev/out/native-parity/re-ps3-na
   `page-video-library`, `page-download-management`, `options-panel`, `media-player-panel`. The same build
   and the same scripts passed those routes at 21:22-21:28 (three consecutive isolated runs of
   `page-game-all-games` and a full-suite run at 21:24), so this is a capture-condition regression, not a
-  catalogue error: the app's own vertical input path was blocked, and the harness reports the state it
-  actually reached instead of the one the route intended.
+  catalogue error: the harness reports the state it actually reached instead of the one the route
+  intended. **Root cause, 2026-10-27 (`07884d7`):** a live DualSense on USB was reporting a held up and
+  `View::pollController` merged it into the navigation bits, producing a `vertical(-1)` every 67 ms that
+  cancelled the scripted DOWN. The fix gates live pad input during `--script`; this scorecard predates
+  it and has not been re-captured.
 - **The app can also hang on exit under the host Steam root.** Three direct probes stopped responding
   after the grab (no further token processed, process never exited) with the host Steam library, and
   completed cleanly with an empty `XMB_STEAM_ROOT` - the Steam scan is implicated. The harness bounds
@@ -351,15 +354,34 @@ written next to the scorecard as `regression-<stamp>.json`.
 (`--references-missing --matrix`). The other 24 canonical cells are captured and gated on Tier A/C and
 reported as "no reference yet".
 
+> **Measured result, not a placeholder.** This section carries no unfilled template block: the results
+> are the filled tables in section 6 and the header above. For run `run-20261027-222734` /
+> `scorecard-20261027-223917`: **Tier A 19/25, Tier B 0/25, Tier C 6/25, A+B+C 0/25.** The six Tier A
+> failures are route failures, named: `page-settings-system`, `page-game-all-games`,
+> `page-video-library`, `page-download-management`, `options-panel`, `media-player-panel`. An earlier
+> pass summarized the tier as "Tier A is proven today for every capturable state"; that is not what this
+> scorecard measured - six states are FAIL and the score is 19/25. The named ids are the correction.
+
 What this means per tier:
 
-- **Tier A** is proven today for 19 of the 25 capturable states; the other six are blocked by the
-  capture-condition defect in 1.4, not by a missing dump field. The OSK and controller-indicator scope
-  caveat in 1.1 still applies to the two states that pass "page only".
+- **Tier A is not proven for every capturable state.** It is proven for 19 of the 25; the six states
+  named above are FAIL, all on a route that needs a DOWN move, and they stay FAIL until a re-capture
+  takes them. The cause is not a missing dump field. The OSK and controller-indicator scope caveat in
+  1.1 still applies to the two states that pass "page only".
 - **Tier C** is proven for the 6 states with a scripted transition that logs; the rest are `n/a` because
   their route is "open the column" and there is no transition to trace.
 - **Tier B** is a single number for a single state, against a frame whose content differs by construction.
   It is a plumbing proof, not a fidelity claim.
+
+**In-band caveat: the scripted-vertical defect.** From about 21:45 on 2026-10-27 every scripted `UP`/
+`DOWN` was cancelled while `LEFT`/`RIGHT` still moved the column. That is the defect behind all six
+failures. On 2026-10-27 it was root-caused, not excused: a live DualSense on USB reported a stick at raw
+Y=55 (-0.575), which `View::pollController` turned into a held D-pad up repeating every 67 ms (188
+phantom `vertical(-1)` calls in 12.6 s); the scripted DOWN was undone before the next token. `07884d7`
+makes `pad::latest()` withhold live pad input while `--script` is on, traces each source, and verifies a
+DOWN-dependent settings route twice with byte-identical frames. **No scorecard re-capture exists after
+that fix.** The six states are therefore still reported FAIL at 19/25; the next run is what changes the
+number, and a widened assertion before that run would be the failure this corpus exists to prevent.
 
 The corpus cannot become a parity claim until the RPCS3 rig fills cells. The order that buys the most:
 `root` first (it is the frame that already exists - re-capture it matched, with the Steam rows the native
@@ -386,11 +408,12 @@ composite surfaces, then the 4 background presets and 720p.
   in front (`src/view.cpp:1769`), so a capture can lose that race. It is retried (three attempts) and the
   failure mode is visible in `ps.log` as `event: press not actionable`; a run that loses three times
   reports FAIL rather than a fake pass.
-- **Scripted input is not yet a reliable instrument on this build.** As 1.4 records, vertical moves
-  stopped registering mid-session, and the same binary had passed those routes four hours earlier. Until
-  that is explained (it is an app/input-path question, not a harness question), a Tier A FAIL on a route
-  that needs a row move has two possible causes - the app or the capture - and the scorecard names the
-  row it actually reached so the two can be told apart.
+- **Scripted input was unreliable on this build until `07884d7`.** As 1.4 records, vertical moves
+  stopped registering mid-session, and the same binary had passed those routes four hours earlier. The
+  cause is now measured - a live pad injecting a held up, not an app route or a harness script - and the
+  gate withholds live pad input while a script runs. That makes the instrument trustworthy on the
+  verification route, but it does not retroactively fix this scorecard: a Tier A FAIL on a DOWN route
+  here is that defect, and only a re-capture after `07884d7` can move it to PASS.
 - **Shared seeds are local scratch, not fixtures.** `out/native-reference/store/*` is written by whoever
   runs a capture; the Jellyfin focus drift in 6.2 came from a seed edit between runs. A state that depends
   on a seed field should assert the field's *shape* (a focused row on this page) rather than one value
@@ -412,3 +435,8 @@ composite surfaces, then the 4 background presets and 720p.
   the page's identity (`focusedRow` prefix) because the shared `jf-smoke` seed had a server URL
   pre-filled, which moved the initial focus to Server URL. The state passes A+C from the 22:39 run. No
   budget was changed.
+- **2026-10-28** - section 7 reconciled with section 6: Tier A 19/25, Tier B 0/25, Tier C 6/25,
+  A+B+C 0/25, with the six failing state ids named and no results placeholder. The scripted-vertical
+  defect is root-caused in `07884d7` (a live DualSense injecting a held up) and recorded as an in-band
+  caveat on the measurement. No budget, reference, score or measured number changed; the scorecard still
+  describes the pre-fix capture, and a re-run after the input fix is owed.
