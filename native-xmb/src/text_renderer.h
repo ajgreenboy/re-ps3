@@ -7,6 +7,7 @@
 #include <QOpenGLShaderProgram>
 #include <QPainter>
 #include <QRawFont>
+#include <QVector>
 #include <memory>
 #include <vector>
 #include "font_raster.h"
@@ -42,23 +43,34 @@ public:
     // FreeType advances that place glyphs, so a caller that adopts them keeps one metric authority.
     Elision elideToWidth(const QFont& font,const QString& text,qreal maxWidth) const;
     qreal measure(const QFont& font,const QString& text) const;
-    // Deterministic self-check for the elision rule and the keep-larger coverage union. Logs one
-    // line per assertion; enabled by XMB_TEXT_CHECK=1 so a scripted run records the result (see
-    // audit/TEXT-RENDERER.md).
-    void selfCheck();
+    // Deterministic self-check for the elision rule, the keep-larger coverage union and the mask path.
+    // Logs one line per assertion; enabled by XMB_TEXT_CHECK=1 so a scripted run records the result
+    // (see audit/TEXT-RENDERER.md). The GL probe renders through the real mask pass and reads it back,
+    // so it compares the shipped union path with the pure helper rather than re-testing the helper.
+    void selfCheck(QOpenGLFunctions_3_3_Core& gl);
 private:
-    struct Glyph { int page=-1; QRect atlas; QPoint bearing; int phaseX=0,phaseY=0; };
+    struct Glyph { int page=-1; QRect atlas; QPoint bearing; int phaseX=0,phaseY=0; QRect ink; };
     struct Face { QRawFont font; QHash<quint64,Glyph> glyphs; };
     struct Page { GLuint texture=0; int x=0,y=0,rowHeight=0; };
     struct PlacedGlyph { int face=0; quint32 index=0; QPointF position; };
     struct Layout { QVector<PlacedGlyph> glyphs; qreal height=0; quint64 used=0; };
     struct Vertex { float x,y,u,v,left,top,right,bottom; };
+    struct Batch { int page=0,first=0,count=0; };
     int face(const QRawFont& font);
     // Phase bucket for a pen coordinate in layer pixels: the fraction quantised to 1/phaseSteps of a layer pixel.
     static int penPhase(qreal penX);
     const Glyph& glyph(QOpenGLFunctions_3_3_Core& gl,int face,quint32 index,int phaseX,int phaseY);
     Layout& layout(const QString& text,const QFont& font,qreal width,int flags);
+    // Coverage-union target. PAF's copy rule is compare-and-keep-larger (FUN_004057a0 @ 0x4057a0),
+    // so a string whose glyph inks overlap is drawn into a single R8 mask with GL_MAX and composited
+    // once; strings without overlapping ink keep the per-glyph alpha-over fast path. The target is one
+    // R8 texture the size of the UI layer, created on first use and only recreated when that size
+    // changes, then cleared inside a scissor per string. GL_NEAREST sampling keeps the 1:1 layer map
+    // exact and the result deterministic.
+    bool ensureMask(QOpenGLFunctions_3_3_Core& gl);
+    void maskPass(QOpenGLFunctions_3_3_Core& gl,const QVector<Batch>& batches,const QRect& box);
     QOpenGLShaderProgram program_;
+    QOpenGLShaderProgram maskProgram_,compositeProgram_;
     FontRaster raster_;
     bool useFreeType_=false;
     GLuint vao_=0,vbo_=0;
@@ -68,6 +80,18 @@ private:
     int pixelGrid_=1;
     quint64 serial_=0;
     bool checked_=false;
+    GLuint maskTexture_=0,maskFbo_=0;
+    QSize maskSize_;
+    bool maskAvailable_=false;
+    bool maskLogged_=false;
+    // -1 auto (only overlapping ink), 0 off (XMB_TEXT_MASK=0), 1 forced for every ink/shadow string
+    // (XMB_TEXT_MASK=1, for the A/B and frame-time measurement).
+    int maskMode_=-1;
+    // Reused per-draw scratch so a frame does not allocate a fresh vertex vector per string. These
+    // grow to the widest string and are then reused; the mask target itself is the only large buffer.
+    QVector<Vertex> vertexBuffer_;
+    QVector<Batch> batchBuffer_;
+    QVector<QRectF> boxBuffer_;
     // Sub-pixel pen phases are per-phase coverage tiles: the pen's fraction of a layer pixel on each
     // axis selects a tile rasterised at that phase. On by default when FreeType coverage is in use;
     // XMB_TEXT_PHASE=0 restores whole-output-pixel snapping to the 26.6 blit origin

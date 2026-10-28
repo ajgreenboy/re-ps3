@@ -382,3 +382,175 @@ per-phase tiles change every native render, so refresh the named-state self-base
 `bun work/ab-layers.ts --states --save-reference` (a deliberate step for a rendering change, not a
 fidelity claim). Their 55 dB self-baseline still catches accidental drift afterwards.
 
+## Coverage union implemented: per-string R8 mask with GL_MAX (2026-10-27)
+
+Supersedes the "not wired into composition" status in section 2. The firmware copy rule is unchanged
+(`FUN_004057a0 @ 0x4057a0`, `FUN_004056d8 @ 0x4056d8`; `TEXT-RASTER.md` 1.4-1.5). This section records the
+implementation, the mode rule, the assertion that proves the union, the per-layer numbers and the
+frame-time comparison.
+
+Files touched: `src/text_renderer.h`, `src/text_renderer.cpp` and this section. `src/view.cpp` and
+`src/view.h` were read and did not need to change: `View::paintGL` already hands the renderer the UI
+layer size (`textRenderer_.beginFrame(*this, pixels, ...)`), and the renderer already receives the
+painter transform in `draw()`, so the mask is renderer-internal state exactly as the section 2 contract
+foresaw. The public `text(...)`/`glow(...)` API is unchanged.
+
+### 1. Design
+
+- Target: one `GL_R8` texture plus FBO at `target_` size, i.e. the UI layer's own size. Created on the
+  first masked string and recreated only when `target_` changes (2.07 MB at the 1920x1080 layer,
+  8.29 MB at 3840x2160), `GL_NEAREST`, `CLAMP_TO_EDGE`, no mipmaps, deleted in `release()`.
+- Per string: scissor to the string's ink box grown by the shadow reach, `glClear` to 0 inside that
+  scissor only, then draw every glyph quad already built for the string with a coverage-only fragment
+  shader (atlas red channel) and `glBlendEquation(GL_MAX)`, `glBlendFunc(GL_ONE, GL_ONE)`. That is a
+  bytewise compare-and-keep-larger on the R8 channel: the firmware copy rule, applied once per
+  string instead of per glyph.
+- One composite: a single quad over the box, appended after the glyph vertices, sampled 1:1 with
+  `GL_NEAREST` (`uv = layer/target`, v flipped because the mask is rendered with the same top-down
+  vertex transform). The shadow samples the same mask at `-reach/-reach` (`reach =
+  round(rasterScale_)`, so one scene pixel as before), and ink is `tint.rgb * coverage * opacity`,
+  premultiplied and blended with the layer's existing `GL_ONE/GL_ONE_MINUS_SRC_ALPHA`. One FBO
+  bind/restore per masked string.
+- Halo membership is decided explicitly: the halo is NOT unioned. The atlas green channel stays a
+  per-glyph Gaussian and the halo pass is unchanged, because max-unioning per-glyph halos is not the
+  same image as one blur of the unioned coverage and the firmware gives no evidence for either
+  (`TEXT-RASTER.md` 1.5, 3.2). A glow-only call (`ink=false, shadow=false`) therefore never masks; the
+  two-call glow/ink contract in section 3 still holds.
+- Bounded: the mask target is allocated on first use and on layer resize only; the vertex, batch and
+  box vectors are members that grow to the widest string and are reused, so a steady frame does not
+  allocate for the mask path. Draw order is unchanged, so the mask is a pure function of the string.
+- Deterministic: the canonical capture is byte-identical across runs with the mask path active
+  (SHA-256 `9C2A6CE9...32A0`, three runs, including the forced mode below).
+
+### 2. When the mask is used
+
+The per-glyph ink boxes are tight (nonzero coverage only, halo padding excluded) and stored with each
+atlas tile, so the decision is "can two glyph inks share a layer pixel":
+
+| mode | when | env |
+|---|---|---|
+| auto (default) | an ink/shadow string whose ink boxes intersect | unset |
+| fast path | no box intersection, glow-only calls, strings with no inked glyph, mask unavailable | auto |
+| forced | every ink/shadow string (A/B and timing) | `XMB_TEXT_MASK=1` |
+| off | never, the per-glyph alpha-over result | `XMB_TEXT_MASK=0` |
+
+The box test is conservative: it can select the mask for a pair whose boxes meet while the coverage
+does not. That is safe (the mask then reproduces alpha-over) and it is what the canonical capture
+exercises: the first masked string is the item label "Game Data Utility" (235x30 layer px, 15 inked
+glyphs). `XMB_TEXT_CHECK=1` also votes the rule over five menu strings and reports 1 of 5 taking the
+mask, which is the same label.
+
+### 3. Per-layer numbers
+
+Canonical capture, same command as section 1:
+
+```
+& C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-mask
+& "$env:USERPROFILE\.bun\bin\bun.exe" work\ab-layers.ts --capture --exe C:/dev/out/native-mask/re-ps3-native.exe
+```
+
+| layer | before this change (build `native-mask-before`) | after, auto (default) | delta |
+|---|---|---|---|
+| frame | 18.29 / 0.8295 | 18.28 / 0.8285 | -0.01 / -0.0010 |
+| top background | 20.24 / 0.9344 | 20.22 / 0.9336 | -0.02 / -0.0008 |
+| category icon row | 20.91 / 0.8947 | 20.89 / 0.8939 | -0.02 / -0.0008 |
+| item label row | 11.94 / 0.3913 | 11.94 / 0.3909 | +0.00 / -0.0004 |
+| clock text | 11.39 / 0.4105 | 11.39 / 0.4105 | +0.00 / +0.0000 |
+| info bar | 14.78 / 0.6117 | 14.78 / 0.6117 | +0.00 / +0.0000 |
+
+All six gates pass (budget 0.5 dB / 0.004). The small whole-frame and background deltas are not this
+change: the shared checkout's particle sources (`particles.cpp/.h`, `p3t.cpp/.h`) were modified by
+another task between the two builds, and the mask path is text-only. The clean attribution is the
+same-binary A/B below, where the only variable is the mask mode.
+
+Same executable, one capture per mode:
+
+| mode | item label row | clock text | info bar | PNG SHA-256 |
+|---|---|---|---|---|
+| `XMB_TEXT_MASK=0` (fast) | 11.94 / 0.3909 | 11.39 / 0.4105 | 14.78 / 0.6117 | `9C2A6CE9...32A0` |
+| auto (default) | 11.94 / 0.3909 | 11.39 / 0.4105 | 14.78 / 0.6117 | `9C2A6CE9...32A0` |
+| `XMB_TEXT_MASK=1` (forced) | 11.94 / 0.3909 | 11.39 / 0.4105 | 14.78 / 0.6117 | `9C2A6CE9...32A0` |
+
+Forced mode renders every ink/shadow string through the mask, including the shadow sampled from the
+mask, and still produces the exact same 1920x1080 frame as the fast path. That is the strongest
+available form of "the mask path does not regress the canonical capture": the union is inert in this
+English UI state (no shared covered pixel), as `TEXT-RASTER.md` 1.5 and the earlier `e` + U+0301
+measurement predicted, and the path is nevertheless exercised on a real label.
+
+No layer improves here because nothing in the canonical state has overlapping coverage; an
+improvement is only expected on labels with overlapping or accented glyphs, and none is present
+(the accent pair `e` + U+0301 still measures 0 shared ink pixels in Rodin).
+
+### 4. The union assertion
+
+`XMB_TEXT_CHECK=1` now runs the real mask pass, not just the helper: two deliberately overlapping
+copies of `e` are drawn one layer pixel apart into the real R8 target with `GL_MAX`, read back with
+`glReadPixels`, and compared pixel for pixel with `unionCoverage()`. The same probe counts where
+alpha-over would have differed, so the assertion cannot pass vacuously. Output of the final build:
+
+```
+text check: PASS union-rule overlapping coverage 90 px, keep-larger below alpha-over at 41 px
+text check: accent pair e+U+0301 overlap 0 px at one pen
+text check: PASS union-detect overlapping ink -> mask; touching or gapped ink -> alpha-over fast path
+text mask: R8 coverage target QSize(1920, 1080)
+text check: PASS union-mask GPU GL_MAX mask == keep-larger helper on 169 px; alpha-over differs at 57 px
+text check: union auto rule takes the mask on 1 of 5 menu strings tested
+text check: all assertions passed
+```
+
+`union-mask` is the required proof: 169 covered pixels match the helper exactly (0 mismatches), and
+57 of them would be darker under alpha-over. The earlier elision and metric assertions still pass.
+Running the same check at the 3840x2160 layer also passes (`600 px`, alpha-over differs at `116 px`).
+
+One bug was found and fixed by this work: the first composite attempt left the vertex array unbound
+after the mask pass, so an ink pass drew nothing and forced mode lost the text (halo only). Forced
+mode against the fast path now being byte-identical is the regression check that catches that class of
+error.
+
+### 5. Frame-time comparison
+
+The app's own 5 s `native frames:` line, one 30 s scripted session per mode on the final build plus the
+pre-change build under the same conditions (`100` wait tokens, no render-clock), warm lines only (the
+first 5 s line covers start-up):
+
+| session | fps lines | warm mean |
+|---|---|---|
+| before (build `native-mask-before`) | 239.8 240.0 240.0 240.0 240.0 240.0 | 239.9 |
+| after, `XMB_TEXT_MASK=0` | 240.0 (six lines) | 240.0 |
+| after, auto (default) | 240.0 (six lines) | 240.0 |
+| after, `XMB_TEXT_MASK=1` | 240.0 (six lines) | 240.0 |
+
+The render loop is capped at 240 fps, so the 5 s line cannot resolve sub-frame costs. The three
+after-mode sessions were therefore also run with `XMB_FRAME_TRACE` (the existing per-paint CPU timer,
+which is not capped) and the `rebuilt=1` paint lines - the frames that redraw the UI layer and run the
+text path - were compared:
+
+| session | paints | rebuilt | rebuilt mean | rebuilt p95 | all-paint mean |
+|---|---|---|---|---|---|
+| `XMB_TEXT_MASK=0` | 8155 | 481 | 3.315 ms | 3.216 ms | 2.111 ms |
+| auto (default) | 8159 | 481 | 3.288 ms | 3.195 ms | 2.060 ms |
+| `XMB_TEXT_MASK=1` | 8159 | 484 | 3.437 ms | 3.240 ms | 2.041 ms |
+
+Auto is inside run noise of the fast path (-0.8% on rebuilt frames). Forced mode, which masks every
+string including the shadow pass, adds about 0.12 ms on a UI-rebuild frame (+3.7%). UI rebuilds are
+about 6% of frames, so the amortised effect is ~0.007 ms/frame (~0.3%), which is why the fps line
+cannot see it. That is consistent with the draw counts: the fast path issues a shadow and an ink pass
+over N glyph quads, the mask path issues one N-quad mask pass plus two composite quads, so it trades a
+glyph pass for a scissored clear and one FBO switch. The mask target is created twice on the canonical
+run, both at start-up as the window enters fullscreen; no frame after that reallocates it.
+
+Two earlier sessions were discarded: a stale `re-ps3-native` instance from a previous session (script
+finished, no `quit`, one core busy) was still running and produced 205-238 fps spreads. It was closed
+before the sessions above; that is the only reason the distributions are this tight.
+
+### 6. Limits
+
+- The overlap test is a box test, so auto mode can mask a string whose coverage does not actually
+  overlap. The union is then a no-op (proven by the forced-mode hash), but the cost is paid; off and
+  forced remain available.
+- The halo is not unioned (section 1); if a later trace shows the firmware blurs one string mask, that
+  is a second pass over the same target, not a change to this design.
+- The shadow is still the approximate one-scene-pixel offset of `TEXT-RASTER.md` 3.3, now taken from
+  the union mask; its runtime value is still unrecovered.
+- `XMB_TEXT_MASK` and `XMB_TEXT_CHECK` are diagnostic switches only; neither is set by the capture
+  harness, so the default path is the one measured above.
