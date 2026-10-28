@@ -1940,14 +1940,29 @@ void View::drawScene(QPainter& p) {
         // The item columns are replaced by a message screen and kept behind an inline line, which stands
         // in only for the focused row's label (the firmware's line sits in that list slot).
         if(!messageScreen) {
-            // On a category move the item columns do not travel a whole icon step (202 px): the reference slides the old
-            // list ~150 px away while it fades and brings the new one in from ~150 px, crossing over each other.
+            // On a category move the console cross-fades two row sets, and the two sides are not symmetric
+            // (audit/PAGE-MOVE.md "Phase 14.2": the console burst at C:\dev\out\navfeel\navmove\right1,
+            // 83.6 fps, key at 540 ms, Network -> PlayStation Network). The outgoing block translates
+            // rigidly one bar step left and its alpha falls 1 -> 0 on the move ease, i.e. it is the ghost;
+            // the incoming block arrives from about 125 px and is already at about 0.7 alpha on the first
+            // frame, so the new column stays legible for the whole move. Measured outgoing offsets
+            // -50/-139/-179/-185 px at p .30/.63/.78/.88 (215 px at p = 1), incoming +87/+51/+27/+14/+6 px
+            // at the same progress (125 px at p = 0), incoming label peak luma 208/218/232/243/255 in a
+            // 255-peak settled frame. [TRACED: 215 px, 125 px, and the four alpha samples; FIT: the
+            // incoming alpha line .58+.42p, extrapolated to p = 0 - no captured frame exists before
+            // p = .30, so its intercept is the one fit number here.]
+            const double outSlide=215.,inSlide=125.;            // px, traced
+            const double inAlpha=.58+.42*(1.-categoryFade_);    // .58 -> 1 over the move, fit
             // The item menu's band covers the page too (measured 0.545, ITEM-MENU-INFO-FIRMWARE E1); the
             // in-player panel's frame is unmeasured, so it keeps the page at full brightness.
             const double optionsCover=(shell_.optionsOpen() && !shell_.optionsArePlayer())?
                 1.-(1.-kOptionsBand.contentDim)*optionsOpenEase_.value:1.;
-            if(!outgoing_.isEmpty())drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*150,false,optionsCover);
-            drawColumns(columns_,1.-categoryFade_,(shell_.category()-categoryPosition_)*150,true,optionsCover);
+            // XMB_MOVE_DEBUG=1 skips the outgoing set: a capture-only switch that lets a burst measure the
+            // incoming block on its own. Unset in every normal run, where it draws both sets.
+            static const bool skipOutgoing=qEnvironmentVariableIsSet("XMB_MOVE_DEBUG");
+            if(!skipOutgoing && !outgoing_.isEmpty())
+                drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*outSlide,false,optionsCover);
+            drawColumns(columns_,inAlpha,(shell_.category()-categoryPosition_)*inSlide,true,optionsCover);
             // Item-level Triangle options: the same right-hand band over the page it belongs to. Only drawn while
             // the shell reports it open; the panel never becomes a level of the column stack.
             if(shell_.optionsOpen() && optionsOpenEase_.value>0.) {

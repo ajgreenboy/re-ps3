@@ -1062,3 +1062,214 @@ by reading 1 (a composite of the 12-frame item move and the slower bar recede) o
 outside the traced code. This batch supplies no page-move burst, so nothing here moves.
 
 No source, threshold or reference was touched by this section.
+
+---
+
+# PAGE-MOVE Phase 14.2 - 2026-10-28: the category move's two row sets, measured on the console
+
+Phase 14.1 settled the bar driver (200 ms, mode 5) and left one shape question behind it: on a **category**
+move (LEFT/RIGHT) does the console cross-fade two item-row sets, or does it slide one row block as a unit?
+This phase measured it on console frames and changed the two compositing calls in `src/view.cpp` to match.
+
+## 0. Why a new console burst was needed
+
+The 642-frame burst at `C:\dev\out\rpcs3-xmb-cap\burst-png` cannot answer the question. It is a page
+**open and close** - `burst.ps1`'s key log is `key1 PgDown at 707.032`, `key2 PgUp at 2706.328`, and the
+crop is band `y 220..380` - so it holds the category bar and no item row at all: the labels whose doubling
+is the question are below y 470 and outside every frame. The audited `nav/` and `nav2/` sets are stills.
+So the console frames that decide this were taken for this phase (section 1), and the local burst keeps its
+existing role: timing the bar recede.
+
+## 1. Capture
+
+| item | value |
+|---|---|
+| Rig | `C:\dev\rpcs3-cap\rpcs3.exe` (the RSX-capture tree), `--no-gui --config C:\dev\out\rpcs3-xmb-cap\capture.yml --fullscreen C:\dev\rpcs3\bin\dev_flash\vsh\module\vsh.self` - the same build and config as batch 2 |
+| Input | global keyboard map installed for the run (`Handler: Keyboard`, Cross `PgDown`, Circle `PgUp`, Triangle `Insert`, Square `Delete`, arrows arrows): sha256 `40200e9c6b2954ec95d8db1c3fbada210fe469a70b7ae75d7c2881cd3ed24835`, 139 B. Restored at the end to the DualSense file, 66 B, sha256 `e624da0d66a8e971173c39a69a1dc2c89ffe146d57bf2a03c2c8cfacb459ceee` = the documented target. Both hashes in `C:\dev\out\navfeel\logs-input-hash.txt` |
+| Bursts | `tools/refcap2.ps1` (plan runner, keys on a background thread), 1:1 crop `(x=0, y=180, w=1920, h=680)` - the category bar, both category labels and six item rows, nothing scaled |
+| Stills | `navprobe/boot.png` (Game column at rest), `navprobe/after-right1b.png` |
+| Frame rate | 82.0-83.7 fps (this crop is 1.31 MPix, so slower than batch 2's small crops), per-frame ms in `frames.csv` |
+
+| burst | plan | frames | fps | keys (ms into the burst) |
+|---|---|---:|---:|---|
+| `navmove/right1` | `plans/p3-right.txt` | 100 | 83.6 | RIGHT at 540.4 |
+| `navmove/left1` | `plans/p4.txt` | 92 | 71.2 | LEFT at 540.1 |
+| `navmove/right2step` | `plans/p4.txt` | 108 | 72.1 | RIGHT at 547.6 and 672.7 (125 ms apart) |
+
+The first probe still (`navprobe/boot.png`) is the Game column with `Steam Store` focused, but the move the
+bursts captured runs from the **Network** column: the vsh restarted between the probe and the bursts (the
+clock jumps from `10/25 12:32` to `28/10 17:03`, the EPILEPSY warning is on screen in the first burst's
+frames, and the first burst batch was discarded for that reason). `right1` is therefore
+`Network -> PlayStation Network`, `left1` the reverse, and `right2step` a second key pressed 125 ms into
+the first move's 200 ms.
+
+## 2. Per-frame motion of the console move (`right1`, Network -> PlayStation Network)
+
+Every value is measured on the frames, read with the ink-run and template trackers in
+`C:\dev\out\navfeel\` (`measure.py`, `blocks.py`, `profile.py`, `track.py`). "Entering icon" is the glyph
+centroid of the category icon that is taking the focus slot (glyph-centroid bias about +-12 px; the icon
+quads themselves are on the 200 px grid). Row-block x is the left edge of the focused row's label; the
+outgoing and incoming values are relative to their own settled x (684 outgoing at rest, 682 settled after).
+
+| frame (ms) | t after key | entering bar icon x | icon y | bar pitch | outgoing label x | incoming label x | two row sets? |
+|---|---:|---:|---:|---:|---:|---:|---|
+| 539 | -1 | 551 (settled Network) | 278 | 205 | 684 (settled) | - | no |
+| 566 | +26 | merged with the leaving icon | 278 | 205 | 634 (-50) | 765 (+83) | **yes**, both readable |
+| 605 | +65 | 632 | 278 | 217 | 545 (-139) | 733 (+51) | **yes**, both readable |
+| 653 | +113 | 592 | 278 | 215 | 505 (-179) | 709 (+27) | **yes**, outgoing faint |
+| 703 | +163 | 575 | 278 | 215 | 499 (-185) | 696 (+14) | **yes**, outgoing very faint |
+| 754 | +214 | 567 | 278 | 215 | - (gone) | 688 (+6) | no |
+| 1197 | settled | 561 | 278 | 215 | - | 682 | no |
+
+Alpha of each set, from the label peak luma in the same frames (settled peak 255, background about 100):
+
+| t after key | outgoing alpha | incoming alpha |
+|---|---:|---:|
+| +26 ms | 0.62 | 0.70 |
+| +65 ms | 0.37 | 0.76 |
+| +113 ms | 0.25 | 0.85 |
+| +163 ms | 0.15 | 0.92 |
+| settled | 0 | 1.00 |
+
+Progress p is not assumed: it is read off the measured offsets (outgoing -215 p, incoming +125 (1-p)),
+which is why the two columns above are quoted against time and the slide numbers below against p.
+
+## 3. What the frames show
+
+1. **The bar is one continuous set.** No frame shows a doubled category icon: the pitch stays 200-215 px
+   (glyph measurement) and the icons all translate together, the entering one arriving 632 -> 592 -> 575 ->
+   567 -> 561 while the leaving one goes. The only place two texts coexist at the focus slot is the bar's
+   own *label* pair - the leaving category's label fades while the entering one brightens - which this build
+   does not draw (it draws only the focused category's label). That is a separate, still-open detail.
+2. **The row block is two sets, not one.** From +26 to +163 ms both label sets are readable in the same
+   frame, at different x and different brightness. So the console **does** cross-fade; the native's
+   compositing *kind* was right and the question was always the curve.
+3. **Each set translates rigidly.** At +65 ms the outgoing row's icon centre is 426 (-139 from its 565 rest)
+   and its label left edge 545 (-139 from 684): one offset for icon and text, no scale on the block. The
+   outgoing set is not a receded parent column; it is the same block moved.
+4. **The fade is asymmetric, and that is the visible difference.** The outgoing block travels about
+   **215 px** (one bar step) while its alpha falls 1 -> 0 on the move ease - measured -50/-139/-179/-188 px
+   at p .30/.63/.78/.88, i.e. 215 px at p = 1. The incoming block travels only about **125 px** and is
+   already at **0.70** alpha on its first visible frame (+26 ms), reaching 1.0 at settle - measured
+   +83/+51/+27/+14/+6 px, i.e. 125 px at p = 0 and 0 at p = 1. The two alphas do not sum to 1 (0.62+0.70,
+   0.37+0.76); the new column is a fresh draw that is mostly opaque throughout, and the old one is the ghost.
+   That is the shape the "mushy" native move was missing: it had both sets at 1-p and p, so at mid-move two
+   half-bright label sets sat 150 px apart.
+5. **A second key re-uses one outgoing set.** In `right2step` (RIGHT at +125 ms) the frame 107 ms after the
+   second key shows exactly one fading set (the column that was incoming) plus the new incoming one - the
+   console does not accumulate two ghosts. The native's `outgoing_` latch behaves the same way (it is
+   overwritten), so nothing changes there.
+6. **Duration.** The incoming set's approach is an exponential: offsets 83/51/27/14/6 give a constant
+   tau = 72-75 ms (per-frame retention 0.80). The 200 ms mode-5 candidate is tau = 66.8 ms and the 300 ms
+   mode-4 candidate 65.7 ms, so this channel does not separate them - it confirms 14.1's 200 ms mode 5 is
+   at least not contradicted, and this phase keeps it. The outgoing set's fade is slightly ahead of the
+   slide (alpha 0.62 where 1-p is 0.70 at p = .30), so its alpha is not exactly 1-p; the four samples fit
+   1 - p within +-0.08, which is what the source keeps.
+
+## 4. What changed (`src/view.cpp`, single writer)
+
+The two compositing calls, and nothing else:
+
+| quantity | was | is | provenance |
+|---|---:|---:|---|
+| outgoing set slide | 150 px | **215 px** | TRACED (section 2/3.4) |
+| incoming set slide | 150 px | **125 px** | TRACED |
+| outgoing opacity | `categoryFade_` (1 -> 0) | unchanged | TRACED within +-0.08 by the four samples |
+| incoming opacity | `1 - categoryFade_` (0 -> 1) | **`.58 + .42*(1-categoryFade_)`** (0.58 -> 1) | TRACED samples .70/.76/.85/.92; FIT line - the p = 0 intercept is extrapolated, no captured frame exists before p = .30 |
+| duration / mode | 200 ms mode 5 | unchanged | PAGE-MOVE 14.1 |
+
+The rest frame cannot move: at rest `categoryFade_` is 0 and both offsets are 0, so the incoming opacity
+evaluates to exactly 1.0 and the canonical capture is unchanged (section 6). The page (depth) move is
+untouched - its incoming offset `ahead*210` and pinned focused icon are separate code.
+
+Also added: `XMB_MOVE_DEBUG=1` skips the outgoing set at draw time (a static env read, capture only), so a
+burst can measure the incoming block alone. Unset in every normal run, where both sets draw. It was used
+for one burst (`dbg-right`, section 5) and is kept because it is the only way to separate the two alphas
+in a native burst.
+
+## 5. Before/after, measured
+
+Native RIGHT from the same route (`Game -> Network`, `--render-clock 30`, `burst=<prefix>@RIGHT`, 12 frames,
+`C:\dev\out\navfeel\bef-right_*` and `aft-right_*`; trackers as in section 2; the "before" figures are the
+pre-change build gated at `7ca1a0e`):
+
+| quantity | before | after | console |
+|---|---:|---:|---:|
+| outgoing block travel (p = 1) | 150 px | **215 px** | 215 px |
+| outgoing label x at about 40 ms | -80 px | -112 px | -95 px (interpolated 26..65 ms) |
+| incoming block travel (p = 0) | 150 px | **125 px** | 125 px |
+| incoming label x at about 40 ms | +75 px | +74 px | +80 px |
+| separation of the two sets | constant 150 px | 125 -> 215 px | 133 -> 206 px |
+| incoming alpha at p about .35 | 0.35 (1-p) | 0.75 measured / 0.73 modelled | 0.70 |
+| frames with both sets between .25 and .75 alpha | about half the move | none (incoming >= .58) | none |
+
+The incoming alpha after the change was measured with the outgoing set disabled (`XMB_MOVE_DEBUG=1`,
+`dbg-right_*`), on a glow-free row 240 px below focus (peak luma 154.7 settled, background about 100):
+136.2 at 36 ms -> 151.7 at 169 ms = alpha 0.65 -> 0.95. The full-draw track of the same set gives
+0.753 at 28 ms -> 0.970 at 178 ms, which includes the focused label's glow and so reads high; both agree
+that the incoming set is legible from the first frame, which the pre-change 1-p could not do.
+
+Visual: `C:\dev\out\navfeel\navfeel-strip.png` - three rows (console, ours after, ours before) x four
+matched times (26/65/113/163 ms). At 163 ms the "before" row still shows the outgoing label over the
+incoming one; the "after" row does not, and its overlap frames carry the console's asymmetry.
+
+The two other directions were captured on the same build and behave as the mirror image: `aft-left_*`
+(LEFT from the same route, Game -> Video) slides the outgoing block +215 px right and brings the incoming
+one from -125 px, and `aft-right2_*` (a second RIGHT from the settled Network column, one burst per key -
+`main.cpp`'s burst token presses one key, so a true in-flight two-step is only available on the console
+side, where section 3.5 shows the latch is re-used) repeats the same one-step geometry.
+
+## 6. Gates and determinism
+
+- Canonical: `bun work/ab-layers.ts --capture --exe C:\dev\out\native-navfeel\re-ps3-native.exe` ->
+  **PASS 6/6** with `text presence: 1668 bright pixels in the clock crop (minimum 900) PASS`.
+  frame 18.76 / 0.8360, top background 21.06 / 0.9434, category icon row 21.62 / 0.9062, item label row
+  11.99 / 0.3895, clock text 11.41 / 0.4528, info bar 15.05 / 0.7667 - every delta **0.00 / 0.0000**
+  against the stored baselines, i.e. the canonical frame at rest did not move and the gate's text-presence
+  line is unchanged.
+- Determinism: two `--render-clock 20` root captures are SHA-256
+  `37e2b590c42ef0e3f3601ca492221147c9874d2e3b1785e6237b616f2c0bbc14` both - also the hash phase 13
+  recorded, which is the same statement as the gate: this phase changes no rest frame.
+- Rig restore: input config back to `e624da0d...` (66 B), RPCS3 stopped; `logs-input-hash.txt` holds all
+  three hashes. No RCO, threshold, budget, reference, harness, CMake or asset file was touched.
+
+## 7. What remains
+
+1. The bar's leaving **label**. The console fades the departed category's label while the entering one
+   brightens (section 3.1); `src/view.cpp` draws only `i==shell_.category()`'s label, so a category move
+   currently swaps the label without a fade. Measured on the same frames; not changed here.
+2. The bar's entering icon. The console's arrives by sliding (632 -> 561 over 200 ms); this build's
+   `open?pageX` branch pins the selected icon at 565 from the first frame, which is a 0-210 px difference
+   at the start of a move depending on direction. The strip does not separate it cleanly enough to change
+   it here - it needs a burst that isolates the bar (crop `0,180,1920,180`) the way this phase isolated the
+   row block.
+3. The outgoing alpha: the four samples fit 1-p within +-0.08, but the measured 0.62 at p = .30 is below
+   the fit's 0.70, i.e. the fade runs slightly ahead of the slide. A 200 fps crop of the label band alone
+   would settle it; the 83.6 fps burst cannot.
+
+## 8. Reproduction
+
+```
+# console (rig; input map swapped and restored around the run)
+C:\dev\rpcs3-cap\rpcs3.exe --no-gui --config C:\dev\out\rpcs3-xmb-cap\capture.yml --fullscreen ^
+  C:\dev\rpcs3\bin\dev_flash\vsh\module\vsh.self
+powershell -File C:\dev\out\rpcs3-ref2-2026-10-28\tools\refcap2.ps1 -Plan C:\dev\out\navfeel\plans\p3-right.txt ^
+  -ProcessId <pid> -Root C:\dev\out\navfeel
+
+# native (build + burst + settled frames)
+C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-navfeel
+re-ps3-native.exe --dev-flash C:/dev/rpcs3/bin/dev_flash --data-dir C:\dev\out\navfeel\data ^
+  --render-clock 30 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00 ^
+  --focus-time 2000 --script "full,wait,wait,wait,grab=<root>/aft-settled.png,burst=<root>/aft-right@RIGHT,wait,wait,grab=<root>/aft-after.png,quit"
+
+# measurement + strip
+python measure.py <png> [--dy 180] | python blocks.py <png> [--dy 180] | python track.py <dir> <frames.csv> <pre> <post>
+python strip.py   # C:\dev\out\navfeel\navfeel-strip.png
+
+# gates
+bun work/ab-layers.ts --capture --exe C:\dev\out\native-navfeel\re-ps3-native.exe
+```
+
+Artifacts (never committed, this machine): `C:\dev\out\navfeel\` - `navmove\right1|left1|right2step\`
+(console frames + `frames.csv` + `rect.txt`), `navprobe\`, `bef-right_*`, `aft-right_*`, `dbg-right_*`,
+`aft-settled.png`, `aft-after.png`, `navfeel-strip.png`, `logs-input-hash.txt`, `plans\`.
