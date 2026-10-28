@@ -816,6 +816,11 @@ void View::paintGL() {
             qInfo().noquote()<<QString("volume: trace HUD fade opacity %1 at %2 ms after the change")
                 .arg(hud.opacity,0,'f',3).arg(clock_.elapsed()-volumeHudAt_);
     }
+    // The PS-tap indicator's fade runs on the same wall clock between shell changes (155/66/2000/66 ms),
+    // so its opacity is part of the signature; without it the cached layer would freeze the plate at the
+    // opacity of the frame the tap landed on.
+    if(psHudAt_>0 && clock_.elapsed()<psHudUntil_)
+        signature+=QString::asprintf(" psHud %d ",int(psHudOpacity(clock_.elapsed())*256.));
     if(shell_.mediaOpen())signature+=QString::number(now); // media frames change every frame
     bool rebuild=signature!=uiSignature_;
     if(!uiMsaa_ || uiMsaa_->size()!=pixels) {
@@ -1236,6 +1241,65 @@ const PanelBand* bandForSetting(const QString& setting) {
 const PanelBand kOptionsBand{.firmware=true,.x0=1320.,.fadeEnd=1742.,.pitch=38.,.fixedRows=true,
     .rowCentre=552.,.labelInset=14.,.groupGap=237.,.contentDim=.545,.stops=kOptionsBandStops,
     .stopCount=int(std::size(kOptionsBandStops))};
+// The PS menu's selected-entry bloom. The firmware draws the focused row as white glyphs inside a
+// Gaussian halo: in the 4.93 frame (a21-ps-menu-1.png) the halo measures 106 luma 3 px above the cap,
+// 59 at 6 px, 27 at 9 px and 10 at 12 px, i.e. coverage blurred with sigma ~5 px. The text atlas halo
+// (TEXT-RENDERER haloSigma 2.2) is right for the item labels but too tight here, so the menu draws its
+// own: the label into an 8-bit mask, three box passes (the standard 3-box Gaussian approximation) and a
+// white ARGB image composited under the ink. The mask is rendered at the layer's own scale, so the
+// blur is five scene pixels wide whatever the capture size.
+void boxBlurGray(QImage& image,int radius) {
+    if(radius<1 || image.isNull())return;
+    const int w=image.width(),h=image.height(),window=2*radius+1;
+    QImage horizontal(image.size(),QImage::Format_Grayscale8);
+    for(int y=0;y<h;++y) {
+        const uchar* in=image.constScanLine(y);uchar* out=horizontal.scanLine(y);
+        int sum=0;
+        for(int x=-radius;x<=radius;++x)sum+=in[std::clamp(x,0,w-1)];
+        for(int x=0;x<w;++x) {
+            out[x]=uchar(sum/window);
+            sum-=in[std::clamp(x-radius,0,w-1)];
+            sum+=in[std::clamp(x+radius+1,0,w-1)];
+        }
+    }
+    for(int x=0;x<w;++x) {
+        int sum=0;
+        for(int y=-radius;y<=radius;++y)sum+=horizontal.constScanLine(std::clamp(y,0,h-1))[x];
+        for(int y=0;y<h;++y) {
+            image.scanLine(y)[x]=uchar(sum/window);
+            sum-=horizontal.constScanLine(std::clamp(y-radius,0,h-1))[x];
+            sum+=horizontal.constScanLine(std::clamp(y+radius+1,0,h-1))[x];
+        }
+    }
+}
+void drawTextBloom(QPainter& p,const QFont& font,const QRectF& rect,const QString& value,double strength) {
+    if(rect.isEmpty() || value.isEmpty())return;
+    const double scale=std::max(1.,p.transform().m11());
+    const int radius=std::max(2,int(std::lround(5.*scale)));
+    const int pad=radius*3;
+    const QSize size(int(std::ceil(rect.width()*scale))+2*pad,int(std::ceil(rect.height()*scale))+2*pad);
+    if(size.width()<=0 || size.height()<=0 || size.width()>8192 || size.height()>2048)return;
+    QImage mask(size,QImage::Format_Grayscale8);mask.fill(0);
+    {
+        QPainter mp(&mask);mp.setRenderHint(QPainter::TextAntialiasing);
+        QFont f=font;f.setPixelSize(std::max(1,int(std::lround(double(font.pixelSize())*scale))));
+        mp.setFont(f);mp.setPen(Qt::white);
+        mp.drawText(QRectF(pad,pad,rect.width()*scale,rect.height()*scale),Qt::AlignLeft|Qt::AlignVCenter,value);
+    }
+    for(int i=0;i<3;++i)boxBlurGray(mask,radius);
+    QImage glow(size,QImage::Format_ARGB32_Premultiplied);
+    for(int y=0;y<size.height();++y) {
+        const uchar* in=mask.constScanLine(y);auto* out=reinterpret_cast<QRgb*>(glow.scanLine(y));
+        for(int x=0;x<size.width();++x) {
+            const int alpha=std::clamp(int(double(in[x])*strength),0,255);
+            out[x]=qRgba(alpha,alpha,alpha,alpha);
+        }
+    }
+    p.save();p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.drawImage(QRectF(rect.x()-double(pad)/scale,rect.y()-double(pad)/scale,
+        double(size.width())/scale,double(size.height())/scale),glow);
+    p.restore();
+}
 }
 const View::ChoiceBand* View::choiceBandFor(const QString& setting) {
     if(setting.isEmpty())return nullptr;
@@ -1958,46 +2022,85 @@ void View::drawScene(QPainter& p) {
     // cannot steal a press from whatever is underneath.
     if(!shell_.psMenuOpen() && notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
         drawNotification(p,notificationEase_.value);
-    // PS button: the console's system menu (RPCS3 capture 2026-10-26): the frame goes black except the clock,
-    // a centred two-item menu, the controller/charge panel bottom left and the Enter/Back legend. A hold opens
-    // it; "Turn Off the System" asks once before quitting.
+    // PS button: the console's system menu, re-measured on the 4.93 day frame (a21-ps-menu-1.png, the
+    // corpus's ps-menu reference). The frame goes black except the clock over a 1 px rule, two entries
+    // left-aligned on a 40 px pitch with the selected one one size larger inside a ~5 px Gaussian bloom,
+    // the controller/charge panel at y 803-865 and the Enter/Back legend with its own rule at the bottom.
+    // A hold opens it; "Turn Off the System" asks once before quitting.
     if(shell_.psMenuOpen()) {
-        // The console's system menu (RPCS3 capture, audit/PS-BUTTON.md): black frame, clock still top right,
-        // the menu centred, the controller/charge panel bottom left, Cross/O legend along the bottom.
         p.save();
         p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0));   // the console blacks the whole frame
-        text({1500,95,420,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        // The menu's own clock: ink x 1613..1802, y 166..185, with a 1 px luma-175 rule under it at y 199.
+        text({1383,153,420,45},shell_.clockText(),23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        p.fillRect(QRectF(0,199,1920,1),QColor(255,255,255,175));
         const auto psItems=shell_.psMenuItems();
-        const double psFirst=psItems.size()>1?500.:520.;
+        // Both entries start at the same left edge (measured ink x 831/832) and the selected one is ~7%
+        // larger: the shared prefix "Turn Off the " measures 156 px on the focused row and 146 px on the
+        // other, and the caps are 18 px and 17 px. The 43 px "pitch" in SCORECARD 16.5 is band tops:
+        // the bloom adds 2 rows above the focused cap, the baselines themselves are 40 px apart.
+        const double psTop=506.5;
         for(int i=0;i<psItems.size();++i) {
             const bool focused=!shell_.psMenuConfirmingOff() && i==shell_.psMenuSelection();
+            const int size=focused?24:23;
             const QString label=shell_.psMenuConfirmingOff() && i==0?QObject::tr("Turn Off the System?"):psItems[i];
-            text({360,psFirst+i*40.,1200,34},label,22,focused?Qt::white:QColor(160,160,160),Qt::AlignHCenter|Qt::AlignVCenter);
+            const QRectF row(831,psTop+i*40.,1000,34);
+            if(focused) {
+                QFont bloomFont(shell_.fontFamily());bloomFont.setPixelSize(size);
+                drawTextBloom(p,bloomFont,row,label,3.6);
+            }
+            text(row,label,size,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
         }
         if(shell_.psMenuConfirmingOff())
-            text({360,psFirst+80,1200,34},QObject::tr("X turns the XMB off; the PC stays on   O cancels"),20,QColor(150,150,150),Qt::AlignHCenter|Qt::AlignVCenter);
+            text({830,psTop+80,1000,34},QObject::tr("X turns the XMB off; the PC stays on   O cancels"),20,QColor(170,170,170),Qt::AlignLeft|Qt::AlignVCenter);
+        // Controller/charge panel: numbers above 17 px slots (x 132 + 44.33*i 1..4), labels at x 311, the
+        // pad glyph between "Controller" and "1", the charge dash centred on x 488.
+        p.setPen(Qt::NoPen);
         for(int i=0;i<4;++i) {
-            const QRectF slot(157+i*26.,682,20,20);
-            p.fillRect(slot,i==0?QColor(214,72,72):QColor(68,68,68));
-            text(slot,QString::number(i+1),14,QColor(235,235,235),Qt::AlignCenter);
+            const double x=132.+i*44.333;
+            p.setBrush(i==0?QColor(160,13,13):QColor(30,30,30));
+            p.drawRect(QRectF(x,828,17,17));
+            text({x-2,801,21,22},QString::number(i+1),19,QColor(215,215,215),Qt::AlignCenter);
         }
-        text({260,675,140,32},QObject::tr("Controller"),20,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-        text({400,675,220,32},"1",20,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-        text({260,707,140,32},QObject::tr("Charge Level"),20,QColor(215,215,215),Qt::AlignLeft|Qt::AlignVCenter);
-        text({400,707,220,32},"-",20,QColor(215,215,215),Qt::AlignLeft|Qt::AlignVCenter);
-        drawImage(p,"system_plugin","tex_cross",{856,858,26,26});text({890,850,140,40},QObject::tr("Enter"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-        drawImage(p,"system_plugin","tex_circle",{1010,858,26,26});text({1044,850,140,40},QObject::tr("Back"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+        text({311,795,220,34},QObject::tr("Controller"),24,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+        drawImage(p,"system_plugin","tex_controller",{448,799,31,31});
+        text({494,795,60,34},"1",23,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+        text({311,835,220,34},QObject::tr("Charge Level"),24,QColor(215,215,215),Qt::AlignLeft|Qt::AlignVCenter);
+        text({468,835,40,34},"-",24,QColor(215,215,215),Qt::AlignHCenter|Qt::AlignVCenter);
+        // Footer legend (console ink x 726/762 and 1155/1192, y 897-916) with the console's 1 px rule at y 880.
+        p.fillRect(QRectF(0,880,1920,1),QColor(255,255,255,175));
+        drawImage(p,"system_plugin","tex_cross",{726,898,18,18});
+        text({760,890,140,34},QObject::tr("Enter"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+        drawImage(p,"system_plugin","tex_circle",{1155,897,20,20});
+        text({1190,890,140,34},QObject::tr("Back"),21,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
         p.restore();
     }
-    else if(psHudUntil_>0 && clock_.elapsed()<psHudUntil_) {
-        // A PS tap flashes the controller indicator beside the clock, then fades.
-        const double fade=std::clamp(double(psHudUntil_-clock_.elapsed())/600.,0.,1.);
-        p.save();p.setOpacity(fade);
-        drawImage(p,"system_plugin","tex_controller",{1230,92,34,34});
-        text({1270,88,150,42},"1",22,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
-        text({1430,88,90,42},"-",22,QColor(210,210,210),Qt::AlignRight|Qt::AlignVCenter);
-        p.restore();
+    else if(psHudAt_>0) {
+        // A PS tap raises the controller indicator beside the clock. Measured on the console's tap burst
+        // (rpcs3-gaps MANIFEST 4 / PS-BUTTON.md): a 134x46 rounded plate at (1191,81), flat RGB 53,49,41
+        // in the settled frame, that starts 155 ms after the press, is full 66 ms later, holds for about
+        // 2.0 s and leaves 66 ms after that. The pad glyph, "1" and "-" sit inside the plate at the
+        // reference frame's own ink boxes (x 1200-1229, 1239-1245 and 1294-1302).
+        const double alpha=psHudOpacity(clock_.elapsed());
+        if(alpha>0.) {
+            p.save();p.setOpacity(alpha);
+            p.setPen(Qt::NoPen);p.setBrush(QColor(53,49,41));
+            p.drawRoundedRect(QRectF(1191,81,134,46),4.5,4.5);
+            drawImage(p,"system_plugin","tex_controller",{1199,88,31,34});
+            text({1237,81,26,46},"1",23,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+            text({1278,81,40,46},"-",23,QColor(235,235,235),Qt::AlignHCenter|Qt::AlignVCenter);
+            p.restore();
+        }
     }
+}
+// The console's tap indicator window: 155 ms delay, 66 ms fade in, ~2.0 s hold, 66 ms fade out, as
+// measured on the burst (luma 80.47 at rest, 68.85 from 321 ms to 2322 ms, 80.47 again by 2388 ms).
+double View::psHudOpacity(qint64 now) const {
+    if(psHudAt_<=0)return 0.;
+    const qint64 t=now-psHudAt_;
+    if(t<155 || t>=2288)return 0.;
+    if(t<221)return double(t-155)/66.;
+    if(t<2222)return 1.;
+    return 1.-double(t-2222)/66.;
 }
 // ---- Couch volume ----------------------------------------------------------------------------------------
 // The PC's master volume, driven by the pad's analog triggers and by the Windows media keys, with one
@@ -2487,12 +2590,22 @@ void View::replayKeyTap(int key) {
     QKeyEvent press(QEvent::KeyPress,key,Qt::NoModifier);keyPressEvent(&press);
     QKeyEvent release(QEvent::KeyRelease,key,Qt::NoModifier);keyReleaseEvent(&release);
 }
-// Scripted PS tokens feed the global watcher exactly like a HID press: the tap keeps the button down
-// briefly, the hold long enough for the watcher's 1 s rule to fire on its own.
+// Scripted PS tokens feed the global watcher exactly like a HID press: the hold keeps the button down
+// long enough for the watcher's 1 s rule to fire on its own. A tap cannot go through the watcher in a
+// scripted run: the pad is gated, so no HID sample ever reaches poll(), and poll() deliberately holds
+// the last state across a missing sample (a controller dropout is not a release). The injected release
+// is therefore never observed and the token became a 1001 ms hold that opened the system menu instead
+// of flashing the indicator (probe 2026-10-28, out/psfix/tap-probe-ps.log). The token drives the tap
+// handler the watcher would call, at the press instant, so the indicator's 155 ms delay is measured
+// from the press exactly as the console burst measures it. The watcher's own tap path stays exercised
+// by a real pad and by the pshold token.
 void View::replayPsTap() {
     psLog("script: token ps (tap)");
-    psWatcher_.replayPress();
-    QTimer::singleShot(120,this,[this]{psWatcher_.replayRelease();});
+    psPressActionable_=!QApplication::activeModalWidget() && (xmbOwnsForeground()||titleRunning());
+    psLog(QString("script: tap driven directly xmbActive=%1 xmbForeground=%2 titleRunning=%3 modal=%4 foreground=%5")
+        .arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(titleRunning()?1:0)
+        .arg(QApplication::activeModalWidget()?1:0).arg(foregroundDescription()));
+    psTappedEvent(120);   // the script stands in for the console's 60-120 ms press
 }
 void View::replayPsHold() {
     psLog("script: token pshold (hold)");
@@ -2544,13 +2657,15 @@ void View::psHeldEvent() {
 }
 void View::psTappedEvent(qint64 durationMs) {
     const bool running=titleRunning();
-    psLog(QString("event: tap %1 ms xmbActive=%2 xmbForeground=%3 titleRunning=%4 foreground=%5")
-        .arg(durationMs).arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(running?1:0).arg(foregroundDescription()));
+    psLog(QString("event: tap %1 ms xmbActive=%2 xmbForeground=%3 titleRunning=%4 foreground=%5 at=%6 ms")
+        .arg(durationMs).arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(running?1:0)
+        .arg(foregroundDescription()).arg(clock_.elapsed()));
     if(!psPressActionable_) { psLog("event: tap ignored (not actionable)"); return; }
     if(QApplication::activeModalWidget()) { psLog("event: tap ignored (a modal dialog owns input)"); return; }
     if(!running && !xmbOwnsForeground()) { psLog("event: tap ignored (XMB lost the foreground before the tap completed)"); return; }
     if(running)bringXmbForward("PS tap while a tracked title is running");
-    psHudUntil_=clock_.elapsed()+2500;
+    psHudAt_=clock_.elapsed();
+    psHudUntil_=psHudAt_+2288;   // the console's own window (PS-BUTTON.md, MANIFEST 4)
     shell_.psTapped();   // closes the menu if open, otherwise clears status and flashes the indicator
     psLog(QString("event: tap handled; no title was quit (titleRunning=%1) foreground=%2")
         .arg(titleRunning()?1:0).arg(foregroundDescription()));
