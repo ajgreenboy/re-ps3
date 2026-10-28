@@ -36,6 +36,19 @@ behind the dated correction sections added to [DIALOGS](DIALOGS-FIRMWARE.md),
 [SETTINGS](SETTINGS-FIRMWARE.md), [ITEM-MENU/INFO](ITEM-MENU-INFO-FIRMWARE.md), [OSK](OSK-FIRMWARE.md),
 [GEOMETRY-ROOT](GEOMETRY-ROOT.md) and [PAGE-MOVE](PAGE-MOVE.md).
 
+Firmware capture batch 2 (2026-10-28): [capture batch 2](CAPTURE-BATCH-2-2026-10-28.md) - a second targeted
+RPCS3 batch, one session in two boots (251 stills, 22,149 burst frames in 19 bursts; 1:1 crop bursts at
+130.2-234.9 fps; clock scale 100 %, so no timing rescale), aimed at what a settled frame cannot show. It
+carries the rig-restoration hashes (input config `e624da0d...ceee`, `config.yml` untouched, `xRegistry.sys`
+restored byte-for-byte), the coverage ledger (closed / partial / open with the frame for each), the depth-2
+page numbers, the options-menu and choice-band timings, the BG1-at-rest negative result (a focused settings
+row has no filled rectangle), the Theme/Color/Background/Font contents, the Video/System page tails, and the
+error-surface investigation - one real firmware error page, fully measured, and an explicit account of why a
+numeric error code could not be produced on this console. It is the evidence behind the dated correction
+sections added to [DIALOGS](DIALOGS-FIRMWARE.md) (section 9), [SETTINGS](SETTINGS-FIRMWARE.md) (section 12),
+[ITEM-MENU/INFO](ITEM-MENU-INFO-FIRMWARE.md) (part G), [GEOMETRY-ROOT](GEOMETRY-ROOT.md) (section 10) and
+[PAGE-MOVE](PAGE-MOVE.md) (dated note 2).
+
 Latest Friends continuation (2026-10-26): [signed-in Steam client connection](STEAM-CLIENT-FRIENDS.md), including the verified live list and external SDK build input.
 
 Latest continuations (2026-10-25): [Steam and installed-PKG content](STEAM-INTEGRATION.md),

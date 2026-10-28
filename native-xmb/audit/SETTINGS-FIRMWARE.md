@@ -1371,4 +1371,205 @@ video is captured, its cue is not).
 - The commit cue (U5) and the band's open/close duration (U3's audio/settle frame).
 - Wiring the 45 RCO lists to live rows (11.7d) and the choice-page row actions that follow.
 
+---
+
+## 12. Dated correction - 2026-10-28 capture batch 2: depth-2 pages, band geometry, list contents
+
+Evidence added after section 11 was written: a second targeted RPCS3 batch on the same 4.93 XMB, one
+session in two boots, at 1920x1080 (`C:\dev\out\rpcs3-ref2-2026-10-28\`, `MANIFEST.md`): 251 stills,
+22,149 burst frames in 19 bursts (crop bursts at 131-235 fps, 1:1, no rescale), **clock scale 100 %** for
+the whole session. Nothing above is deleted; sections 9-11 keep their 2026-10-27 text. Frame paths are
+relative to the capture root. Where the batch summary rounds a value, the frame value is used and the
+difference is named; the numbers marked "(re-measured)" were checked against the cited still with a
+luma/ink scan for this section, the rest are the batch's own frame measurements.
+
+### 12.1 Status of 9.5 and 11.9
+
+| old item | status | value and frame |
+|---|---|---|
+| 9.5: the tail rows of Video and System below y 1080 | **CLOSED** | Video **19 rows**, last `50 Hz Video Output` (Automatic); System **25 rows**, last `About PlayStation(R)3 (PS3(TM))` - 12.5 |
+| 9.5: Background and Font list contents | **CLOSED** | Background 3 items + `Brightness >`; Font 3 items - 12.4 |
+| 9.5 / 11.9: Colour's 11 chip labels | **CLOSED as a negative** | the chips carry **no labels at all**; only the current value is named above the column - 12.4 |
+| 9.5: the exact BG1 focus-plate rectangle inside the band | **PARTIAL, and changed in kind** | inside the band it is still not separable; at rest on a settings page there is **no filled rectangle** at all - 12.6 |
+| 9.5 / U3: the exact open and close duration of a choice band | **CLOSED** | Theme band open starts +62 ms, ramp 270 ms, rest by +330 ms; close starts +11 ms, ramp 200 ms - 12.3 |
+| 9.5: U5 and U3's audio half (the commit cue) | **OPEN** | no audio was recorded in this batch either (`MANIFEST` section 5 no. 6); `INTERACTION-AUDIO.md` 277-285 stays the open item |
+| 9.5: the `software_update_plugin` RCO for U8 | **OPEN** | not part of this batch; the update path kills vsh (`MANIFEST` section 4.1b) |
+| 11.9: the two timer lists behind `System Auto-Off` / `Controller Auto-Off` (D20) | **OPEN** | not captured; the Network/Display/Theme pages were the targets instead |
+| U9: Colour's item count (11.7b said "12 items, labels not transcribed") | **CLOSED** | 12 chips, 40 px pitch, `Original` + 11 colours, no labels, live preview - 12.4 |
+
+New in this batch and not on any earlier list: a **depth-2 page class** with its own grid (12.2), and the
+band's row origin turning out to be per-list rather than a constant (12.4c).
+
+### 12.2 A page class the audit did not have: the depth-2 read-only page
+
+Route: Settings column, row 16 `Network Settings`, Cross, row 1 `Settings and Connection Status List`,
+Cross. Frame `depth2/statuslist-rest.png` (re-measured for this section).
+
+| quantity | value | note |
+|---|---|---|
+| Title-bar rule | **y = 199**, 1 px | same as every D4/D5 page |
+| Rows | **13**, ink tops **291 -> 771**, **pitch 40 px exactly**, ink height 18 | all 13 re-measured; pitch identical on every step |
+| Label column | **right-aligned at x = 939** | re-measured 938-940 across all 13 rows |
+| Value column | **left-aligned at x = 979-980** | re-measured 978-980 |
+| Column gutter | 38-41 px | new |
+| Lower rule | **y = 879**, 1 px | new: the page uses the D4 rule pair, not one rule |
+| Back hint | `O Back`, ink x 1155-1239, y 897-916 | same rect as the information page |
+| Focus | **none** | `Down`/`Up` produce no change (mean frame delta 0.82 / 1.31 luma = the wave) |
+| Category band | **off-frame** | no icon-column elevation: x 240-320 mean luma 11.8 against 25.8 on the depth-1 parent page |
+| Info bar | **absent** | luma 0 at x 1300 / 1340 / 1700 / 1900 on y 100 |
+
+**The 40 px pitch is a depth-2 number.** D24 and U1 measured **80 px** on the depth-1 list pages and
+`GEOMETRY-ROOT.md` 9.3 confirmed the item-row grid at 80 there. Two page classes, two grids: a single row
+pitch constant cannot serve both, and 12.2's 40 is *not* a correction of D24 - it is a second class.
+
+The second depth-2 type is a **message page** (`depth2/ics-page-01.png`, `Internet Connection Settings`):
+title bar, rule at y 199, a two-line body, an `OK` button, `X Enter` / `O Back` hints; `Down`/`Down`/`Up`
+move nothing (`depth2/ics-page-down1/down2/up1.png`). So a depth-2 page inherits one of the two shapes this
+audit already knows - the read-only table or the D4 message page - and neither has focusable rows.
+
+### 12.3 Band geometry and timing, per page
+
+**Timing** (1:1 crop bursts, 131-235 fps, clock 100 %; no rescale anywhere):
+
+| transition | start after key | ramp | at rest | frame |
+|---|---|---|---|---|
+| Choice band (Theme) **open** | **+62 ms** | **270 ms** (0 -> 1 by +330 ms) | +330 ms | `bands/theme-band-open2/` (539 f, 158.9 fps) |
+| Choice band (Theme) **close** | **+11 ms** | **200 ms** | +215 ms | `bands/theme-band-close2/` (560 f, 164.7 fps) |
+| Choice band (Screensaver) **close** | +11 ms class | 200 ms class | - | `bands/screensaver-band-close/` (452 f, 151.2 fps), an independent repeat |
+
+The metric is the band background's luma inside its own region (Theme 0.37 -> 19.7 open, 19.7 -> 0.36
+close). This closes U3's "exact open/commit duration" for the video half and confirms it is **not** the
+item menu's timing (that surface starts +115...150 ms and ramps 245-255 ms, `ITEM-MENU-INFO-FIRMWARE.md`
+G1): the two overlays share a look, not a clock.
+
+**Geometry at rest** (re-measured on the stills):
+
+| quantity | Screensaver band | Theme band |
+|---|---|---|
+| frame | `bands/screensaver-band-rest.png` | `bands/theme-band-rest2.png` |
+| left border | **x = 1260-1261** (1 px step, 0 -> 31 luma at y 100) | **x = 1324-1325** (1 px step, 0 -> 31) |
+| gradient peak | 56 luma at x about 1320 | 55-56 at x about 1400 |
+| profile | 46 @1280, 34 @1500, 20 @1560, 8 @1600, 2 @1640, 1 @1680, 0 @1720 | 44 @1500, 35 @1560, 27 @1600, 15 @1640, 6 @1680, 1 @1720 |
+| geometric zero | about 1680 (last >=2 luma at 1648) | about 1744 (last >=2 luma at 1744) |
+| vertical extent | full height y 0-1079 | full height y 0-1079 |
+| item text left | 1276-1278 (11.6) | 1341 = border + 17 |
+
+Two corrections to 11.6, and they do not cancel:
+
+- **(a) There is no single left edge.** 11.6 generalised the Display page's 1260 to "the band". The Theme
+  band's border is at **1324/1325**, i.e. **64 px further right**, on a page of the same class. 11.8's hunk
+  hardcodes `x0 = 1260` for the firmware band and is therefore correct for the Screensaver band only. A
+  per-page origin is needed, and the frames do not say what sets it.
+- **(b) "Fading out by 1660" and "zero by 1690" are two different thresholds, and the batch's own numbers
+  are the geometric one.** Re-measured: the Screensaver band is visually gone by about 1660-1680 (>1 luma
+  left) and geometrically zero at about 1680; the Theme band at about 1720-1744. State which is meant.
+
+The parent page behind the band is dimmed and visible left of the border and through the gradient
+(`bands/theme-band-rest2.png`, `bands/screensaver-band-rest.png`), so 11.8's `fillRect` dim is the right
+kind of thing; its alpha is still a re-measure target.
+
+### 12.4 List contents: Theme, Color, Background, Font
+
+All four lists were opened and cancelled with Circle, so nothing was committed (`lists/theme-page-after*.png`).
+
+**(a) Theme - 4 items, no overflow.** `lists/theme-list-rest.png`: `Install`, `Original` (current and
+focused), `Classic`, `Air Paint`. The current item carries **no check and no dot** - it is only brighter -
+which closes U4 for this page as well. `Air Paint` carries a small preview icon on its row. The list has
+exactly 4 items and cannot scroll (`MANIFEST` section 5 no. 8).
+
+**(b) Color - 12 chips, unlabelled, live preview.** `lists/color-list-rest.png` and `-down1..14.png`:
+
+| quantity | value |
+|---|---|
+| items | **12**: a white `Original` chip plus 11 colour chips |
+| labels per chip | **none**, anywhere; there is no text column in the list |
+| chip pitch | **40 px**, exact over the ten chips measured (571, 611, 651, ... 931) |
+| chips drawn at rest | 11, first ink top **531**, last ink bottom **957**, plus a down-chevron at y 969-977 |
+| the 12th chip | appears when focus reaches it (`-down14.png`); the focused chip takes a **1 px outline** the others do not |
+| label line above the column | ink y **494-523**, and it reads the **current** value (`Original`) - it does **not** follow focus |
+| preview | focus **recolours the whole screen live** (`-down14.png` is red end to end) |
+
+Correction to U9's "Color: `Original` + 11 colour chips + overflow arrow": the arrow is drawn while the
+column is not at its end, and the list is 12 items, not 12 labels. Correction to 11.7b ("this build's 6
+colours"): the firmware's list is **12 unlabelled chips** whose only identity is the colour itself, so a
+native list cannot be built from labels at all - it needs 12 rendered chips.
+
+**(c) Background - 3 items plus a submenu row.** `lists/background-list-rest.png`: `Brightness` (first
+row, with a right-hand chevron: a submenu, not a value), then `Original` (current and focused), `Classic`,
+`Wallpaper`. Clamps at `Wallpaper`. Row ink tops measured 381 / 537 / 581 / 621.
+
+**(d) Font - 3 items.** `lists/font-list-rest.png`: `Original` (current and focused), `Rounded`, `Pop`. Clamps
+at `Pop`.
+
+**(e) The row origin is per-list, and this is a correction to 11.8.** The same string - `Original` - sits at
+ink top about **494** on the Theme list and about **537** on the Background list: two pages, one word, one
+font, 43 px apart. So the band does not place its rows from a single origin, and 11.8's
+`first = 505-(rows-1)*20` (and 11.8 Hunk A's `first`/`rowZero` pair) cannot reproduce both. Measured row
+tops: Theme 261 / 494 / 532 / 576, Background 381 / 537 / 581 / 621, Font 491 / 539 / 578, Color label line
+494 then chips from 531. The 40 px pitch holds inside a list; the origin does not hold across lists. The
+frames do not explain the 43 px difference - recorded as an open item, not a rule.
+
+### 12.5 Video and System page tails
+
+The two pages that were cut at y 1080 in batch 1 were walked to the last row.
+
+| page | rows | last row | frame |
+|---|---:|---|---|
+| Video (`page_bdvd_config`) | **19** | `50 Hz Video Output` (Automatic) | `tails/video-page-top.png`, `video-down1..22.png` |
+| System (`page_console_config`) | **25** | `About PlayStation(R)3 (PS3(TM))` | `tails/system-page-top.png`, `system-down1..20.png` |
+
+This closes 9.2's "Video continues below the fold" note and 9.5's tail item, and makes the full ordered
+lists in `MANIFEST` section 4.6 the authoritative row sets for both pages (19 and 25 rows, one row per
+frame of the walk). Neither page scrolled past its last row.
+
+### 12.6 BG1 at rest: the focused settings row has no filled rectangle
+
+This is the batch's most consequential negative result for this document. Measured on
+`bands/theme-page-ready.png` (Theme Settings page, `Color` row focused) and `bands/theme-plate-rest-color.png`:
+
+- **no filled rectangle** anywhere on the row: at y 470-560 the page background is 3-5 luma from x 405 to
+  x 1300, i.e. the same value as the rows above and below. There is no plate edge, no rounded corner, no
+  fill;
+- the row is marked by **brighter text** plus a **soft gradient confined to the text block**: 10-18 luma
+  over the 3-4 background inside y 470-500, back to 3.9 by y 545-560;
+- the description line under the row is unaffected.
+
+So the depth-1 settings page marks focus with light, not with a plate - in contrast to the XMB column's
+item plate (x 405-731, y about 420-560, peak about 126 luma; `error/column-corrupted-focused.png`,
+`GEOMETRY-ROOT.md` 10.1). Two surfaces, two focus languages, on the same 505/80 grid.
+
+What this does to the rows above:
+
+| old line | what stands |
+|---|---|
+| 9.5 "the exact BG1 focus-plate rectangle inside the band (not separable from the band's gradient)" | still not separable **inside the band**, but on the page at rest there is nothing to separate - there is no plate to measure |
+| 11.8 Hunk A's placeholder dim and its note "the BG1 focus plate inside the band (9.5 still open)" | the dim stays a re-measure target; the "focus plate" language should not become a `fillRect` on a settings row |
+| 3.2's description of the native's settings focus | the native's soft text glow is the right *kind*; a plate would be wrong |
+
+### 12.7 What this batch does not change
+
+- **D24 (row pitch 80)** stands for depth-1 pages; 12.2 adds a 40 px depth-2 class beside it, not instead
+  of it.
+- **U1's focused-row expansion** (+177 px first step on a depth-1 page) is untouched by this batch.
+- **U2's band profile** (11.6) stands as the Display page's profile; 12.3 corrects its generalisation, not
+  its numbers.
+- **The 4-item Theme list, the 5-item Screensaver list and the 110-item time zone list** in 11.4 are
+  unaffected: this batch confirms Theme (4) and does not re-open the RCO enumerations.
+- **D22 (no dot), U4 (no check)** are confirmed again on the Theme list.
+- The choice data model in 11.x needs **no value change** for Color/Background/Font (they write no
+  preference yet); what changes is 11.7b's note *why* Color cannot be labelled.
+
+### 12.8 Still open after batch 2
+
+- U5 / U3 audio half (the commit cue) - still no audio channel.
+- The `software_update_plugin` RCO (U8) and the update failure page (the update path kills vsh).
+- A depth-2 page **with focusable rows** - does not exist on this console (12.2).
+- The two timer lists behind `System Auto-Off` / `Controller Auto-Off` (D20).
+- What sets a band's left edge (1260 vs 1324) and its row origin (494 vs 537) - measured, not derived.
+- The band's rendered font size and cap height - the 40 px pitch and x 1276 / x 1341 are measured, the
+  glyph height is not.
+- The dim alpha behind a band.
+
+No source was edited for this section; no RCO, threshold or reference was touched.
+
 

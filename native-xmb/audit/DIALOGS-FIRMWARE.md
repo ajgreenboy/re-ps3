@@ -884,3 +884,124 @@ Every row of section 5 that this batch did **not** close, restated so it stays v
 
 No source file was edited for this section; no RCO or capture is committed. The frames stay under
 `C:\dev\out\rpcs3-ref-2026-10-28\` (git-ignored).
+
+---
+
+## 9. Dated correction - 2026-10-28 capture batch 2: the error surface is real, and it has no code
+
+Evidence added after section 8 was written: a second targeted RPCS3 batch on the same 4.93 XMB, one session
+in two boots, 1920x1080 (`C:\dev\out\rpcs3-ref2-2026-10-28\`, `MANIFEST.md`): 251 stills, 22,149 burst
+frames in 19 bursts, crop bursts at 131-235 fps, **clock scale 100 %**. Nothing above is deleted. Frame
+paths are relative to the capture root. Where the batch summary rounds a value, the frame value is used and
+the difference is named; numbers marked "(re-measured)" were checked against the cited still for this
+section.
+
+Section 5's row "error-code page | spec-only | one capture of a failing network sign-in" was the wish this
+batch was built around. The batch reached **one real firmware error page** - and it is not an error-code
+page. Both halves of that sentence matter, and 9.3 states the limit plainly.
+
+### 9.1 The one reachable firmware error page, measured
+
+Route: Settings column, row 16 `Network Settings`, Cross, row 4 `Internet Connection Test`, Cross, wait out
+the timeout. Frame `error/page-at-rest.png` (the settled state; the failure itself is the burst in 9.2).
+
+| Quantity | Value | Note |
+|---|---|---|
+| Title-bar rule | **y = 199**, 1 px | mean luma 179 over x 200-1700 |
+| Lower rule | **y = 879**, 1 px | mean luma 182.7 - **the D4/D5 rule pair**, not the single rule 8.1 could check on the info page |
+| Title icon | globe, x about 100-140, y about 160-190 | 2.2's `D2` icon slot |
+| Title ink | **x 145-446, y 167-185** | `Internet Connection Test`, 19 px cap height |
+| Heading ghost | a dimmed repeat of the title at y about **490-523**, **max luma 43** (about 25 % alpha, below the 45 luma ink floor) | this is what is left of the heading: it is not a body line and not a plate |
+| Message ink | **x 753-1163, y 530-546** (re-measured 753-1164 / 529-547) | `An Ethernet cable is not connected.`, one line |
+| Back hint | `O Back`, ink **x 1155-1239, y 897-916** | the same rect as the information page and D4 |
+| Focusable controls | **none** - Down and Up change nothing (mean frame delta 0.82 / 1.31 luma = the wave) | `error/page-after-down.png`, `error/page-after-up.png` |
+| Dim behind | **none**; the XMB is not visible and the category band is off-frame | the page is not modal over a live screen |
+| Info bar | **present but unfilled**: 1 px plate border at x 1329, clock ink x 1592-1799 y 88-119, no plate fill | see 9.4 |
+| Numeric code | **none**: no `800xxxxx`, no code field, no `Enter` hint, no suggested-actions body | 9.3 |
+
+In the D1-D9 taxonomy this is **D4** (titled status page) with a dimmed heading instead of a body: two
+full-width rules, a title above the upper rule, one line of centred text between them, one hint under the
+lower rule, no plate, no dim, no buttons. It is *not* D2.
+
+Dismiss: Circle returns to the `Network Settings` page with the focus on the `Internet Connection Test` row
+(`error/ictest2-dismiss-01..03.png`, `error/page-dismissed.png`, `error/ictest5-row.png`). The page has no
+control of its own - Back is the only verb, which is what a D4 page with no button row should do.
+
+### 9.2 The failure moment, at 234.9 fps
+
+Burst `error/ictest5-fail/` (10,569 frames, **234.9 fps**, 1:1 crop `620,450,740,170`, Cross at about
+800 ms) - the highest frame rate in either batch, and the only timestamped record of a firmware error
+appearing.
+
+| Phase | Time after Cross |
+|---|---|
+| `Please wait...` (spinner + `O Back`) | 0.8 s -> 11.9 s |
+| `Please wait...` text fades out | 11.90 -> 12.05 s (about **150 ms**) |
+| Message and heading fade in | 12.05 -> 12.80 s; white text full at **12.283 s**; plate at rest by 12.8 s |
+| Whole transition | about **750-900 ms**, cross-fade style |
+
+**The timeout is not deterministic.** Three runs of the same test failed at about **12 s, 15 s and 26 s**
+after the Cross (`error/ictest5-fail/`, `error/ictest2-burst/` 868 f at 57.9 fps, `error/ictest3-burst/`
+1,594 f at 63.7 fps). So the *offset* is unpredictable and only the *shape* is stable: a 150 ms text
+fade-out followed by a ~250 ms message fade-in, end to end 750-900 ms. A native implementation that models
+a fixed error delay would be modelling the rig.
+
+### 9.3 The limit: a numeric error code could not be produced on this console
+
+**Stated explicitly, because section 5's error-code row is the one this batch set out to close and did
+not.** Four routes were tried; none produces a `800xxxxx` page, and the reasons are specific:
+
+| Route | What it produced | Why it is not a code page |
+|---|---|---|
+| Game column, `Corrupted Data`, Cross | **nothing at all** - no dialog, no page, no code; clock advances, XMB stays live (`error/launch-burst/` 387 f, `error/corrupt-launch-burst/` 740 f, three 20 s grabs) | `dev_hdd0/game/TEST12345` has no `PARAM.SFO`; the firmware treats the item as dead and Start is a no-op. There is no failure to report |
+| `PlayStation(R)Store` launch | the `Internet Connection Settings` message page (title, rule 199, two-line body, `OK`, `X Enter` / `O Back`), **no code** (`error/icp-page-rest.png`) | configuration advice, not a classified failure |
+| `Settings > System Update > Update via Internet` | **vsh died**: RPCS3 fatal, `ScePafJob`, `fs::windows_file::write ... Access is denied (0x5)` (`sys_fs_write`); console frozen on `Checking... Please wait.` with the host overlay `The PS3 application has likely crashed...` (`error/update2-launch-burst/`, `error/update2-settle-01..04.png`) | an **emulator** fault, not firmware. The overlay is RPCS3 UI and cannot become a firmware page |
+| `Settings > Network Settings > Internet Connection Test` | **the D4 error page of 9.1** | the firmware classifies this as a cable condition, not an error code: string only |
+
+So: **D2 (section 2.2) stays spec-only.** It remains a traced structure -
+`mbox_try_button`, `mbox_detail_scroll`, the `msg_errorcode_*` strings, the Enter/Back hint pair, the
+150-unit settle - with no photograph. What the batch adds is a measured *sibling* from the same dialog
+family, and the distinction is now concrete:
+
+| | D2, error-code page (spec-only) | the measured error page (9.1) |
+|---|---|---|
+| hints | **`Enter` and `Back` labels** (2.2's traced getters) | **`O Back` only**, glyph + label |
+| body | a scrollable suggested-actions body over `tex_default_scroll_*`, centred by -0.5 of its height | one centred line, no scroll object |
+| code | the number, plus `msg_errorcode_if_no_solution_ask_ic_with_errorcode` ("write down error code %1 ...") | **none** |
+| heading | the code/title as real text | a dim ghost below luma 45 |
+| rules | two full-width rules (2.2) | two full-width rules at 199 / 879 |
+
+A reimplementation that draws D2 for a cable-unplugged condition is drawing the wrong dialog: the firmware
+draws D4 with a ghost heading and no code, and reserves D2 for failures it classifies.
+
+### 9.4 Two additions to the D4/D5 convention
+
+- **The rule pair is 199 / 879 on this page too** (re-measured mean luma 179.0 and 182.7). Section 2.4
+  measured the pair on a `Search for Media Servers` frame as 197 / 877 and 8.1's info page as 199 / 879;
+  the error page agrees with the 199 / 879 pair. The depth-2 status-list page uses the same pair
+  (`SETTINGS-FIRMWARE.md` 12.2), so a two-rule page is the family's shape, not one page's.
+- **The info bar is present here, unfilled.** Section 2.4 recorded for the D4 frame: "plate and date text
+  absent; only the analog clock face remains". On the error page the bar is drawn as a **1 px outline at
+  x 1329 with the clock string ink x 1592-1799, y 88-119 and no fill** (luma 0 at x 1700 on y 100). The
+  batch summary's "the info bar is replaced by the rule" is therefore not what the frame shows; the frame
+  value is used here. This is a **third variant** of the same bar (filled / absent / outline-only) and it
+  means "the info bar" is not one state - worth knowing before a native dialog unconditionally hides it.
+
+### 9.5 Status of section 5's and 8.3's open rows after batch 2
+
+| Surface | Status after 2026-10-28 batch 2 | What would still prove it |
+|---|---|---|
+| two-button confirm box (Cross/Circle, Yes/No) | **spec-only, unchanged** - no reachable path produces one | a capture of any "Are you sure?" box |
+| the box's plate rectangle at 1080p | **spec-only, unchanged** | the same capture plus the box's plane vertices |
+| error-code page (D2) | **spec-only, still** - 9.3 | a failure the firmware itself classifies: a rejected PKG, a disc error, a failing PSN sign-in (needs PSN) |
+| **a firmware error page of any kind** | **CLOSED** by 9.1 - D4-class, string-only | n/a |
+| the error page's failure timing | **CLOSED** by 9.2 - 150 ms out, ~250 ms in, 750-900 ms total, variable offset | n/a |
+| dim behind a modal | **spec-only**, and this batch adds a third non-modal surface with no dim | the two-button capture |
+| button-hint fade (100 units) | **spec-only, unchanged** - no frame shows a hint row appearing | a burst of a dialog's hint row |
+| box open/close fade (200 / 1000 units) | **spec-only, unchanged** - the measured fade is the *error page's*, not a box's | the same burst |
+| D6 delete / D7 copy / D8 busy | **no frame, unchanged** (empty VFS) | an object to delete or copy |
+| which `tex_notification_*` glyph a box draws | unchanged | a normal message box |
+| what the info page's rules are made of | unchanged (geometry only) | a decode or pixel samples at several backgrounds |
+
+No source file was edited for this section. The frames stay under `C:\dev\out\rpcs3-ref2-2026-10-28\`
+(git-ignored).

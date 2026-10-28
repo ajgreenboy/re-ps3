@@ -691,3 +691,117 @@ is why `SETTINGS-FIRMWARE.md` D24's native 80 px pitch is right and only the exp
   authored 560x82 is not the drawn box.
 
 No source file was edited for this section.
+
+---
+
+## 10. Dated correction - 2026-10-28 capture batch 2
+
+Evidence added after section 9 was written: a second targeted RPCS3 batch on the same 4.93 XMB, one session
+in two boots, 1920x1080 (`C:\dev\out\rpcs3-ref2-2026-10-28\`, `MANIFEST.md`): 251 stills, 22,149 burst
+frames in 19 bursts (1:1 crops, 131-235 fps), **clock scale 100 %**. Nothing above is deleted. Frame paths
+are relative to the capture root; the numbers marked "(re-measured)" were checked against the cited still
+for this section.
+
+This section records three things that bear on this document's numbers: the item plate rectangle (4.2, and
+the `BG1` object the RCO names but does not place), the **depth-2 page** - the capture section 8 called the
+single one that would close the most uncertainty - and the three band endpoints that 4.4 left to
+`ITEM-MENU-INFO-FIRMWARE.md`.
+
+### 10.1 The item plate: a rect at last, and the settings row that has none
+
+Section 4.2 measures the item grid (focus row 505, pitch 80, first step +175) but contains **no plate
+rectangle** - the RCO's `BG1` planes are all `posX/posY/width/height = 0` (2.2), so the focus plate's screen
+rect was never a firmware number. The batch supplies it at 1080p:
+
+| quantity | value | frame |
+|---|---|---|
+| XMB item plate (focused item in a column) | **x 405-731**, y about **420-560** | `error/column-corrupted-focused.png` |
+| plate size | 326 x 140 | same |
+| fill | soft vertical gradient, peak about 126 luma at y 520 over the icon; re-measured 136 at x 410 on y 520, dropping to 80 at x 730-750 | same |
+
+So the focused item is a plate **326 px wide and 140 px tall**, centred on the focus row (420-560 straddles
+505) and starting 160 px left of the label column - it is an object behind the icon and the label, not a
+full-width row band. 4.2 #32 (the artwork tile, "about 300x180 at about (550, 490)") is a *different*
+object: the plate is not the artwork card, and its width does not track the artwork.
+
+**The settings pages do not do this.** On a depth-1 settings page at rest the focused row has **no filled
+rectangle at all**: `bands/theme-page-ready.png` (Theme Settings, `Color` focused) reads 3-5 luma from
+x 405 to x 1300 across y 470-560, the same value as the rows above and below, with the row marked only by
+brighter text and a soft gradient confined to the text block (10-18 luma over the 3-4 background inside
+y 470-500, back to 3.9 by y 545-560). Detail and consequences: `SETTINGS-FIRMWARE.md` 12.6.
+
+That is the structural finding of this section: the two surfaces share the **grid** (focus row 505, pitch
+80, label column) and not the **focus language**. Section 9.3's "settings pages reuse the item-row grid" is
+confirmed for the grid and must not be read as "and therefore the plate". A view that reuses one focus
+renderer for both is wrong on one of them.
+
+### 10.2 The depth-2 page (section 8's outstanding capture)
+
+Section 8 named a two-level-deep page as the single capture that would close the most uncertainty, and 9.4
+records that it was not taken. It was taken:
+
+Route: Settings column, row 16 `Network Settings`, Cross, row 1 `Settings and Connection Status List`,
+Cross. Frame `depth2/statuslist-rest.png` (1080p, re-measured).
+
+| quantity | value | relation to this document |
+|---|---|---|
+| title rule | y = 199 | the same rule as every captured page |
+| rows | **13**, ink tops **291 -> 771**, **pitch 40 px exactly**, ink height 18 | **a second grid**: 4.2 #16's 80 px is the depth-1 column/page pitch, and the depth-2 table uses 40 |
+| label column | right-aligned **x = 939** (938-940 over all 13 rows) | a new column pair, not 4.2 #34/#36's |
+| value column | left-aligned **x = 979-980** | same |
+| gutter | 38-41 px | new |
+| lower rule | **y = 879** | the D4/D5 pair, not one rule |
+| back hint | `O Back`, x 1155-1239, y 897-916 | unchanged |
+| focus | **none** - the page is read-only | no focus plate and no row move to measure |
+| category band | off-frame (no icon-column elevation at x 240-320: 11.8 luma against 25.8 on the depth-1 page) | this is what a depth-2 page does to the band, and it is what 3.5/5.1's parent-column question is *not* about |
+| info bar | absent (luma 0 at x 1300-1900 on y 100) | differs from the depth-1 page, which keeps the outlined plate |
+
+Two consequences:
+
+- **Row pitch is page-class dependent.** 4.2 #16 (80) stays exact for the depth-1 column and the settings
+  list pages; the depth-2 table is 40. Any code that carries one pitch constant for "rows" is wrong for one
+  of the two classes - a native depth-2 table needs its own constant.
+- **The depth-2 page is not a scaled depth-1 page.** Different rule count (two), different pitch (40),
+  different column pair (939 / 980 against 1301 for a settings value), no info bar, no band. It is a page
+  class of its own, like the choice band was.
+
+The second depth-2 type captured is a **message page** (`depth2/ics-page-01.png`): title bar, rule 199,
+two-line body, `OK`, `X Enter` / `O Back`. No focusable rows there either, so section 8's "depth-2 page with
+focusable rows" remains uncaptured on this console - it does not exist in the pages this rig can reach.
+
+### 10.3 The three band endpoints
+
+4.4 deferred the panel to `ITEM-MENU-INFO-FIRMWARE.md` A6 and had no band numbers. The batch measured three
+bands of the same visual family, and they do **not** share an origin:
+
+| surface | left edge | geometric zero | vertical | frame |
+|---|---|---|---|---|
+| Options menu (Triangle) | **1330** | about **1690-1700** (nothing measurable right of 1750) | full height y 0-1079 | `menus/game-menu-open-check.png` |
+| Choice band, Display page (Screensaver) | **1260-1261** | about **1680** (last >=2 luma 1648) | full height | `bands/screensaver-band-rest.png` |
+| Choice band, Theme page | **1324-1325** | about **1744** | full height | `bands/theme-band-rest2.png` |
+
+Three surfaces, three left edges, all full height, all fading into a dimmed parent page rather than ending
+at a hard right edge. The item menu and the Theme band sit within 6 px of each other (1330 / 1324); the
+Display band is 64 px further left. So:
+
+- **there is no single band-origin constant in the firmware**, and this document should not gain one;
+- 4.4's "the deferred numbers" are now half-answered: the span, the full-height shape and the fade are
+  measured, the **`BG1` plate inside a band** is not (no frame isolates it);
+- the native's `x0 = 1330` (`view.cpp:1110`) is exact for the options menu and the Theme band and 70 px
+  right of the Display band - the same -70 px delta 9.2 already recorded, now known to be page-specific
+  rather than universal.
+
+### 10.4 Not resolved here
+
+- The band's row origin: the same word `Original` sits at ink about 494 on the Theme list and about 537 on
+  the Background list, so the rows are not placed from one origin (`SETTINGS-FIRMWARE.md` 12.4e). Measured,
+  not derived - this document records it so no future pass hardcodes `505-(n-1)*20`.
+- What sets a band's left edge (1260 vs 1324 vs 1330). No frame separates the candidates (list length,
+  page class, the parent page's own column).
+- The `BG1` plate inside a band, and the plate's alpha over a non-black background (10.1's numbers are over
+  the column's backdrop, not over video).
+- 5.1-5.3 (the 262 shift, the parent column's fate, the incoming column) and 5.4's `+113` label rule: this
+  batch is all settled-state geometry and does not touch the transition.
+- 3.7's 560x82 authored vs 591x58 drawn plate: still measured, still unexplained.
+
+No source file was edited for this section.
