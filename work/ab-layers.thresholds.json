@@ -229,7 +229,7 @@
     },
     {
       "name": "video-options-panel",
-      "description": "The Triangle options panel open on the Video Library folder page: Open / Information / Sort By / Close with the focus glow on Open, over the dimmed page. The panel is a composite, not a page, so its own log line and the page's sidecar rows are the state oracle.",
+      "description": "The Triangle options panel open on the Video Library folder page: the firmware row set Open / Copy / Delete / Sort By / Information (no Close row - Circle closes) on the measured full-height band, over the dimmed page. The panel is a composite, not a page, so its own log line and the page's sidecar rows are the state oracle.",
       "reference": "out/native-reference/layers/video-options-panel.png",
       "dataSeed": "out/native-reference/store/video-data",
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini"],
@@ -243,7 +243,7 @@
         "entryTitle": "Movies",
         "entryCount": 3,
         "pageKind": "folder",
-        "log": [{ "pattern": "shell: options opened category= video depth= 1 .*rows= 4 Open\\|Information\\|Sort By\\|Close" }]
+        "log": [{ "pattern": "shell: options opened category= video depth= 1 .*rows= 5 Open\\|Copy\\|Delete\\|Sort By\\|Information" }]
       },
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
