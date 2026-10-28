@@ -472,6 +472,21 @@ difference is this machine's load, not the build. The phase target was "under th
 1.35-1.62 s under load and ~1.2 s quiet, this build is not inside 1 s, and the number to attack is the
 text atlas / GL init block, not the loaders.
 
+### STATUS CORRECTION 2026-10-28: the warm-up gain in 5.4a is withdrawn
+
+The breakdown below is still correct - the `text atlas:` stamp is a cumulative timestamp, the window costs
+~449 ms, the ribbon cloth settle ~221-230 ms, Qt's first shaping ~155 ms and the atlas itself ~21 ms. What is
+**not** correct any more is the outcome claimed at the end of this section: the font-stack warm-up thread that
+cut the first frame by 147 ms (1063 -> 916 ms median) was **reverted in `b0defd8`** because it left the text
+renderer drawing **no glyphs** (302 bright clock pixels against 1,677 for a text-bearing build), and a textless
+frame scored *better* against the reference - which is how the artifact reached the canonical baselines and had
+to be corrected the same night. The slice's startup gain is therefore **withdrawn, not landed**: the startup
+budget is back to its pre-5.4a state and the next attempt must prove glyph output before its milliseconds count.
+A text-presence assertion (>=900 bright pixels in the clock crop) now runs on every canonical capture so this
+cannot pass silently again (`d1e45a8`).
+
+The remaining candidates the section identifies are unaffected and still unclaimed: first native window
+creation (~450 ms) and the ribbon's 14,400-step cloth settle (~225 ms).
 ### 5.4a Where the 714 ms actually goes (measured, 2026-10-27)
 
 This section is appended here, next to the numbers it corrects, rather than to `TEXT-RASTER.md`: the
