@@ -8,9 +8,11 @@
 // explicit native fit (the modal box rectangle, which no local frame shows; section 5 of the audit says
 // what would prove it). The distinction is stated on every fitted value.
 //
-// Nothing here dims the frame. Both measured reference frames have the background, ribbon, particles and
-// info bar at the same luminance as the frame without a message, so the 135-alpha full-frame dim this
-// build used to draw was an invention and is gone.
+// No dim is drawn here. The confirm box and the table page measure the frame behind them at the same
+// luminance as a message-free frame, so the 135-alpha full-frame dim this build used to draw was an
+// invention and stays gone. Two message-page references (page-network-test-error,
+// page-network-connection-settings) do measure the page behind the message at a 0.70 factor; that delta
+// belongs to the page composite and is recorded, not implemented, in the DIALOGS-FIRMWARE addendum.
 #include "view.h"
 #include "assets.h"
 #include "shell.h"
@@ -21,32 +23,56 @@
 
 namespace xmb {
 namespace {
-// ---- Measured on the firmware reference frames (1920x1080) ----------------------------------------
-// D4 header: icon ink 118..154 x 153..188, title ink from x 169 (read as column runs, not by eye).
-constexpr double kChromeIconX=119.,kChromeIconY=154.,kChromeIconSize=36.;
-constexpr double kChromeTitleX=169.;
-constexpr double kChromeTitleTop=152.;                                   // title ink centre y 174
-// D4 rules: core row 198 (delta 49.7 over background 27 -> alpha 0.218) and core row 872 (delta 38.0
-// over 66 -> alpha 0.201), flat across the frame. The audit's table rounds these to 197/877 and
-// 0.22/0.15; the firmware frame measures 198/872 and 0.22/0.20.
-constexpr double kRuleTop=198.,kRuleBottom=872.;
-constexpr int kRuleTopAlpha=56,kRuleBottomAlpha=51;
+// ---- Measured on the 1920x1080 reference frames ---------------------------------------------------
+// Header, and it is one header for both measured page classes: icon ink 109..149 x 154..189 (41 x 36),
+// title ink from x 165 with its cap rows at 167..186. page-network-test-error,
+// page-network-connection-settings and page-network-status-list all measure that box. The older D4 fit
+// (icon 118..154, title from 169) came from a 1262x800 video frame and is superseded by these.
+constexpr double kChromeIconX=109.,kChromeIconY=151.,kChromeIconSize=41.;
+constexpr double kChromeTitleX=163.;
+constexpr double kChromeTitleTop=155.;                                   // 23 px VCenter -> cap ink 167
+// Rules, per page class. The modal message page (the D4 shape a message opens over) and the confirm box
+// draw one flat white 1 px pair at y 199 and y 879, alpha 177/255 = 0.693: page-network-test-error
+// measures 192.6 over 51.7 at y199 and 189.4 over 41.5 at y879; the dialog frame the same pair at
+// 199.2 over 73.5 and 193.4 over 54.4. Both rows are uniform across the frame - 189.6 at x0, 191.1 at
+// x1919 - so the extent is the full width, not the 960 px centre-bright tex_msgdialog_bar.
+// This replaces the D4 fit of 198/872 at 0.218/0.201, which no 1080p message-page frame shows.
+constexpr double kPageRuleTop=199.,kPageRuleBottom=879.;
+constexpr int kPageRuleAlpha=177;
+// The D5 information page is the one message shape with no 1080p reference in the corpus, so it keeps
+// the D4 fit unchanged (198 alpha 0.218, 872 alpha 0.201) instead of being re-fitted to a frame it does
+// not have. The table page's own pair (199/879 at 92) is declared with that page below.
+constexpr double kInfoRuleTop=198.,kInfoRuleBottom=872.;
+constexpr int kInfoRuleAlphaTop=56,kInfoRuleAlphaBottom=51;
 // D4 body: line 1 ink y 509, line 2 ink y 543 (pitch 34 by measurement, 31..33 in the audit's rounding),
 // font ~24 px. AlignTop puts the font's own ascent above the ink, so the rect starts five pixels above the
 // measured ink row.
 constexpr double kBodyLeft=260.,kBodyWidth=1400.,kBodyTop=504.;
 constexpr double kBodyPitch=32.;
 constexpr int kBodySize=24,kTitleSize=23,kInfoRowSize=22;
-// D4 hint: glyph + label x 1155..1238 with ink y 889..909, glyph ~20 px; the 30x30 textures are fitted to
-// the glyph box through drawImage's alpha bounds.
-constexpr double kHintX=1155.,kHintInkTop=889.,kHintGlyphSize=22.,kHintLabelGap=8.,kHintGroupGap=22.;
+// Hint row, one measured pair for every message-surface page: the O glyph's ink is 1155..1174 x
+// 897..916 (20 x 20) and its label's ink 1192..1240 x 898..914; the box's X pair is 726..743 x
+// 898..915 with its label at 762..814 x 898..914. All four measured frames (both network message pages,
+// the table page, the dialog box) put the glyph's ink top at 897 and the label's at 898, so the row is
+// anchored on those two ink tops. The 30x30 tex_cross/tex_circle art fills the box it is given
+// (measured: a 22 px box drew 22 px of ink), so the 2 px inherited glyph-height error is the box size.
+constexpr double kHintX=1155.;                                            // O glyph ink left
+constexpr double kHintInkTop=897.;                                        // glyph ink top
+constexpr double kHintGlyphSize=20.;                                      // glyph ink box (was 22)
+constexpr double kHintLabelInk=1192.;                                     // label ink left
+constexpr double kHintLabelBearing=2.;                                    // 21 px face: rect left -> ink left
+constexpr double kHintLabelRectTop=4.;                                    // inkTop - this = the 26 px rect top
+constexpr double kHintGroupGap=22.;
 constexpr int kHintSize=21;
 // D3 inline line: left at the level-1 item-label column, ink centre y 504, ink height 20 px (~24-28 px
 // font). 628 is the measured ink origin of the firmware's own line; the native label column's ink starts
 // at 624, so the line is the reference's, not a re-fit of it.
 constexpr double kInlineX=628.,kInlineCentreY=504.;
 constexpr int kInlineSize=26;
-// D4 keeps the analog clock face while the info bar's plate and date are hidden: centre ~(1776,93).
+// The clock face these pages keep. The 1080p message-page frames keep the whole info bar (the plate's
+// ramps at y75 and y132, the clock text, and the filled clock face at 1789.5/103.5); view.cpp suppresses
+// the bar for a message screen, so this path draws only the face, at the older fit position. Both the
+// suppressed plate and the face's own geometry are recorded in the DIALOGS-FIRMWARE addendum.
 constexpr double kClockX=1776.,kClockY=93.;
 // ---- The depth-2 read-only table page (SETTINGS-FIRMWARE.md 12.2) ---------------------------------
 // Reference: out/parity-references/page-network-status-list__original__day__1080p.png, re-measured for
@@ -112,22 +138,21 @@ constexpr double kBoxChoiceGap=120.;
 // and bottom rows). 120 px apart, and the pair is centred on the body column (its centre is 1279.5, the
 // 1074..1484 text block's own centre), not on the screen.
 constexpr double kBoxChoiceTop=579.;
-constexpr int kBoxChoiceSize=22;
+constexpr int kBoxChoiceSize=23;      // 23 px: the frame's "Yes" ink is 41 x 19, which a 23 px face gives
 // The captured box focuses No: the console's default answer, and the non-destructive one. The native's box
 // has one accept path (Shell::activate, see the comment in drawMessageBox), so this is the drawn default.
 // The captured box focuses No: the console default answer and the non-destructive one. That is where a
 // box starts, not a constant: the live focus comes from Shell::boxChoiceSlot() (0 = Yes, 1 = No).
-// Footer: the captured box keeps a footer band under the box - one flat full-width 1 px rule at y 879
-// (RGB 200/192/183 over an RGB 78/52/22 background = white at 177/255, uniform from x 20 to x 1900, so not
-// the centre-bright 960 px tex_msgdialog_bar) and the Enter/Back hints at ink y 897..916.
-constexpr double kBoxFooterRuleY=879.;
-constexpr int kBoxFooterRuleAlpha=177;
-constexpr double kBoxFooterInkTop=897.;
-// Hint x: the X glyph's ink starts at 726 and its label at 762; the O glyph's ink at 1155 and its label at
-// 1192 (the D4 row's own anchor), so the pair is drawn at these measured positions rather than stacked
-// from kHintX.
+// Footer: the captured box keeps the modal page's rule pair - the frame's footer rule measures white at
+// 0.693 (193.4 over 54.4) and its header rule the same at y199 - plus the Enter/Back hint pairs at ink
+// y 897..916. X: glyph ink 726..743 x 898..915 (18 x 18), label ink 762..814 x 898..914; O: glyph ink
+// 1155..1174 x 897..916 (20 x 20), label ink 1192..1240 x 898..914. The two glyphs are drawn from two
+// different 30x30 textures with different ink margins, so each pair carries its own measured ink box.
+constexpr double kBoxFooterInkTop=897.;                                  // label anchor (both pairs)
 constexpr double kBoxFooterGlyphX[2]={726.,1155.};
-constexpr double kBoxFooterLabelX[2]={762.,1192.};
+constexpr double kBoxFooterGlyphTop[2]={898.,897.};
+constexpr double kBoxFooterGlyphSize[2]={18.,20.};
+constexpr double kBoxFooterLabelX[2]={762.,1192.};   // label INK left; the draw subtracts the bearing
 // Splits the shell's "Title\n\nbody" shape. A message with no heading leaves the heading empty and the
 // whole text is the body.
 QString takeHeading(QString& text) {
@@ -174,8 +199,8 @@ bool hostReportTable(const Shell& shell) {
 }
 } // namespace
 
-// ---- D4 chrome: icon + left title, the two flat rules, the analog clock ---------------------------
-void View::drawPageChrome(QPainter& p,const QString& title) {
+// ---- D4 chrome: icon + left title, the page class's two flat rules, the analog clock -----------------
+void View::drawPageChrome(QPainter& p,const QString& title,double ruleTop,int ruleTopAlpha,double ruleBottom,int ruleBottomAlpha) {
     // The icon is the focused row's own, the same source the information page has always used: the page
     // the message belongs to shows its item's icon, as D4's "Search for Media Servers" shows the network
     // search icon. A message with no heading draws no header at all.
@@ -185,11 +210,13 @@ void View::drawPageChrome(QPainter& p,const QString& title) {
         drawMessageText(p,{kChromeTitleX,kChromeTitleTop,1200,44},title,kTitleSize,Qt::white);
     }
     // The rules are flat alpha rectangles, not tex_msgdialog_bar: the measured references show one
-    // uniform colour across the whole width, while that texture is 960 px and centre-bright.
+    // uniform colour across the whole width, while that texture is 960 px and centre-bright. The y and
+    // the alpha are the page class's own (kPageRule* for a modal message page, kInfoRule* for the D5
+    // page); both rows run the full frame width on every measured frame.
     p.save();
     p.setPen(Qt::NoPen);
-    p.setBrush(QColor(255,255,255,kRuleTopAlpha));p.drawRect(QRectF(0,kRuleTop,1920,1));
-    p.setBrush(QColor(255,255,255,kRuleBottomAlpha));p.drawRect(QRectF(0,kRuleBottom,1920,1));
+    p.setBrush(QColor(255,255,255,ruleTopAlpha));p.drawRect(QRectF(0,ruleTop,1920,1));
+    p.setBrush(QColor(255,255,255,ruleBottomAlpha));p.drawRect(QRectF(0,ruleBottom,1920,1));
     p.restore();
     drawPageClock(p);
 }
@@ -253,7 +280,7 @@ double View::drawMessageLines(QPainter& p,const QString& body,double top,double 
 void View::drawMessagePage(QPainter& p) {
     QString text=messageShown_.text;
     const QString heading=takeHeading(text);
-    drawPageChrome(p,heading);
+    drawPageChrome(p,heading,kPageRuleTop,kPageRuleAlpha,kPageRuleBottom,kPageRuleAlpha);
     drawMessageLines(p,text,kBodyTop,kBodyPitch,kBodySize,QColor(240,240,240),kBodyLeft,kBodyWidth);
     drawHintRow(p,{{"tex_circle",assets_.text("system_plugin","msg_back","Back")}},kHintInkTop,dialogHintEase_.value);
 }
@@ -298,11 +325,14 @@ void View::drawMessageBox(QPainter& p) {
                 {centre.x()-kBoxIconSize/2.,centre.y()-kBoxIconSize/2.,kBoxIconSize,kBoxIconSize},plateAlpha);
         }
     }
-    // The footer band is part of the captured surface and fades with the box's own group.
+    // The rule pair is part of the captured surface and fades with the box's own group: the frame draws the
+    // same modal pair as a message page, the header rule at y199 and the footer rule at y879, both white at
+    // 177/255, not one footer rule alone.
     if(plateAlpha>.002) {
         p.save();p.setPen(Qt::NoPen);p.setOpacity(plateAlpha);
-        p.setBrush(QColor(255,255,255,kBoxFooterRuleAlpha));
-        p.drawRect(QRectF(0,kBoxFooterRuleY,1920,1));
+        p.setBrush(QColor(255,255,255,kPageRuleAlpha));
+        p.drawRect(QRectF(0,kPageRuleTop,1920,1));
+        p.drawRect(QRectF(0,kPageRuleBottom,1920,1));
         p.restore();
     }
     if(content<=.002)return;
@@ -329,9 +359,11 @@ void View::drawMessageBox(QPainter& p) {
     const QString choices[2]={assets_.text("system_plugin","msg_yes","Yes"),
                               assets_.text("system_plugin","msg_no","No")};
     const double pairWidth=advance(choices[0])+kBoxChoiceGap+advance(choices[1]);
-    // Centred on the text column, not on the body's longest line: the frame's pair centre is 1279.5, which
-    // is both the centre of its 1074..1484 ink block and (within 6.5 px) the centre of this 424 px column.
-    const double left=kBoxTextX+(kBoxTextWidth-pairWidth)/2.;
+    // Centred on the frame's measured pair centre, not on the 424 px rect: the frame's "Yes" ink starts at
+    // 1182 and "No" ends at 1379, so the pair centre is 1280.5, while the rect's own centre is 1286. The
+    // 6.5 px difference is what the earlier "within 6.5 px" note left on the table.
+    constexpr double kBoxChoiceCentre=1280.5;
+    const double left=kBoxChoiceCentre-pairWidth/2.;
     const double centres[2]={left+advance(choices[0])/2.,
                              left+advance(choices[0])+kBoxChoiceGap+advance(choices[1])/2.};
     const int focused=shell_.boxChoiceSlot();
@@ -353,9 +385,13 @@ void View::drawMessageBox(QPainter& p) {
     {
         p.save();p.setOpacity(dialogHintEase_.value);
         for(int i=0;i<2;++i) {
-            drawImage(p,"system_plugin",glyphs[i],{kBoxFooterGlyphX[i],kBoxFooterInkTop,22.,22.});
-            drawMessageText(p,{kBoxFooterLabelX[i],kBoxFooterInkTop-2.,300.,26},labels[i],kHintSize,
-                QColor(235,235,235));
+            // Same measured pair as drawHintRow: the glyph's ink box is 20 px (a 22 px box drew 22 px of
+            // ink, the 2 px inherited height error), the label's ink sits at x - 2 and y = 898 on the
+            // 21 px face, so its VCenter rect starts 4 px above the glyph's ink top.
+            drawImage(p,"system_plugin",glyphs[i],
+                {kBoxFooterGlyphX[i],kBoxFooterGlyphTop[i],kBoxFooterGlyphSize[i],kBoxFooterGlyphSize[i]});
+            drawMessageText(p,{kBoxFooterLabelX[i]-kHintLabelBearing,kBoxFooterInkTop-kHintLabelRectTop,300.,26},
+                labels[i],kHintSize,QColor(235,235,235));
         }
         p.restore();
     }
@@ -366,7 +402,7 @@ void View::drawMessageBox(QPainter& p) {
 void View::drawErrorMessagePage(QPainter& p) {
     QString text=messageShown_.text;
     const QString heading=takeHeading(text);
-    drawPageChrome(p,heading);
+    drawPageChrome(p,heading,kPageRuleTop,kPageRuleAlpha,kPageRuleBottom,kPageRuleAlpha);
     // The body is vertically centred on its content and settled with the traced 150-unit animation
     // (TRACED 0x00340964, DATA 0x0068C2FC), so the first frame starts a little low and rises into place.
     const double settle=(1.-dialogSettleEase_.value)*24.;
@@ -392,13 +428,14 @@ void View::drawErrorMessagePage(QPainter& p) {
 
 // ---- D5 information page --------------------------------------------------------------------------
 void View::drawMessageInfoPage(QPainter& p) {
-    // The page keeps the geometry it already had - it matches the firmware convention of D4 - with the
-    // measured rule positions and header, and the hint moved to the measured x 1155 / ink y 889.
+    // The page keeps the D4 chrome, with the hint on the family's measured anchors (glyph ink x 1155 /
+    // y 897, label ink x 1192 / y 898). Its rule pair stays the D4 fit: no 1080p reference exists for the
+    // D5 shape, so kInfoRule* is unchanged rather than re-fitted to a frame it does not have.
     QString text=messageShown_.text;
     auto lines=text.split('\n');
     const QString title=lines.isEmpty()?QString{}:lines.takeFirst();
     if(!lines.isEmpty() && lines.first().isEmpty())lines.removeFirst();
-    drawPageChrome(p,title);
+    drawPageChrome(p,title,kInfoRuleTop,kInfoRuleAlphaTop,kInfoRuleBottom,kInfoRuleAlphaBottom);
     double height=0;for(const auto& line:lines)height+=line.isEmpty()?20:40;
     double y=std::max(230.,533-height/2+20);
     for(const auto& line:lines) {
@@ -467,14 +504,21 @@ void View::drawHintRow(QPainter& p,const QVector<Hint>& hints,double inkTop,doub
     if(opacity<=.002 || hints.isEmpty())return;
     QFont font(shell_.fontFamily());font.setPixelSize(kHintSize);
     const QFontMetrics metrics(font);
-    double x=kHintX;
+    // The first pair sits on the measured anchors; a second pair (the error page's Enter + Back) flows
+    // from it by the label's own advance and the 22 px group gap, because no reference measures a pair
+    // layout. The glyph's ink is the 20 px box, the label's ink starts at the anchor minus the face's
+    // 2 px left bearing and its VCenter rect 4 px above the glyph's ink top (measured: rect 887 -> ink
+    // 892..908 for the old 889 row, and the frames put the cap rows at 898..914).
+    double glyphX=kHintX, labelInkX=kHintLabelInk;
     p.save();p.setOpacity(opacity);
     for(const auto& hint:hints) {
         if(!hint.glyph.isEmpty())
-            drawImage(p,"system_plugin",hint.glyph,{x,inkTop,kHintGlyphSize,kHintGlyphSize});
-        const double labelX=x+(hint.glyph.isEmpty()?0.:kHintGlyphSize+kHintLabelGap);
-        drawMessageText(p,{labelX,inkTop-2.,300,26},hint.label,kHintSize,QColor(235,235,235));
-        x=labelX+metrics.horizontalAdvance(hint.label)+kHintGroupGap;
+            drawImage(p,"system_plugin",hint.glyph,{glyphX,inkTop,kHintGlyphSize,kHintGlyphSize});
+        const double labelInk=hint.glyph.isEmpty()?glyphX:labelInkX;
+        drawMessageText(p,{labelInk-kHintLabelBearing,inkTop-kHintLabelRectTop,300.,26},hint.label,
+            kHintSize,QColor(235,235,235));
+        glyphX=labelInk+metrics.horizontalAdvance(hint.label)+kHintGroupGap;
+        labelInkX=glyphX+37.;                 // 1155 -> 1192 measured; the X pair is 726 -> 762 in the box
     }
     p.restore();
 }

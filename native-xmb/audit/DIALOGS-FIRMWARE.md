@@ -1547,3 +1547,220 @@ manual  full,<10 waits>,LEFT,wait x5,<10 waits>,DOWN,wait x15,<10 waits>,ENTER,<
 ```
 
 
+
+---
+
+## 13. Message-surface chrome, 2026-10-28: per-page-class rules, hint anchors, footer band, notification plaque
+
+Scope of this pass: the four elements listed in the UI-ELEMENT-GAP-AUDIT work brief - the message-page
+header rules (P2/D2), the Back/Enter hint row (D5), the footer band (D3), and the notification plaque
+(D7) - plus the two chrome defects the same draw path showed when the crops were re-measured (the
+message-page header ink and the confirm box's answer row). Code touched: `native-xmb/src/dialogs.cpp`
+and one signature in `native-xmb/src/view.h`. `view.cpp` was not touched; 13.7 lists the two deltas this
+pass measured on message pages that live in it and returns them as hunks.
+
+All numbers are 1920x1080 frame pixels, Rec.709 luma, 1 px rules read as a full-width row mean
+(`x20..1900`) and alphas as `(row - background) / (255 - background)`. "before" is build
+`out/native-msgchrome-before` (HEAD cbba0de), "after" is `out/native-msgchrome`, both captured at
+`--render-clock 30 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00 --focus-time 2000`.
+
+### 13.1 The rules are a per-page-class pair, and the message page is NOT the old 198/872 fit
+
+The frames decide this. Every 1080p message-surface reference carries one flat white 1 px pair at
+**y 199 and y 879**, and the pair's alpha is the class's own:
+
+| page class | frame | top rule (y199) | bottom rule (y879) | alpha | drawn before | drawn after |
+|---|---|---|---|---|---|---|
+| modal message page | `page-network-test-error` | 192.6 over 51.7 | 189.4 over 41.5 | 177/255 = 0.693 | 198 / 872 at 56 / 51 (0.218 / 0.201) | 199 / 879 at 177 |
+| modal message page | `page-network-connection-settings` | 192.6 over 51.7 | 189.4 over 41.5 | 0.693 | 198 / 872 at 56 / 51 | 199 / 879 at 177 |
+| confirm box | `dialog-box` (byte-identical copy of the `dialog` firmware frame) | 199.2 over 73.5 | 193.4 over 54.4 | 0.693 | footer rule only at 879 at 177; no top rule | 199 / 879 at 177 |
+| depth-2 table page | `page-network-status-list` | 138.9 over 73.2 | 133.2 over 61.9 | 92/255 = 0.361 / 0.369 | 199 / 879 at 92 | unchanged, re-verified |
+| D5 information page | none in the corpus | - | - | - | 198 / 872 at 56 / 51 | unchanged |
+
+Consequences and corrections to this document:
+
+- **Section 2.1's message-page rule values are a different capture's.** The 198/872 at 0.218/0.201
+  numbers came from `out/native-reference/recording-193556/frame-00020600.jpg`, a 1262x800 window
+  capture whose content rect does not map to 1080p by a single scale: its rule rows measure y201
+  (alpha 0.220) and y644 (alpha 0.189), not 198 and 872. No 1080p frame of the D4 "Search for Media
+  Servers" page exists, so those values were never verifiable at 1080p. The two 1080p message pages
+  this build actually reaches draw the bright pair.
+- **The D5 information page keeps the old fit.** It is the one shape in this file with no 1080p
+  reference at all, so re-fitting it to the message page's pair would be invention. It is now an
+  explicit constant (`kInfoRuleTop/Bottom`, `kInfoRuleAlphaTop/Bottom`) rather than a shared one, so
+  the two classes cannot drift into each other.
+- **The table page was already right and is kept.** Its pair is 199/879 at 92 (0.361/0.369 measured),
+  which the previous pass landed; this pass re-measured it and changed nothing.
+- **The extent is the frame width, not a 960 px centre-bright bar.** The message page's rule row reads
+  189.6 at x0 and 191.1 at x1919 - uniform to both edges - so the flat rect runs 0..1919. The brief's
+  "x20..x1900" is the audit's sampling window, not the rule's extent: the rule continues into the
+  last pixel column. `tex_msgdialog_bar` (960 px, centre-bright) stays unused for these rules.
+- The confirm box now draws the **pair**: the frame has a header rule at y199 as well as the footer
+  rule, and the footer rule is one half of the same pair, not a lone band.
+
+### 13.2 The hint row: one measured pair, and the 2 px glyph error was the box
+
+Every measured message-surface frame puts the O glyph's ink at **1155..1174 x 897..916** (20 x 20) and
+its label's ink at **1192..1240 x 898..914**; the box's X pair at **726..743 x 898..915** (18 x 18) and
+**762..814 x 898..914**. The old code anchored the glyph's *rect* at 1155/889 with a 22 px box (which
+draws 22 px of ink - the textures fill the box they are given) and flowed the label from
+`glyph + 22 + 8`, i.e. 1185 rect -> 1187 ink.
+
+| element | frame ink | before | after |
+|---|---|---|---|
+| O glyph (message, table, info pages) | 1155..1174 x 897..916 (20 x 20) | 1155..1176 x 889..910 (22 x 22, 8 px high) | 1155..1174 x 897..916 |
+| O label "Back" | 1192..1240 x 898..914 | 1187..1235 x 892..908 (5 px left, 6 px high) | 1192..1240 x 898..914 |
+| X glyph (box) | 726..743 x 898..915 (18 x 18) | 726..747 x 897..918 (22 x 22) | 726..743 x 898..915 |
+| X label "Enter" (box) | 762..814 x 898..914 | 764..816 x 900..916 | 762..814 x 898..914 |
+
+The 2 px inherited glyph-height error is now named where it comes from: the 30x30 `tex_cross` /
+`tex_circle` art fills its destination rect, so a 22 px rect drew 22 px of ink against a 20 px (O) and
+18 px (X) frame. The two glyphs have different ink margins, so the box carries a per-pair ink box
+(`kBoxFooterGlyphTop/Size`) while the generic row uses the O's 20 px.
+
+The 21 px label's two layout offsets are now explicit and measured rather than incidental: its ink
+starts 2 px inside the AlignLeft rect (`kHintLabelBearing`) and the AlignVCenter rect sits 4 px above
+the glyph's ink top (`kHintLabelRectTop`, giving ink rows 898..914).
+
+### 13.3 The header was 10 px right and 6 px high on every message page
+
+Measured while re-measuring the title rule crop: the message pages' icon ink is **109..149 x 154..189**
+(41 x 36) and the title ink starts at **x 165** with cap rows **167..186** - the same anchors the table
+page already used, not the 36 px icon at (119,154) / title from 169 that the D4 800p capture gave.
+
+| element | frame ink | before | after |
+|---|---|---|---|
+| header icon | 109..149 x 154..189 | 119..154 x 156..187 | 109..149 x 154..188 |
+| header title | from x 165, rows 167..186 | from x 171, rows 164..182 | from x 165, rows 167..185 |
+
+One px short at the bottom of the icon and one px short on the title's right edge is the same
+alpha-bounds/kerning residue the table page carries (12.4), not a new fit.
+
+### 13.4 The confirm box's answer row
+
+Found while scoring the box: the pair sat on the 424 px text rect's centre (1286) instead of the
+frame's pair centre (1280.5), and the 22 px face drew a 38 x 18 "Yes" against the frame's 41 x 19.
+
+| element | frame ink | before | after |
+|---|---|---|---|
+| "Yes" | 1182..1222 x 583..601 | 1191..1228 x 584..601 | 1184..1223 x 584..602 |
+| "No" (focused) | 1337..1379 x 578..606 (halo) | 1350..1380 x 583..602 | 1345..1377 x 583..603 |
+| pair centre | 1280.5 | 1285.5 | 1280.5 (by construction) |
+
+The 23 px face reproduces the frame's 41 x 19 "Yes" (the 23 px table title face is the same size).
+Residual: the focused label's halo is weaker than the frame's - ours adds 473 luma pixels over the ink
+box, the frame 1003 with ~5 px of bloom. The glow call already passes `glow = 1.0`; the shape of the
+bloom is `text_renderer.cpp`'s, which this pass may not edit.
+
+### 13.5 Crop numbers (matched comparisons, `work/ab-compare.ts`)
+
+| state | crop | before | after | budget | verdict |
+|---|---|---|---|---|---|
+| page-network-status-list | title rule 80,150,1520,60 | 22.16 / 0.9538 | 22.16 / 0.9538 | 18.00 / 0.850 | PASS both (landed by commit 719aeb8, re-verified) |
+| page-network-test-error | back hint 1140,880,120,56 | 11.44 / 0.5197 | **16.71 / 0.8358** | 18.00 / 0.850 | +5.27 dB, +0.316 SSIM; still 1.3 dB short (13.7) |
+| page-network-connection-settings | back hint 1140,880,120,56 | 11.44 / 0.5196 | **16.72 / 0.8359** | 18.00 / 0.850 | same |
+| page-network-test-error | title rule 80,150,1520,60 (diagnostic: no catalogue region) | 13.94 / 0.6404 | **16.12 / 0.8569** | - | header + rule fix |
+| page-network-connection-settings | title rule 80,150,1520,60 (diagnostic) | 13.75 / 0.6295 | **16.10 / 0.8563** | - | same |
+| dialog-box | box footer 600,872,760,55 | 17.71 / 0.8712 | **22.25 / 0.9512** | 18.00 / 0.880 | +4.54 dB, now PASS |
+| dialog-box | box answers 1150,560,420,60 | 19.32 / 0.8613 | **21.64 / 0.9012** | 18.00 / 0.880 | +2.32 dB, now PASS |
+| dialog-box | frame 0,0,1920,1080 | 19.68 / 0.8924 | **19.88 / 0.9013** | 18.00 / 0.880 | PASS |
+| page-network-test-error | frame 0,0,1920,1080 | 15.65 / 0.7866 | **15.85 / 0.8051** | 18.00 / 0.850 | FAIL both; residual is 13.7 |
+| page-network-connection-settings | frame | 15.72 / 0.7856 | **15.93 / 0.8046** | 18.00 / 0.850 | same |
+| page-network-status-list | frame | 17.47 / 0.8641 | 17.49 / 0.8648 | 18.00 / 0.850 | unchanged (13.7) |
+| dialog-box | box plate 482,452,319,40 | 12.10 / 0.3815 | 12.10 / 0.3815 | - | unchanged; contentDiffers (different scene behind the wash) |
+
+The back-hint crop's remaining 1.3 dB is the page dim, quantified in 13.7: with the frame's own page
+factor applied offline the same crop measures **19.41 dB** (best-fit gain 0.735), i.e. the hint row is
+now pixel-aligned and the residual is not this element.
+
+### 13.6 Verification
+
+| check | result |
+|---|---|
+| canonical gate `work/ab-layers.ts --capture --exe C:/dev/out/native-msgchrome/re-ps3-native.exe` | **PASS 6/6**, every layer delta +0.00 dB / +0.0000 SSIM (frame 18.76/0.8360, top background 21.06/0.9434, category icon row 21.62/0.9062, item label row 11.99/0.3895, clock text 11.41/0.4528, info bar 15.05/0.7667); text presence 1668 bright pixels (min 900) PASS - the rest frame did not move |
+| determinism, two `--render-clock 20` captures | both SHA-256 `37E2B590C42EF0E3F3601CA492221147C9874D2E3B1785E6237B616F2C0BBC14`, PSNR Infinity / SSIM 1.0000 |
+| `work/parity.ts --capture --score --state page-network-status-list,page-settings-system,dialog-box` | scorecard `out/parity/scorecards/scorecard-20261028-181513.md`, shipped exe sha256 `AE576594849AF17A9BACCF4913BA2EB9C0F9C7AB81AAE755C5BDEDA71E9593C9` (Tier A 3 pass, 2 cells B informative, 1 gating cell failure - the status-list frame below) |
+
+| state | region | PSNR / SSIM | verdict |
+|---|---|---|---|
+| page-network-status-list | frame | 17.49 / 0.8648 | FAIL (18.00/0.850) - the host-report rows, contentDiffers |
+| | status rows | 12.52 / 0.6277 | informative (content differs) |
+| | title rule | 22.16 / 0.9538 | PASS |
+| page-settings-system | frame | 19.08 / 0.8630 | PASS |
+| | page rows | 16.80 / 0.7533 | informative (content differs) |
+| | category icon row | 22.73 / 0.9593 | PASS |
+| dialog-box | frame | 19.88 / 0.9013 | PASS |
+| | box plate | 12.10 / 0.3815 | informative (content differs) |
+| | box answers | 21.64 / 0.9012 | PASS |
+| | box footer | 22.25 / 0.9512 | PASS |
+
+`dialog-box` moved from "B fail" to "B informative" (only its annotated plate region is under budget
+now) and `page-network-status-list` keeps its one gating frame miss, which is the row content.
+
+The tree also carries the transitions pass's in-flight `view.cpp`/`view.h` work (PAGE-MOVE: page/bar
+duration split, PS-hold envelope, options-panel timing). The before/after pair above holds it constant:
+the crops this pass did not touch are byte-identical across the pair (status rows 12.52 / 0.6277 and
+box plate 12.10 / 0.3815 in both, the same values the 18:09 and 18:10 builds score), and the canonical
+gate's root frame is +0.00 on every layer, so the deltas in 13.5 belong to `dialogs.cpp` alone.
+
+### 13.7 Deltas this pass measured but did not close (they are not this file's chrome)
+
+1. **The page behind a message page is dimmed 0.70; this build draws no dim.** `page-network-test-error`
+   and `page-network-connection-settings` read 47.0-51.0 where the same patch on a message-free frame
+   reads 73-88 (ratio 0.56-0.74 by point; a least-squares gain over the whole page is 0.735). The confirm
+   box and the table page measure **no** dim, so the treatment is per class: modal message page = dimmed,
+   box/table = not. This is the dominant term in the two message pages' frame crops and in the back-hint
+   crop's residual (11.44 -> 16.71 -> 19.41 with the gain applied). The stack order is
+   page -> dim -> chrome, so the wash belongs where the page is composited (`view.cpp`'s page path), not
+   inside `drawMessageSurface`, which draws after the whole scene including the ribbon and info bar.
+   Hunk returned rather than landed.
+2. **A message page keeps the whole info bar; this build suppresses it.** The reference keeps the plate's
+   nine-slice ramps (y75 = 124.8 and y132 = 124.5 at x1400; left ramp x1329 = 135), the clock text
+   (574 ink pixels in x1690..1770) and the filled clock face. Our `view.cpp` gate
+   (`if(!messageScreen && !choiceBandUp && !optionsBandUp)`, `view.cpp:2097`) skips the whole block, so
+   `dialogs.cpp` draws only the face - at the old fit centre (1776,93) with a 2.7 px ring and no dark
+   disc, against the frame's 32x32 face at (1789.5,103.5), ~3 px stroke, dark disc and 1.5 px shadow.
+   Hunk returned rather than landed: the plate/text are the info bar's, and the face should move with
+   them.
+3. **The box's focused-answer halo is weaker than the frame's** (13.4).
+
+### 13.8 The notification plaque: no console frame exists, so nothing was changed
+
+D7's plaque (400x58 one line / 400x84 two, right edge 1896, top 145, 48 px slide) is still a fit. The
+search this pass ran:
+
+- **Name search.** Every `*.png|*.jpg|*.bmp` under `C:\dev` whose name contains notif/plaque/trophy/
+  message: 130 hits, all of them native captures (`out/native-reference/notify*`,
+  `out/native-notify*`, `out/smoke-notify.png`), RCO texture extracts (`system_plugin/tex_notification*`,
+  `profile_plugin/tex_*message*`) or unrelated assets. No console frame.
+- **Capture metadata.** The RPCS3 manifests and session logs for the six capture trees under `out/`
+  never script a notification event, and `out/rpcs3-ref2-2026-10-28/MANIFEST.md` explicitly lists the
+  notification among the states that need a reference and do not have one. `work/parity-catalogue.json`
+  catalogues `notification` as native-only, and every scorecard scores it `no-reference`.
+- **Pixel search.** A plaque signature (mean luma of x1500..1890, y150..227 minus the same band at
+  y300..377; the XMB background falls with y, so a plaque stands out) over 836 frames - all 1,018
+  curated stills/pages/frames of the six capture trees plus `out/parity-references`, and a 1-in-40
+  sample of 25,603 burst frames - found no plaque. The highest score belongs to
+  `column-psn__original__day__1080p.png` (49.1), and it is not a notification: the PSN column's own
+  category artwork is a 340 x 106 banner at x1560..1900, y144..250, not a 400 x 58 nine-sliced plate.
+  Median score over the set is 0.67.
+
+Therefore the plaque rect, the 48 px slide and the 22/18 px text stay exactly as they are; nothing was
+invented to fill the gap. What would settle it is one console frame with a trophy/friend notification,
+which needs an event that PSN-less RPCS3 cannot produce on this host.
+
+### 13.9 Reproduction
+
+```
+build   & C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-msgchrome
+before  bun work\parity.ts --capture --exe C:/dev/out/native-msgchrome-before/re-ps3-native.exe --state page-network-status-list,page-network-test-error,page-network-connection-settings,page-settings-system,dialog-box
+after   bun work\parity.ts --capture --exe C:/dev/out/native-msgchrome/re-ps3-native.exe --state page-network-status-list,page-network-test-error,page-network-connection-settings,page-settings-system,dialog-box
+rule    bun work\ab-compare.ts out/parity-references/page-network-status-list__original__day__1080p.png <frame.png> 80,150,1520,60
+hint    bun work\ab-compare.ts out/parity-references/page-network-test-error__original__day__1080p.png <frame.png> 1140,880,120,56
+footer  bun work\ab-compare.ts out/parity-references/dialog-box__original__day__1080p.png <frame.png> 600,872,760,55
+gate    bun work\ab-layers.ts --capture --exe C:/dev/out/native-msgchrome/re-ps3-native.exe
+parity  bun work\parity.ts --capture --score --state page-network-status-list,page-settings-system,dialog-box --exe C:/dev/out/native-msgchrome/re-ps3-native.exe
+```
+
+The measuring scripts for 13.1-13.4 (row profiles, ink boxes, the dim gain) are in
+`C:\dev\out\msgchrome\` (`measure_refs.py`, `measure_frame.py`, `scan_notify3.py`), outside the repo.
