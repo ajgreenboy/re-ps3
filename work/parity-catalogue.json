@@ -250,7 +250,8 @@
       "native": { "reachable": "yes", "how": "Settings column, Network Settings row, ENTER, then row 4 (Internet Connection Test), ENTER: the row answers with this build's own message page (Shell::activate Action::Unavailable), titled with the firmware row's title; no connection test runs" },
       "route": { "column": "settings", "stages": [{ "catalogueId": "network" }, { "rowIndex": 3 }] },
       "expect": { "category": "settings", "depth": 1, "entryId": "net_internet_test", "entryCount": 5, "pageKind": "page" },
-      "tierANote": "Page-scoped Tier A: the message has no dump field, so the assertions prove the page and the focused row, not the message. Content difference by construction: the firmware's body is `An Ethernet cable is not connected.` after a variable timeout (measured at 12 s, 15 s and 26 s across three runs), while this build draws its own `not available in the native recreation yet` explanation - no test runs and no firmware string is reproduced. The firmware body rect the regions frame is the measured one; the native body is at the shared message position, so Tier B on this state compares the surface shape, not the text.",
+      "tierANote": "Page-scoped Tier A: the message has no dump field, so the assertions prove the page and the focused row, not the message. Content difference by construction: the firmware's body is `An Ethernet cable is not connected.` after a variable timeout (measured at 12 s, 15 s and 26 s across three runs), while this build draws its own 
+ot available in the native recreation yet` explanation - no test runs and no firmware string is reproduced. The firmware body rect the regions frame is the measured one; the native body is at the shared message position, so Tier B on this state compares the surface shape, not the text.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "message body", "crop": [700, 470, 520, 100], "required": true, "contentDiffers": true, "contentDiffersReason": "reference body reads An Ethernet cable is not connected.; the native row answers with this build own not available in the native recreation yet message" },
@@ -695,7 +696,7 @@
       "tierANote": "No sidecar field reports the indicator, so the assertions only prove the root underneath; the indicator itself is a pixel claim.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
-        { "name": "controller indicator", "crop": [1200, 80, 340, 60], "required": true },
+        { "name": "controller indicator", "crop": [1191, 81, 134, 46], "required": true },
         { "name": "info bar", "crop": [1329, 75, 591, 58] }
       ]
     },
@@ -715,7 +716,8 @@
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "ps menu entries", "crop": [300, 470, 1320, 240], "required": true, "psnrDb": 26.0, "ssim": 0.95 },
-        { "name": "ps menu footer", "crop": [140, 650, 600, 130], "required": true }
+        { "name": "ps menu legend", "crop": [700, 875, 560, 50], "required": true },
+        { "name": "ps menu controller panel", "crop": [120, 790, 400, 90], "required": true }
       ]
     },
     {
