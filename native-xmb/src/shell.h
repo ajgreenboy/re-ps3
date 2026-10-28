@@ -31,12 +31,18 @@ namespace xmb {
 class Assets;
 class SteamArtwork;
 enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, SteamStoreSection, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps, JellyfinApp, JellyfinFolder, JellyfinPlay, JellyfinMore, JellyfinSignOut, SteamDownloads,
+    // A free-text search of the signed-in server's own library: the row asks the view for the XMB
+    // keyboard (through requestJellyfinFieldEdit with the field key "search") and pushes a result
+    // page whose rows carry the same Play/Resume semantics as a folder.
+    JellyfinSearch,
     // The in-XMB Jellyfin sign-in page (audit/JELLYFIN-NATIVE.md, "Sign-in inside the XMB"). A field row opens
     // the on-screen keyboard for that field (Entry::value names it: server, username, password), Submit sends
     // the request and Cancel leaves the page and aborts anything in flight. They are ordinary rows on an
     // ordinary page, so the pad reaches them through the same horizontal/vertical/activate/back path as
     // every other row and no modal dialog can turn pollController off.
-    JellyfinSignInField, JellyfinSignInSubmit, JellyfinSignInCancel };
+    // JellyfinSignInRemember is the explicit "stay signed in" opt-in: Cross toggles it, and only an
+    // accepted sign-in with it on writes the DPAPI-protected session record.
+    JellyfinSignInField, JellyfinSignInSubmit, JellyfinSignInCancel, JellyfinSignInRemember };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -60,6 +66,10 @@ struct Entry {
     // page's three fields use it (server URL, user name, and the password as dots); every other row leaves it
     // empty, so the view falls through to Shell::valueText() exactly as before and no existing frame changes.
     QString fieldValue;
+    // Remote media progress supplied by the authenticated provider, never a local file resume key.
+    QString mediaKind;
+    qint64 resumeMs=0,durationMs=0;
+    bool played=false;
 };
 struct Category { QString id,title,container,texture; QVector<Entry> entries; QString themeIcon; };
 // Item-level Triangle options menu: the PS3 shows a right-hand panel, not a level. Each row is a command
@@ -70,7 +80,7 @@ enum class OptionCommand { Activate, Information, SortByNameAscending, SortByNam
     SubtitlesOff, SubtitleTrack, AudioTrack, RepeatMode, ToggleShuffle,
     // The Continue Watching page's own command: forget the remembered position for this row. Only the
     // page that lists resume points offers it (buildOptions gates on the row id).
-    RemoveResume };
+    RemoveResume, JellyfinRestart };
 struct MenuOption {
     QString title;
     OptionCommand command=OptionCommand::Close;
@@ -186,6 +196,12 @@ public:
     // What the page under the cursor is, for the capture sidecar: "jellyfinSignIn", "jellyfinViews",
     // "jellyfinFolder", "downloads", "continueWatching", "folder", "page" or "root".
     QString pageKind() const;
+    // The open Jellyfin page's backdrop, fetched through the authenticated image route and kept for
+    // the view's hero surface. Nothing draws it yet: the view has no page-level artwork slot, so the
+    // hunk that would use it is reported in audit/JELLYFIN-NATIVE.md instead of being written here.
+    const QImage& pageBackdrop() const { return jellyfinBackdrop_; }
+    // True while a DPAPI session record exists for this installation (the "stay signed in" opt-in).
+    bool jellyfinRemembered() const;
     QString focusedRowId() const;
     void createUser(const QString& name);
     // PS button (DualSense/DualShock over HID, keyboard substitute): a tap shows the controller indicator
@@ -263,7 +279,16 @@ private:
     int jellyfinRequestDepth_=0,jellyfinRootDepth_=0;
     bool jellyfinSigningIn_=false,jellyfinQueue_=false,jellyfinStarted_=false;
     QString jellyfinServiceTitle_,jellyfinRequestedTitle_;
+    QUrl jellyfinServiceServer_;      // the registration's URL, for a sign-in page reached after a refused restore
     QHash<QString,bool> jellyfinAudio_;
+    QHash<QString,qint64> jellyfinResume_;
+    qint64 jellyfinResumePending_=0;
+    bool jellyfinApplyingResume_=false;
+    bool jellyfinRestoring_=false;    // a remembered session's first page is loading
+    bool signInRemember_=false;       // the sign-in page's opt-in row
+    QString jellyfinSearchTerm_;      // the last accepted search term, prefilled into the keyboard
+    QImage jellyfinBackdrop_;         // the open page's hero image (no view surface yet)
+    QString jellyfinBackdropId_;
     // In-XMB sign-in page state (audit/JELLYFIN-NATIVE.md). The server comes from the registration; the user
     // name and password are typed on the XMB's own keyboard and stay in memory for this process only, and the
     // password is cleared when the page closes. signInError_ is the client's own message, shown on the page.
@@ -273,9 +298,13 @@ private:
     void initJellyfin();
     void openJellyfin(const Entry& entry);
     void loadJellyfinPage(const QString& parent,const QString& title,int start=0,bool views=false,bool replace=false);
-    void openJellyfinMedia(const Entry& entry);
+    void openJellyfinSearch(const QString& term);
+    void loadJellyfinSearchPage(const QString& term,const QString& title,int start=0,bool replace=false);
+    void openJellyfinMedia(const Entry& entry,bool fromBeginning=false);
     void startJellyfinMedia();
-    void finishJellyfinPlayback();
+    void applyJellyfinResume();
+    void reportJellyfinPlaybackState();
+    void finishJellyfinPlayback(bool completed=false);
     void signOutJellyfin();
     SteamFriends steamFriends_;
     SteamOwned steamOwned_;
@@ -334,7 +363,7 @@ private:
     int photoRotation_=0;
     QVector<Category> categories_;
     QVector<int> selections_;
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step

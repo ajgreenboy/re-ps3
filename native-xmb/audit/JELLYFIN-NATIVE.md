@@ -332,3 +332,390 @@ Not touched: `jellyfin_client.*`, `jellyfin_stream.*`, `jellyfin_shell.cpp`, `ap
 `settings_menu.cpp`, `preferences.cpp`, `xmbml_view.*`, `subtitles.*`, `CMakeLists.txt`, the verification
 harness and its thresholds and references. Captures, the stub server and the run logs live under
 `out/native-jfsignin/evidence` and are not committed.
+
+## Phase 1 completion, 2026-10-27 (evening)
+
+This section supersedes the two "not implemented" statements of the sections above - "Playback currently starts
+at zero" and "remembered sign-in is not implemented" - and the five-row sign-in page of section 2. Everything
+below was written after the last source edit, from runs of `C:\dev\out\native-jf1\re-ps3-native.exe` (built
+2026-10-27 20:41, later than every source file this pass edited), from the logs those runs wrote, from the state
+sidecar each capture writes, and from the stub server's own request log. The stub, the runner, the captures and
+the logs live under `C:\dev\out\native-jf1-evidence` and are not committed.
+
+Scope: finish and own the uncommitted resume slice (1.1), then 1.2 posters, 1.3 search, 1.4 stream tracks and
+1.5 DPAPI remembered sign-in, as far as the file fence allows. `view.cpp`, `view.h`, `main.cpp`,
+`settings_menu.cpp`, `preferences.cpp`, `xmbml_view.*`, `particles.*`, `icons.cpp`, `text_renderer.*`,
+`CMakeLists.txt` and the harness were not edited by this pass.
+
+### 11. The in-flight resume slice: what it did, and what this pass fixed
+
+The uncommitted slice in the working tree added: `RunTimeTicks`/`UserData` parsing in `JellyfinClient`
+(`JellyfinItem::durationMs/resumeMs/played`), `EnableUserData=true` on the Items request, `Entry` fields for
+remote progress, the "Resume at HH:MM" detail line, a resume seek path with a seekable guard, the Triangle
+"Play from Beginning" row, completion -> Watched and stop/progress reporting. It compiled and its shape was
+right; the problems were in how the pieces met:
+
+1. **Two resume paths could fight over one seek.** The local-file path in `shell.cpp` applies `resumePending_`
+   on `LoadedMedia`; the new remote path applies `jellyfinResumePending_` on the same signal. The local branch
+   now refuses when `jellyfinQueue_` is set, and `startJellyfinMedia()` clears `resumePath_`/`resumePending_`,
+   so exactly one owner exists at a time.
+2. **The resume seek was not actually guarded.** It now requires `isSeekable()`, a `LoadedMedia`/`BufferedMedia`
+   status, and one attempt flag (`jellyfinApplyingResume_`), re-checks 1.5 s later, and when the stream still
+   cannot seek it says so (`This stream cannot seek; playing from the beginning.`) instead of silently
+   pretending. The target is clamped to `duration-1`.
+3. **Completion was not reported as completion.** `finishJellyfinPlayback()` now takes `completed`, which
+   `advanceMedia()` passes as `!failed`; a completed title reports its **end** position even if the backend has
+   already rewound to 0, reports `IsPaused=false`, sets the row to `played` (label "Watched", resume 0), and the
+   start/stop reports are logged with their positions. An abandoned title reports where it actually stopped.
+4. **Rows were only updated on the current page.** `finishJellyfinPlayback()` walks every open Jellyfin page, so
+   a title finished on the search page is also correct on the folder page underneath it.
+5. **The detail line is ASCII and does not claim a position for watched items.** `Movie - Resume at 00:08 -
+   00:20` / `Movie - Watched - 00:20` (the in-flight code used a U+00B7 separator; this pass's ASCII-only rule
+   for new text is why it is now a plain hyphen).
+6. **Nothing was observable.** The resume decision, the applied seek, the start/progress/stop reports and the
+   Watched transition now log one line each (section 12 quotes them); they carry item ids and millisecond
+   positions, never a credential.
+7. **`jellyfinResume_` outlived the session.** It is cleared on sign-out.
+
+Verified end to end against the stub (below): the row reads "Resume at 00:08", Cross lands at 8 s (sidecar
+`mediaPosition` 11541 for a server position of 8000 ms), Triangle offers "Play from Beginning", that starts at 0
+(sidecar 3989), the clip runs to its end, the row becomes "Watched", and the stub receives a Stopped report at
+`positionTicks=200000000` which it records as `played=true`.
+
+### 12. The stub server and the four scripted runs
+
+`C:\dev\out\native-jf1-evidence\stub-jellyfin.ps1` is a single-file TCP listener (Windows PowerShell 5.1, no
+Jellyfin binaries, no account) that answers the routes this client uses:
+
+| route | answer |
+|---|---|
+| `POST /Users/AuthenticateByName` | fixed test user `aaaa...0000`, token `stub-token-not-a-real-credential` |
+| `GET /UserViews` | one movie library `Stub Movies` |
+| `GET /Items` | two movies with `RunTimeTicks` + `UserData{Played,PlaybackPositionTicks}`: One resumes at 8 s, Two is unplayed; both play the same 20 s clip |
+| `GET /Items?searchTerm=` | the same rows filtered by name (`Recursive=true` as the client sends) |
+| `POST /Items/<id>/PlaybackInfo` | one DirectPlay source with four `MediaStreams`: video, AAC stereo, AC3 5.1, one SRT subtitle |
+| `GET /Videos/<id>/stream` | the real 20 s `Top Level Clip.mp4` (3,459,152 bytes) with byte ranges (`200`/`206`, `Content-Range`, `416`) |
+| `GET /Items/<id>/Images/Primary` / `Backdrop` | local fixture art, `401` without an `Authorization` header |
+| `POST /Sessions/Playing`, `/Sessions/Playing/Progress`, `/Sessions/Playing/Stopped` | `204`; the log carries item, position ticks and the resulting stored state |
+| `POST /Sessions/Logout`, `DELETE /Videos/ActiveEncodings` | `204` |
+
+Two switches exist only to exercise the client's honest failure paths: `-RejectToken` answers every
+signed-in route with `401`, `-FailPlayback` returns a source with no direct play, no direct stream and no
+transcoding URL. The stub keeps `Played`/`PlaybackPositionTicks` in memory and updates them from a Stopped
+report, so a re-open shows server-side state, not only the client's.
+
+Registration went through the shipped route, not a hand-edited file: a fresh data directory plus
+`--import-apps` with
+`{"version":1,"apps":[{"id":"jellyfin","title":"Jellyfin","kind":"jellyfin","category":"tv","url":"http://127.0.0.1:8098"}]}`
+wrote `apps.json` (the command printed `Apps imported successfully.`, exit 0). Each run then used
+`--dev-flash C:/dev/rpcs3/bin/dev_flash --data-dir <data-final> --no-intro --script <tokens>`, one token every
+300 ms, fullscreen 1920x1080.
+
+Run A (`client-a.log`, `stub-a.log`) - sign-in with the masked OSK and the opt-in, resume, tracks, restart,
+finish. Item ids are abridged to `1111...8888` in this document only; both logs carry the full 32-character
+ids, and the capture sidecars carry them verbatim.
+
+    jellyfin: sign-in page opened rows= Server URL|Username|Password|Stay Signed In|Sign In|Cancel focus= Username
+    jellyfin: sign-in field username set to 4 character(s), value masked (not logged)
+    jellyfin: sign-in field password set to 8 character(s), value masked (not logged)
+    jellyfin: stay signed in on (an accepted sign-in will store the session for this Windows user)
+    jellyfin: sign-in accepted
+    jellyfin: remembered sign-in stored (DPAPI, this Windows user; no password kept)
+    jellyfin: library page with 3 row(s); 0 poster request(s)
+    jellyfin: folder page with 2 row(s); 2 poster request(s) and one backdrop
+    jellyfin: play "Stub Movie One" (server position 8000 ms)
+    jellyfin: resume pending at 8000 ms for Stub Movie One
+    jellyfin: playback 1111...8888 DirectPlay 4 server stream(s) Video:1080p H.264|Audio:English AAC stereo|Audio:French AC3 5.1|Subtitle:English (SRT)
+    jellyfin: resume applied at 8000 ms (server reported 8000 ms, duration 20000 ms)
+    jellyfin: start report at 8000 ms
+    jellyfin: progress report at 13098 ms
+    jellyfin: stop report item=1111...8888 at 13440 ms
+    shell: options opened category= tv depth= 2 entry= jellyfin:1111...8888 rows= 4 Resume|Play from Beginning|Information|Close
+    shell: options selection 1 Play from Beginning
+    jellyfin: play from the beginning "Stub Movie One" (server position 0 ms)
+    jellyfin: start report at 0 ms
+    jellyfin: progress report at 6741 ms
+    jellyfin: progress report at 15317 ms
+    jellyfin: stop report item=1111...8888 at 20000 ms (reached the end)
+    jellyfin: row now reads Movie - Watched - 00:20
+
+and the server side of the same session (`stub-a.log`, abridged; the full log has every request):
+
+    POST /Sessions/Playing            item=1111...8888 positionTicks=80000000  paused=False method=DirectPlay
+    POST /Sessions/Playing/Progress   item=1111...8888 positionTicks=130980000 paused=False method=DirectPlay
+    POST /Sessions/Playing/Stopped    item=1111...8888 positionTicks=134400000 paused=False -> resumeTicks=134400000
+    POST /Sessions/Playing            item=1111...8888 positionTicks=0         paused=False method=DirectPlay
+    POST /Sessions/Playing/Stopped    item=1111...8888 positionTicks=200000000 paused=False -> played=true resumeTicks=0
+
+| capture | what it proves | sidecar |
+|---|---|---|
+| `10-views.png` | the app opens on its own library page; 3 rows (Stub Movies, Search Jellyfin, Sign Out) | `pageKind` `jellyfinViews`, depth 1 |
+| `11-rows.png` | **the row reads `Movie - Resume at 00:08 - 00:20`**, with the server's poster as its icon | `pageKind` `jellyfinFolder`, `entryTitle` `Stub Movie One` |
+| `12-resume.png` | Cross resumed: playback starts at the server position | `mediaPosition` **11541**, `mediaDuration` 20000, `playMethod` `DirectPlay` |
+| `13-tracks.png` | Triangle during playback: the stream track panel (section 15) | `audioTrack` 1 of 1 reported |
+| `14-after-stop.png` | Back leaves playback; the row keeps what was watched | `mediaOpen` false, `pageKind` `jellyfinFolder` |
+| `15-options.png` | Triangle on the row: `Resume`, `Play from Beginning`, `Information`, `Close` | `optionsOpen`, 4 rows in the log line above |
+| `16-beginning.png` | **"Play from Beginning" starts at 0** | `mediaPosition` **3989** (4 s into a restart), start report at 0 ms |
+| `17-watched.png` | **the row becomes `Movie - Watched - 00:20`** after the end | `entryTitle` `Stub Movie One`, focus on it |
+
+Run B (`client-b.log`, `stub-b.log`) - the remembered session, then search:
+
+    jellyfin: using the remembered session for http://127.0.0.1:8098 (DPAPI record, no password)
+    jellyfin: library page with 3 row(s); 0 poster request(s)
+    jellyfin: search term accepted ( 4  character(s))
+    jellyfin: search stub from 0
+    jellyfin: search page with 3 row(s); 2 poster request(s) and one backdrop
+
+The stub log for this run contains **no** `AuthenticateByName` request at all - only `GET /UserViews` and
+`GET /Items?...searchTerm=stub` - which is the point of the DPAPI record. `20-restored.png` is the library page
+reached without a sign-in page (`pageKind` `jellyfinViews`, `signInOpen` false); `21-search.png` is the result
+page (`pageKind` `jellyfinSearch`, 2 result rows + "Search Again").
+
+Run C (`client-c.log`, `stub-c.log`) - a remembered session the server refuses:
+
+    jellyfin: using the remembered session for http://127.0.0.1:8098 (DPAPI record, no password)
+    jellyfin: the remembered session was refused; it has been forgotten, signing in again
+    jellyfin: sign-in page opened rows= Server URL|Username|Password|Stay Signed In|Sign In|Cancel focus= Username
+
+    GET /UserViews?userId=aaaa...0000 auth=yes rejected (expired-token mode)
+    POST /Sessions/Logout auth=yes
+
+`22-refused.png` is the sign-in page (`pageKind` `jellyfinSignIn`, `signInState` `idle`, `modalWidget` `""`),
+and `data-final/jellyfin/session.bin` was gone afterwards (checked: `False`; the record run described in
+section 16 created a fresh one later, on purpose). A stale record therefore costs one sign-in, never a dead end.
+
+Run D (`client-d.log`, `stub-d.log`) - a stream the client cannot use:
+
+    jellyfin: play "Stub Movie One" (server position 8000 ms)
+    POST /Items/1111...8888/PlaybackInfo auth=yes directPlay=0 (source the player cannot use) streams=0
+
+`23-unplayable.png` shows the client's own message over the XMB: `Jellyfin` / `Jellyfin did not provide a
+compatible stream.` - the exit criterion "a failed stream shows the client's error".
+
+### 13. 1.2 Posters (and the backdrop, which needs a view change)
+
+- `JellyfinClient::artwork(itemId, tag, backdrop)` fetches `/Items/<id>/Images/Primary?maxHeight=480` (or
+  `.../Backdrop?maxWidth=640`) with the session `Authorization` header, over the same `QNetworkAccessManager` the
+  rest of the client uses. Nothing is fetched without a signed-in session.
+- Bounded on the network and in decode: the shared 4 MB response cap; the declared pixel size is refused above
+  4096x4096 and anything above 1024x1024 is scaled down *before* the read; the decoded image must come back
+  non-null and within the same bound. A malformed body yields no image, not an error the viewer sees.
+- Cached per item under `<data>/jellyfin/images/<id>-p-<sha1(tag)[0..7]>.img` (and `-b-` for a backdrop). The key
+  includes the server's `ImageTags.Primary` / `BackdropImageTags[0]`, so a replaced poster is a new file rather
+  than a stale one. Writes go through `QSaveFile`; a corrupt entry is deleted and fetched again; the directory is
+  capped at 400 files, oldest first.
+- The row image is `Entry::artwork`, which `view.cpp` already draws in the item-icon slot, so **no view change
+  was needed for posters** - and the icon is a real poster in `11-rows.png`/`17-watched.png` (the blue/orange
+  fixture art, not the built-in film glyph). The fetch is bounded to the first 60 playable rows of a page.
+- Stub evidence: `GET /Items/1111...8888/Images/Primary auth=yes bytes=1826`,
+  `GET /Items/2222...9999/Images/Primary auth=yes bytes=1826`,
+  `GET /Items/1111...8888/Images/Backdrop auth=yes bytes=2199`; the three cache files are on disk under
+  `data-final/jellyfin/images` at exactly those sizes.
+- **Backdrops are fetched, cached and exposed, but nothing draws them.** There is no page-level artwork surface
+  in the view: `Entry::artwork` is a row icon, and a grep for `backdrop`/`hero` in `view.cpp`, `view.h`,
+  `shell.cpp` and `shell.h` matches nothing before this change. The shell side is done
+  (`Shell::pageBackdrop()`, the fetch, the cache), so the remaining hunk is the draw - and
+  `view.cpp` is outside this change's fence, so it is reported here instead of applied (illustrative hunk; the
+  surrounding paint path is the one that draws the background and the columns):
+
+      --- a/native-xmb/src/view.cpp
+      +++ b/native-xmb/src/view.cpp
+      @@ View::paintGL(), after the background and before the columns are composited
+      +    // The open Jellyfin page's own Backdrop, full-bleed under the columns. Shell owns the
+      +    // authenticated fetch and the cache; this is the only surface that draws it.
+      +    if(const QImage& hero=shell_.pageBackdrop(); !hero.isNull() && shell_.depth()>0) {
+      +        const QSizeF cover=QSizeF(hero.size()).scaled(QSizeF(width(),height()),Qt::KeepAspectRatioByExpanding);
+      +        p.save();p.setOpacity(.55);
+      +        p.drawImage(QRectF(QPointF((width()-cover.width())/2.,(height()-cover.height())/2.),cover),hero);
+      +        p.restore();
+      +    }
+
+  With that hunk the backdrop is already warm from the run that produced `11-rows.png`; no client or shell
+  change would be needed. Until then the honest statement is: posters render, backdrops are fetched and cached
+  but not drawn.
+
+### 14. 1.3 Search, driven by the existing OSK
+
+- The library page gained a `Search Jellyfin` row (and a search result page gains `Search Again`). Cross emits
+  the existing `Shell::requestJellyfinFieldEdit` signal with the field key `search`; `view.cpp` already answers
+  that signal with its own `openOsk`, and returns the accepted text through `Shell::setJellyfinSignInField`,
+  which routes `search` to `Shell::openJellyfinSearch`. **No view code was added for this.**
+- `JellyfinClient::search(term, startIndex)` is the user-scoped `/Items` route with `SearchTerm`,
+  `Recursive=true`, `IncludeItemTypes` (movie/episode/video/music video/audio/trailer/recording/series/season),
+  `EnableUserData=true` and the same page limit as a folder, so each result carries its `UserData`.
+- Result rows are built by the same loop as a folder page: they carry the same detail line, the same poster
+  fetch, and the same `Action::JellyfinPlay`, which is what gives them identical Play/Resume/Play from Beginning
+  semantics (the row is a queue entry like any other, so the same resume path applies). Paging reuses the `More`
+  row; the term travels in `Page::jellyfinParent`, and `pageKind()` reports `jellyfinSearch` so a scripted run
+  can tell the pages apart.
+- Evidence: `jellyfin: search term accepted ( 4  character(s))` / `jellyfin: search stub from 0` /
+  `jellyfin: search page with 3 row(s); 2 poster request(s) and one backdrop`; stub
+  `GET /Items auth=yes searchTerm=stub rows=2`; `21-search.png` (pageKind `jellyfinSearch`, 2 rows + Search
+  Again). A term the server has no match for closes the page's rows to just `Search Again` and sets the status
+  line the loading text already uses to `No Jellyfin items match that search.` (not captured in this pass).
+
+### 15. 1.4 Stream audio and subtitle tracks, with honest disabling
+
+- `PlaybackInfo`'s `MediaStreams` are parsed into `JellyfinPlayback::streams` (index, type, title/language/codec,
+  channels, external, default) and logged when playback starts:
+  `playback 1111...8888 DirectPlay 4 server stream(s) Video:1080p H.264|Audio:English AAC stereo|Audio:French
+  AC3 5.1|Subtitle:English (SRT)`.
+- The in-player panel (Triangle) keeps its local-file rows unchanged and, for a streamed item, lists the
+  server's own tracks:
+  - **Audio** rows are the server's audio streams, in server order. A row is selectable only when
+    `QMediaPlayer::audioTracks()` reports a switchable track at the same position; otherwise it is drawn dimmed
+    with the reason ("The player reports 1 audio track(s) for this stream, so the server's track 2 cannot be
+    selected."). Selecting one goes through the existing `chooseAudioTrack()`, so the backend's own read-back is
+    still the authority on whether the switch happened.
+  - **Subtitle** rows are listed but disabled, each with the reason: an embedded stream says "the media backend
+    cannot switch stream subtitles", an external one says this build does not download subtitle streams. That is
+    the same rule the local panel already follows for tracks it cannot honour.
+- Evidence: `shell: playback panel opened rows= 6 subtitles= 0 audio= 1 Subtitles Off|Subtitles 1: English
+  (SRT)|Audio 1: English AAC stereo|Audio 2: French AC3 5.1|Repeat: Off|Shuffle: Off` and `13-tracks.png`: the
+  SRT and the French track are dimmed, "Subtitles Off" and "Audio 1" carry the marker, and the sidecar reports
+  `audioTrack` 1 of `audioTrackCount` 1 - the player really only has one, which is exactly why the second row is
+  disabled rather than claimed.
+- Not done, and stated: no subtitle stream is downloaded or rendered (the rows say so), and no quality/bitrate
+  selection was added.
+
+### 16. 1.5 Remembered sign-in behind DPAPI, explicit opt-in
+
+- The sign-in page now has a sixth row, **Stay Signed In**, between Password and Sign In. Its value is the
+  current choice; Cross flips it. It defaults to whether a record already exists, so the page shows the truth on
+  open. A fifth scripted session (`client-e.log`, after runs A-D) pinned the two states:
+  `24-signin-remember-off.png` (the row present, value `Off`, before Cross) and `25-signin-remember-on.png`
+  (value `On`, focused, with the six-row page and the masked password), then signed in and quit, leaving the
+  record inspected below.
+- Turning it **off** deletes the record immediately, not at the next sign-in. Turning it on only takes effect
+  when the sign-in is accepted: `Shell::initJellyfin()`'s `authenticated` handler calls
+  `JellyfinClient::saveSession()` and logs
+  `remembered sign-in stored (DPAPI, this Windows user; no password kept)` or, when off,
+  `stay-signed-in is off; nothing was written`.
+- The record (`<data>/jellyfin/session.bin`) is `XMBJF1\n` followed by `CryptProtectData` of a compact JSON
+  `{v,server,userId,token}` with a fixed application entropy string, written atomically with `QSaveFile`.
+  **The password is never in it, and the plaintext token never touches the disk.** Checked on the record the
+  final binary wrote: 389 bytes, magic `XMBJF1`, and no occurrence of the token, the server URL or the user name
+  as plaintext.
+- `crypt32` is linked from the source with `#pragma comment(lib, "crypt32.lib")` (MSVC), so `CMakeLists.txt` -
+  outside this change's fence - did not have to change.
+- Opening the app while signed out and a record exists for that registration calls `restoreSession()` and loads
+  the library directly (`using the remembered session for <url> (DPAPI record, no password)`); the server sees no
+  `AuthenticateByName`. A refused session (a `401`) forgets the record, signs the client out and opens the
+  sign-in page (`the remembered session was refused; it has been forgotten, signing in again`). **Sign Out of
+  Jellyfin** forgets the record as well.
+- Threat model, stated plainly: DPAPI's user scope means another Windows user on the same machine, or a copy of
+  the file taken to another machine or account, cannot decrypt it. It does **not** defend against a process
+  running as the same user - malware that can call `CryptUnprotectData` can read the token, so this is
+  protection at rest, not a defence against a compromised session. What is stored is a revocable access token,
+  not the password, and signing out on the server (or here) invalidates it; the opt-in is off by default and
+  turning it off deletes the file. The file lives under the app's data directory, not in the registry, and never
+  contains the password.
+- One more exit criterion is covered by this: with the opt-in off, no record is written at all (run D logs
+  `stay-signed-in is off; nothing was written`, and `data-final` had no `session.bin` when that run ended; the
+  separate record-inspection run described below created one afterwards, on purpose).
+
+### 17. Gate
+
+    & C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-jf1
+    -> Built C:\dev\out\native-jf1\re-ps3-native.exe (2026-10-27 20:41; no warning from the files this pass touched)
+
+    & bun work\ab-layers.ts --all --exe C:/dev/out/native-jf1/re-ps3-native.exe
+
+| layer gate | result |
+|---|---|
+| 6 stored-baseline layers (frame, top background, category icon row, item label row, clock text, info bar) | **PASS 6/6** |
+| canonical capture, same 6 layers | **PASS 6/6** |
+
+The canonical capture's own numbers, for the record (PSNR | baseline | delta; SSIM | baseline | delta):
+
+| layer | PSNR | baseline | delta | SSIM | baseline | delta | gate |
+|---|---:|---:|---:|---|---:|---:|---|
+| frame | 18.28 | 18.02 | +0.26 | .8288 | .8301 | -.0013 | PASS |
+| top background | 20.22 | 20.24 | -0.01 | .9336 | .9344 | -.0008 | PASS |
+| category icon row | 20.89 | 21.05 | -0.16 | .8966 | .8950 | +.0016 | PASS |
+| item label row | 11.94 | 11.94 | +0.00 | .3909 | .3910 | -.0001 | PASS |
+| clock text | 11.39 | 11.39 | +0.00 | .4105 | .4105 | +.0000 | PASS |
+| info bar | 14.78 | 14.78 | +0.00 | .6117 | .6117 | +.0000 | PASS |
+
+**The named states did not come back green in this pass, and the cause is not this change.** Two separate
+things were happening in the shared tree while this section was being written:
+
+1. `--all` cannot complete: the harness in the working tree has grown new states (`xmb-notification`,
+   `xmb-volume-hud`, `video-options-panel`, `continue-watching`, `continue-watching-empty`, `subtitle-cue`,
+   `jellyfin-signin`, `steam-download-page`) from a concurrent task, and the run stops at `jellyfin-signin` with
+   `catalogue has no entry "custom:jellyfin" in column "tv"; rows: [services]` - its route is resolved against
+   the shared discovery capture, whose data directory carries no Jellyfin registration. `work/ab-layers.ts`
+   (20:42), `work/ab-layers.thresholds.json` (20:45) and five new reference PNGs (20:48-20:50) are modified in
+   the tree by that task; **this pass did not edit the harness, the thresholds or any reference.**
+2. The four original named states, run individually, FAIL on their full-frame region only: `steam-game-root`
+   48.82 dB, the other three 50.59 dB, all at SSIM 0.9996, against the 55 dB / 0.9995 self-baseline; every
+   content crop (`item column`, `rows`, `sections`) is **`inf / 1.0000`**, i.e. pixel-identical to its
+   reference. The frame difference is confined to one box, `(112,247)-(1213,326)` - the category icon row -
+   and is the Game icon's new inner-glass/specular material:
+
+   - two runs of the same binary are byte-identical (`diff bbox None`), so the capture is still deterministic;
+   - the integration build the references were saved from (`C:\dev\out\native-phase3\re-ps3-native.exe`,
+     19:25) still reproduces `steam-game-root` at **`inf / 1.0000`**, so the reference itself is intact;
+   - `icons.h` changed at 20:40:06 and `icons.cpp` at 20:47:20 (and `audit/ITEM-ICONS.md` is modified) in the
+     shared tree between this pass's first gate run - which was 4/4 with every region `inf / 1.0000` at 20:33 -
+     and the later runs; the band crop shows the Game icon gaining an inner highlight and rim that the
+     reference does not have. Those files are outside this change's fence and were not touched here.
+
+For the record, the 20:33 run of the same command on the previous binary did report `states: 4/4 pass` with every
+region `inf / 1.0000`; the icon material landed after it. So the layer gates are green, the content of every
+named state is unchanged, and the full-frame delta the states now report belongs to the concurrent
+category-icon work, not to this pass. Nothing here draws in the idle Game root: the Jellyfin rows, panels and
+pages are only reachable from the TV column's registered app.
+
+One interaction the concurrent task must handle: the new `jellyfin-signin` state expects `entryCount` 5 and the
+log line `jellyfin: sign-in page opened rows= Server URL|Username|Password|Sign In|Cancel focus= Username`.
+Section 16 added a sixth row, `Stay Signed In`, so that expectation and any reference saved for it need to be
+refreshed to `rows= Server URL|Username|Password|Stay Signed In|Sign In|Cancel` and `entryCount` 6. The harness
+was not edited here.
+
+### 18. Files touched by this pass
+
+- `native-xmb/src/jellyfin_client.h` / `.cpp`: `JellyfinItem::primaryTag/backdropTag`; `JellyfinTrack` and
+  `JellyfinPlayback::streams`; `search()`; `artwork()` with the authenticated image request, bounded decode,
+  tag-keyed cache and 400-file cap; `setImageCache()`; the DPAPI store (`setSessionStore`, `saveSession`,
+  `restoreSession`, `forgetSession`, `hasStoredSession`); `Operation::Search/Artwork`; `#pragma comment(lib,
+  "crypt32.lib")`.
+- `native-xmb/src/jellyfin_shell.cpp`: cache and session-store wiring; the in-flight resume/completion
+  coherence fixes and their log lines; poster/backdrop requests and `artworkReady`; the search page helpers;
+  restore-on-open and the refused-restore fallback; `jellyfinRemembered()`; ASCII detail separator.
+- `native-xmb/src/shell.h`: `Action::JellyfinSearch`, `Action::JellyfinSignInRemember`;
+  `Page::jellyfinSearch`; `pageBackdrop()`/`jellyfinRemembered()`; the new private state
+  (`jellyfinServiceServer_`, `jellyfinRestoring_`, `signInRemember_`, `jellyfinSearchTerm_`, backdrop image/id)
+  and the two search helpers.
+- `native-xmb/src/shell.cpp`: the search and Remember branches in `activate()`; the search-page `More` branch;
+  the Stay Signed In row and its default; the `search` route in `setJellyfinSignInField()`; the Remember state in
+  the sign-in request log line; `pageKind()` `jellyfinSearch`; the streamed-track branch in
+  `buildPlayerOptions()`; `entryKind()` for the search row.
+- `native-xmb/audit/JELLYFIN-NATIVE.md`: this section.
+
+Not touched: `view.cpp`, `view.h`, `main.cpp`, `settings_menu.cpp`, `preferences.cpp`, `xmbml_view.*`,
+`particles.*`, `icons.cpp`, `text_renderer.*`, `subtitles.cpp/.h`, `CMakeLists.txt`, the harness and its
+thresholds/references. The stub server, the runner, the captures and the logs are under
+`C:\dev\out\native-jf1-evidence` and are not committed.
+
+### 19. What remains
+
+- **The backdrop draw** (section 13): the hunk above is the only missing piece; the fetch, cache and accessor
+  are working.
+- **A real Jellyfin 12 server.** This pass proves the client against a stub whose payloads match the documented
+  schema; the 2026-10-26 section above is still the only real-server pass, and it predates resume, played
+  state, search, tracks and DPAPI. Re-running those four scripts against a real library is the next honest step,
+  and the only one that can catch a schema detail the stub and the client agree on but the server does not.
+- **Subtitle streams** are listed and honest, not rendered. Rendering them means downloading the
+  `DeliveryUrl`/embedded stream and feeding the existing sidecar cue renderer; that is a new slice.
+- **Audio-track switching for streams** is wired but only as good as the backend's `audioTracks()` report; on
+  this clip the player reports one track, so the second server stream is correctly disabled. A multi-audio
+  fixture would prove a real switch.
+- **A pad.** No controller is attached to this machine; the scripted runs drive the same `Shell` methods the pad
+  calls (the argument is section 7's). The remembered-sign-in page, search page and track panel are ordinary
+  pages and rows, so nothing here is modal or pad-inaccessible, but that is structural plus the sidecar's
+  `modalWidget` `""`.
+- **Quit-time stop reports** remain best effort: the process exits with a report in flight (the runs above quit
+  after an explicit Back, which is why their Stopped lines are complete).
+- Poster prefetch is bounded to the first 60 playable rows per page and the cache to 400 files; a very large
+  library re-fetches art after eviction by design.
