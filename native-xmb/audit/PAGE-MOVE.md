@@ -1655,3 +1655,336 @@ Artifacts (never committed, this machine): `C:\dev\out\transitions\` - `cap-befo
 `det1\`, `det2\`, `work\` (the scratch measurement scripts and the contact sheets `band-look.png`,
 `ps-envelope.png`).
 
+---
+
+# PAGE-MOVE Phase 16 - 2026-10-28: the navigation-feel pass
+
+Four items, each measured on console frames and on a native before/after build. Source writes:
+`native-xmb/src/view.cpp` and `native-xmb/src/view.h` only (plus this section and a verdict note in
+`TRANSITION-HARNESS.md`). The shell-side overscroll count is returned as a hunk, not applied (the
+`shell.*` fence). Every number is TRACED, FIT or NOT MEASURABLE and labelled where it is used.
+
+Method note that matters for every verdict below: the extended burst grammar
+(`burst=<prefix>@KEY@<frames>@<intervalMs>`) records an onset grab that the harness's previous native
+captures did not have. That changes the progress axis on two of the four transitions (sections 1.3 and
+2.4), so this pass reports both the harness verdict and a **time-aligned** track measured from the same
+frames. The time-aligned track is the stable one: the same before build scores WARN 6 px with a
+24-frame burst and FAIL 52 px with a 40-frame burst on page-close, because the harness's `p = 0` is a
+template lock on the page glyph whose value depends on the sequence's first-frame composition.
+
+## 0. Summary
+
+| # | item | was | is | evidence |
+|---|---|---|---|---|
+| 1 | category move: entering icon + row block | reported pinned at the focus slot | **verified sliding from one bar step (+211 px) on the 200 ms mode-5 move**; no code change was needed - the fix is in HEAD (15.2) and the pinned verdict came from frames captured before it landed | 1.1-1.3, TRACED |
+| 2 | page close | starts on the key, ~101 px ahead of the console at +57 ms | **holds 49 ms then runs the same 300 ms mode-4 content ease**; within 13 px of the console at matched time | 2.1-2.3, TRACED (hold bracket) + FIT (49 in the bracket) |
+| 3 | options close | hard cut: every frame from +8 ms was the plain page | **latched content**: panel drawn through a 9 ms hold + 200 ms ramp, 105,653 px still different from the page at +8 ms, 0 at +205 ms | 3.1-3.2, TRACED (O6 9/200) |
+| 4 | end-of-list overscroll | clamped silently | **projection half in the view** (40 px per press, label and icon together), count hook returned as a shell hunk | 4.1-4.3, inventory #13 + measured projection |
+| + | page icon size on the open page | (checked, not changed) | **already right**: 113 px against the console's 111 px, before and after | 2.5, measured ink bbox |
+
+## 1. The category move: the entering icon and its row block are already on the bar's motion
+
+### 1.1 The stale verdict
+
+The harness's stored native `cat-right` sequence was captured at 17:47, before `view.cpp` 18:52 (Phase
+15.2). On that build the selected category's icon was drawn at `open ? pageX : ...`, i.e. at the focus
+slot from the first frame, which is what the stored verdict records (`native 565 pinned`, delta -150 px
+at p = 0). At HEAD the draw is
+
+```cpp
+x = open ? pageX + 200.*distance*recede : barFocusX + (200.*distance + 10.*sign)*recede;
+```
+
+so the entering icon starts one whole bar step (+200 x 1.087 on a combined move, +211 measured) and
+lands on the focus slot when `categoryEase_` (200 ms, mode 5) reaches 0. The row block is the same
+channel: `outSlide` 215 px on the ghost and `inSlide` 125 px on the entering column, both multiplied by
+`(shell_.category() - categoryPosition_)`, and the entering label is drawn under the entering icon.
+
+### 1.2 The console's own icon track, segmented by colour
+
+The template track is unreliable at the start of a category move (it merges the two icons; the audit's
+own `left1` track has a 73.7 px settled sigma). The PlayStation Network icon is a blue sphere, so it can
+be segmented without a template: pixels with `b > 90`, `b > r + 35`, `g > r` in the category band,
+reported as the sphere's bbox centre. Console `navmove/right1` (crop y 0..240 of a y-origin-180 crop)
+against the final native build (full frame):
+
+| t after key | console x | native x | delta |
+|---:|---:|---:|---:|
+| +16 | 758 | 707 | -51 |
+| +26 | 723 | 688 | -35 |
+| +36 | 699 | 670 | -29 |
+| +42 | 685 | 661 | -24 |
+| +54 | 656 | 645 | -11 |
+| +66 | 635 | 630 | -5 |
+| +79 | 632 | 620 | -12 |
+| +89 | 618 | 612 | -6 |
+| +102 | 605 | 604 | -1 |
+| +113 | 595 | 598 | +3 |
+| +140 | 588 | 586 | -2 |
+| +163 | 577 | 580 | +3 |
+| +190 | 575 | 575 | 0 |
+| +214 | 570 | 565 | -5 |
+| +240 | 569 | 565 | -4 |
+
+The native's own before build (no item-1 change was made in this pass) measures the same numbers to
+within 1 px, i.e. HEAD already had the slide. The 24-51 px lead in the first 40 ms is the burst's
+synchronous tap: the onset grab forces a paint inside the tap, so the ease advances one frame before
+the console's first frame; a live key press pays the same one-frame input latency the console's 552 ->
+566 sample shows. The console's slow 4-5 px tail past +200 ms is not modelled (it would be a second,
+slower channel; the burst cannot separate it).
+
+### 1.3 Why the harness still says FAIL (and why that is the probe, not the move)
+
+The final capture (`burst=@RIGHT@24@10`, onset at 7 ms): p = 0 track.x 715 console / 725 native
+(+10, WARN), max |delta| 32.5 px, verdict FAIL. The residual is the `@motion` progress axis: the native's
+window is 165 ms against the console's 198 ms because the onset grab's first interval (0 -> 7 ms) makes
+the peak motion rate high and the relative detection threshold cuts the exponential's tail early. A
+24-frame/12 ms capture of the same motion (the before build; item 1 changed no code) gives a 92 ms
+window and max 58.3 px; the harness's own doc records native duration as a lower bound for this reason.
+In time (1.2) the two agree within 6 px from +66 ms.
+
+The left direction is the mirror (`distance` is -1): the entering Network icon starts at 565 - 200 =
+365, and the console's left neighbour centroid is 356.8 (`navmove/right1` bar probe, p = -40), 8 px
+apart. The harness's `cat-left` stays NO-DATA because its console template track is unstable and the
+native `bar.pitch` does not resolve on that sequence; it is not a motion failure.
+
+## 2. The page close has its own start
+
+### 2.1 The console's close, measured frame by frame
+
+The 642-frame burst (`C:\dev\out\rpcs3-xmb-cap\burst-png`, 139.7 fps, PgUp at 2706.9 ms) holds the page
+icon in the y 220..380 band. Segmented as the bright ink bbox at threshold 115 in x 200..720:
+
+| burst ms | t after key | icon left | moved |
+|---:|---:|---:|---:|
+| 2702-2752 | -5 .. +45 | 250 | 0 |
+| 2760 | +53 | 312 | +62 |
+| 2777 | +70 | 360 | +110 |
+| 2794 | +87 | 396 | +146 |
+| 2828 | +121 | 424 | +174 |
+| 2861 | +154 | 466 | +216 |
+| 2902 | +195 | 488 | +238 |
+| 2951 | +244 | 502 | +252 |
+| 3002 | +295 | 508 | +258 |
+| 3102 | +395 | 512 | +262 |
+
+The icon is untouched through 2752 and has moved 62 of its 262 px at 2760 - exactly one 60 Hz curve
+frame (0.226 x 262 = 59). So the console's ease starts in (2743, 2760], a **hold of 37..54 ms after the
+key**, and then runs the open's own shape: the per-frame retention is 0.762 (the audit's 0.7623), the
+same within the tracker's -0.014 bias, so the close is NOT a different ease - it is the same 300 ms
+mode-4 content ease with a hold in front of it. That is the mirror-breaking difference the harness saw:
+before the fix the native's close started at the key and was ~50 ms early in time.
+
+### 2.2 What changed
+
+`PafEase::retarget` already takes a delay (added in Phase 15 for the options panel), and `paintGL` now
+tells the depth eases which direction the page is moving (`depthSeen_` vs `shell_.depth()`), so a
+closing move retargets both channels with `pageCloseDelayMs = 49`:
+
+```cpp
+const bool pageClosing = depthSeen_ >= 0 && depthNow < depthSeen_;
+const double depthDelay = pageClosing ? pageCloseDelayMs : 0.;
+depthEase_.retarget(shell_.depth(), pageMilliseconds, 4, depthDelay);
+barEase_.retarget(shell_.depth(), barMilliseconds, 5, depthDelay);
+```
+
+49 is inside the measured hold bracket (37..54) and is the value that lands the native's first rendered
+step on the console's 2760 render: PafEase's elapsed clock starts at the paint before the key (up to a
+frame early), and measured against the console's +62 px at +57, a 41 ms hold overshoots by 22 px and a
+57 ms hold lags by 36 px. The **bar channel's** share of the hold is a **FIT**: the burst cannot time
+the bar layer's own start because its neighbours are already at the end state in the first visible
+frame (section 1.3 of Phase 15), so it takes the content channel's measured offset. **The ease itself
+is not re-fit.**
+
+### 2.3 Measured before/after (same template, same frames)
+
+Template track of the page icon (48x48 patch from the page-state frame, position reported in template
+x, so both sides use the same axis; console column from the same segmented series as 2.1 with the
+template's 22 px offset):
+
+| t after key | console | before build | after build | before delta | after delta |
+|---:|---:|---:|---:|---:|---:|
+| +57 | 334 | 435 | 324 | +101 | -10 |
+| +74 | 382 | 456 | 372 | +74 | -10 |
+| +91 | 418 | 475 | 412 | +57 | -6 |
+| +125 | 446 | 498 | 459 | +52 | +13 |
+| +158 | 488 | 511 | 488 | +23 | 0 |
+| +199 | 510 | 521 | 509 | +11 | -1 |
+| +248 | 524 | 526 | 522 | +2 | -2 |
+| +299 | 530 | 529 | 528 | -1 | -2 |
+| +399 | 534 | 529 | 532 | -5 | -2 |
+
+The close is now within 13 px at matched time across the whole move (the tail within 2 px), against up
+to 101 px ahead before. The final build's own close is 244 ms from first to last moving sample against
+the console's 217 (the harness's window measure; both include the hold).
+
+### 2.4 The harness's page-close verdict after
+
+`bun work/transition-compare.ts -t page-close` on the final capture: **FAIL**, max |track.x| 57 px, best
+alignment offset **-20.0 ms** (was -55 ms with a 24-frame burst and -33.3 ms when the same before build
+is captured with the same 40-frame burst). The 57 px is one grid point: p = 0 is the *page-state* glyph,
+where the console's 48x48 bar template locks at x 360 and the native's at 303 for the same physical
+icon (console ink bbox 250..360, native 249..361, delta 2 px). Every later grid point is within the
+time-aligned deltas in 2.3. Capture stability, same before build: WARN 6 px (24-frame burst) vs FAIL
+52 px (40-frame burst). The stable number is the time-aligned one, and it moved by 90 px.
+
+### 2.5 Checked, not changed: the page icon's size is already right
+
+The harness's page-close `track.scale` reads 1.1 on the console and 1.0 here, which looks like a missing
+1.08716 (2700/2483.53) projection on the page's own icon. It is not. Measured directly on the same
+threshold-115 ink bbox as 2.1, the page icon is **111 px** wide on the console (250..360) and **113 px**
+on this build (249..361), before and after the phase, i.e. already within 2 px. The glass icon path
+sizes the page's icon from `focus` (`117.13 + 50.2*focus` = 167.33 at the page, quad scale 1.0); the
+1.087 camera factor applies to the console's bar layer, not to its page icon. The track.scale 1.0 is a
+template-scale artefact (the 48x48 bar patch is not scale-sensitive on this glyph), not a geometry gap.
+An experimental `iconScale` term was measured, found inert on the glass path and reverted, so the
+settled depth-1 frame stays byte-identical and no rest frame moves.
+
+## 3. The options panel's close is latched
+
+### 3.1 What was wrong
+
+The panel's draw was gated on `Shell::optionsOpen()`. The closing Triangle clears the options on the
+same tick, so the panel vanished in one frame no matter what `optionsOpenEase_` did: measured on the
+rebuilt before build, the panel band (x 1250..1920, y 450..760) is identical to the settled plain page
+in every burst frame from +8 ms (0 pixels differ, mean 74.56).
+
+### 3.2 The latch
+
+`View::OptionsShown` keeps the last titles, heading, `MenuOption` rows, selection and which panel shape
+(in-player vs item menu) while the shell still holds them, and the three draw sites read it while
+`optionsOpenEase_ > 0.001` instead of asking the shell. The close retargets to 0 with the measured 9 ms
+delay and 200 ms mode-5 ramp (UI-ELEMENT-GAP-AUDIT O6 [M]; no console close burst exists, so the
+duration is O6's measured value, not a fit), and the page dim and the info-bar suppression use the same
+latch so the page does not pop back to full brightness under a fading panel.
+
+Measured on the same script with the final build (`full,wait,TRIANGLE,wait,wait,grab=open,
+burst=@TRIANGLE@24@8,...`), panel band pixels differing from the settled plain page by more than 6
+luma:
+
+| t after closing Triangle | before | after |
+|---:|---:|---:|
+| +8 | 0 | 105,653 |
+| +28 | 0 | 102,055 |
+| +48 | 0 | 93,462 |
+| +69 | 0 | 67,418 |
+| +90 | 0 | 48,278 |
+| +121 | 0 | 24,805 |
+| +152 | 0 | 1,348 |
+| +184 | 0 | 549 |
+| +205 | 0 | 0 |
+
+The band mean goes 91.1 -> 74.56 over the same window, and the settled open panel is **byte-identical**
+before/after (SHA-256 prefix fc96b66d), so only the exit moved. The content persists for ~197 ms after
+the hold, i.e. the panel is gone 205 ms after the key against O6's 9 + 200.
+
+**NOT MEASURABLE:** O10 says the console's row *text* drops below 180 within one frame while the plate
+ramps 200 ms. No console close burst of this panel exists on disk, so the text/plate split cannot be
+separated from the stills; this pass latches one alpha for both, which is the measured plate's curve.
+That split is recorded as open item 3 below.
+
+## 4. End-of-list overscroll: the view half, and the shell hunk
+
+### 4.1 The behaviour and its evidence
+
+GRAPHICS-INVENTORY #13: "pressing DOWN on the last row does not move the focus; the whole column sinks
+40 px per press and stays sunk. A build that clamps silently is drawing a different console." The
+local frames do **not** re-measure it: `col-game-r06..r09` are near-identical (best integer shift 0,
+mean |diff| 2.1-2.6 on the item column) and `col2-video-r02 -> r03` is the same (best dy 0). The 40 px
+is therefore the inventory's claim (its frames' route is a live walk), and the easing is **NOT
+MEASURABLE**: this build applies a straight offset, no curve.
+
+### 4.2 The view half (implemented)
+
+`View::setColumnSink(int presses)` is the one hook: a shell-owned press count. `drawColumns` adds
+`overscrollStep * columnSink_` (40 px) to every row's y of the focused column only, so the icon, label,
+value, subtitle and note travel together; the category bar and the other columns do not move. At rest
+the count is 0 and every y is exactly what it was. `XMB_OVERSCROLL=<0..8>` is the capture-only pin
+(same idea as `XMB_DEPTH_PIN`) that states the count so the projection is measurable before the shell
+hunk lands; the sink amount also enters the UI-layer signature only while it is non-zero.
+
+Verified with a scripted DOWN-at-end run (`full,wait,DOWN x10,wait,grab=end,quit`, Game column, last row
+`Import Games and Apps`, selection 9). An extra DOWN leaves the selection at 9 (state sidecar), i.e.
+the focus is clamped as on the console, and:
+
+| XMB_OVERSCROLL | focused row's label ink rows | selection |
+|---:|---|---:|
+| 0 | 500-504, 513-517 | 9 |
+| 1 | 540-544, 553-557 | 9 |
+| 2 | 580-584, 593-597 | 9 |
+
++40 px per press, the label's ink rows move with the row, and the row's icon moves with them (the
+`os-0..2` strip shows the icon and the label travelling together); it stays sunk, and the focus does not
+move (selection 9 with the extra DOWN).
+
+### 4.3 The shell hunk (returned, not applied)
+
+The count belongs to `Shell`, because only the shell knows the move was clamped. The hunk is in the
+reply to this pass and adds:
+
+- `shell.h`: `int columnSink() const { return columnSink_; }` and `int columnSink_=0;`.
+- `shell.cpp` `Shell::vertical`: on `delta > 0` and `previous == selection()` (already at the end),
+  `++columnSink_; emit changed();`; reset to 0 on any successful move, on `horizontal()`, `back()` and
+  `activate()`.
+- `view.cpp` (one line, ships with the hunk): in the existing `Shell::changed` lambda,
+  `setColumnSink(shell_.columnSink());` so the projection follows the shell's count.
+
+## 5. Gates and determinism
+
+- Canonical: `bun work/ab-layers.ts --capture --exe C:\dev\out\navfeel\certified\re-ps3-native.exe` ->
+  **PASS 6/6** with `text presence: 1668 bright pixels in the clock crop (minimum 900) PASS`.
+  frame 18.76 / 0.8360, top background 21.06 / 0.9434, category icon row 21.62 / 0.9062, item label row
+  11.99 / 0.3895, clock text 11.41 / 0.4528, info bar 15.05 / 0.7667 - every delta **0.00 / 0.0000**.
+  (The capture runs above used `C:\dev\out\navfeel\final\`; the certified build differs only by a reverted
+  experimental `iconScale` term that never affected the glass icon path the captures show - the page icon's
+  measured ink bbox is 113 px on both.)
+- Determinism: two `--render-clock 20` root captures are SHA-256
+  `37e2b590c42ef0e3f3601ca492221147c9874d2e3b1785e6237b616f2c0bbc14` both - the hash Phases 13, 14.2
+  and 15 recorded, i.e. the canonical rest frame is untouched.
+- The options panel's settled state is byte-identical before/after (fc96b66d), and the depth-1 page
+  frame is unchanged too (2.5). Nothing was re-baselined. No shell, dialogs, assets, main, ribbon, hdr,
+  CMake, harness, budget or reference file was touched.
+
+## 6. What remains
+
+1. **The harness's progress axis on the onset-grab captures.** `cat-right` max 32.5 px and page-close
+   p = 0 -57 px are `p = 0`/window artefacts, not curve errors (1.3, 2.4). The instrument needs a
+   time-aligned track (or a pin at stated progress, which the probes JSON already has a `pins` slot
+   for) before its headline can judge these two.
+2. **The entering icon's size growth** lags the console: the segmented sphere grows 74 -> 106 px on the
+   console but 78 -> 92 px here even though the glass quad grows 117 -> 167. The rendered glyph does not
+   scale with the quad in `icons.cpp` (out of this pass's fence) - measured, not fixed.
+3. **The options close's text/plate split** (O10): one alpha for both here; a console close burst would
+   settle whether the row ink cuts before the plate.
+4. **The page open's ~709 ms page-load delay** is still not modelled; with the onset grab the harness
+   now samples the native's first frame at +11 ms against the console's +695 ms, so page-open's FAIL 61
+   is that design difference (the before build scores 63 with the same capture), unchanged by this pass.
+5. **The console's own overscroll sink** is not in the local frames (4.1); a live capture with two
+   DOWNs past the last row would settle the 40 px and whether it eases.
+
+## 7. Reproduction
+
+```
+# native captures (one process per burst; the file name carries the elapsed ms)
+$env:XMB_INPUT_SCRIPT_ONLY='1'
+re-ps3-native.exe --dev-flash C:/dev/rpcs3/bin/dev_flash --data-dir <dir>/data ^
+  --render-clock 30 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00 ^
+  --focus-time 2000 --script "full,wait,RIGHT,wait,grab=<p>-before.png,burst=<p>@RIGHT@24@10,wait,wait,grab=<p>-after.png,quit"
+# page close: ENTER on Settings, then burst=@ESC@40@10
+# options close: TRIANGLE, waits, burst=@TRIANGLE@24@8
+# overscroll: DOWN x10, then grab with XMB_OVERSCROLL=0|1|2
+
+# harness + recordings
+bun work/transition-compare.ts -t cat-right -t cat-left -t page-open -t page-close
+bun work/transition-compare.ts -t cat-right -t page-close --render
+
+# gates
+bun work/ab-layers.ts --capture --exe C:\dev\out\navfeel\certified\re-ps3-native.exe
+```
+
+Artifacts (never committed, this machine): `C:\dev\out\transitions\` - `native\{cat-right,cat-left,
+page-open,page-close}\` (the final captures), `cat-right|cat-left|page-open|page-close-side-by-side.gif`,
+`*-contact-sheet.png`; `C:\dev\out\navfeel\` - `certified\` (the build), `before-build\`, `optclose-before\`,
+`optclose-final\`, `os-{0,1,2}-final\`, `base-cat\`, `pclose-before\`, `cr10-{1,2,3}\` (the burst
+captures), `gate-certified.log`, `certdet1\`, `certdet2\`.
+

@@ -157,6 +157,10 @@ public:
     int depth() const { return int(pages_.size()); }
     const QVector<Entry>& entriesAt(int depth) const;
     int selectionAt(int depth) const;
+    // End-of-list overscroll (GRAPHICS-INVENTORY #13): DOWN on the last row does not move the focus; the whole
+    // column sinks 40 px per press and stays sunk. The count lives here because this object knows the move was
+    // clamped; View::setColumnSink() projects it.
+    int columnSink() const { return columnSink_; }
     QString pageTitle() const { return pages_.isEmpty()?QString{}:pages_.last().title; }
     QString message() const { return message_; }
     // Which surface the message is drawn on (see MessageKind). message() carries the text: for Inline the
@@ -427,6 +431,7 @@ private:
     int photoRotation_=0;
     QVector<Category> categories_;
     QVector<int> selections_;
+    int columnSink_=0;
     struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing

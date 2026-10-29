@@ -1417,6 +1417,7 @@ int Shell::boxChoiceSlot() const {
 }
 void Shell::horizontal(int delta) {
     touch();if(!delta)return;
+    columnSink_=0;
     if(!message_.isEmpty()) {
         // A confirm box is the one message with a horizontal choice row: Left/Right (the keyboard's and the
         // pad's, both already routed through here) move the answer with the XMB's own snd_cursor. Every other
@@ -1462,7 +1463,9 @@ void Shell::vertical(int delta) {
     }
     if(!message_.isEmpty() || loading_)return;
     const int previous=selection();currentSelection()=std::clamp(selection()+delta,0,std::max(0,int(entries().size())-1));
-    if(previous!=selection())interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
+    if(previous!=selection()){columnSink_=0;interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();}
+    else if(delta>0 && !entries().isEmpty()){++columnSink_;emit changed();}
+    else emit changed();
 }
 void Shell::activate() {
     touch();

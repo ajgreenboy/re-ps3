@@ -1,0 +1,359 @@
+﻿{
+  "version": 1,
+  "outDir": "C:/dev/out/transitions",
+  "note": "Probe geometry is in full-frame 1080p coordinates. A sequence declares its capture crop, so a probe whose region falls outside that crop is reported as unavailable instead of guessed. Per-side geometry lives in each sequence's params, because a band crop and a framebuffer grab never share a y origin.",
+  "toleranceDefaults": {
+    "bar.focusX": { "pass": 3, "warn": 8, "unit": "px", "source": "console settled-tail sigma, 2x band" },
+    "bar.focusY": { "pass": 14, "warn": 34, "unit": "px", "source": "capture-window placement, not the animation" },
+    "bar.focusW": { "pass": 5, "warn": 12, "unit": "px", "source": "glyph quad size; console sigma about 1 px" },
+    "bar.focusH": { "pass": 5, "warn": 12, "unit": "px", "source": "glyph quad size" },
+    "bar.focusMass": { "pass": 6000, "warn": 15000, "unit": "ink px", "source": "ink mass of the focus blob; content dependent" },
+    "bar.pitch": { "pass": 4, "warn": 10, "unit": "px", "source": "console bar pitch is a fixed 200 px grid; band is 2% of pitch" },
+    "bar.count": { "pass": 1, "warn": 2, "unit": "blobs", "source": "icons merge at the focus slot on some frames" },
+    "bar.merged": { "pass": 1, "warn": 1, "unit": "flag", "source": "flag only, never a verdict driver" },
+    "bar.leftX": { "pass": 5, "warn": 12, "unit": "px", "source": "neighbour icon x" },
+    "bar.rightX": { "pass": 5, "warn": 12, "unit": "px", "source": "neighbour icon x" },
+    "bar.leftMass": { "pass": 6000, "warn": 15000, "unit": "ink px", "source": "neighbour ink mass" },
+    "bar.rightMass": { "pass": 6000, "warn": 15000, "unit": "ink px", "source": "neighbour ink mass" },
+    "bar.leftLuma": { "pass": 8, "warn": 20, "unit": "luma", "source": "neighbour icon peak luma" },
+    "bar.rightLuma": { "pass": 8, "warn": 20, "unit": "luma", "source": "neighbour icon peak luma" },
+    "label.left": { "pass": 4, "warn": 10, "unit": "px", "source": "text left edge; console settled sigma about 1 px" },
+    "label.y": { "pass": 14, "warn": 34, "unit": "px", "source": "text line y; capture-window placement" },
+    "label.peak": { "pass": 8, "warn": 20, "unit": "luma", "source": "label peak luma (alpha proxy)" },
+    "label.mass": { "pass": 400, "warn": 1200, "unit": "ink px", "source": "label ink mass; glyph content differs per page" },
+    "label.blocks": { "pass": 1, "warn": 2, "unit": "blocks", "source": "ghost separation; a merged pair loses one block" },
+    "label.block0": { "pass": 6, "warn": 16, "unit": "px", "source": "text block left edge" },
+    "label.block0End": { "pass": 8, "warn": 20, "unit": "px", "source": "text block right edge" },
+    "label.block1": { "pass": 8, "warn": 20, "unit": "px", "source": "second text block (incoming set)" },
+    "label.block1End": { "pass": 8, "warn": 20, "unit": "px", "source": "second text block" },
+    "label.block2": { "pass": 8, "warn": 20, "unit": "px", "source": "third text block" },
+    "label.block2End": { "pass": 8, "warn": 20, "unit": "px", "source": "third text block" },
+    "label.block3": { "pass": 8, "warn": 20, "unit": "px", "source": "fourth text block" },
+    "label.block3End": { "pass": 8, "warn": 20, "unit": "px", "source": "fourth text block" },
+    "row.left": { "pass": 5, "warn": 12, "unit": "px", "source": "focused row label left edge" },
+    "row.y": { "pass": 14, "warn": 34, "unit": "px", "source": "focused row label y; capture-window placement" },
+    "row.peak": { "pass": 8, "warn": 20, "unit": "luma", "source": "label peak luma" },
+    "row.mass": { "pass": 400, "warn": 1200, "unit": "ink px", "source": "label ink mass" },
+    "row.blocks": { "pass": 1, "warn": 2, "unit": "blocks", "source": "ghost block count" },
+    "row.block0": { "pass": 8, "warn": 20, "unit": "px", "source": "first label block" },
+    "row.block0End": { "pass": 10, "warn": 24, "unit": "px", "source": "first label block end" },
+    "row.block1": { "pass": 10, "warn": 24, "unit": "px", "source": "second label block" },
+    "row.block1End": { "pass": 10, "warn": 24, "unit": "px", "source": "second label block end" },
+    "row.block2": { "pass": 10, "warn": 24, "unit": "px", "source": "third label block" },
+    "row.block2End": { "pass": 10, "warn": 24, "unit": "px", "source": "third label block end" },
+    "row.block3": { "pass": 10, "warn": 24, "unit": "px", "source": "fourth label block" },
+    "row.block3End": { "pass": 10, "warn": 24, "unit": "px", "source": "fourth label block end" },
+    "rows.blockLeft": { "pass": 4, "warn": 10, "unit": "px", "source": "row block left edge" },
+    "rows.blockTop": { "pass": 14, "warn": 34, "unit": "px", "source": "row block top; capture-window placement" },
+    "rows.blockBottom": { "pass": 14, "warn": 34, "unit": "px", "source": "row block bottom" },
+    "rows.y0": { "pass": 14, "warn": 34, "unit": "px", "source": "row y positions (capture-window placement)" },
+    "rows.y1": { "pass": 14, "warn": 34, "unit": "px", "source": "row y positions" },
+    "rows.y2": { "pass": 14, "warn": 34, "unit": "px", "source": "row y positions" },
+    "rows.y3": { "pass": 14, "warn": 34, "unit": "px", "source": "row y positions" },
+    "rows.y4": { "pass": 14, "warn": 34, "unit": "px", "source": "row y positions" },
+    "rows.y5": { "pass": 14, "warn": 34, "unit": "px", "source": "row y positions" },
+    "rows.left0": { "pass": 5, "warn": 12, "unit": "px", "source": "per-row label left edge" },
+    "rows.left1": { "pass": 5, "warn": 12, "unit": "px", "source": "per-row label left edge" },
+    "rows.left2": { "pass": 5, "warn": 12, "unit": "px", "source": "per-row label left edge" },
+    "rows.left3": { "pass": 5, "warn": 12, "unit": "px", "source": "per-row label left edge" },
+    "rows.left4": { "pass": 5, "warn": 12, "unit": "px", "source": "per-row label left edge" },
+    "rows.left5": { "pass": 5, "warn": 12, "unit": "px", "source": "per-row label left edge" },
+    "rows.count": { "pass": 1, "warn": 2, "unit": "rows", "source": "row count; content dependent" },
+    "track.x": { "pass": 8, "warn": 16, "unit": "px", "source": "console settled-tail sigma (printed per run, about 1-2 px) plus template quantisation on the 1/16 p grid; 8 px is 3% of the 262 px page slide" },
+    "track.y": { "pass": 14, "warn": 34, "unit": "px", "source": "template-track y; capture-window placement" },
+    "track.scale": { "pass": 0.05, "warn": 0.12, "unit": "ratio", "source": "template scale; 5% of the quad" },
+    "track.corr": { "pass": 0.25, "warn": 0.45, "unit": "ncc", "source": "track confidence, not geometry; a dip means the console icon is occluded mid-move" },
+    "backdrop.mean": { "pass": 3, "warn": 8, "unit": "luma", "source": "console settled-tail sigma about 0.6 luma; band 3" },
+    "backdrop.p99": { "pass": 6, "warn": 15, "unit": "luma", "source": "wave crest" },
+    "backdrop.std": { "pass": 3, "warn": 8, "unit": "luma", "source": "backdrop contrast" },
+    "backdrop.min": { "pass": 6, "warn": 16, "unit": "luma", "source": "backdrop floor" },
+    "backdrop.max": { "pass": 6, "warn": 16, "unit": "luma", "source": "backdrop ceiling" },
+    "panelLuma.mean": { "pass": 3, "warn": 8, "unit": "luma", "source": "panel glass brightness" },
+    "panelLuma.p99": { "pass": 6, "warn": 15, "unit": "luma", "source": "panel glass highlight" },
+    "panelLuma.std": { "pass": 3, "warn": 8, "unit": "luma", "source": "panel glass contrast" },
+    "panelLuma.min": { "pass": 6, "warn": 16, "unit": "luma", "source": "panel glass floor" },
+    "panelLuma.max": { "pass": 6, "warn": 16, "unit": "luma", "source": "panel glass ceiling" }
+  },
+  "transitions": [
+    {
+      "id": "page-open",
+      "label": "Page open: ENTER on the Settings column",
+      "driver": "track.x",
+      "headline": ["track.x", "track.scale", "bar.pitch"],
+      "view": [0, 180, 1920, 620],
+      "knownMs": { "console": 300, "native": 300 },
+      "notes": [
+        "Console: 642-frame burst at 139.7 fps, band y220..380. The page load hides the first 709 ms after the press (PAGE-MOVE.md 2), so the window starts at 1280 ms; motion is measured from the frames.",
+        "Native: 12-frame burst from ENTER. The first saved frame lands 20-160 ms after the key because grabFramebuffer costs a frame or three, so a preamble grab at rest supplies p=0."
+      ],
+      "probes": [
+        { "id": "track", "kind": "track", "region": [200, 205, 1500, 145], "params": { "template": [281, 251, 48, 48], "dx": 320, "dy": 26, "step": 6, "scales": [1.0, 1.08, 1.16] } },
+        { "id": "bar", "kind": "bar", "region": [0, 205, 1920, 145], "params": { "r": 9, "k": 12, "gap": 8, "minRun": 10, "minCol": 2, "pitchMin": 150, "pitchMax": 300, "focusAt": 565 } },
+        { "id": "rows", "kind": "rows", "region": [640, 455, 1280, 405], "params": { "r": 5, "k": 18, "minRowInk": 60, "rowGap": 12, "minRowH": 6, "labelGap": 12, "minLabelWidth": 30 } },
+        { "id": "backdrop", "kind": "luma", "region": [0, 225, 260, 170], "params": { "sample": 2 } }
+      ],
+      "console": {
+        "dir": "C:/dev/out/rpcs3-xmb-cap/burst-png",
+        "match": "^f_(\\d+)\\.png$",
+        "timeIndex": 1,
+        "timeUnit": "ms",
+        "crop": [0, 220, 1920, 180],
+        "timeRange": [1280, 1980],
+        "keyMs": 707,
+        "source": "C:/dev/out/rpcs3-xmb-cap/burst-png (burst.ps1 key log: PgDown at 707 ms)"
+      },
+      "native": {
+        "dir": "C:/dev/out/transitions/native/page-open",
+        "match": "^page-open_(\\d+)_(\\d+)ms\\.png$",
+        "timeIndex": 2,
+        "timeUnit": "ms",
+        "crop": [0, 0, 1920, 1080],
+        "prepend": [{ "file": "page-open-before.png", "t": 0 }],
+        "params": {
+          "track": { "template": [285, 231, 48, 48], "dx": 340, "dy": 30 }
+        },
+        "source": "C:/dev/out/transitions/native/page-open (re-ps3-native burst=@ENTER)"
+      },
+      "capture": {
+        "tokens": ["full", "wait", "grab=<prefix>-before.png", "LEFT", "LEFT", "LEFT", "LEFT", "LEFT", "grab=<prefix>-at-settings.png", "burst=<prefix>@ENTER", "wait", "wait", "wait", "grab=<prefix>-after.png", "quit"],
+        "expect": { "category": "settings", "depth": "1" },
+        "note": "5 LEFT from the boot Game column reaches Settings (census 2026-10-28); ENTER opens it."
+      }
+    },
+    {
+      "id": "page-close",
+      "label": "Page close: Circle (ESC) on the Settings page",
+      "driver": "track.x",
+      "headline": ["track.x", "track.scale", "bar.pitch"],
+      "view": [0, 180, 1920, 620],
+      "knownMs": { "console": 300, "native": 300 },
+      "notes": [
+        "Console: the same 642-frame burst, second transition (PgUp at 2706 ms); motion starts 57 ms after the press.",
+        "Native: ESC (Circle) closes the page; the burst covers the 300 ms move."
+      ],
+      "probes": [
+        { "id": "track", "kind": "track", "region": [200, 205, 1500, 145], "params": { "template": [536, 276, 48, 48], "dx": 320, "dy": 26, "step": 6, "scales": [1.0, 1.08] } },
+        { "id": "bar", "kind": "bar", "region": [0, 205, 1920, 145], "params": { "r": 9, "k": 12, "gap": 8, "minRun": 10, "minCol": 2, "pitchMin": 150, "pitchMax": 300, "focusAt": 565 } },
+        { "id": "backdrop", "kind": "luma", "region": [0, 225, 260, 170], "params": { "sample": 2 } }
+      ],
+      "console": {
+        "dir": "C:/dev/out/rpcs3-xmb-cap/burst-png",
+        "match": "^f_(\\d+)\\.png$",
+        "timeIndex": 1,
+        "timeUnit": "ms",
+        "crop": [0, 220, 1920, 180],
+        "timeRange": [2700, 3350],
+        "keyMs": 2706,
+        "source": "C:/dev/out/rpcs3-xmb-cap/burst-png (burst.ps1 key log: PgUp at 2706 ms)"
+      },
+      "native": {
+        "dir": "C:/dev/out/transitions/native/page-close",
+        "match": "^page-close_(\\d+)_(\\d+)ms\\.png$",
+        "timeIndex": 2,
+        "timeUnit": "ms",
+        "crop": [0, 0, 1920, 1080],
+        "prepend": [{ "file": "page-close-before.png", "t": 0 }],
+        "params": {
+          "track": { "template": [541, 231, 48, 48], "dx": 340, "dy": 30 }
+        },
+        "source": "C:/dev/out/transitions/native/page-close (re-ps3-native burst=@ESC)"
+      },
+      "capture": {
+        "tokens": ["full", "wait", "LEFT", "LEFT", "LEFT", "LEFT", "LEFT", "wait", "ENTER", "wait", "wait", "grab=<prefix>-before.png", "burst=<prefix>@ESC", "wait", "wait", "grab=<prefix>-after.png", "quit"],
+        "note": "Open Settings, let the 300 ms move settle, grab the open page, then burst on ESC."
+      }
+    },
+    {
+      "id": "cat-right",
+      "label": "Category move right: Network -> PlayStation Network",
+      "driver": "@motion",
+      "headline": ["track.x", "bar.pitch"],
+      "view": [0, 180, 1920, 680],
+      "knownMs": { "console": 200, "native": 200 },
+      "notes": [
+        "Console: navmove/right1, 83.6 fps, 1:1 crop (0,180,1920,680), RIGHT at 540.4 ms (PAGE-MOVE 14.2).",
+        "Native: one RIGHT from the boot Game column reaches Network; the burst presses RIGHT into PSN on the same tick.",
+        "The native build pins the entering icon at the focus slot from the first frame (PAGE-MOVE 14.2 section 7 item 2), so track.x does not move there; progress comes from the motion window instead."
+      ],
+      "probes": [
+        { "id": "track", "kind": "track", "region": [300, 205, 1200, 145], "params": { "template": [536, 256, 48, 48], "dx": 240, "dy": 20, "step": 4, "scales": [1.0] } },
+        { "id": "bar", "kind": "bar", "region": [0, 205, 1920, 145], "params": { "r": 9, "k": 12, "gap": 8, "minRun": 10, "minCol": 2, "pitchMin": 150, "pitchMax": 300, "focusAt": 565 } },
+        { "id": "label", "kind": "label", "region": [0, 325, 1920, 60], "params": { "r": 6, "k": 14, "rowPad": 10, "minRows": 2, "blockGap": 22, "minBlock": 20 } },
+        { "id": "row", "kind": "label", "region": [560, 455, 1360, 130], "params": { "r": 5, "k": 14, "rowPad": 12, "minRows": 2, "blockGap": 26, "minBlock": 40 } },
+        { "id": "rows", "kind": "rows", "region": [640, 455, 1280, 405], "params": { "r": 5, "k": 18, "minRowInk": 60, "rowGap": 12, "minRowH": 6, "labelGap": 12, "minLabelWidth": 30 } },
+        { "id": "backdrop", "kind": "luma", "region": [0, 600, 1920, 240], "params": { "sample": 3 } }
+      ],
+      "console": {
+        "dir": "C:/dev/out/navfeel/navmove/right1",
+        "match": "^f_(\\d+)\\.png$",
+        "timeIndex": 1,
+        "timeUnit": "ms",
+        "crop": [0, 180, 1920, 680],
+        "timeRange": [500, 780],
+        "keyMs": 540.4,
+        "source": "C:/dev/out/navfeel/navmove/right1 (keys log: RIGHT at 540.4 ms)"
+      },
+      "native": {
+        "dir": "C:/dev/out/transitions/native/cat-right",
+        "match": "^cat-right_(\\d+)_(\\d+)ms\\.png$",
+        "timeIndex": 2,
+        "timeUnit": "ms",
+        "crop": [0, 0, 1920, 1080],
+        "prepend": [{ "file": "cat-right-before.png", "t": 0 }],
+        "params": {
+          "track": { "template": [541, 231, 48, 48], "dx": 260, "dy": 26 }
+        },
+        "source": "C:/dev/out/transitions/native/cat-right (re-ps3-native burst=@RIGHT)"
+      },
+      "capture": {
+        "tokens": ["full", "wait", "RIGHT", "wait", "grab=<prefix>-before.png", "burst=<prefix>@RIGHT", "wait", "wait", "grab=<prefix>-after.png", "quit"],
+        "expect": { "category": "psn" },
+        "note": "One RIGHT from boot Game reaches Network; the burst's RIGHT then moves Network -> PSN."
+      }
+    },
+    {
+      "id": "cat-left",
+      "label": "Category move left: PlayStation Network -> Network",
+      "driver": "@motion",
+      "headline": ["bar.pitch"],
+      "view": [0, 180, 1920, 680],
+      "knownMs": { "console": 200, "native": 200 },
+      "notes": [
+        "Console: navmove/left1, 71.2 fps, LEFT at 540.1 ms (PAGE-MOVE 14.2). The console template track is UNSTABLE on this burst (settled sigma 73.7 px, the patch matches two icons), so track.x is reported but is not a headline metric and the entering-icon comparison rests on cat-right only.",
+        "Native: two RIGHT from boot reach PSN; the burst presses LEFT back into Network."
+      ],
+      "probes": [
+        { "id": "track", "kind": "track", "region": [300, 205, 1200, 145], "params": { "template": [536, 256, 48, 48], "dx": 240, "dy": 20, "step": 4, "scales": [1.0] } },
+        { "id": "bar", "kind": "bar", "region": [0, 205, 1920, 145], "params": { "r": 9, "k": 12, "gap": 8, "minRun": 10, "minCol": 2, "pitchMin": 150, "pitchMax": 300, "focusAt": 565 } },
+        { "id": "label", "kind": "label", "region": [0, 325, 1920, 60], "params": { "r": 6, "k": 14, "rowPad": 10, "minRows": 2, "blockGap": 22, "minBlock": 20 } },
+        { "id": "row", "kind": "label", "region": [560, 455, 1360, 130], "params": { "r": 5, "k": 14, "rowPad": 12, "minRows": 2, "blockGap": 26, "minBlock": 40 } },
+        { "id": "rows", "kind": "rows", "region": [640, 455, 1280, 405], "params": { "r": 5, "k": 18, "minRowInk": 60, "rowGap": 12, "minRowH": 6, "labelGap": 12, "minLabelWidth": 30 } },
+        { "id": "backdrop", "kind": "luma", "region": [0, 600, 1920, 240], "params": { "sample": 3 } }
+      ],
+      "console": {
+        "dir": "C:/dev/out/navfeel/navmove/left1",
+        "match": "^f_(\\d+)\\.png$",
+        "timeIndex": 1,
+        "timeUnit": "ms",
+        "crop": [0, 180, 1920, 680],
+        "timeRange": [500, 800],
+        "keyMs": 540.1,
+        "source": "C:/dev/out/navfeel/navmove/left1 (keys log: LEFT at 540.1 ms)"
+      },
+      "native": {
+        "dir": "C:/dev/out/transitions/native/cat-left",
+        "match": "^cat-left_(\\d+)_(\\d+)ms\\.png$",
+        "timeIndex": 2,
+        "timeUnit": "ms",
+        "crop": [0, 0, 1920, 1080],
+        "prepend": [{ "file": "cat-left-before.png", "t": 0 }],
+        "params": {
+          "track": { "template": [541, 231, 48, 48], "dx": 260, "dy": 26 }
+        },
+        "source": "C:/dev/out/transitions/native/cat-left (re-ps3-native burst=@LEFT)"
+      },
+      "capture": {
+        "tokens": ["full", "wait", "RIGHT", "RIGHT", "wait", "grab=<prefix>-before.png", "burst=<prefix>@LEFT", "wait", "wait", "grab=<prefix>-after.png", "quit"],
+        "expect": { "category": "network" },
+        "note": "Two RIGHT from boot Game reach PSN; the burst's LEFT then moves PSN -> Network."
+      }
+    },
+    {
+      "id": "options-open",
+      "label": "Options panel open: Triangle on the Game column",
+      "mode": "endpoint",
+      "driver": "label.left",
+      "headline": ["panelLuma.mean", "panelLuma.std"],
+      "view": [900, 180, 1020, 700],
+      "notes": [
+        "No console burst of the options open exists; the console ground truth is the settled still dialogs/options-open-01.png (Game column, Corrupted Data).",
+        "The row sets differ (console: Sort By, Group Content, Start, Delete, Information; native: Open, Information). Only the panel glass brightness is in the headline: the text-column probe locks onto the native panel rim (a harder edge than the console glass), which is a probe fix for the next pass, not a verdict."
+      ],
+      "probes": [
+        { "id": "label", "kind": "label", "region": [1330, 500, 570, 300], "params": { "r": 6, "k": 14, "rowPad": 12, "minRows": 2, "blockGap": 26, "minBlock": 30 } },
+        { "id": "rows", "kind": "rows", "region": [1330, 500, 570, 300], "params": { "r": 5, "k": 10, "minRowInk": 6, "rowGap": 8, "minRowH": 5, "labelGap": 14, "minLabelWidth": 24 } },
+        { "id": "panelLuma", "kind": "luma", "region": [1650, 500, 250, 200], "params": { "sample": 2 } }
+      ],
+      "endpoint": {
+        "console": { "file": "C:/dev/out/rpcs3-ref-2026-10-28/dialogs/options-open-01.png" },
+        "native": { "file": "C:/dev/out/transitions/native/options-open/options-open.png" }
+      },
+      "capture": {
+        "tokens": ["full", "wait", "grab=<prefix>-closed.png", "TRIANGLE", "wait", "wait", "wait", "grab=<prefix>.png", "quit"],
+        "expect": { "category": "game", "depth": "0" },
+        "note": "Game column root, Steam Store focused: TRIANGLE opens the options panel."
+      }
+    },
+    {
+      "id": "options-close",
+      "label": "Options panel close: Triangle again on the Game column",
+      "mode": "endpoint",
+      "driver": "label.left",
+      "headline": ["panelLuma.mean", "panelLuma.std"],
+      "view": [900, 180, 1020, 700],
+      "notes": [
+        "Console ground truth is the settled still dialogs/options-closed-03.png.",
+        "The close removes the panel, so the same probes should read an empty panel region on both sides."
+      ],
+      "probes": [
+        { "id": "label", "kind": "label", "region": [1330, 500, 570, 300], "params": { "r": 6, "k": 14, "rowPad": 12, "minRows": 2, "blockGap": 26, "minBlock": 30 } },
+        { "id": "rows", "kind": "rows", "region": [1330, 500, 570, 300], "params": { "r": 5, "k": 10, "minRowInk": 6, "rowGap": 8, "minRowH": 5, "labelGap": 14, "minLabelWidth": 24 } },
+        { "id": "panelLuma", "kind": "luma", "region": [1650, 500, 250, 200], "params": { "sample": 2 } }
+      ],
+      "endpoint": {
+        "console": { "file": "C:/dev/out/rpcs3-ref-2026-10-28/dialogs/options-closed-03.png" },
+        "native": { "file": "C:/dev/out/transitions/native/options-close/options-close.png" }
+      },
+      "capture": {
+        "tokens": ["full", "wait", "TRIANGLE", "wait", "wait", "TRIANGLE", "wait", "wait", "wait", "grab=<prefix>.png", "quit"],
+        "expect": { "category": "game", "depth": "0" },
+        "note": "Open then close with Triangle, and grab the settled root."
+      }
+    },
+    {
+      "id": "ps-tap",
+      "label": "PS button tap: controller indicator",
+      "mode": "endpoint",
+      "driver": "bar.focusX",
+      "headline": ["bar.focusX", "bar.pitch", "backdrop.mean"],
+      "view": [0, 180, 1920, 700],
+      "notes": [
+        "NATIVE ONLY. No full-frame console still of the tap indicator is on disk: psfix/tap-*.png are crops with no recorded origin, and the rpcs3-allgraphics ps-menu-* frames are the root, not the indicator.",
+        "Recorded so the next pass has a native reference; a verdict needs a console tap burst (see the missing-capture-token table in TRANSITION-HARNESS.md)."
+      ],
+      "probes": [
+        { "id": "bar", "kind": "bar", "region": [0, 205, 1920, 145], "params": { "r": 9, "k": 12, "gap": 8, "minRun": 10, "minCol": 2, "pitchMin": 150, "pitchMax": 300, "focusAt": 565 } },
+        { "id": "backdrop", "kind": "luma", "region": [0, 600, 1920, 240], "params": { "sample": 3 } }
+      ],
+      "endpoint": {
+        "native": { "file": "C:/dev/out/transitions/native/ps-tap/ps-tap.png" }
+      },
+      "capture": {
+        "tokens": ["full", "wait", "grab=<prefix>-before.png", "ps", "wait", "grab=<prefix>.png", "quit"],
+        "note": "ps token replays the PS tap; the indicator is up at +300 ms."
+      }
+    },
+    {
+      "id": "ps-hold",
+      "label": "PS button hold: system menu",
+      "mode": "endpoint",
+      "driver": "bar.focusX",
+      "headline": ["bar.focusX", "bar.pitch", "backdrop.mean"],
+      "view": [0, 180, 1920, 700],
+      "notes": [
+        "NATIVE ONLY for the same reason as ps-tap: the console PS-menu frames on disk (rpcs3-allgraphics ps-menu-open.png) show the root after the menu closed, so they are not the menu ground truth."
+      ],
+      "probes": [
+        { "id": "bar", "kind": "bar", "region": [0, 205, 1920, 145], "params": { "r": 9, "k": 12, "gap": 8, "minRun": 10, "minCol": 2, "pitchMin": 150, "pitchMax": 300, "focusAt": 565 } },
+        { "id": "backdrop", "kind": "luma", "region": [0, 600, 1920, 240], "params": { "sample": 3 } }
+      ],
+      "endpoint": {
+        "native": { "file": "C:/dev/out/transitions/native/ps-hold/ps-hold.png" }
+      },
+      "capture": {
+        "tokens": ["full", "wait", "pshold", "wait", "wait", "grab=<prefix>.png", "quit"],
+        "note": "pshold token opens the system menu; grabbed at +600 ms."
+      }
+    }
+  ]
+}

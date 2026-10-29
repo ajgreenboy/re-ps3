@@ -130,7 +130,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     // layout and the provenance is never guessed.
     oskLayout_=loadOskLayout(assets_,oskObjects_);
     monthImage_=assets_.image("qgl/lines",QString("textures/month_bg/rgb/%1.dds").arg(QDateTime::currentDateTime().date().month(),2,10,QChar('0')));
-    connect(&shell_,&Shell::changed,this,[this]{++uiRevision_;syncColumns();loadWallpaper();update();});
+    connect(&shell_,&Shell::changed,this,[this]{++uiRevision_;syncColumns();loadWallpaper();setColumnSink(shell_.columnSink());update();});
     connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){
         mediaFrame_=frame;
         if(frame.isNull())photoViewport_={};
@@ -701,8 +701,19 @@ void View::paintGL() {
     // burst's frame count is 18 frames = 300 ms mode 4 for the page content). See view.h and section 15 of the audit.
     categoryEase_.retarget(shell_.category(),moveMilliseconds);categoryEase_.advance(dt);categoryPosition_=categoryEase_.value;
     if(!outgoing_.isEmpty()){fadeEase_.advance(dt);categoryFade_=fadeEase_.value;if(!fadeEase_.running()){categoryFade_=0;outgoing_.clear();}}
-    depthEase_.retarget(shell_.depth(),pageMilliseconds,4);depthEase_.advance(dt);depthPosition_=depthEase_.value;
-    barEase_.retarget(shell_.depth(),barMilliseconds,5);barEase_.advance(dt);barDepthPosition_=barEase_.value;
+    // Opening a page and closing one are not the same start: the console's close holds still for ~49 ms after the
+    // Circle press and its first moved render is at +57 ms, while the open's first visible frame is the page load
+    // (PAGE-MOVE 16.2, measured on the 642-frame burst). Both depth channels take the same offset: the burst times
+    // the page content, and the bar layer's own start is hidden behind it (its neighbours are already at the end
+    // state on the first visible frame), so the bar's share of the hold is a FIT to the content's measured one.
+    // `depthSeen_` is the depth the previous painted frame saw, because syncColumns() has already updated
+    // `previousDepth_` to the new value by the time this runs.
+    const int depthNow=shell_.depth();
+    const bool pageClosing=depthSeen_>=0 && depthNow<depthSeen_;
+    depthSeen_=depthNow;
+    const double depthDelay=pageClosing?pageCloseDelayMs:0.;
+    depthEase_.retarget(shell_.depth(),pageMilliseconds,4,depthDelay);depthEase_.advance(dt);depthPosition_=depthEase_.value;
+    barEase_.retarget(shell_.depth(),barMilliseconds,5,depthDelay);barEase_.advance(dt);barDepthPosition_=barEase_.value;
     // Capture-only switch: XMB_DEPTH_PIN=<0..2> holds the depth progress at that value, so a deterministic
     // --render-clock grab can measure one intermediate frame of the page move (the easing itself runs on the
     // real frame clock, which --render-clock does not pin). Both channels are pinned to the same value so a
@@ -711,6 +722,14 @@ void View::paintGL() {
     if(const QString pin=qEnvironmentVariable("XMB_DEPTH_PIN");!pin.isEmpty()) {
         bool ok=false;const double pinned=std::clamp(pin.toDouble(&ok),0.,double(shell_.depth()));
         if(ok){depthPosition_=pinned;barDepthPosition_=pinned;}
+    }
+    // Capture-only pin for the end-of-list overscroll (XMB_OVERSCROLL=<0..8>): it states the press count the
+    // shell will report (see View::setColumnSink) so a deterministic grab can measure the 40 px-per-press
+    // projection before the shell-side count is wired. Unset in every normal run, where the setter is the only
+    // source and the count is 0 at rest.
+    if(const QString pin=qEnvironmentVariable("XMB_OVERSCROLL");!pin.isEmpty()) {
+        bool ok=false;const int presses=pin.toInt(&ok);
+        if(ok)columnSink_=std::clamp(presses,0,8);
     }
     for(auto& column:columns_){column.ease.retarget(column.selection,moveMilliseconds);column.ease.advance(dt);column.position=column.ease.value;}
     // The item-level Triangle options panel: its list slides in from the right and moves between rows on the
@@ -724,8 +743,19 @@ void View::paintGL() {
         if(!optionsWasOpen_){optionsOpenEase_=PafEase();optionsOpenEase_.retarget(0);optionsPanelEase_=PafEase();}
         optionsOpenEase_.retarget(1,optionsOpenMs,5,optionsOpenDelayMs);
         optionsPanelEase_.retarget(shell_.optionsSelection(),moveMilliseconds);
+        // Latch the content while Shell still holds it: the closing Triangle clears it before the close ramp is
+        // over, so the draw reads this copy (PAGE-MOVE 15.4).
+        optionsShown_.titles.clear();optionsShown_.titles.reserve(shell_.options().size());
+        for(const auto& option:shell_.options())optionsShown_.titles<<option.title;
+        optionsShown_.heading=shell_.optionsTitle();
+        optionsShown_.rows=shell_.options();
+        optionsShown_.selection=shell_.optionsSelection();
+        optionsShown_.player=shell_.optionsArePlayer();
+        optionsShown_.valid=true;
     } else optionsOpenEase_.retarget(0,moveMilliseconds,5,optionsCloseDelayMs);
     optionsOpenEase_.advance(dt);optionsPanelEase_.advance(dt);
+    // The latch ends when the close ramp has run out, so the panel is gone only after its measured fade.
+    if(!shell_.optionsOpen() && optionsOpenEase_.value<=0.001)optionsShown_.valid=false;
     if(static const bool motionLog=qEnvironmentVariableIsSet("XMB_MOTION_LOG");motionLog && optionsOpenEase_.running())
         qInfo().noquote()<<"options:"<<now<<"ms open amount"<<QString::number(optionsOpenEase_.value,'f',4);
     optionsWasOpen_=shell_.optionsOpen();
@@ -818,9 +848,15 @@ void View::paintGL() {
     if(dialogEase_.value>.002 || dialogPlateEase_.value>.002 || dialogHintEase_.value>.002 || dialogSettleEase_.value>.002)
         signature+=QString::asprintf(" dialog %d %d %d %d ",
             int(dialogEase_.value*256.),int(dialogPlateEase_.value*256.),int(dialogHintEase_.value*256.),int(dialogSettleEase_.value*256.));
-    // The options panel animates (slide-in, row focus) without a shell change on every frame.
+    // The options panel animates (slide-in, row focus) without a shell change on every frame. While the close
+    // ramp runs, Shell has already dropped the panel, so the latched copy's identity is what the layer shows;
+    // its selection and the ramp amount are in the string, so the fade redraws per frame.
     if(shell_.optionsOpen() || optionsOpenEase_.value>0.)
-        signature+=QString::asprintf(" options %d %.4f %.4f %d",shell_.optionsOpen()?1:0,optionsOpenEase_.value,optionsPanelEase_.value,shell_.optionsSelection());
+        signature+=QString::asprintf(" options %d %.4f %.4f %d %d",shell_.optionsOpen()?1:0,optionsOpenEase_.value,
+            optionsPanelEase_.value,shell_.optionsSelection(),int(optionsShown_.valid));
+    // The end-of-list sink is a projection amount the shell's press count moves; absent at rest (count 0), so
+    // the canonical frame's signature string is unchanged.
+    if(columnSink_>0)signature+=QString::asprintf(" sink %d ",columnSink_);
     // The PS surfaces' own envelopes advance with the clock, not with a shell change, so their state belongs
     // in the signature or the cached UI layer would freeze on the frame the menu opened: the hold menu's
     // black/text/bloom staging and the tap indicator's fade. Quantised by 1/256, and absent at rest (so the
@@ -1687,10 +1723,11 @@ void View::drawScene(QPainter& p) {
         p.restore();
         // The in-player panel (Triangle): the same right-hand options panel, over the video and over the
         // controls' band, so it reads as an overlay that owns the screen while it is open. It changes
-        // nothing about the controls' own clock: mediaControls_ was advanced above exactly as before.
-        if(shell_.optionsArePlayer() && optionsOpenEase_.value>0.) {
-            drawOptionsPanel(QStringList{},optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,
-                shell_.optionsTitle(),&shell_.options());
+        // nothing about the controls' own clock: mediaControls_ was advanced above exactly as before. The
+        // latched content keeps it drawing through its close ramp (PAGE-MOVE 15.4).
+        if(optionsDrawn() && optionsShown_.player) {
+            drawOptionsPanel(optionsShown_.titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,
+                optionsShown_.heading,&optionsShown_.rows);
         }
         // Surface B2: the XMB music control panel (Triangle). It draws over the audio player's own chrome,
         // the way the firmware's panel sits over the XMB, and only while a local audio item is what plays.
@@ -1907,7 +1944,13 @@ void View::drawScene(QPainter& p) {
                 // the focused row stays at 2700 and steps 262 px left, the others 109.46 px (GEOMETRY-ROOT 8: the
                 // measured parent-unfocused offset; the 262 stays the focused row's own step).
                 const double depth=behind*(1.-focus);
-                const double y=540+(505+row-540-15*depth*std::clamp(distance,0.,1.))*(1.-.055*depth);
+                // End-of-list overscroll (GRAPHICS-INVENTORY #13): the press count sinks the focused column by
+                // 40 px per press. It is added to the row's y, so the icon, its label, value, subtitle and note
+                // all travel with it; the other columns and the category bar do not move. At rest the count is 0
+                // and every y below is exactly what it was. No ease: the inventory gives the step, not its curve
+                // (the frames on disk do not show the sink, see PAGE-MOVE 16), so it is a straight offset.
+                const double sink=(active && level==int(columns.size())-1)?overscrollStep*columnSink_:0.;
+                const double y=540+(505+row-540-15*depth*std::clamp(distance,0.,1.))*(1.-.055*depth)+sink;
                 if(y<-100 || y>1050)continue;
                 // The incoming page column is one slot right and 10.223% larger in the decoded transition
                 // (fp_0174..fp_0181: 774.09 = 565+210; 85.554 = 77.616*1.10223, 203.700 = 184.8*1.10227),
@@ -2076,8 +2119,10 @@ void View::drawScene(QPainter& p) {
             const double outSlide=215.,inSlide=125.;            // px, traced
             const double inAlpha=.58+.42*(1.-categoryFade_);    // .58 -> 1 over the move, fit
             // The item menu's band covers the page too (measured 0.545, ITEM-MENU-INFO-FIRMWARE E1); the
-            // in-player panel's frame is unmeasured, so it keeps the page at full brightness.
-            const double optionsCover=(shell_.optionsOpen() && !shell_.optionsArePlayer())?
+            // in-player panel's frame is unmeasured, so it keeps the page at full brightness. The cover is
+            // held by the latch while the close ramp runs, so the page does not pop back to full brightness
+            // under a panel that is still fading.
+            const double optionsCover=(optionsDrawn() && !optionsShown_.player)?
                 1.-(1.-kOptionsBand.contentDim)*optionsOpenEase_.value:1.;
             // XMB_MOVE_DEBUG=1 skips the outgoing set: a capture-only switch that lets a burst measure the
             // incoming block on its own. Unset in every normal run, where it draws both sets.
@@ -2085,16 +2130,15 @@ void View::drawScene(QPainter& p) {
             if(!skipOutgoing && !outgoing_.isEmpty())
                 drawColumns(outgoing_,categoryFade_,(outgoingCategory_-categoryPosition_)*outSlide,false,optionsCover);
             drawColumns(columns_,inAlpha,(shell_.category()-categoryPosition_)*inSlide,true,optionsCover);
-            // Item-level Triangle options: the same right-hand band over the page it belongs to. Only drawn while
-            // the shell reports it open; the panel never becomes a level of the column stack.
-            if(shell_.optionsOpen() && optionsOpenEase_.value>0.) {
-                QStringList titles;titles.reserve(shell_.options().size());
-                for(const auto& option:shell_.options())titles<<option.title;
+            // Item-level Triangle options: the same right-hand band over the page it belongs to. Drawn while
+            // Shell reports it open OR while the latched close ramp still has content (PAGE-MOVE 15.4); the
+            // panel never becomes a level of the column stack.
+            if(optionsDrawn() && !optionsShown_.player) {
                 // Phase 11.3: the item menu is the firmware's own band (ITEM-MENU-INFO-FIRMWARE E1/F6): its
                 // measured edge, 38 px pitch, fixed rows and 1334 text column, and its MenuOption rows so a
                 // row this build cannot honour is dimmed with its reason. No dot: the band marks by focus.
-                drawOptionsPanel(titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,
-                                 shell_.optionsTitle(),&shell_.options(),&kOptionsBand);
+                drawOptionsPanel(optionsShown_.titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,
+                                 optionsShown_.heading,&optionsShown_.rows,&kOptionsBand);
             }
         }
         if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
@@ -2132,7 +2176,8 @@ void View::drawScene(QPainter& p) {
                 return choice && !choice->labels.isEmpty()
                     && (choice->source==QLatin1String("rco")||choice->source==QLatin1String("capture"));
             }();
-        const bool optionsBandUp=shell_.optionsOpen() && !shell_.optionsArePlayer() && optionsOpenEase_.value>.001;
+        // The item menu's band is up (from the latch, so it stays up through its close ramp) or on its way in.
+        const bool optionsBandUp=optionsDrawn() && !optionsShown_.player;
         if((!messageScreen || modalPage) && !choiceBandUp && !optionsBandUp) {
             // Measured from the saved 1920x1080 firmware frames (audit/ITEM-MENU-INFO-FIRMWARE.md B3/E4):
             // the visible plate is 591x58 at (1329,75), flush to the right screen edge. The tile's own 1 px
