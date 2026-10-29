@@ -51,3 +51,5 @@ idps*
 !/work/parity-catalogue.json
 !/work/parity-reference.json
 !/work/parity-references-map.json
+!/work/transition-probes.json
+!/work/transition-render.py

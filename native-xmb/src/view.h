@@ -58,12 +58,22 @@ public:
     //     layer: the recede distance/projection, the bar's own focus row and the neighbours' brightness.
     static constexpr double pageMilliseconds=300;
     static constexpr double barMilliseconds=200;
+    // The page move's two channels also carry the console's measured CLOSE hold. Measured frame by frame on the
+    // 642-frame burst (C:\dev\out\rpcs3-xmb-cap\burst-png; PgUp at 2706.9 ms, 60 Hz renders): the page icon is
+    // untouched at 2743 and has moved 62 of its 262 px at 2760 - exactly one 60 Hz curve frame (0.226 x 262 =
+    // 59). So the ease's first stepped frame is the 2760 render and its start lies in (2743, 2760], i.e. the hold
+    // is 37..54 ms after the key. 49 is used: with PafEase's elapsed clock starting at the paint before the key
+    // (up to one frame early), 49 lands the native's first rendered step within 7 px of the console's +62 at
+    // +57 (measured: 41 puts it 22 px ahead, 57 lags 36 px behind). The audit's "first motion +57" is the frame
+    // the console's first step is seen on, not the hold's length. The close's per-frame retention is 0.762, the
+    // open's own shape within the tracker's -0.014 bias, so the curve is NOT re-fit: the close is the same
+    // 300 ms mode-4 content ease with this hold in front of it.
+    static constexpr double pageCloseDelayMs=49;
     // The item-level Triangle options panel's entrance (UI-ELEMENT-GAP-AUDIT O6, measured [M]): the open
     // starts 115..150 ms after the key and ramps 245..255 ms (at rest 360..410 ms); the close starts 9 ms
-    // after the key and ramps 200 ms. The mid-points of the measured ranges are used. The CLOSE still draws
-    // no fade: the panel's draw is gated on Shell::optionsOpen(), so the exit is a hard cut (measured: every
-    // frame from +21 ms is the plain page). The 9 ms is measured and applied to the ease so a latched close
-    // needs no further change here; PAGE-MOVE section 15.4 records the gap.
+    // after the key and ramps 200 ms. The mid-points of the measured ranges are used. The exit used to be a
+    // hard cut because the panel's draw was gated on Shell::optionsOpen(); the content is now latched
+    // (OptionsShown below), so the measured 9 ms + 200 ms close has something to draw.
     static constexpr double optionsOpenDelayMs=130;
     static constexpr double optionsOpenMs=250;
     static constexpr double optionsCloseDelayMs=9;
@@ -145,9 +155,23 @@ private:
     struct Column { QVector<Entry> entries; int selection=0; double position=0; PafEase ease; };
     PafEase categoryEase_,depthEase_,fadeEase_,barEase_;
     // Item-level Triangle options panel: its own open amount (slide-in) and focus position, animated with the
-    // same paf curve as the settings panel. Drawn only while Shell::optionsOpen().
+    // same paf curve as the settings panel. Drawn while Shell::optionsOpen() OR while its close ramp is still
+    // running, from the latched content below.
     PafEase optionsPanelEase_,optionsOpenEase_;
     bool optionsWasOpen_=false;
+    // The panel's content, latched across its close (PAGE-MOVE 15.4). Shell drops the options the moment the
+    // closing Triangle lands, so the draw used to disappear in one frame while the measured close ramps 200 ms
+    // (O6). The latch keeps the last titles/heading/rows/selection so that ramp has content to fade; `player`
+    // records which of the two panel shapes it was (the in-player panel or the item menu).
+    struct OptionsShown {
+        QStringList titles;
+        QString heading;
+        QVector<MenuOption> rows;
+        int selection=0;
+        bool player=false,valid=false;
+    };
+    OptionsShown optionsShown_;
+    bool optionsDrawn() const { return optionsShown_.valid && optionsOpenEase_.value>0.001; }
     // The console's notification pop-up (Shell's queue). The ease is its presence on screen: it slides and
     // fades in over 200 ms (paf mode 5, the XMB's own move curve) and back out the same way. The last content
     // is kept while it leaves, because Shell has already dropped the entry by then.
@@ -178,7 +202,24 @@ private:
     // rest frame moves; mid-transition the bar recede lands ~100 ms before the page content does.
     double barDepthPosition_=0;
     int previousDepth_=0;
+    // The depth the previous painted frame reported, so the eases can tell an opening page from a closing one
+    // (the close holds ~49 ms before its first step; `previousDepth_` is already the new depth by paint time).
+    int depthSeen_=-1;
     void syncColumns();
+    // ---- End-of-list overscroll (GRAPHICS-INVENTORY #13) ---------------------------------------------
+    // DOWN on the last row does not move the focus: the whole column sinks 40 px per press and stays sunk.
+    // The PRESS COUNT is Shell's (it is the object that knows the move was clamped); this is the projection
+    // half. The returned shell hunk adds `Shell::columnSink()` and feeds it here through this one setter, so
+    // the view never infers input state. `XMB_OVERSCROLL=<0..8>` is the capture-only pin (same idea as
+    // XMB_DEPTH_PIN) that states the count so the offset is measurable before the shell hunk lands; unset in
+    // every normal run, where the setter is the only source and the rest frame is unchanged (count 0).
+    void setColumnSink(int presses) {
+        if(presses<0)presses=0;
+        if(presses==columnSink_)return;
+        columnSink_=presses;++uiRevision_;update();
+    }
+    static constexpr double overscrollStep=40.;
+    int columnSink_=0;
     // ---- Phase 11.3: the settings choice band -------------------------------------------------------
     // The committed choice model (settings_menu.h) owns the lists; the draw pass needs only the
     // firmware's own labels in their authored order, and each item's value so the row the model has
