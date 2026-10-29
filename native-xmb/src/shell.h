@@ -43,7 +43,11 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // every other row and no modal dialog can turn pollController off.
     // JellyfinSignInRemember is the explicit "stay signed in" opt-in: Cross toggles it, and only an
     // accepted sign-in with it on writes the DPAPI-protected session record.
-    JellyfinSignInField, JellyfinSignInSubmit, JellyfinSignInCancel, JellyfinSignInRemember };
+    JellyfinSignInField, JellyfinSignInSubmit, JellyfinSignInCancel, JellyfinSignInRemember,
+    // Settings > System Settings > Restore Default Settings: a real, confirm-gated action that puts every
+    // preference this build owns back to its default for the active profile. It is app state only - no host
+    // setting, library path or profile is touched - and the confirmation box names exactly what is reset.
+    ResetPreferences };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -67,6 +71,11 @@ struct Entry {
     // page's three fields use it (server URL, user name, and the password as dots); every other row leaves it
     // empty, so the view falls through to Shell::valueText() exactly as before and no existing frame changes.
     QString fieldValue;
+    // The Settings page a row belongs to ("system", "network", "device", ...), empty on every other row. It is
+    // what lets the shell resolve a row's live value and its information page through host::rowValue /
+    // host::rowDetail - the machine half of the settings source layer - without every call site naming the
+    // page again. Set by the Settings page builders in settings_menu.cpp only.
+    QString settingsPage;
     // Remote media progress supplied by the authenticated provider, never a local file resume key.
     QString mediaKind;
     qint64 resumeMs=0,durationMs=0;
@@ -545,6 +554,9 @@ private:
     bool directoryRefresh_=false;
     void openSettings(const QString& page);
     void openChoices(const QString& key,const QString& title);
+    // Restore Default Settings: every key this build stores, set back to the default Preferences documents
+    // (preferences.cpp defaultValue). Called only from the confirmed box, and logged with the count.
+    void restoreDefaultSettings();
     void applyPreferences();
     void touch();
     void stepPhoto(int delta);

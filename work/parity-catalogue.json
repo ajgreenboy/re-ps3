@@ -407,9 +407,9 @@
         "category": "settings",
         "depth": 1,
         "entryId": "bd_menu_lang",
-        "entryCount": 10,
+        "entryCount": 22,
         "pageKind": "page",
-        "log": [{ "pattern": "settings: video page from the RCO row set: 10 rows, 3 native-only" }]
+        "log": [{ "pattern": "settings: video page from the RCO row set: 22 rows, 3 native-only" }]
       },
       "tierANote": "Row set difference stated, not averaged away: the firmware's page has 19 BD/DVD rows (batch 2 walked all of them to `50 Hz Video Output`), this build lists the seven measured rows and then three native-only rows (Repeat, Shuffle, Volume) that are the page's only working settings on a PC. Its rows are all explained refusals where no drive or decoder exists.",
       "regions": [

@@ -22,6 +22,7 @@
 #include "steam_family.h"
 #include "host.h"
 #include "pad.h"
+#include "settings_menu.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QMap>
@@ -352,6 +353,9 @@ int main(int argc,char** argv) {
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
     parser.addOption({"rco-tree","Write the RCO object model (objects, animations, typed properties) of named containers (<name>[,<name>...][@file]; * = every vsh/resource RCO) and exit","spec"});
     parser.addOption({"image-audit","Print the container resolution table for the ICON-GAP-AUDIT bucket B/C image inventory and exit ([file] instead of stdout is accepted as a positional argument)"});
+    // ---- Settings (audit/SETTINGS-COVERAGE.md 5.1) ----
+    parser.addOption({"settings-report","Write the whole settings surface (every page, every row, its live value, source and coverage) as JSON, then exit","json-file"});
+    parser.addOption({"settings-page","Limit --settings-report's pages array to one page id (system, video, theme, ...)","page-id"});
     parser.addOption({"month-sheet","Write a local contact sheet of the qgl/lines month_bg day/night textures and exit","image-file"});
     parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
     parser.addOption({"decode-fp","Decode RSX fragment-program captures (archive:lib/x.fpo@dir) into named parameter values and exit","spec"});
@@ -661,6 +665,35 @@ int main(int argc,char** argv) {
     }
     if(parser.isSet("dev-hdd0"))assets.setHddRoot(parser.value("dev-hdd0"));
     if(parser.isSet("vsh-modules"))assets.setModulesRoot(parser.value("vsh-modules"));
+    if(parser.isSet("settings-report")) {
+        // The whole Settings surface as one JSON document (audit/SETTINGS-COVERAGE.md 5.1): the machine
+        // snapshot, the RCO container every label was read from, the choice model's provenance, and every
+        // page row's live value, where that value came from and its coverage verdict. No window is opened,
+        // nothing on the machine is written, and the only file is the one named here.
+        xmb::Preferences preferences(data);
+        auto report=xmb::settingsReport(assets,preferences,data);
+        if(parser.isSet("settings-page")) {
+            const auto only=parser.value("settings-page");
+            QJsonArray kept;
+            for(const auto& page:report.value("pages").toArray())
+                if(page.toObject().value("id").toString()==only)kept.push_back(page);
+            if(kept.isEmpty()){qCritical().noquote()<<"settings-report: no page named"<<only;return 2;}
+            report["pages"]=kept;
+            report["pageFilter"]=only;
+        }
+        QFile file(parser.value("settings-report"));
+        const auto bytes=QJsonDocument(report).toJson();
+        if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();return 2;}
+        const auto totals=report.value("totals").toObject();
+        qInfo().noquote()<<QStringLiteral("settings-report: %1 inventory rows: %2 real, %3 placeholder, "
+            "%4 absent; %5 rows show a value; %6 pages; %7 permitted host writes; %8 unavailable messages")
+            .arg(totals.value("rows").toInt()).arg(totals.value("real").toInt())
+            .arg(totals.value("placeholder").toInt()).arg(totals.value("absent").toInt())
+            .arg(totals.value("withValue").toInt()).arg(report.value("pages").toArray().size())
+            .arg(report.value("writeSurface").toArray().size())
+            .arg(report.value("unavailableMessageCount").toInt());
+        return 0;
+    }
     if(parser.isSet("export-image")) { // local analysis: container:name[,container:name...] -> <dir>/<name>.png
         const auto spec=parser.value("export-image").split('@');
         if(spec.size()!=2){qCritical()<<"use --export-image container:name,...@directory";return 2;}
