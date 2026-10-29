@@ -2592,9 +2592,12 @@ void View::drawVolumeHud(QPainter& p,double opacity) {
     const qreal meterWidth=segmentWidth*volumeMeterSegments;
     const QRectF meter(960.-meterWidth/2.,1008.,meterWidth,segmentHeight);   // FIT (audit 5.4)
     p.save();
+    // The plate and the segments must fade together: drawNineSlice has its own opacity argument, so passing
+    // 1.0 left the backing fully opaque while the segments faded with p.setOpacity(alpha), which is why the
+    // HUD showed a raised plate with no segments at any level (SETTINGS-COVERAGE section 8.8 item 3). Both now
+    // take the same alpha.
+    drawNineSlice(p,"system_plugin","tex_default_lvmeter_bg",meter.adjusted(-8,-8,8,8),16.,alpha);
     p.setOpacity(alpha);
-    // The widget's own backing (48x48): nine-sliced, so its corners keep their pixels at the meter's width.
-    drawNineSlice(p,"system_plugin","tex_default_lvmeter_bg",meter.adjusted(-8,-8,8,8),16.,1.);
     for(int i=0;i<volumeMeterSegments;++i) {
         // Which segment paf draws with _focus is not traced (5.4); the boundary segment - the one at the
         // level - is the only state this surface has that could be called focused, so that is the one.
