@@ -11,7 +11,8 @@ namespace xmb {
 // explore_category_sysconf, through Assets::text and the shared image path); `edy` and `console_qa`
 // are omitted because the console gates them (the Japan-only Edy Viewer and the QA Debug Settings) and
 // the reason is logged. The three child rows (Game/Accessory/Network Settings) carry
-// child=segment / ch_pos=1 / fo_lbl2_alpha=0: they are folders, so their native row keeps no info line.
+// child=segment / ch_pos=1 / fo_lbl2_alpha=0, and the console still draws their info line (the frames
+// col-settings-r01/r09/r15 show it), so the native row keeps it too: C-1 in SETTINGS-COVERAGE 1.1.
 //
 // `builtin` is this build's hand-written Settings column. The resolver keeps each id's native action,
 // value and setting (which page it opens, and the segment pages for the three folders) and replaces
@@ -99,5 +100,25 @@ QVector<ChoiceList> settingsChoiceCatalogue(Assets& assets,
 // True when `current` is the item's value. QVariant compares int/bool/string strictly, and the store may
 // hold an int where a choice is a bool (or the reverse), so this also compares the numeric and text forms.
 bool choiceValueMatches(const QVariant& current,const QVariant& value);
+
+// The label an app-owned choice row shows for a stored value: the same choices() table (and the same
+// firmware strings) the value band commits, so a row's value and its band's focused item are one string.
+// The host-driven keys read their value from the machine (host::snapshot()) rather than the store.
+QString settingsChoiceLabel(const QString& key,const QVariant& value,Assets& assets);
+
+// The body of one settings row's information page. The host layer's own page (host::rowDetail) when it has
+// one; System Information's host report; otherwise this build's page for the row, composed from the row's
+// title, the firmware's explanation (Entry::detail), the host fact that leaves its value column empty
+// (host::rowValue's note) and - where the RCO carries the row's own option page - the console's option
+// labels read from that page's MItems. Never empty for a settings row, so a settings row can never fall
+// through to another row's body. `renderer` and `systemName` are the two values only the caller knows; the
+// report passes none and the shell passes its own.
+QString settingsRowBody(const Entry& row,Assets& assets,const QString& renderer={},const QString& systemName={});
+
+// The whole Settings surface as one JSON document: every page, every row, the live value the row shows,
+// where that value came from ("win32", "qt", "com", "hid", "app", ...), what a Cross on the row does
+// ("action", "read-only", "live"), and the machine readings behind them. `--settings-report` prints it, so
+// the coverage is verifiable without screenshots.
+QJsonObject settingsReport(Assets& assets,Preferences& preferences,const QString& dataDirectory);
 
 } // namespace xmb

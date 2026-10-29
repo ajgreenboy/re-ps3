@@ -1514,8 +1514,13 @@ void Shell::activate() {
             break;
         }
         if(entry.setting.startsWith("host/")) { // the computer's own settings, written straight to the host
-            const bool ok=entry.setting=="host/volume"?host::setMasterVolume(entry.option.toInt()):host::setMasterMuted(entry.option.toBool());
-            if(!ok){interactionAudio_.play(InteractionAudio::Cue::Error);showMessage("The system volume could not be changed.",MessageKind::Page);}
+            // Volume and mute go to the default endpoint through Core Audio (the media keys' own path); the
+            // Accessory page's four rows go through the host layer's documented SystemParametersInfo pair.
+            // Every one of them is reversible from the same list and needs no elevation.
+            const bool ok=entry.setting=="host/volume"?host::setMasterVolume(entry.option.toInt()):
+                entry.setting=="host/muted"?host::setMasterMuted(entry.option.toBool()):
+                host::setHostChoice(entry.setting,entry.option.toInt());
+            if(!ok){interactionAudio_.play(InteractionAudio::Cue::Error);showMessage("The system setting could not be changed.",MessageKind::Page);}
             else {interactionAudio_.play(InteractionAudio::Cue::Accept);if(!pages_.isEmpty())pages_.removeLast();}
             break;
         }
@@ -1575,9 +1580,20 @@ void Shell::activate() {
     case Action::Information: {
         // System Information, the connection status list and the output pages are D5 information pages:
         // the same titled frame with Key: value rows, no dialog chrome (audit/DIALOGS-FIRMWARE.md 2.5).
+        // A settings row's own page comes from settings_menu's builder: the host layer's page where it has
+        // one (host::rowDetail), otherwise the row's firmware explanation plus the host fact that leaves its
+        // value column empty. The three host: payloads keep their measured depth-2 table shape (dialogs.cpp
+        // reads the payload, not the text).
         const host::Label label=[this](const QString& id,const QString& fallback){return assets_.text("sysconf_plugin",id,fallback);};
-        showMessage(entry.value=="host:network"?host::networkStatus(label):entry.value=="host:display"?host::displayOutput():entry.value=="host:audio"?host::audioOutput():
-            entry.value.isEmpty()?host::systemInformation(renderer_,label,preferences_.value("system/name").toString()):entry.value,MessageKind::Info);break;
+        QString body;
+        if(entry.value=="host:network")body=host::networkStatus(label);
+        else if(entry.value=="host:display")body=host::displayOutput();
+        else if(entry.value=="host:audio")body=host::audioOutput();
+        else if(!entry.settingsPage.isEmpty())
+            body=settingsRowBody(entry,assets_,renderer_,preferences_.value("system/name").toString());
+        if(body.isEmpty())
+            body=entry.value.isEmpty()?host::systemInformation(renderer_,label,preferences_.value("system/name").toString()):entry.value;
+        showMessage(body,MessageKind::Info);break;
     }
     case Action::Library: {
         // The Video column's Continue Watching row: a page built from this shell's own resume points, not a
@@ -1681,6 +1697,15 @@ void Shell::activate() {
         showMessage(entry.title,entry.id.startsWith("continue:") && !entry.detail.isEmpty()
             ?entry.detail
             :QObject::tr("This feature is not available in the native recreation yet."),MessageKind::Page);
+        break;
+    case Action::ResetPreferences:
+        // A real, confirm-gated write: the box names what is reset (this profile's settings, nothing else),
+        // the default answer is No, and the reset runs only after Yes. The console's own row is a confirm
+        // chain too (SETTINGS 4.2: page_console_setting_init_top -> proceed -> finish).
+        showConfirm(entry.title,
+            QObject::tr("Restore every XMB setting on this system to its default? "
+                        "Libraries, the system name, the users and the time zone are kept."),
+            [this]{restoreDefaultSettings();});
         break;
     }
     emit changed();
