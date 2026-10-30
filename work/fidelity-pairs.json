@@ -1,0 +1,511 @@
+{
+  "schema": "xmb-fidelity-pairs/1",
+  "note": "One row is one measured surface pair: a console frame from C:/dev/out/rpcs3-allgraphics-2026-10-28/frames (every frame named here was opened and verified in the sweep document) against the native frame this sweep captured at the canonical pin. A native path that is absolute is a cell frame from the parity run rather than a frame from the sweep's own capture directory; the sweep document says which and why.",
+  "cropColumns": ["label", "icons", "panel"],
+  "pairs": [
+    {
+      "id": "column-user-row0",
+      "surface": "Users column, row 1 at rest",
+      "consoleFrame": "col-users-r00.png",
+      "native": "col-user/r00.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console focuses Turn Off System from its account rows; the native column focuses Create New User from the host profile store (no power row)"
+    },
+    {
+      "id": "column-settings-row0",
+      "surface": "Settings column, row 1 at rest",
+      "consoleFrame": "col-settings-r00.png",
+      "native": "col-settings/r00.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": false,
+      "note": "both focus System Update, 16 rows, same help line"
+    },
+    {
+      "id": "column-photo-row0",
+      "surface": "Photo column, row 1 at rest",
+      "consoleFrame": "col-photo-r00.png",
+      "native": "col-photo/r00.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console focuses Search for Media Servers over an empty console VFS; the native column focuses Photo Library from the host photo folder"
+    },
+    {
+      "id": "column-music-row0",
+      "surface": "Music column, row 1 at rest",
+      "consoleFrame": "col-music-r00.png",
+      "native": "col-music/r00.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console focuses Search for Media Servers; the native column focuses Music Library from the host music folder"
+    },
+    {
+      "id": "column-video-row0",
+      "surface": "Video column, row 1 at rest",
+      "consoleFrame": "col2-video-r00.png",
+      "native": "col-video/r00.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console focuses BD Data Utility; the native column focuses Continue Watching (col2-video is the authoritative walk; col-video-* never left its last row)"
+    },
+    {
+      "id": "column-game-row0",
+      "surface": "Game column, row 1 at rest",
+      "consoleFrame": "col-game-r00.png",
+      "native": "col-game/r00.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console focuses PS Vita System Application Utility; the native column focuses Steam Store, and its first two rows are native-only (Steam Store, All Games)"
+    },
+    {
+      "id": "column-network-row0",
+      "surface": "Network column, row 1 at rest",
+      "consoleFrame": "col-network-r00.png",
+      "native": "col-network/r00.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": false,
+      "note": "both focus Online Instruction Manuals with the same help line"
+    },
+    {
+      "id": "column-psn-row0",
+      "surface": "PlayStation Network column, row 1 at rest",
+      "consoleFrame": "col-psn-r00.png",
+      "native": "col-psn/r00.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console draws the full-width purple Sign Up banner and its information panel; the native column draws a plain row list with Sign In and no artwork band"
+    },
+    {
+      "id": "column-friends-row0",
+      "surface": "Friends column, row 1 at rest",
+      "consoleFrame": "col-friends-r00.png",
+      "native": "col-friends/r00.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "the console column is rowless because it is signed out and offline; the native column draws three Steam rows"
+    },
+    {
+      "id": "column-user-scrolled",
+      "surface": "Users column, scrolled (console row 3 of 3)",
+      "consoleFrame": "col-users-r02.png",
+      "native": "col-user/r02.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console row 3 is *User; the native column has two rows and clamps its selection at row 2 (sidecar selection 1, entry User)"
+    },
+    {
+      "id": "column-settings-scrolled-9",
+      "surface": "Settings column, scrolled to Accessory Settings (console row 10)",
+      "consoleFrame": "col-settings-r09.png",
+      "native": "col-settings/r09.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": false,
+      "note": "both focus Accessory Settings with its help line; the native row list matches the console order row for row"
+    },
+    {
+      "id": "column-settings-scrolled-15",
+      "surface": "Settings column, scrolled to Network Settings (console row 16)",
+      "consoleFrame": "col-settings-r15.png",
+      "native": "col-settings/r15.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": false,
+      "note": "both focus Network Settings at the bottom of a 16-row column"
+    },
+    {
+      "id": "column-photo-scrolled",
+      "surface": "Photo column, scrolled (console row 3 of 3)",
+      "consoleFrame": "col-photo-r02.png",
+      "native": "col-photo/r02.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console row 3 is Playlists; the native third row is Choose Media Folder"
+    },
+    {
+      "id": "column-music-scrolled",
+      "surface": "Music column, scrolled (console row 2 of 2)",
+      "consoleFrame": "col-music-r01.png",
+      "native": "col-music/r01.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console row 2 is Playlists; the native second row is Music Settings"
+    },
+    {
+      "id": "column-video-scrolled",
+      "surface": "Video column, scrolled (console row 3 of 3)",
+      "consoleFrame": "col2-video-r02.png",
+      "native": "col-video/r02.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console row 3 is Video Editor & Uploader; the native third row is Video Settings"
+    },
+    {
+      "id": "column-game-scrolled",
+      "surface": "Game column, scrolled to row 6 (PlayStation Store on the console)",
+      "consoleFrame": "col-game-r05.png",
+      "native": "col-game/r05.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console row 6 is PlayStation Store; the native row 6 is Saved Data Utility (PSP) because two native-only rows are inserted above it"
+    },
+    {
+      "id": "column-network-scrolled",
+      "surface": "Network column, scrolled to Internet Search (console row 4)",
+      "consoleFrame": "col-network-r03.png",
+      "native": "col-network/r03.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": false,
+      "note": "both focus Internet Search; the native adds a fifth row (Download Management) below it"
+    },
+    {
+      "id": "column-psn-scrolled",
+      "surface": "PlayStation Network column, scrolled (console row 5)",
+      "consoleFrame": "col-psn-r04.png",
+      "native": "col-psn/r04.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "console row 5 is PlayStation Store over its artwork; the native column has three rows and clamps its selection at row 3 (Store)"
+    },
+    {
+      "id": "column-friends-scrolled",
+      "surface": "Friends column, DOWN probe (console row 2)",
+      "consoleFrame": "col-friends-r02.png",
+      "native": "col-friends/r02.png",
+      "crops": [
+        { "name": "label", "rect": [400, 425, 800, 100] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1329, 75, 591, 58] }
+      ],
+      "class": "icon-heavy",
+      "contentDiffers": true,
+      "note": "the console draws nothing on a DOWN probe; the native column moves to its third Steam row"
+    },
+    {
+      "id": "options-open",
+      "surface": "Options menu (Triangle), open",
+      "consoleFrame": "menu-options-open.png",
+      "native": "options/open.png",
+      "crops": [
+        { "name": "label", "rect": [1300, 430, 620, 300] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1300, 260, 620, 420] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "console menu is two groups of five rows (Sort By / Group Content, then Start / Delete / Information) opened on Game Corrupted Data; the native menu here is two rows (Open, Information) opened on the Video column Continue Watching row"
+    },
+    {
+      "id": "options-row2",
+      "surface": "Options menu, focus row 2",
+      "consoleFrame": "menu-options-row2.png",
+      "native": "options/row2.png",
+      "crops": [
+        { "name": "label", "rect": [1300, 430, 620, 300] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1300, 260, 620, 420] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "console focus is on the second group's Start row; the native panel has two rows and the DOWN did not change the highlighted row (sidecar selection stays 0)"
+    },
+    {
+      "id": "options-row3",
+      "surface": "Options menu, focus row 3",
+      "consoleFrame": "menu-options-row3.png",
+      "native": "options/row3.png",
+      "crops": [
+        { "name": "label", "rect": [1300, 430, 620, 300] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1300, 260, 620, 420] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "console focus is Delete; the native panel never reaches a third row"
+    },
+    {
+      "id": "options-row4",
+      "surface": "Options menu, focus row 4",
+      "consoleFrame": "menu-options-row4.png",
+      "native": "options/row4.png",
+      "crops": [
+        { "name": "label", "rect": [1300, 430, 620, 300] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [1300, 260, 620, 420] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "console focus is Information; the native panel never reaches a fourth row"
+    },
+    {
+      "id": "dialog-confirm",
+      "surface": "Delete-confirmation dialog (settled)",
+      "consoleFrame": "dlg-confirm-3000.png",
+      "native": "C:/dev/xmb/out/parity/run-20261029-192650/cells/dialog-box__original__day__1080p/frame.png",
+      "crops": [
+        { "name": "label", "rect": [1150, 560, 420, 60] },
+        { "name": "icons", "rect": [600, 872, 760, 55] },
+        { "name": "panel", "rect": [482, 452, 319, 40] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "native frame is the parity cell for dialog-box (same build, same pin, its own resume seed): the console deletes a corrupted game item over the Game column, the native box sits over the darker Continue Watching page"
+    },
+    {
+      "id": "dialog-column-route",
+      "surface": "Delete-confirmation dialog, column route (no box)",
+      "consoleFrame": "dlg-confirm-3000.png",
+      "native": "dialog/confirm.png",
+      "crops": [
+        { "name": "label", "rect": [1150, 560, 420, 60] },
+        { "name": "icons", "rect": [600, 872, 760, 55] },
+        { "name": "panel", "rect": [482, 452, 319, 40] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "the column route (Triangle, Down, Down, Cross on Continue Watching with nothing to continue) draws the inline empty-state page instead of a box, so this pair measures the absence of the dialog on that route"
+    },
+    {
+      "id": "osk-default",
+      "surface": "On-screen keyboard at rest",
+      "consoleFrame": "osk-default.png",
+      "native": "osk/osk.png",
+      "crops": [
+        { "name": "label", "rect": [480, 280, 960, 520] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [493, 290, 933, 499] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "the console OSK opens over the user-name page with the title User Name and the field User 1; the native OSK opens straight from Users > Create New User with the title Create New User"
+    },
+    {
+      "id": "user-create-page",
+      "surface": "User-name page (before the OSK)",
+      "consoleFrame": "page-user-create.png",
+      "native": "osk/page.png",
+      "crops": [
+        { "name": "label", "rect": [600, 300, 800, 300] },
+        { "name": "icons", "rect": [0, 240, 1920, 120] },
+        { "name": "panel", "rect": [493, 290, 933, 499] }
+      ],
+      "class": "text-heavy",
+      "contentDiffers": true,
+      "note": "the console draws a centred prompt, field and OK button with no keyboard; the native route opens the OSK immediately, so this pair measures that difference"
+    },
+    {
+      "id": "band-theme",
+      "surface": "Theme choice band (Theme Settings page, row 1)",
+      "consoleFrame": "page-theme-list.png",
+      "native": "band-theme/band.png",
+      "crops": [
+        { "name": "label", "rect": [1324, 0, 420, 1080] },
+        { "name": "icons", "rect": [400, 380, 1000, 620] },
+        { "name": "panel", "rect": [1324, 240, 420, 380] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "console band holds Install, Original, Classic, Air Paint; the native band holds Install plus a one-item value list (Original), so only the top and focused rows exist"
+    },
+    {
+      "id": "band-theme-down1",
+      "surface": "Theme choice band, one Down",
+      "consoleFrame": "page-theme-list-down1.png",
+      "native": "band-theme/band-down1.png",
+      "crops": [
+        { "name": "label", "rect": [1324, 0, 420, 1080] },
+        { "name": "icons", "rect": [400, 380, 1000, 620] },
+        { "name": "panel", "rect": [1324, 240, 420, 380] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "the native band has one value, so Down cannot move focus (sidecar selection stays 0) while the console focus reaches Classic"
+    },
+    {
+      "id": "band-color",
+      "surface": "Color chip band (Theme Settings page, row 2)",
+      "consoleFrame": "page-color-list.png",
+      "native": "band-color/band.png",
+      "crops": [
+        { "name": "label", "rect": [1324, 0, 420, 1080] },
+        { "name": "icons", "rect": [400, 380, 1000, 620] },
+        { "name": "panel", "rect": [1324, 470, 420, 520] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "console draws 12 unlabelled chips; the native band has 13 items (Original plus twelve months) and shows a label on the focused one"
+    },
+    {
+      "id": "band-color-down1",
+      "surface": "Color chip band, one Down",
+      "consoleFrame": "page-color-list-down1.png",
+      "native": "band-color/band-down1.png",
+      "crops": [
+        { "name": "label", "rect": [1324, 0, 420, 1080] },
+        { "name": "icons", "rect": [400, 380, 1000, 620] },
+        { "name": "panel", "rect": [1324, 470, 420, 520] }
+      ],
+      "class": "composite",
+      "contentDiffers": true,
+      "note": "both move one chip down; the native focus is the Silver chip and it is labelled"
+    },
+    {
+      "id": "band-background",
+      "surface": "Background choice band (Theme Settings page, row 3)",
+      "consoleFrame": "page-background-list.png",
+      "native": "band-background/band.png",
+      "crops": [
+        { "name": "label", "rect": [1324, 0, 420, 1080] },
+        { "name": "icons", "rect": [400, 380, 1000, 620] },
+        { "name": "panel", "rect": [1324, 240, 420, 380] }
+      ],
+      "class": "composite",
+      "contentDiffers": false,
+      "note": "both bands hold Brightness (a submenu row) above Original, Classic and Wallpaper with Original focused"
+    },
+    {
+      "id": "band-background-down1",
+      "surface": "Background choice band, one Down",
+      "consoleFrame": "page-background-list-down1.png",
+      "native": "band-background/band-down1.png",
+      "crops": [
+        { "name": "label", "rect": [1324, 0, 420, 1080] },
+        { "name": "icons", "rect": [400, 380, 1000, 620] },
+        { "name": "panel", "rect": [1324, 240, 420, 380] }
+      ],
+      "class": "composite",
+      "contentDiffers": false,
+      "note": "both move focus from Original to Classic"
+    },
+    {
+      "id": "band-font",
+      "surface": "Font choice band (Theme Settings page, row 4)",
+      "consoleFrame": "page-font-list.png",
+      "native": "band-font/band.png",
+      "crops": [
+        { "name": "label", "rect": [1324, 0, 420, 1080] },
+        { "name": "icons", "rect": [400, 380, 1000, 620] },
+        { "name": "panel", "rect": [1324, 470, 420, 150] }
+      ],
+      "class": "composite",
+      "contentDiffers": false,
+      "note": "both bands hold Original, Rounded and Pop, with Original focused"
+    },
+    {
+      "id": "band-font-down1",
+      "surface": "Font choice band, one Down",
+      "consoleFrame": "page-font-list.png",
+      "native": "band-font/band-down1.png",
+      "crops": [
+        { "name": "label", "rect": [1324, 0, 420, 1080] },
+        { "name": "icons", "rect": [400, 380, 1000, 620] },
+        { "name": "panel", "rect": [1324, 470, 420, 150] }
+      ],
+      "class": "composite",
+      "contentDiffers": false,
+      "note": "there is no console frame of the Font band with focus moved; this pair compares the native one-Down state against the console at-rest band and is informational only"
+    },
+    {
+      "id": "depth2-video-library",
+      "surface": "Video > Video Library page (depth 1)",
+      "consoleFrame": "page3-video-row0.png",
+      "native": "C:/dev/xmb/out/parity/run-20261029-192650/cells/page-video-library__original__day__1080p/frame.png",
+      "crops": [
+        { "name": "label", "rect": [300, 280, 1320, 600] },
+        { "name": "icons", "rect": [80, 150, 1520, 60] },
+        { "name": "panel", "rect": [400, 380, 1000, 620] }
+      ],
+      "class": "text-heavy",
+      "contentDiffers": true,
+      "note": "the console page for BD Data Utility with an empty VFS reads There is no data.; the native page lists the host video folder (a Movies folder). Native frame is the parity cell, because this sweep's own route into a media library page stops its capture loop (documented in the sweep section)"
+    }
+  ]
+}
