@@ -2002,3 +2002,403 @@ profiles and polar disc sample, the ghost-page ratios) are in `C:\dev\out\msgvie
 `gain2.py`, `face_ref2.py`, `faceverify.py`, `disc.py`, `ghost.py`), outside the repo. The after frames are
 in `C:\dev\out\msgview\parity-after\run-20261028-182902\`, the hunk's in
 `C:\dev\out\msgview\parity-hunk\run-20261028-183634\` and `parity-hunk-clock\run-20261028-183827\`.
+
+---
+
+## 15. Message-page rules, the busy/wait page and the error page's reachability (2026-10-29)
+
+Scope of this pass: the message page's rule pair (the FIDELITY-SURFACES top gap #8: "message page loses
+its lower rule and its rule contrast"), the busy/progress page (FIDELITY-BEHAVIOUR #12 / N12 / X5), the
+error-code surface's reachability (2.2 / 9.3), and a re-run of the three dialog classes that already
+measured exact. Code touched: `native-xmb/src/dialogs.cpp` and declarations only in
+`native-xmb/src/view.h`. `view.cpp` and `shell.h`/`shell.cpp` are held by other passes; the three hunk
+files this surface needs are RETURNED in 15.7, not landed. All numbers are 1920x1080 frame pixels,
+Rec.709 luma, a rule read as a full-width row mean over x200..1699 unless a narrower window is named, and
+alpha as `(row - its own background) / (255 - background)`.
+
+Evidence: console frames `out/parity-references/page-network-test-error__original__day__1080p.png`,
+`.../page-network-connection-settings__original__day__1080p.png`,
+`C:\dev\out\rpcs3-ref-2026-10-28\dialogs\information-page-01.png` (the D5 page's own 1080p frame) and
+`C:\dev\out\rpcs3-ref2-2026-10-28\error\ictest2-burst\` (the wait page, full frame, 868 frames at
+57.9 fps, Cross at 908 ms; the settled frame is `f_0003013.png` at 3.0 s). Native builds: "before" is
+`C:\dev\out\native-dlg2-before\re-ps3-native.exe` (sha256 `147BFA4F...A11`, the tree with HEAD's
+`dialogs.cpp`), "after" is `C:\dev\out\native-dlg2\re-ps3-native.exe` (sha256 `F36A1B15...049`). Both
+were built twice from the same tree state; the only source delta between them is `dialogs.cpp`/`view.h`.
+The hunk build is `C:\dev\out\native-dlg2-hunk\re-ps3-native.exe` (sha256 `DEBDD052...ECF`), a scratch
+copy of the tree carrying the 15.7 hunks - evidence only, not a deliverable.
+
+### 15.1 The finding: the two network message states no longer draw the D4 class
+
+The audit's 5.2 and top gap #8 measured the native message page at "y=198 **134**; y=879 **no rule**" and
+concluded the message class had lost its pair. Re-measured this pass, the number is real but its owner is
+not the message page: 134 over a 98 background is alpha 0.219, and 198/872 are exactly `kInfoRuleTop` /
+`kInfoRuleBottom` with the old D4 fit alphas 56/51. The frame that audit captured was drawn by
+`drawMessageInfoPage` (the D5 information page), not by `drawMessagePage`. The working tree now routes
+both network rows to `MessageKind::Info` (the settings pass answers "Internet Connection Settings" and
+"Internet Connection Test" with host reports), so the two parity states draw the D5 page over an
+undimmed background:
+
+| state | before this pass, rules | console frame, rules |
+|---|---|---|
+| page-network-test-error | y198 alpha 0.219; y872 alpha 0.199 | y199 alpha 0.693; y879 alpha 0.694 |
+| page-network-connection-settings | y198 alpha 0.219; y872 alpha 0.199 | y199 alpha 0.694; y879 alpha 0.694 |
+
+The message page class itself (`MessageKind::Page`) was already correct: the 14.x build draws 199/879 at
+0.694 (measured on `out/msgview/parity-after/.../page-network-test-error/frame.png`: 197.8 over 68.2 and
+193.2 over 53.4). So the gap FIDELITY-SURFACES ranked was the D5 pair, and that pair was a fit from the
+1262x800 window recording, not a measurement: section 13.1 of this file said the D5 page "is the one shape
+with no 1080p reference", but 8.1 of this same file had already imported one
+(`dialogs/information-page-01.png`, whose table gives rule means 176.8 and 182.0). 13.1's premise was
+wrong, and this pass closes it from that frame.
+
+### 15.2 The rule pair, measured on every 1080p frame of the family
+
+| frame | y199 | y879 | thickness | extent |
+|---|---|---|---|---|
+| page-network-test-error | 193.1 over 53.0 = **0.693** | 189.9 over 42.2 = **0.694** | 1 px (rows 198 and 200 are background) | full width: 189.9 at x0..39, 191.2 at x1919 (row 199) |
+| page-network-connection-settings | 193.1 over 53.0 = 0.694 | 189.9 over 42.3 = 0.694 | 1 px | full width |
+| information-page-01 (D5) | 176.9 over 0.0 = **0.694** | 182.4 over 17.6 = **0.694** | 1 px (rows 198, 200 = 0.0) | full width |
+| dialog (confirm box, 13.1 re-cited) | 199.2 over 73.5 = 0.693 | 193.4 over 54.4 = 0.693 | 1 px | full width |
+| ictest2 wait page f_0003013 | 179.0 over 7.8 = 0.693 | 182.2 over 17.1 = 0.694 | 1 px | full width |
+| depth-2 table page (unchanged, 12.2) | 138.9 over 73.2 = 0.361 | 133.2 over 61.9 = 0.369 | 1 px | full width |
+
+So the family is one pair - y 199 / y 879, one pixel, white at 177/255 - on five frames and four page
+classes, and the D5 page is not an exception. The table page keeps its own 92 (0.36) as 12.2 measured and
+13.1 re-verified.
+
+A second read of the same page shape at a partial fade: `error/retry-t01.png` (the Store launch wait at
++0.9 s) shows the same rows at 2 px and alpha 0.400 - 0.40/0.693 = 0.577, i.e. the pair captured while the
+page was still fading in. It is not a different rule; it is the same pair at 58% of its alpha.
+
+### 15.3 What changed in dialogs.cpp
+
+Two constants and one suppression, all measured:
+
+- `kInfoRuleTop/kInfoRuleBottom` 198/872 -> **199/879** and `kInfoRuleAlphaTop/Bottom` 56/51 ->
+  **177/177** (the D5 frame above). The pair stays a per-class constant so the message page's and the D5
+  page's values cannot drift back together silently, but both are now measurements.
+- `kBodyTop` 504 -> **525**. The 1080p frames put the body's first line ink at 529..547
+  (page-network-test-error: 753..1164 x **529..547**, 412 x 19; the wait page: 885..1033 x 529..547), while
+  the old fit drew it at 509, from the 800p recording. A 24 px face at rect top 504 drew ink at 509, so 525
+  draws the cap ink at 530 (1 px below the console's 529). The D2 error page shares the constant and moves
+  with it; the D5 page has its own row block and is untouched.
+- `drawPageChrome` no longer draws the page's own clock while the busy page is up (15.6): the bar's
+  measured face is the only clock on that page, the same rule 14.2 applied to a modal message page.
+
+### 15.4 Before/after numbers and crops
+
+Native rule values on the two parity states, before -> after. The two frames differ from their "before"
+captures by exactly four rows and nothing else - `diff` over the whole frame reports 7,680 differing
+pixels = 4 x 1920, at rows 198, 199, 872, 879:
+
+| state | before | after | console |
+|---|---|---|---|
+| page-network-test-error | y198 128.6 over 93.0 (0.219); y872 97.3 over 58.1 (0.199) | **y199 205.4 over 93.0 (0.694); y879 195.0 over 58.5 (0.695)** | 0.693 / 0.694 |
+| page-network-connection-settings | y198 128.6 / 0.219; y872 97.3 / 0.199 | **y199 205.4 / 0.694; y879 195.0 / 0.695** | 0.694 / 0.694 |
+
+The 205.4 against the frame's 193.1 is not an alpha error: the two states draw no page wash, so their
+background at y199 is 93.0 against the console's 53.0, and (93.0 - 53.0) x (1 - 0.694) = 12.2, which is
+the whole difference. The alpha is the invariant the rows agree on.
+
+`work/ab-compare.ts` on the rule element (reference `page-network-test-error`), before -> after:
+
+| crop | before | after | delta |
+|---|---|---|---|
+| upper rule band 0,190,1920,20 | 14.77 dB / 0.3953 | **16.77 dB / 0.8642** | +2.00 / +0.4689 |
+| lower rule band 0,870,1920,20 | 16.97 dB / 0.1294 | **24.22 dB / 0.9603** | +7.25 / +0.8309 |
+| pair band 0,860,1920,40 | 19.19 dB / 0.6196 | **24.07 dB / 0.9522** | +4.88 / +0.3326 |
+
+The whole-frame numbers stay under the text-heavy budget: page-network-test-error frame 15.77 / 0.7934 ->
+15.86 / 0.8080, page-network-connection-settings 15.66 / 0.7948; message body 9.09 / 0.2041 and back hint
+19.91 / 0.9051 unchanged. The frame is dominated by two things that are not this element: the row content
+(the host report against the console's one-line cable message) and the missing page wash (the class
+question in 15.11 item 1). Two 1920 px rows are 0.19% of the frame, which is why closing them moves the
+frame by 0.09 dB and the rule bands by 7 dB.
+
+### 15.5 The busy/wait page: the console reference and its measured geometry
+
+`page_busy` is the console's own state (2.8), and this rig has a full-frame reference for it that no
+earlier pass used: the Internet Connection Test wait, `error/ictest2-burst/`. Measured on the settled
+frame `f_0003013.png`:
+
+| element | measured |
+|---|---|
+| header title | cap ink rows **168..185** ("Internet Connection Test"), the same row the message page's title starts on; icon on the family's 109..149 box |
+| rule pair | y199 1 px alpha 0.693; y879 1 px alpha 0.694 (15.2) |
+| body | `Please wait...`, ink **885..1033 x 529..547** (149 x 19), ink centre x 959, on the message page's body slot |
+| Back hint | `O` glyph + label ink **1155..1240 x 897..916**, the family's anchors |
+| page behind | dimmed; the ghosted page content reads 28 luma (max 35) in x700..1250, y480..525 |
+| info bar | kept: plate outline, clock text and the analog face at the clock's 1774..1805 x 88..119 |
+
+The D8 sweep (`page_busy`'s `busy_icon`, `tex_busy` 36x36 plus the 8x36 `tex_busy_s`/`_l` strips) is not
+on this page: the circle in the frame's top-right corner is the info bar's clock face at the clock's own
+box. `page_busy`'s children carry pos/size 0 in the RCO (2.8), so no frame can place a ring; the surface
+therefore draws none by default (15.6).
+
+### 15.6 The busy page as built, and the determinate progress row
+
+`View::drawBusySurface` (dialogs.cpp) draws the D4 chrome - `drawPageChrome` with the class pair, the
+focused row's icon, the page title - one status line on the measured body slot, the Back hint at the
+family's anchors, and, only when the shell publishes a fraction, the progress row. `View::busyPageUp()` is
+the class: `Shell::busy()` with no message up and no media player. The status is `Shell::status()` (the
+settings proceed text, the scan's "Reading media folder...") with the firmware's own `system_plugin
+msg_wait` ("Please wait...") as the fallback. The hint draws at full strength: `dialogHintEase_` is 0
+while no message is up, and no burst of a wait page's entrance exists to time a fade from.
+
+Hunk build, captured through the real raise path (Settings > System Settings > Restore Default Settings >
+Yes; `startSettingsWritePage` holds the proceed page for 900 ms), pins
+`--render-clock 20 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00 --focus-time 2000`:
+
+| element | console (wait frame) | achieved (busy capture) |
+|---|---|---|
+| rule 1 | y199, 1 px, alpha 0.693 | y199, 1 px, alpha **0.694** (197.8 over 68.2) |
+| rule 2 | y879, 1 px, alpha 0.694 | y879, 1 px, alpha **0.695** (190.4 over 43.4) |
+| header title cap ink top | 168 | **168** (row profile; the title's descender runs to 189) |
+| body ink top / centre | 529 / x 959 | **530** / x 960 (the same slot; the string is the shell's, not `Please wait...`) |
+| Back hint ink | 1155..1240 x 897..916 | **1155..1240 x 897..916** (exact) |
+| page-behind wash | class 0.733 (message page 14.1) | **0.733** (top band 90.3 -> 66.2) |
+| info bar | kept | kept, with the measured face (one clock) |
+| D8 ring | none | none (default) |
+
+The two frames differ by construction behind the chrome (the console's wait is over a near-black network
+page, this route's over the bright Settings page), so `work/ab-compare.ts` only bounds shape:
+frame 14.55 / 0.4706, rule bands 13.21 / 0.4107 (control band 0,190) and 20.45 / 0.7803 (0,870), back hint
+1140,880,120,56 17.96 / 0.7146. Those crops are background-dominated (the console's rows sit on 7.8 and
+17.1, ours on 68.2 and 43.4), which is why the element table above is the evidence and the crops are not.
+
+Determinism of the surface: two independent captures of the wait state are byte-identical, sha256
+`C4A58936...B20F`.
+
+The progress row has no console frame: the rig's VFS holds no copyable object, so D6/D7/D8 progress was
+never photographed (8.2 item 5, 8.3). It is drawn from the firmware's own Progress art -
+`system_plugin` `tex_default_progress_base` (24x20, flat, coverage 0.450, mean alpha 105/255) and
+`tex_default_progress_slider` (24x20, coverage 0.196, mean alpha 234/255), the same pair the music
+panel's `progress_bar_playing_time` object draws as paf's default progression art (MEDIA-PANELS 11.5) -
+at a rect this pass states as a FIT: art height 1:1 (20 px), 360 px wide, centred on x 960, top 561
+(the measured body ink 529 plus the 32 px body pitch). The percentage is native text ("42%" at
+x 1156.., 21 px): no RCO string in any container carries a percentage. Exercised in the hunk build with
+`XMB_BUSY_PROGRESS=0.42`: the bar's rect is 780..1140 x 561..581 on screen (its art has transparent
+margins, so the visible band sits inside it), the fill covers 42% of the 360 px, "42%" is drawn beside
+it, and the D8 ring draws only with `XMB_BUSY_SPIN=0.25` at a stated fit. Both the progress row and the
+ring are RCO-derived / fitted, not frame-measured.
+
+### 15.7 The hunks this surface needs (view.cpp and shell.h are other passes')
+
+`dialogs.cpp` and `view.h` land in the tree; the busy page becomes visible only when the scene calls it
+and its class is included in the page wash. Three view.cpp hunks and two shell.h accessors:
+
+```diff
+--- a/native-xmb/src/view.cpp
++++ b/native-xmb/src/view.cpp
+@@ the XMB text block @@
+-        if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
++        // The busy page carries the status line itself; the loose line would draw it twice.
++        if(!messageScreen && !busyPageUp() && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
+
+@@ the page wash @@
+-        const bool modalPage=modalMessagePage();
++        // The console's wait page is the D4 class over the dimmed page: it takes the same wash, and the
++        // same measured clock face (const bool measuredFace=modalPage below).
++        const bool modalPage=modalMessagePage()||busyPageUp();
+
+@@ the message surfaces @@
+         if(messageUp)drawMessageSurface(p);
++        // The busy page outranks a box's exit fade: the console replaces the ask page with the proceed
++        // page, so a dismissed box must not keep drawing its plate and rule pair over the new surface.
++        else if(busyPageUp())drawBusySurface(p,shell_.busyProgress(),shell_.busySpinnerPhase());
+         else if(messageShown_.kind==MessageKind::Box && (dialogEase_.value>.002 || dialogPlateEase_.value>.002))drawMessageBox(p);
+```
+
+```diff
+--- a/native-xmb/src/shell.h
++++ b/native-xmb/src/shell.h
+@@ the busy state @@
+     bool busy() const { return loading_ || busy_; }
+     QString status() const { return status_; }
++    // The determinate form of the busy page: 0..1 while the operation publishing it knows its total, -1
++    // (the default) for the indeterminate wait page the console frame shows.
++    double busyProgress() const { return busyProgress_; }
++    // The D8 busy_icon sweep, 0..1 per turn. -1 draws no ring: the measured wait page has none and
++    // page_busy's children carry no rect in the RCO, so no frame can place one.
++    double busySpinnerPhase() const { return busySpinnerPhase_; }
+@@ the private flags @@
+     bool busy_=false;
++    double busyProgress_=-1.;
++    double busySpinnerPhase_=-1.;
+```
+
+`shell.cpp` needs no hunk for the wait page: the raise site exists (`startSettingsWritePage` sets
+`settingsWrite_.stage=Proceed`, `busy_=true`, `busyClock_.start()`, `status_=proceedText`, then holds for
+`kWriteProceedMinMs=900` before `runSettingWrite`), and the scan lockout raises the same flag
+(`loading_=true; status_="Reading media folder..."`). The two new values stay -1 until an operation has a
+total; setting them is a one-liner at that operation's start, for example
+`busyProgress_=qreal(done)/qreal(total);` and, only if a D8 ring is ever wanted,
+`busySpinnerPhase_=std::fmod(double(busyClock_.elapsed())/1000.,1.)`.
+
+### 15.8 The error-code surface stays unreachable
+
+Section 2.2's D2 page has no console frame and the search is closed, not open: 9.3's four routes produce
+no 800xxxxx page (a cable condition is the D4 page of 9.1, a classified failure needs PSN, a PKG or a
+disc), and no capture tree contains one. The native's own route is gone as well: `Shell::showError()`
+(`MessageKind::ErrorCode`, shell.cpp:1406) has **no call site**, so `drawErrorMessagePage` never runs. It
+therefore stays as the traced structure (the two headings, the body, the Enter/Back label pair) with no
+fidelity claim; it now inherits the family's 199/879 at 0.693 chrome and the 525 body slot, and its header
+comment says all of this. What would prove it is still a failure the firmware itself classifies (9.5).
+
+The name check the brief asks for: the image tables hold no `tex_error_*` family on `system_plugin` or
+`msgdialog_plugin` either. The only error art in the inventory is `autodownload_plugin: tex_error`,
+`impose_plugin: tex_error_batsu` (+shadow) and `bgdl_tex_error` in `explore_plugin_full` /
+`explore_category_network`, i.e. the download and imposition rows, not a message page; the message error
+page's own content is the `msg_errorcode_*` strings (2.2). So there is neither a frame nor a texture set
+to align to.
+
+### 15.9 The classes that already measured exact are not disturbed
+
+Both builds were captured with the same pins and both scorecards are in the evidence set (15.10).
+
+| class | element | before | after |
+|---|---|---|---|
+| confirm box | frame 0,0,1920,1080 | 20.69 / 0.9159 | **20.69 / 0.9159** |
+| | box plate 482,452,319,40 (contentDiffers) | 12.10 / 0.3815 | **12.10 / 0.3815** |
+| | box answers 1150,560,420,60 | 22.56 / 0.9137 | **22.56 / 0.9137** |
+| | box footer 600,872,760,55 | 27.36 / 0.9805 | **27.36 / 0.9805** |
+| depth-2 table | frame | 17.40 / 0.8625 | **17.40 / 0.8625** |
+| | status rows (contentDiffers) | 12.46 / 0.6262 | **12.46 / 0.6262** |
+| | title rule 80,150,1520,60 | 22.16 / 0.9538 | **22.16 / 0.9538** |
+| D5 info page | every row, label, value, title, clock | - | **byte-identical**, except the four rule rows |
+
+The box frames differ by 77 pixels of 1-luma jitter, all inside the plate icon (rows 527..556), which is
+the same GPU/texture-sampling noise 14.3 recorded; the three scored regions are identical to four
+decimals. The table page's frame is byte-identical (sha256 `B7090356...206CCA` in both runs), and its
+rules re-measure 199/879 at 0.361/0.360 with the first row ink at 291, i.e. 12.2's numbers. The D5 page's
+own numbers are 15.4's: the two network states are D5 frames, and their frames differ from their "before"
+captures only at the four rule rows, so no row block, column, title or clock moved.
+
+### 15.10 Verification
+
+| check | result |
+|---|---|
+| build | `build.ps1 -OutputDirectory C:\dev\out\native-dlg2` succeeded; `re-ps3-native.exe` sha256 `F36A1B15013FD66DDF7FF50CE8068ED866BCC385C836481CA13F55E67FB6A049` |
+| canonical gate `work/ab-layers.ts --capture --exe .../native-dlg2/re-ps3-native.exe` | **PASS 6/6**; text presence **1703** bright pixels in the clock crop (minimum 900) **PASS**; frame 18.91 (-0.30 against the recorded 19.21), top background 21.06, category icon row 21.62, item label row 12.06, clock text 11.52, info bar 15.15 - every layer +0.00 except `frame`, whose -0.30 is the concurrent view.cpp work (15.11 item 4) |
+| rest frame across this change | **byte-identical**: the before and after binaries of the same tree state both capture sha256 `897711880A4E80C2B28924A50E23DAD4BE21648830F3666CD795733C7CB99EA3` at the gate's pins |
+| determinism, two `--render-clock 20` captures of the same build | both sha256 `FB8CC8F77153C085A2DA17538E57A6809BA6DF1AA714C21D659F095609BB8669` |
+| parity `--capture --score --state dialog-box,page-network-test-error,page-network-status-list,page-network-connection-settings` | before `out/parity/run-20261029-201525` (scorecard `scorecard-20261029-201655`), after `C:\dev\out\dlg2\parity-after\run-20261029-202225` (scorecard `scorecard-20261029-202420`); Tier A 4/4 PASS, dialog-box B informative (unchanged), three gating B failures remain: the message pages (15.4) and the table page's host-report rows (12.4) |
+
+### 15.11 What remains open
+
+1. **The page behind a message page is dimmed 0.733 by this build and the console also drops its content to
+   ~0.40 first** (14.5 item 1). The busy page inherits the same term: its ghosted Settings page reads ~85
+   where the console's ghost reads 28. That is the page composite (`view.cpp`), not the busy surface.
+2. **The two network states draw the D5 class where the console draws the D4 class.** Their rule pair is
+   now the family's, but the page wash and the row content are the class's, so the frame crop stays under
+   budget. Whether these rows should answer with `MessageKind::Page` is a `shell.cpp` decision.
+3. **The progress row's on-page rect is a fit** (15.6); only a console frame of a copy/delete/download
+   progress page would turn it into a measurement, and this rig cannot produce one.
+4. **The rest frame moved under this pass.** `view.cpp`/`shell.cpp` were rewritten by another pass at
+   20:33, after this pass's builds; the gate's `frame` layer reads -0.30 dB against the recorded baseline
+   for that reason, and the rest-frame hash of the final build (`1D91C09A...960`) is not the `89771188...`
+   the before/after pair measured. The +0.00 on the other five layers and the +0.00 the before/after pair
+   shows on all six belong to the builds they name.
+5. **The busy page's entrance is not timed.** No burst isolates the wait page's own fade-in from the page
+   transition; the surface draws at full strength the frame it appears.
+6. **`view.h`'s `drawMessageBox` comment** still says "plate, two bars, two hints" (10.4, 11.5); it is
+   the header pass's, and it is still stale.
+
+### 15.12 Reproduction
+
+```
+build   & C:\dev\xmb\native-xmb\build.ps1 -OutputDirectory C:\dev\out\native-dlg2
+parity  bun work\parity.ts --capture --score --state dialog-box,page-network-test-error,page-network-status-list,page-network-connection-settings --exe C:/dev/out/native-dlg2/re-ps3-native.exe --out C:/dev/out/dlg2/parity-after
+crops   bun work\ab-compare.ts out\parity-references\page-network-test-error__original__day__1080p.png <frame.png> 0,190,1920,20
+        bun work\ab-compare.ts out\parity-references\page-network-test-error__original__day__1080p.png <frame.png> 0,870,1920,20
+gate    bun work\ab-layers.ts --capture --exe C:/dev/out/native-dlg2/re-ps3-native.exe
+det     bun work\ab-layers.ts --capture --render-clock 20 --exe C:/dev/out/native-dlg2/re-ps3-native.exe   (twice)
+busy    (hunk tree) C:\dev\out\native-dlg2-hunk\re-ps3-native.exe, script
+        full,wait x10,LEFT x5,DOWN x5,ENTER,wait x4,DOWN x21,ENTER,wait x6,RIGHT,wait,wait,ENTER,grab=<png>,quit
+        pins --render-clock 20 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00 --focus-time 2000
+        XMB_DIALOG_LOG=1; XMB_BUSY_PROGRESS=<0..1> / XMB_BUSY_SPIN=<0..1> are the hunk tree's capture aids
+```
+
+The measuring probe for this pass is `C:\dev\out\dlg2\tools\probe.ts` (rule rows, alphas, ink boxes,
+row spans, frame diffs) plus `C:\dev\out\dlg2\tools\busy-capture.ps1`; the frames are under
+`C:\dev\out\dlg2\` (`parity-after\`, `busy\wait\`, `busy\progress\`, `before-rest.png`, `after-rest.png`).
+All of it is outside the repository and none of it is a deliverable.
+
+### 15.13 The view.cpp/view.h merge (2026-10-29): which returned hunks landed, which were superseded
+
+Scope of this pass: the three 15.7 hunks and the five 16.8 hunks, applied to `src/view.cpp`/`src/view.h`
+only. `shell.cpp`/`shell.h` are another pass's fence and were not touched; `main.cpp`, `dialogs.cpp`,
+`assets.*`, the CMake files, `work/` and the references were not touched either. Every line this pass
+added is ASCII (verified over the diff: 0 non-ASCII added lines in both files; `view.cpp` keeps its six
+pre-existing non-ASCII bytes, two comment em dashes and the existing U+2026 in "Loading...").
+
+| hunk | landing point | state |
+|---|---|---|
+| 15.7 (a) the loose status line skipped while `busyPageUp()` | `View::drawScene`, the line after the column stack (`view.cpp:2204`) | landed |
+| 15.7 (b) `const bool modalPage=modalMessagePage()||busyPageUp();` | `View::drawScene`, the page-wash block (`view.cpp:2216`) | landed |
+| 15.7 (c) the draw order `messageUp` -> `busyPageUp` -> box exit fade | `View::drawScene`, the message-surface block (`view.cpp:2369`) | landed, with the defaults |
+| 16.8 (i) `busyWas_`/`busySinceMs_` | `view.h:140-141`, after `psPressAt_` | landed, currently unread (see below) |
+| 16.8 (ii) the four-part busy-page draw + `kBusyPageDimAlpha` | - | **superseded, not applied** |
+| 16.8 (iii) `controlOpacity` 1 while `mediaDisplayPinned()` | `View::drawScene`, the player chrome (`view.cpp:1665`) | landed |
+| 16.8 (iv) pad SELECT/START (`BACK`/`START`) | `View::pollController`, inside `if(shell_.mediaOpen())` (`view.cpp:3394`) | landed |
+| 16.8 (v) keyboard `Key_I`/`Key_S` | `View::keyPressEvent`, after `Key_T` (`view.cpp:3266`) | landed |
+
+**16.8 (ii) is superseded by this section's own surface, and the note 16.8 asked for is this one.** The
+busy page has exactly one owner: `View::drawBusySurface` in `dialogs.cpp`, the frame-measured D4 chrome
+(15.5/15.6). 16.8's four-part block draws `tex_busy` and its strips at a fitted 960/520 with a
+`kBusyPageDimAlpha=140` wash; that art has no screen rect in the RCO and no console frame shows it, and
+the console's wash is the page class's 68 (0.733), which 15.6 pins at 0.733. Two draws would have been two
+pages on one frame, so only the dialogs one landed. `kBusyPageDimAlpha` is therefore not in the tree: the
+wash the busy page takes is `kMessagePageDimAlpha` through the 15.7(b) predicate.
+
+`Shell::busyProgress()`/`Shell::busySpinnerPhase()` do not exist in the held `shell.h` (its only busy
+accessors are `busy()` and `status()`), so 15.7(c) calls `drawBusySurface(p,-1.,-1.)`: both defaults, the
+indeterminate wait page the console frame shows, no progress row and no D8 ring. The 15.7 `shell.h` hunk is
+still open and is returned there. For the same reason the 16.8 (i) members are landed but unread: they are
+the busy page's own latched clock, kept for the day the shell publishes a phase, and their comment says so.
+
+**The busy page through the real raise route, and the box fade.** Captured with 15.12's script and pins
+(`C:\dev\out\viewmerge\busy\final\busy.png`, byte-identical to the `busy\wait` capture); the log shows `stage=ask` then `stage=proceed page=busy
+text="Restoring default settings..."`:
+
+| element | measured on this build |
+|---|---|
+| rule 1 | y199, 197.8 over 67.8 = alpha **0.694** (15.6's 0.694) |
+| rule 2 | y879, 190.4 over 43.2 = alpha **0.695** (15.6's 0.695) |
+| page title | drawPageChrome's ink from x80 (the settings page's own title row follows at 155..199) |
+| body | the shell's own proceed text through drawMessageLines on the body slot (kBodyTop 529; the ink sits under the page-behind row detail, which is the 15.11 item 1 composite and not this page) |
+| Back hint | ink **1155..1239 x 897..916**, the family's anchors |
+| loose status line rect (680,850,1100,50) | the page behind only; the status string is drawn once, on the body slot |
+
+The ordering is what makes the last row possible. With the busy draw placed before the message chain (a
+scratch build, `C:\dev\out\viewmerge\iso-d-build`), the dismissed box's exit fade paints over the proceed
+page: the two frames differ by 59,947 px, exactly rows 199 and 879 (the box's own bars over the page's
+rule pair, 1920 px each) and rows 452..627 across the full width (the box plate and its message, 56,107
+px). With the landed order the box is not drawn at all on that frame: the box's hint band (x620..1120,
+y880..930) measures 0 bright pixels where a build with the same hunks reverted measures 3,762.
+
+**The mojibake.** The audio player's queue line renders its separator doubled (A-circumflex + middle dot, U+00C2 U+00B7: the double-encoded pair) and is not a view.cpp string: `view.cpp`/`view.h` contain no
+U+00C2/U+00C3 sequence at all (scanned: zero double-encoded UTF-8 in both). The line is built by
+`Shell::mediaQueueSummary()` in `shell.cpp`, which writes its separators as the double-encoded pair
+U+00C2 U+00B7 at five sites, one per suffix (shuffle, repeat-one, repeat-all, paused, status; plus a double-encoded U+2026 in the Steam "Refreshing Steam fields..."
+status, and two more of the same doubled pair in the app and file detail strings). `shell.cpp` is another pass's fence, so the
+root fix is returned there; because the fence also forbids leaving the frame wrong, this pass repairs the
+one sequence at the draw site in `view.cpp:1692` (`QChar(0x00C2)+QChar(0x00B7)` -> `QChar(0x00B7)`,
+ASCII source, a no-op once the shell is fixed). Measured on a two-track music queue with Shuffle on:
+the doubled pair on a build without this pass's view hunks, a single U+00B7 on this one (`C:\dev\out\viewmerge\media\final\player-shuffle.png`). The container has no separator string of its
+own - `audioplayer_plugin`'s nearest are `msg_track_number_value "Track %1"` and `msg_tracks_count_value
+"%1 Tracks"`, no "of" and no dot - so U+00B7 is this line's own choice.
+
+**Verification.**
+
+| check | result |
+|---|---|
+| build | `build.ps1 -OutputDirectory C:\dev\out\native-viewmerge` succeeded; `re-ps3-native.exe` 4,372,480 bytes, built 21:30 from the tree as it then stood |
+| canonical gate `work/ab-layers.ts --capture --exe C:/dev/out/native-viewmerge/re-ps3-native.exe` | `text presence: 1703 bright pixels in the clock crop (minimum 900) PASS`; **PASS: 6/6 layers - 5 pass, 1 informative**, and the same binary under `--strict` is **PASS: 6/6 layers within budget** with the frame gated; top background 21.06/0.9434, category icon row 21.62/0.9062, item label row 12.06/0.4171, clock text 11.52/0.4662 and info bar 15.15/0.7738 are the recorded baselines to the last digit; frame 18.84/0.8456 (-0.37/-0.0019) against 19.21/0.8475, inside the 18.71/0.8435 floor |
+| is the frame movement this pass's? | no, and this was measured twice. While this pass was building, the held `shell.cpp` rebound the Game column's Vita and Game Data rows to `tex_album_icon` with the default `qgl/icontex` container, and `view.cpp`'s tile rule matched every texture containing "album" - together they drew those two 50 px rows as wide ICON0 cards and the whole-frame layer read 18.01/0.8404. A scratch build of that tree with **all** this pass's view hunks reverted captures the identical frame (sha256 `91C12C497DB3995D432EACD042C2F1631E5A01FA4B1A0417898C967A9F61EFF9`), and a second scratch build that keeps the hunks but restores HEAD's two Game bindings reads 18.90/0.8460 PASS - so the movement was the held side, not these hunks. The data-wave pass then fixed both at 21:20/21:21 (the rows now pass `explore_plugin_full`; `tile` matches only `*_album_default`/`*_album_pic`) and the final build reads 18.84/0.8456, strict-green |
+| determinism | two `--render-clock 20` captures of the final build, both sha256 `B80884308E06B8489662D14F14FEBB93B5D38E39E62A2D7E4697B57CBE101E08`, both PASS 6/6 (5 pass, 1 informative), text presence 1703 |
+| media SELECT/START and the chrome pin | not exercisable by the capture script: `main.cpp`'s token table has no SELECT/START/BACK token and no I/S token, and `main.cpp` is outside this pass's fence (16.8 records the same limit for its own hunk build, which needed a scratch-only token). The two bindings are evidenced at the source line, not on a frame. The queue line they sit beside was captured: `C:\dev\out\viewmerge\media\final\player-shuffle.png` reads `Track 1 of 2  [U+00B7]  Shuffle` (two-track queue, Shuffle on) |
+
+Evidence for this pass is under `C:\dev\out\viewmerge\` (busy\final, busy\wait, busy-nohunk\wait,
+boxcheck\{hunk,iso-c,iso-d}, media\final, media\run2, media\run-iso-a, iso-a-build, iso-b-build, iso-c-build,
+iso-d-build, tools\) and in `C:\dev\out\native-viewmerge\re-ps3-native.exe`; none of it is a deliverable.

@@ -883,9 +883,17 @@ void View::paintGL() {
         signature+=QString::asprintf(" notify %d ",int(notificationEase_.value*256.))+notificationShown_.title+'|'+
             notificationShown_.detail+'|'+notificationShown_.icon;
     // The volume HUD fades on its own clock between shell changes, so its opacity (quantised by 1/256, finer
-    // than the 2x layer can show) and the value it is drawing belong in the signature.
+    // than the 2x layer can show) and the value it is drawing belong in the signature. The 150 ms appear edge is
+    // a SEPARATE multiplier applied at the draw site (drawScene: `hud.opacity*fadeIn`), and leaving it out of this
+    // string is what let a still frame lose the meter: the level and the opacity both change at the moment of the
+    // change, so the layer rebuilds once - 4 ms into the fade, at fadeIn 0.027 - and then never again, because
+    // nothing else in the signature moves for the rest of the 3 s window. FIDELITY-MEDIA H3 measured exactly that
+    // (the meter band unchanged at 43.39 dB / 0.9966 against a no-HUD frame in 5 of 6 pinned captures, while a
+    // live run draws it at full strength). The fade amount is part of the drawn state, so it enters the signature
+    // quantised by 1/256 like the opacity beside it; at rest the HUD is invisible and the string is unchanged.
     if(const auto hud=volumeHud_.state(clock_.elapsed());hud.visible) {
-        signature+=QString::asprintf(" vol %d %d %d ",int(hud.opacity*256.),volumeLevel_,volumeMuted_?1:0);
+        const double fadeIn=std::clamp(double(clock_.elapsed()-volumeHudAt_)/volumeMeterFadeMs,0.,1.);
+        signature+=QString::asprintf(" vol %d %d %d %d ",int(hud.opacity*256.),int(fadeIn*256.),volumeLevel_,volumeMuted_?1:0);
         // Opt-in trace of the fade itself: one line per frame while it runs, so the 3000/250 ms boundary the
         // video controls are specified at is measurable here without landing a capture inside a 250 ms window.
         if(volumeTrace() && hud.opacity<1.)
@@ -984,84 +992,36 @@ void View::drawImage(QPainter& p,const QString& container,const QString& texture
     const QSizeF size=QSizeF(bounds.size()).scaled(rect.size(),Qt::KeepAspectRatio);
     p.save();p.setOpacity(opacity);p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);p.restore();
 }
-// The item-icon glass mask, prepared once per texture. The firmware draws these glyphs with the icon program:
-// alpha is the mask, and the program turns it into a refracted surface whose flat interior is almost the frame
-// itself (measured on the stored RPCS3 root frame: the folder body reads as 0.18 of white over the background)
-// with a bright rim at the mask edge (the program's Fresnel term). A plain alpha blend shows the whole mask
-// (0.70 there), which is what made the folder rows read as flat grey slabs instead of blue/gold glass.
+// The item-icon mask, prepared once per texture. The firmware's row art is a white mask whose own alpha IS the
+// drawn coverage, so the console composite is a plain source-over of the texel - there is no refraction term and
+// no rim pass. Measured on out/rpcs3-allgraphics-2026-10-28/frames/col-game-r01.png (Game Data Utility focused),
+// a scanline through the folder body at y=505 reads a FLAT 202..204 from x 505 to x 625 over a 96 background,
+// i.e. 0.68 of white; the texture's own body is 195/255 with RGB 237 (median of its covered pixels), and
+// source-over gives 96*(1-.765) + 237*.765 = 203.9 - the frame's 204. The unfocused rows agree: the same body
+// reads 166 over 54 on rpcs3-day-2026-10-28/frames/c-game-root.png (0.56 of white), which is 54*(1-.765) +
+// 237*.765 = 194 for a mask of the same 195 median. So the drawn alpha is the mask's alpha, and the transform
+// this function used to apply - rewriting every non-rim texel to (255-alpha)*0.78 - is deleted, not retuned.
+// Its premise (a comment claiming the console's folder body reads 0.18 of white) is falsified on BOTH console
+// batches: 0.18 is what the rewrite produced, which is why every RCO row icon drew as a hollow outlined
+// rectangle at 0.10-0.25 of white with the background wave showing through its interior (FIDELITY-SURFACES
+// 3.1a, its top gap 1). [TRACED: the body alpha, the RGB, the two composite readings and their backgrounds.
+// FIT: nothing - the texture's own alpha is the drawn coverage, so there is no number left to fit.]
 const QImage& View::itemGlyph(const QString& container,const QString& texture) {
     const QString key=container+"/"+texture;
     if(const auto it=itemGlyphs_.constFind(key);it!=itemGlyphs_.constEnd())return it.value();
     const QImage& source=assets_.bestImage(container,texture);
     if(source.isNull())return itemGlyphs_.insert(key,QImage()).value();
-    QImage argb=source.convertToFormat(QImage::Format_ARGB32);
-    // Opaque artwork (the PS Store bag, ICON0 stills, disc art) keeps its own pixels: its mask covers its
-    // footprint opaquely. A glass glyph's body is a translucent mask (median coverage well below opaque) and only
-    // its rim reaches 250, so the median of the covered pixels tells the two apart.
-    int histogram[256]{};
-    qint64 covered=0;
-    for(int y=0;y<argb.height();++y) {
-        const auto* row=reinterpret_cast<const QRgb*>(argb.constScanLine(y));
-        for(int x=0;x<argb.width();++x){const int alpha=qAlpha(row[x]);++histogram[alpha];if(alpha)++covered;}
-    }
-    int median=0;
-    if(covered)for(int total=0,alpha=1;alpha<256;++alpha){total+=histogram[alpha];if(total>=covered/2){median=alpha;break;}}
-    if(median>=230)return itemGlyphs_.insert(key,argb).value();
-    // The icon program reflects the frame through the mask, so the white it adds falls as the mask thickens: a
-    // folder's body reads as ~0.18 of white over the background and its emblem (a thicker region) nearly
-    // disappears into the frame. Measured on the stored RPCS3 root frame: the plain folder's 196/255 body shows as
-    // 0.18 of white, i.e. k*(255-196). The remaining term is the program's Fresnel highlight, which the mask does
-    // not carry, so the silhouette (the pixels that touch the transparent outside) keeps the mask's own alpha.
-    static constexpr double kThin=.78;
-    const int w=argb.width(),h=argb.height();
-    QVector<quint8> outside(size_t(w)*size_t(h),0);
-    QVector<int> pending;
-    const auto seed=[&](int x,int y){const size_t at=size_t(y)*size_t(w)+size_t(x);if(!outside[at] && !qAlpha(reinterpret_cast<const QRgb*>(argb.constScanLine(y))[x])){outside[at]=1;pending.push_back(y*w+x);}};
-    for(int x=0;x<w;++x){seed(x,0);seed(x,h-1);}
-    for(int y=0;y<h;++y){seed(0,y);seed(w-1,y);}
-    while(!pending.isEmpty()) {
-        const int index=pending.takeLast(),x=index%w,y=index/w;
-        if(x>0)seed(x-1,y);
-        if(x+1<w)seed(x+1,y);
-        if(y>0)seed(x,y-1);
-        if(y+1<h)seed(x,y+1);
-    }
-    const auto isOutside=[&](int x,int y){return x<0||y<0||x>=w||y>=h||outside[size_t(y)*size_t(w)+size_t(x)];};
-    // The rim is ~4 texture pixels thick so that it survives the downscale to a 60..105 px row (a 1 px rim would
-    // vanish under the smoothing).
-    QVector<quint8> rim(size_t(w)*size_t(h),0);
-    for(int y=0;y<h;++y)for(int x=0;x<w;++x)
-        if(qAlpha(reinterpret_cast<const QRgb*>(argb.constScanLine(y))[x]) &&
-           (isOutside(x-1,y)||isOutside(x+1,y)||isOutside(x,y-1)||isOutside(x,y+1)))rim[size_t(y)*size_t(w)+size_t(x)]=1;
-    for(int pass=0;pass<3;++pass) {
-        QVector<quint8> grown=rim;
-        for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
-            const size_t at=size_t(y)*size_t(w)+size_t(x);
-            if(rim[at] || !qAlpha(reinterpret_cast<const QRgb*>(argb.constScanLine(y))[x]))continue;
-            const auto lit=[&](int nx,int ny){return nx>=0&&ny>=0&&nx<w&&ny<h&&rim[size_t(ny)*size_t(w)+size_t(nx)];};
-            if(lit(x-1,y)||lit(x+1,y)||lit(x,y-1)||lit(x,y+1))grown[at]=1;
-        }
-        rim=grown;
-    }
-    QImage prepared(argb.size(),QImage::Format_ARGB32);
-    prepared.fill(Qt::transparent);
-    for(int y=0;y<h;++y) {
-        const auto* in=reinterpret_cast<const QRgb*>(argb.constScanLine(y));
-        auto* out=reinterpret_cast<QRgb*>(prepared.scanLine(y));
-        for(int x=0;x<w;++x) {
-            const int alpha=qAlpha(in[x]);
-            if(!alpha)continue;
-            const int coverage=rim[size_t(y)*size_t(w)+size_t(x)]?alpha:std::clamp(int((255-alpha)*kThin),0,255);
-            out[x]=qRgba(qRed(in[x]),qGreen(in[x]),qBlue(in[x]),coverage);
-        }
-    }
-    return itemGlyphs_.insert(key,prepared).value();
+    // The cache also normalises the format, so every drawItemGlyph call site hands QPainter an ARGB32 image.
+    // Opaque artwork (the PS Store bag at median alpha 255, ICON0 stills, disc art) and translucent masks (the
+    // 151..227 median folder set) take the same path: their own alpha already says how much background shows.
+    return itemGlyphs_.insert(key,source.convertToFormat(QImage::Format_ARGB32)).value();
 }
 void View::drawItemGlyph(QPainter& p,const QString& container,const QString& texture,const QRectF& rect,qreal opacity) {
     const auto& image=itemGlyph(container,texture);
     if(image.isNull())return;
-    // The mask footprint is the same before and after preparation, so the cached alpha bounds of the source fit
-    // the same rect (the prepared body alpha falls below the bounds threshold, which would shrink it).
+    // The mask footprint is the art's own alpha bounds, taken from the source and cached by container/texture;
+    // the prepared image carries the same alpha, so one bounds rect serves both (FIDELITY-ROOT-BAR I2/I3: the
+    // box the caller passes is the measured ink width already, and drawItemGlyph must not shrink it further).
     const QString key=container+"/"+texture;
     auto bounds=imageBounds_.value(key);
     if(bounds.isNull()) {
@@ -1073,7 +1033,7 @@ void View::drawItemGlyph(QPainter& p,const QString& container,const QString& tex
     const QSizeF size=QSizeF(bounds.size()).scaled(rect.size(),Qt::KeepAspectRatio);
     p.save();p.setOpacity(opacity);p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);p.restore();
 }
-void View::drawNineSlice(QPainter& p,const QString& container,const QString& texture,const QRectF& rect,qreal inset,qreal opacity) {
+void View::drawNineSlice(QPainter& p,const QString& container,const QString& texture,const QRectF& rect,qreal inset,qreal opacity,qreal sourceInset) {
     // tex_notification is a 64x64 tile: a dark fill with a lighter 1 px border and rounded corners. Scaling it
     // to the plaque's aspect would stretch the corner arcs into ellipses, so the 3x3 parts are drawn with the
     // corners at their own pixel size and only the edges and the centre stretched.
@@ -1081,8 +1041,12 @@ void View::drawNineSlice(QPainter& p,const QString& container,const QString& tex
     if(image.isNull())return;
     const qreal i=std::min<qreal>(inset,std::min(image.width(),image.height())/2.);
     if(rect.width()<2*i || rect.height()<2*i)return;
-    const qreal sx[4]={0.,i,qreal(image.width())-i,qreal(image.width())};
-    const qreal sy[4]={0.,i,qreal(image.height())-i,qreal(image.height())};
+    // A tile may carry its own near-transparent margin inside its 64x64 canvas (the info bar's tex_indi_bg
+    // does: a 4% alpha row/column at the top and bottom, FIDELITY-ROOT-BAR F4). Skipping it here keeps the
+    // margin out of the drawn plate without changing the 8 px border's 1:1 pixel size.
+    const qreal s=std::clamp<qreal>(sourceInset,0.,std::max<qreal>(0.,std::min(image.width(),image.height())/2.-i));
+    const qreal sx[4]={s,i+s,qreal(image.width())-i-s,qreal(image.width())-s};
+    const qreal sy[4]={s,i+s,qreal(image.height())-i-s,qreal(image.height())-s};
     const qreal dx[4]={rect.left(),rect.left()+i,rect.right()-i,rect.right()};
     const qreal dy[4]={rect.top(),rect.top()+i,rect.bottom()-i,rect.bottom()};
     p.save();p.setOpacity(opacity);
@@ -1224,6 +1188,10 @@ struct PanelBand {
     double rowCentre=505.;    // fixed rows: row 0's text centre; scrolling list: the focus row's centre
     double labelInset=16.;    // row text left = x0 + labelInset
     double groupGap=0.;       // fixed rows: distance up to a divider group's origin
+    // The submenu chevron's left edge. Two measured columns: the settings bands' 1786 (the Background
+    // list's `Brightness` row) and the item menu's 1573 (frames/menu-options-open.png, on both of its
+    // submenu rows). 11x10 px, on the row's centre line, both sides.
+    double chevronX=1786.;
     int groupBreakRow=0;      // fixed rows: rows before this index are the upper group (a band has no MenuOption)
     double contentDim=1.;     // brightness of the page the band covers, at rest (measured)
     const BandStop* stops=nullptr;
@@ -1317,20 +1285,29 @@ const PanelBand* bandForSetting(const QString& setting) {
 // frame's own columns are exact - the first lit column is 1320 (a 2 px step, 15 at 1320 and 34 at 1322),
 // the fill peaks at 62 and the last lit column is 1741 - so the measured edge and end are used, and the
 // text column stays at E1's 1334 (inset 14 from the measured edge, not the 4 the approximate 1330 would
-// give). The rows do not scroll (the firmware's menu carries no scroll object) and are anchored on the
+// give). Re-measured on out/rpcs3-allgraphics-2026-10-28/frames/menu-options-open.png this pass: the band's
+// left edge is x 1320 (84.8 at 1315 -> 89.9 at 1320 -> 108 peak at 1370) and the label ink starts at x 1336,
+// i.e. pen 1334 + the glyph's 2 px bearing on both sides - FIDELITY-SURFACES gap 4's "+66/+73 px" does not
+// reproduce on this build (it was measured on the pre-plate binary), while the ROW GRID does move: the
+// frame's five rows have ink tops 301/341 (utility group) and 540/581/621 (action group), i.e. centres
+// 311.5/351.5 and 549.5/590.5/630.5 - a 40.5 px pitch on the first action row 549.5, not E1's 38 px at 552.
+// The group gap that reproduces the frame is therefore 238: 549.5 + 40.5 - 238 = 352 (row 2 of the utility
+// group, frame 351.5) and 549.5 - 238 = 311.5 (its row 1). [TRACED: the edge, the end, the pen, the five ink
+// tops. FIT: nothing - the three values are the frame's own arithmetic.]
+// The rows do not scroll (the firmware's menu carries no scroll object) and are anchored on the
 // first baseline; drawing centres the em box 8 px above that baseline, which is the offset measured
 // between the rect centre and the ink bottom on this build's capture (SETTINGS 13.5).
-// The fill is the firmware's own plate (ICON-GAP-AUDIT B5), not this build's four-stop fit. Measured on
-// dialogs/options-open-01.png against the same session's band-less frame (options-state-before.png) in a
-// row where the page behind is black: the texture maps 1:1 horizontally at x 1320 (536 px per 536 texels;
-// a least-squares fit of the frame's y=100 profile to the texture's row gives exactly 1.000 px/texel and
-// x0 1320, residual MSE 0.83 luma) and its 216 rows are stretched over the full 1080 height (at y 100 the
-// frame is 62 where texture row 20 peaks at 185/255; at y 280 it is 64 where row 56 reads 190). The
-// object alpha is 0.33: the texture's 207 peak * 0.33 = 68, the frame's 68.3 where the plate sits on a
-// 6.7 page, and its 46 at x 1320 * 0.33 = 15.2 against the frame's measured 15.3. The stops below stay
-// for every other band; the options band no longer uses them.
-const PanelBand kOptionsBand{.firmware=true,.x0=1320.,.fadeEnd=1742.,.pitch=38.,.fixedRows=true,
-    .rowCentre=552.,.labelInset=14.,.groupGap=237.,.contentDim=.545,.stops=kOptionsBandStops,
+// The fill is the firmware's own plate (ICON-GAP-AUDIT B5), not this build's four-stop fit.
+// Measured on dialogs/options-open-01.png against the same session's band-less frame
+// (options-state-before.png) in a row where the page behind is black: the texture maps 1:1 horizontally at
+// x 1320 (536 px per 536 texels; a least-squares fit of the frame's y=100 profile to the texture's row gives
+// exactly 1.000 px/texel and x0 1320, residual MSE 0.83 luma) and its 216 rows are stretched over the full
+// 1080 height (at y 100 the frame is 62 where texture row 20 peaks at 185/255; at y 280 it is 64 where row
+// 56 reads 190). The object alpha is 0.33: the texture's 207 peak * 0.33 = 68, the frame's 68.3 where the
+// plate sits on a 6.7 page, and its 46 at x 1320 * 0.33 = 15.2 against the frame's measured 15.3. The stops
+// below stay for every other band; the options band no longer uses them.
+const PanelBand kOptionsBand{.firmware=true,.x0=1320.,.fadeEnd=1742.,.pitch=40.5,.fixedRows=true,
+    .rowCentre=549.5,.labelInset=14.,.groupGap=238.,.chevronX=1573.,.contentDim=.545,.stops=kOptionsBandStops,
     .stopCount=int(std::size(kOptionsBandStops)),.plateContainer="system_plugin",
     .plateName="tex_optionmenu_bg",.plateX=1320.,.plateY=0.,.plateW=536.,.plateH=1080.,
     .plateOpacity=.33};
@@ -1626,11 +1603,29 @@ void View::drawScene(QPainter& p) {
             } else {
                 text(rect,title,23,QColor(255,255,255,level));
             }
+            if(rows && (*rows)[i].gateBadge && !chip) {
+                // The item menu's second utility row carries the small purple square the frame shows after its
+                // label (frames/menu-options-open.png: 13x14 at x 1517..1529, y 345..358, 14 px after the ink of
+                // "Group Content"). It is the firmware's gaiji U+F882 in msg_folder_class_with_icon, which the
+                // text path would draw as a missing-glyph box, so the shell names the row with msg_folder_class and
+                // the badge is drawn here: fill #BF4EA6, a #32172A inner rect and a lighter lower band.
+                QFont badgeFont(shell_.fontFamily());badgeFont.setPixelSize(23);
+                const double labelRight=labelX+QFontMetrics(badgeFont).horizontalAdvance(title);
+                const QRectF badge(labelRight+14.,y-7.,13.,14.);
+                p.save();p.setPen(Qt::NoPen);
+                p.setBrush(QColor(191,78,166));p.drawRoundedRect(badge,2.,2.);
+                p.setBrush(QColor(50,23,42));p.drawRect(badge.adjusted(3.,3.,-3.,-3.));
+                p.setBrush(QColor(127,53,109));p.drawRect(QRectF(badge.left()+3.,badge.bottom()-4.,badge.width()-6.,2.));
+                p.restore();
+            }
             if(firmwareBand && submenus && submenus->value(i,false)) {
                 // The firmware's submenu row carries a right-pointing chevron: an 11x10 px triangle,
-                // measured on the Background list's `Brightness` row at x 1786-1796, y 387-396.
+                // measured on the Background list's `Brightness` row at x 1786-1796, y 387-396. The item
+                // menu's rows carry the same triangle at its own measured column (1573-1583), which is why
+                // the band owns the x (FIDELITY-SURFACES 15.8 V1).
                 p.save();p.setBrush(QColor(255,255,255,enabled?225:115));p.setPen(Qt::NoPen);
-                QPolygonF chevron;chevron<<QPointF(1786.,y-5.)<<QPointF(1786.,y+5.)<<QPointF(1796.,y);
+                const double chevronX=firmwareBand?band->chevronX:1786.;
+                QPolygonF chevron;chevron<<QPointF(chevronX,y-5.)<<QPointF(chevronX,y+5.)<<QPointF(chevronX+10.,y);
                 p.drawPolygon(chevron);p.restore();
             }
             if(rows && focus>.5) {
@@ -1687,7 +1682,11 @@ void View::drawScene(QPainter& p) {
         // title, hint sentence, bar, time) fades out with the panel's 150 ms ease, so the panel is not
         // read through a bar that belongs to another surface. Video and photo are untouched (panelDim 1).
         const double panelDim=(shell_.videoOpen()||shell_.photoOpen())?1.:1.-musicPanelEase_.value;
-        p.save();p.setOpacity((shell_.videoOpen()?mediaControls_.state(now).opacity:1.)*panelDim);
+        // SELECT's Display state (Shell::mediaDisplayPinned): the console's Display key keeps the player's own
+        // chrome up instead of letting the 3 s hide timer drop it (MEDIA-PANELS-FIRMWARE 4.3/11.5 item 9).
+        const double controlOpacity=shell_.mediaOpen() && shell_.mediaDisplayPinned()
+            ?1.:(shell_.videoOpen()?mediaControls_.state(now).opacity:1.);
+        p.save();p.setOpacity(controlOpacity*panelDim);
         // Vertical order of the chrome, bottom band (surface A, audit 3.5): the time bar (941..961), its
         // 16x16 digit cells (963..979), the title (984..1022) and the direct-key hint strip (1026..1056).
         // The ASCII sentence survives only where this build has no firmware icon set to draw: the photo
@@ -1702,7 +1701,19 @@ void View::drawScene(QPainter& p) {
         else if(!shell_.videoOpen())
             text({110,1020,1700,35},"Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle   R Repeat   Triangle Control Panel",21,QColor(230,230,230));
         if(shell_.busy())text({110,910,1000,45},"Loading…",26,Qt::white);
-        else if(!shell_.photoOpen())text({110,895,1700,36},shell_.mediaQueueSummary(),21,QColor(230,230,230));
+        else if(!shell_.photoOpen()) {
+            // The queue line's separator arrives doubled ("A-circumflex middot") from
+            // Shell::mediaQueueSummary(): shell.cpp is another pass's fence, so the root fix is RETURNED there
+            // (audit/FIDELITY-BEHAVIOUR.md 16.11) and this draw site repairs that one sequence, so the frame
+            // shows a single U+00B7. ASCII source: both characters are QChar codes, which is this tree's rule,
+            // and the container has no separator string of its own (audioplayer_plugin's nearest are
+            // msg_track_number_value "Track %1" and msg_tracks_count_value "%1 Tracks" - no "of", no dot), so
+            // U+00B7 is this line's own choice rather than a firmware string. The replace is a no-op once the
+            // shell side is fixed.
+            QString queueLine=shell_.mediaQueueSummary();
+            queueLine.replace(QString(QChar(0x00C2))+QChar(0x00B7),QString(QChar(0x00B7)));
+            text({110,895,1700,36},queueLine,21,QColor(230,230,230));
+        }
         else if(photoViewport_.valid())text({110,895,1700,36},QString("Zoom %1%").arg(photoViewport_.zoomPercent(),0,'f',0),21,QColor(230,230,230));
         if(shell_.videoOpen() && !shell_.photoOpen()) {
             // Surface A is the video player's own surface: the firmware's time page and its hint strip.
@@ -1735,6 +1746,27 @@ void View::drawScene(QPainter& p) {
             drawMusicPanel(p,musicPanelEase_.value);
     } else {
         previousMediaOpen_=false;
+        // The lower field's own gradient (FIDELITY-ROOT-BAR B4, the audit's gap 9). The console's band x20..300
+        // rises 6.90 luma from y780 to y1075; this build's field rises 3.15 there, because the whole lower field
+        // sits 10..16 luma high and the display response is compressed at that level - the field residue the audit
+        // files as B6, whose cause is the HDR tone-map/glare chain in hdr.cpp, outside this pass's write fence. The
+        // correction is multiplicative and local rather than a retuned fade: the console/native ratio at each
+        // measured row (0.747 at y640, 0.779 at y780, 0.806 at y840, 0.822 at y900, 0.842 at y960, 0.845 at y1075)
+        // is exactly a black veil of alpha 1-ratio. Drawn first in the layer, it darkens the field and the ribbon
+        // that are already on screen and sits under every surface drawn after it; nothing above y560 enters it, so
+        // the top background, the category row and the item label row are untouched.
+        // [TRACED: the console and native row means the ratios come from. FIT: a display-space veil standing in for
+        // the tone-map response - remove it when B6 is fixed in hdr.cpp.]
+        if(shell_.backgroundMode()!=2) {
+            QLinearGradient veil(0,560.,0,1080.);
+            veil.setColorAt(0.,QColor(0,0,0,0));
+            veil.setColorAt(80./520.,QColor(0,0,0,int(std::lround(.253*255.))));   // y 640, measured ratio 0.747
+            veil.setColorAt(220./520.,QColor(0,0,0,int(std::lround(.221*255.))));  // y 780, measured ratio 0.779
+            veil.setColorAt(340./520.,QColor(0,0,0,int(std::lround(.194*255.))));  // y 900, measured ratio 0.822
+            veil.setColorAt(460./520.,QColor(0,0,0,int(std::lround(.153*255.))));  // y 1020, measured ratio 0.847
+            veil.setColorAt(1.,QColor(0,0,0,int(std::lround(.155*255.))));         // y 1075, measured ratio 0.845
+            p.fillRect(QRectF(0,560,1920,520),QBrush(veil));
+        }
         const auto& categories=shell_.categories();
         // Two depth channels (audit/PAGE-MOVE.md section 15). `childAmount` is the page content's progress
         // (the icon's 262 px travel, the item columns, the label's fade): 18 rendered frames = 300 ms mode 4,
@@ -1931,6 +1963,41 @@ void View::drawScene(QPainter& p) {
             // The list under an open options panel stays in place; unfocused rows drop to icons only.
             const double panelAmount=level+1<columns.size() && isChoiceColumn(columns[level+1])?panelOpen:0.;
             if(behind>.999 && level<lastLevel-1)continue;
+            // The focused row's background plate: the item column's own `BG1` plane, and the item column's only
+            // focus cue besides the label glow (FIDELITY-ROOT-BAR I10, which measured nothing here). GEOMETRY-ROOT
+            // 11.1 measures it on five console frames as a hard-edged 319x175 rectangle (x 405-723, y 417-591) and
+            // FIDELITY-ROOT-BAR I10 re-measures it as 405,419 -> 724,594; both give 319x175 centred on the focus
+            // point (565,505), and the rect below takes I10's 419 row origin. It is a fixed-size rectangle centred
+            // on the row, not a row band. The RCO's BG1 planes carry posX/posY/width/height = 0 and a null image
+            // (GEOMETRY-ROOT 2.2/10.1), so the firmware states no rect and ships no texture for it - there is no
+            // firmware art to draw, which is why this is a drawn plane and not an asset. The alpha profile is
+            // measured off the frame's own edge steps (plate minus the column just outside the plate, at the left
+            // edge x405 -> 406 and the right edge x723 -> 724, rows 419..593): 0.17 at the top edge, 0.205-0.22
+            // through the middle (y 443..535), 0.14 at y566 and 0.11 at y588, over white 230 - which reproduces the
+            // frame's +43..+60 luma lift at y 440..540 over its own darker background. It is drawn before every row
+            // (it is a plane behind them, not an overlay) and only at the top level: the settings/page bands carry
+            // no plate (SETTINGS 12.6) and a parent column behind an open page keeps the frame it had, so it fades
+            // with (1-behind). [TRACED: the rect, the edge rows and the per-row alphas. FIT: the stop interpolation
+            // and white 230.]
+            if(level==0 && columnAlpha>0. && !column.entries.isEmpty()) {
+                const double plateDistance=column.selection-column.position;
+                const double plateFocus=std::max(0.,1.-std::abs(plateDistance));
+                const double plateDepth=behind*(1.-plateFocus);
+                const double plateRow=plateDistance*80+std::clamp(plateDistance,0.,1.)*95
+                    -std::clamp(-plateDistance,0.,1.)*305;
+                const double plateSink=(active && level==int(columns.size())-1)?overscrollStep*columnSink_:0.;
+                const double plateY=540+(505+plateRow-540-15*plateDepth*std::clamp(plateDistance,0.,1.))*(1.-.055*plateDepth)+plateSink;
+                const QRectF plateRect(kColumnX-160.+ahead*210.+offset,plateY-86.,319.,175.);
+                QLinearGradient plateFill(plateRect.topLeft(),plateRect.bottomLeft());
+                plateFill.setColorAt(0.,QColor(230,230,230,43));   // 0.170 at the top edge (y 419)
+                plateFill.setColorAt(.14,QColor(230,230,230,52));  // 0.205 at y 443
+                plateFill.setColorAt(.60,QColor(230,230,230,55));  // 0.215 at y 524
+                plateFill.setColorAt(.84,QColor(230,230,230,36));  // 0.140 at y 566
+                plateFill.setColorAt(1.,QColor(230,230,230,28));   // 0.110 at the bottom edge (y 594)
+                p.save();p.setOpacity(columnAlpha*(1.-behind));
+                p.setPen(Qt::NoPen);p.fillRect(plateRect,QBrush(plateFill));
+                p.restore();
+            }
             for(int i=0;i<column.entries.size();++i) {
                 const auto& entry=column.entries[i];
                 const double distance=i-column.position;
@@ -1962,8 +2029,15 @@ void View::drawScene(QPainter& p) {
                 // Reference (RPCS3 4.x video): square icons ~60 px, ~105 px when focused; utility folders are icons too.
                 // Only media thumbnails (album art) keep a wide tile.
                 // Setting rows carry the small round settings bullet: 18 px, 39 px focused (reference 95 s).
+                // Top-level item ink, measured on the console (FIDELITY-ROOT-BAR I2/I3): the focused row's glyph is
+                // 128 px wide inside its 184.8 px firmware quad and the plain folder of an unfocused row is 50 px
+                // wide inside its 77.616 px quad, i.e. the console expands the focused icon 2.56x (50 -> 128).
+                // drawItemGlyph fits the art's own alpha bounds to the box, so this renderer's ink is the box: the
+                // box is set to the two measured ink widths directly. The firmware quads stay on `quad` below, which
+                // is what the glass icon path draws, so the category icons and their material are untouched.
+                // [TRACED: both ink widths and their quads. FIT: nothing - the box equals the measured ink.]
                 const bool bullet=entry.container=="qgl/icontex" && entry.texture=="23n";
-                const double size=(bullet?18+focus*21:level==0?60+focus*44:40+focus*16)*entryScale;
+                const double size=(bullet?18+focus*21:level==0?50+focus*78:40+focus*16)*entryScale;
                 // Firmware folder glyphs: a folder row in the Game column carries the emblem of what it holds - the
                 // captured Game Data Utility row is item_tex_ps3game_folder (folder + gamepad, explore_category_game.rco
                 // and explore_plugin_full.rco), not the bare storage folder. Steam's All Games / collection / Not
@@ -1972,7 +2046,15 @@ void View::drawScene(QPainter& p) {
                 // library folders keep.
                 const QString itemTexture=entry.texture=="item_tex_plain_folder" && entry.action==Action::SteamFolder?
                     QStringLiteral("item_tex_ps3game_folder"):entry.texture;
-                const bool tile=entry.gameTile || itemTexture.contains("album") || entry.container=="file"; // ICON0 thumbnails are wide
+                // ICON0 thumbnails are wide. The tile rule is the media album ART, not every texture whose name
+                // contains "album": category_game.xml's folder placeholder is tex_album_icon, and matching that
+                // turned two 50 px folder rows into wide ICON0 cards (-1.20 dB on the canonical frame until the
+                // distinction was measured, FIDELITY-SURFACES 3.1b + 15.8). The media thumbnail names are
+                // *_tex_album_default / *_tex_album_pic.
+                const bool albumArt=itemTexture.contains("album_default") || itemTexture.contains("album_pic");
+                // ICON0 thumbnails are wide; a picture that is not (the Photo column's 180x180 hakoniwa.png
+                // gallery icon, Entry::iconSized) keeps the icon box the console gives it.
+                const bool tile=!entry.iconSized && (entry.gameTile || albumArt || entry.container=="file");
                 // A row behind an open page is the parent column, and every captured parent-column row is an item icon
                 // (77.616 unfocused / 184.800 focused, 2857.2/0.247 below focus). Keeping the wide album/ICON0 card
                 // there drew a 320x180 placeholder on the same spot as the open category icon (Video Library over the
@@ -2137,11 +2219,18 @@ void View::drawScene(QPainter& p) {
                 // Phase 11.3: the item menu is the firmware's own band (ITEM-MENU-INFO-FIRMWARE E1/F6): its
                 // measured edge, 38 px pitch, fixed rows and 1334 text column, and its MenuOption rows so a
                 // row this build cannot honour is dimmed with its reason. No dot: the band marks by focus.
+                // The two list-level rows carry the frame's own flags (FIDELITY-SURFACES 15.4): a right-pointing
+                // chevron on Sort By and Group Content, and the purple gate badge on Group Content.
+                QVector<bool> submenus;submenus.reserve(optionsShown_.rows.size());
+                for(const auto& row:optionsShown_.rows)submenus<<row.submenu;
                 drawOptionsPanel(optionsShown_.titles,optionsPanelEase_.value,optionsOpenEase_.value,1.-optionsOpenEase_.value,
-                                 optionsShown_.heading,&optionsShown_.rows,&kOptionsBand);
+                                 optionsShown_.heading,&optionsShown_.rows,&kOptionsBand,nullptr,nullptr,nullptr,
+                                 &submenus);
             }
         }
-        if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
+        // The busy page carries the status line itself (drawBusySurface, dialogs.cpp); the loose line would
+        // draw the same text twice on that page.
+        if(!messageScreen && !busyPageUp() && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
         // The modal message page's dim (DIALOGS-FIRMWARE 13.7 item 1). The console does not replace the page
         // when a message page opens, it dims it: page-network-test-error and page-network-connection-settings
         // read 47.0-51.0 where the same patch on a message-free frame reads 73-88, a whole-page least-squares
@@ -2151,7 +2240,9 @@ void View::drawScene(QPainter& p) {
         // page/background composite and before the info bar and the message surface, so the bar's measured
         // ramp alphas and the chrome's own alphas land over the dimmed page (the message page's y75 plate ramp
         // measures the same 0.35 alpha over its 50.6 background that the root's measures over 71.0).
-        const bool modalPage=modalMessagePage();
+        // The console's wait page is the D4 class over the dimmed page: it takes the same wash, and the
+        // same measured clock face (drawPageChrome suppresses the page clock while busyPageUp(), dialogs.cpp).
+        const bool modalPage=modalMessagePage()||busyPageUp();
         if(modalPage)p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,kMessagePageDimAlpha));
         // Info bar: the information panel's own material, xmb_plugin_normal:tex_indi_bg, a 24x24 nine-slice
         // tile with an 8 px white alpha ramp on every side around a black interior at alpha 13/255 (5.1%).
@@ -2188,7 +2279,22 @@ void View::drawScene(QPainter& p) {
             const QRectF infoBar(1329,75,591,58);
             const QImage& plate=assets_.image("xmb_plugin_normal","tex_indi_bg");
             if(!plate.isNull()) {
-                drawNineSlice(p,"xmb_plugin_normal","tex_indi_bg",infoBar.adjusted(-1,-1,8,1),8.,1.);
+                // FIDELITY-ROOT-BAR F4/F2 (2026-10-29). The tile's 1 px margin row/column is not transparent but
+                // ~4% alpha, and drawing it as the slice's first row put a 0.041-alpha overshoot one pixel outside
+                // the plate on every edge (measured y74 95.74, y133 94.13, x1328 102.3 on the canonical frame). The
+                // source grid now starts one pixel in, so the plate's core is exactly rows 75..132 and columns
+                // 1329..1919 with nothing outside it. [TRACED: the core rect and the tile's own margin.]
+                drawNineSlice(p,"xmb_plugin_normal","tex_indi_bg",QRectF(1329,75,600,58),8.,1.,1.);
+                // Both ramps then still measure 17% weak (F2: alpha 0.291 top / 0.292 bottom against the console's
+                // 0.351 / 0.352). The deficit is one row per edge: the console's ramp peaks on its first row and
+                // decays over ~6 rows, and this tile's own first row is that peak at 0.291. A 1 px white row per
+                // edge closes it: 1-(1-0.291)(1-0.086) = 0.352 and 1-(1-0.292)(1-0.086) = 0.353, i.e. the measured
+                // 0.351/0.352 within a thousandth. [TRACED: the target alphas and their difference. FIT: expressing
+                // the difference as a 1 px top-up row rather than a brighter tile.]
+                p.save();p.setPen(Qt::NoPen);
+                p.fillRect(QRectF(1329,75,591,1),QColor(255,255,255,22));
+                p.fillRect(QRectF(1329,132,591,1),QColor(255,255,255,22));
+                p.restore();
             } else {
                 // The decoder reads this tile (audit/TEXTURE-COVERAGE.md: 3174/3174); if a future flash
                 // cannot, keep the drawing this block shipped before and say so once.
@@ -2199,32 +2305,36 @@ void View::drawScene(QPainter& p) {
                 p.setOpacity(1);p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(255,255,255,90),1));p.drawRoundedRect(infoBar.adjusted(.5,.5,-.5,-.5),4,4);p.restore();
             }
             text({1240,82,525,45},shell_.clockText(),27,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
-            // The analog clock face. Two fits, chosen by the same page class as the wash above:
-            //   - the canonical root frame keeps the fit this build has always drawn (2.7 px ring at
-            //     1791/104, no disc, 10/7 px hands). Its gate layers are recorded and the rest frame is
-            //     frozen this pass, so the measured fit is not lifted to it here; that lift is the
-            //     follow-up DIALOGS-FIRMWARE 13.7 records (it would move the clock text and info bar layers).
-            //   - a modal message page draws the face its own frames measure: a 32x32 face centred on
-            //     1789.5/103.5 (ring ink x 1774..1776 and 1803..1805, rows 88..119), a 3 px ring on a
-            //     14.6 px centre line, a near-black disc (the frame's interior reads 0-22 over a 45..70
-            //     plate interior, i.e. black at ~0.8) and hands that reach the ring: the 10:05 minute hand
-            //     merges with it along the 30 degree ray (255 out to r 15.5) and the hour hand ends at
-            //     r 10.5 on the 300 degree ray. drawPageChrome draws its own page clock only when the bar is
-            //     absent (it asks View::modalMessagePage(); the one-line dialogs.cpp hunk is returned with this
-            //     pass), so on a message page this face is the only clock on the frame.
+            // The analog clock face: one geometry for every page. FIDELITY-ROOT-BAR F6/F7 measure the console's
+            // root face at 1774,88 -> 1805,119 (32x32, 3 px ring ink, centre 1789.5/103.5) with a filled interior,
+            // and the message page's own frames measure the same face (ring ink 1774..1776 and 1803..1805, rows
+            // 88..119, interior 0..22 over a dimmed 45..70 plate). This build used to draw a smaller root fit
+            // (centre 1791/104, 2.7 px stroke, no disc, 10/7 px hands), which left the plate showing through the
+            // face (the 6x6 block at (1778,106) read 151.7) and put the ring 2 px small. The two branches therefore
+            // collapse into one: the measured geometry, at two disc alphas.
             const bool measuredFace=modalPage;
-            const QPointF centre=measuredFace?QPointF(1789.5,103.5):QPointF(1791,104);
-            const double ringRadius=measuredFace?14.6:14.;
-            const double ringStroke=measuredFace?3.:2.7;
-            const double minuteLength=measuredFace?13.:10.;
-            const double hourLength=measuredFace?9.5:7.;
+            const QPointF centre(1789.5,103.5);
+            // The console's ring ink occupies x1774..1776 and 1803..1805 on row 103 and rows 88..119 vertically
+            // (F6): a 3 px stroke whose centre line is 14 px from the centre, not the 2.7 px / 14 px this build
+            // drew at 1791. The radius is therefore unchanged and the stroke and centre carry the whole 2 px.
+            const double ringRadius=14.;
+            const double ringStroke=3.;
+            const double minuteLength=13.;
+            const double hourLength=9.5;
             const auto time=shell_.clockDateTime().time();
             const auto hand=[&](double angle,double length){const double a=angle*std::numbers::pi/180.;return QPointF(std::sin(a)*length,-std::cos(a)*length);};
             p.save();
-            if(measuredFace) {
-                p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,204));
-                p.drawEllipse(centre,13.,13.);p.setBrush(Qt::NoBrush);
-            }
+            // The dark disc inside the ring: the root frame's own face is filled too (F7 - the 6x6 block at
+            // (1778,106), which sits 11.8 px from the face centre and therefore inside the ring's inner edge, reads
+            // 28.1 over a 71.4 plate interior, i.e. black at 1-28.1/71.4 = 0.606). One disc draw for both page
+            // classes, each at its own measured alpha: 0.606 at the root, 0.8 on a message page (interior 0..22 over
+            // a 45..70 dimmed plate). Its radius is the ring's inner edge, 14-3/2 = 12.5.
+            // [TRACED: the interiors, the ring geometry and the sample's distance from the centre. FIT: the alpha
+            // expressed as an 8-bit disc.]
+            const int discAlpha=measuredFace?204:int(std::lround(.606*255.));
+            const double discRadius=ringRadius-ringStroke/2.;
+            p.setPen(Qt::NoPen);p.setBrush(QColor(0,0,0,discAlpha));
+            p.drawEllipse(centre,discRadius,discRadius);p.setBrush(Qt::NoBrush);
             for(int shadow=1;shadow>=0;--shadow) {
                 const auto c=centre+QPointF(shadow*1.5,shadow*1.5);p.setPen(QPen(shadow?QColor(0,0,0,150):QColor(255,255,255),ringStroke,Qt::SolidLine,Qt::RoundCap));
                 p.drawEllipse(c,ringRadius,ringRadius);p.drawLine(c,c+hand(time.minute()*6,minuteLength));p.drawLine(c,c+hand((time.hour()%12)*30+time.minute()*.5,hourLength));
@@ -2280,6 +2390,12 @@ void View::drawScene(QPainter& p) {
     // frame; the other four own the screen. A box keeps drawing while its traced 200/1000-unit exit fade
     // runs after Shell has dismissed it.
     if(messageUp)drawMessageSurface(p);
+    // The busy page outranks a box's exit fade: the console replaces the ask page with the proceed page, so a
+    // dismissed box must not keep drawing its plate and rule pair over the new surface. The dialogs pass's
+    // frame-measured surface owns this shape (dialogs.cpp); the shell publishes the two values it takes, both
+    // -1 for the measured indeterminate wait page (no progress row, no D8 ring) and 0..1 once an operation
+    // knows its total or its ring phase.
+    else if(busyPageUp())drawBusySurface(p,shell_.busyProgress(),shell_.busySpinnerPhase());
     else if(messageShown_.kind==MessageKind::Box && (dialogEase_.value>.002 || dialogPlateEase_.value>.002))drawMessageBox(p);
     if(osk_.open)drawOsk(p);
     // The transient volume HUD. It is a timed composite, not a panel: it appears on every change and fades on
@@ -3174,6 +3290,10 @@ void View::keyPressEvent(QKeyEvent* e) {
     // local audio item plays it opens the firmware's own music control panel instead (audit 7.2: the console
     // opens control_panel_page there; this build used to cycle Repeat on this key - R still does).
     case Qt::Key_T:if(mediaAudioOnly())toggleMusicPanel();else shell_.toggleOptions();break;
+    // SELECT/START keyboard substitutes while media is open (the console's own keys have no keyboard
+    // equivalent): I is the Display key, S the control panel. Neither key does anything at the XMB root.
+    case Qt::Key_I:if(shell_.mediaOpen())shell_.toggleMediaDisplay();break;
+    case Qt::Key_S:if(shell_.mediaOpen())shell_.toggleOptions();break;
     case Qt::Key_F11:shell_.setFullscreen(!window()->isFullScreen());break;
     default:QOpenGLWidget::keyPressEvent(e);return;
     }
@@ -3294,6 +3414,14 @@ void View::pollController() {
         if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)shell_.skipMedia(-1);
         if(edge&XINPUT_GAMEPAD_RIGHT_SHOULDER)shell_.skipMedia(1);
         if(edge&XINPUT_GAMEPAD_X)shell_.toggleMediaShuffle();
+        // SELECT and START are both in the video container's direct-key hint set (tex_cp_help_select and
+        // tex_cp_help_start, 86x30 each). SELECT's function is proved by the container's own text:
+        // msg_display_display_with_icon is "Display " + U+F88E and friendim_plugin's msg_select_gaiji is the
+        // same code point, so SELECT is the Display key. START has no string of its own in the container (no
+        // *_with_icon carries a START glyph), so it opens the one surface the container's keys reach - the
+        // control panel Triangle opens - instead of staying dead (FIDELITY-BEHAVIOUR I48).
+        if(edge&XINPUT_GAMEPAD_BACK)shell_.toggleMediaDisplay();
+        if(edge&XINPUT_GAMEPAD_START)shell_.toggleOptions();
     }
     if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
     buttons_=buttons;
@@ -3531,9 +3659,25 @@ void View::drawOsk(QPainter& p) {
     p.setClipRect(QRectF(textX,double(l.bands.field.top()),textWidth,double(l.bands.field.height())),Qt::IntersectClip);
     label({textX-scroll,double(l.bands.field.top()),std::max(textWidth,advance(composed)+4.),
            double(l.bands.field.height())},composed,22,l.bands.fieldTextColour,Qt::AlignLeft|Qt::AlignVCenter);
-    // The caret is two marks, not one (5.2): a 2 px I-beam with 12 px serifs, 27 px tall, at the pen advance, in the
-    // measured 130,249,12 green, plus the hollow triangle 12 px to its right. Both are drawn only while the blink
-    // phase is lit; the phase comes from OskCaret::blinkMilliseconds in paintGL.
+    // The caret is two marks, not one (5.2): a 2 px I-beam with 12 px serifs at the pen advance, in the measured
+    // 130,249,12 green; and, immediately to its right, the cursor marker - a hollow white triangle that points
+    // LEFT. The I-beam blinks (the phase comes from OskCaret::blinkMilliseconds in paintGL); the marker does not.
+    // Measured this pass on the three console OSK frames (out/rpcs3-allgraphics-2026-10-28/frames/osk-default.png,
+    // osk-default-2.png, osk-key-down.png - identical in this band): the I-beam's green shaft is x 578..579 at
+    // rows 346..378, and the marker's ink is x 582..594 x y 353..369, i.e. a 13 x 17 px triangle whose apex is at
+    // x 582..583 (4 px right of the caret) and whose vertical base is at x 593..594, on a 71,71,71 field. Its ink
+    // reads 215,215,215 on the base and 229 at the apex - not the 255 pure white this build drew (127 px of pure
+    // white in the same band). The triangle points left because the apex is at its LEFT x: the frame's zoomed
+    // crop shows the two diagonal strokes running right from the apex into the vertical base.
+    // [TRACED: the bbox, the 4 px offset, the orientation and the 215 ink on all three frames.
+    // FIT (with the module trace behind it): that the marker does NOT blink. All three console frames are in the
+    // I-beam's lit phase, so no local frame samples the dark phase; OSK-FIRMWARE 5.2 records the triangle as
+    // "present whether or not the I-beam is lit" and FIDELITY-MEDIA O6 repeats it, and drawing it unconditionally
+    // is also what keeps a pinned capture (which lands on one blink phase) from losing the marker entirely.]
+    static constexpr double oskMarkerInk=215.;      // TRACED: the console frames' marker ink, 215,215,215
+    static constexpr double oskMarkerInset=4.;      // TRACED: apex x = caret x + 4 (582 against 578)
+    static constexpr double oskMarkerWidth=13.;     // TRACED: x 582..594
+    static constexpr double oskMarkerHeight=17.;    // TRACED: y 353..369
     if(osk_.caretLit) {
         const double x=textX+before-scroll;
         const double y=l.bands.field.top()+9;
@@ -3541,13 +3685,22 @@ void View::drawOsk(QPainter& p) {
         const double serifX=x-(l.caret.serifWidth-l.caret.shaftWidth)/2.;
         p.fillRect(QRectF(serifX,y,l.caret.serifWidth,2),l.caret.colour);
         p.fillRect(QRectF(serifX,y+l.caret.height-2,l.caret.serifWidth,2),l.caret.colour);
-        const double markerX=x+l.caret.markerInset;
-        const double markerTop=y+3;
-        p.setPen(QPen(Qt::white,2));p.setBrush(Qt::NoBrush);
-        p.drawLine(QPointF(markerX,markerTop),QPointF(markerX,markerTop+l.caret.markerHeight));
-        p.drawLine(QPointF(markerX,markerTop),QPointF(markerX+l.caret.markerWidth,markerTop+l.caret.markerHeight/2.));
-        p.drawLine(QPointF(markerX,markerTop+l.caret.markerHeight),
-                   QPointF(markerX+l.caret.markerWidth,markerTop+l.caret.markerHeight/2.));
+    }
+    {
+        // The marker sits on the field's vertical centre, which the frame puts 7 px below the I-beam's own top
+        // (marker y 353 against the caret's 346) - half of the caret's 33 px shaft is 16.5, so the marker's 17 px
+        // height centres on the same axis. It is drawn whether or not the I-beam is lit.
+        const double x=textX+before-scroll+oskMarkerInset;
+        const double y=l.bands.field.top()+9;
+        const double top=y+(l.caret.height-oskMarkerHeight)/2.;
+        const double apexY=top+oskMarkerHeight/2.;
+        p.save();
+        p.setPen(QPen(QColor(int(oskMarkerInk),int(oskMarkerInk),int(oskMarkerInk)),2));
+        p.setBrush(Qt::NoBrush);
+        p.drawLine(QPointF(x+oskMarkerWidth,top),QPointF(x+oskMarkerWidth,top+oskMarkerHeight)); // the base, on the right
+        p.drawLine(QPointF(x+oskMarkerWidth,top),QPointF(x,apexY));                              // upper stroke to the apex
+        p.drawLine(QPointF(x+oskMarkerWidth,top+oskMarkerHeight),QPointF(x,apexY));               // lower stroke to the apex
+        p.restore();
     }
     p.restore();
     // The key grid. A key's cell is its span x 72 by 54; the face is inset by 3/2, so a one-cell face is the measured

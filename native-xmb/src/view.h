@@ -133,6 +133,12 @@ private:
     // entries' text reaches full opacity at 1326 ms, and the selected row's bloom keeps growing until
     // 1840 ms. psPressAt_ is the press instant the watcher reported; 0 means "no press seen".
     qint64 psPressAt_=0;
+    // The busy page's own clock (page_busy; DIALOGS-FIRMWARE 2.8), latched on the busy edge so a phase
+    // computed from it is stable under a --render-clock capture. The dialogs pass's surface draws no ring by
+    // default (the measured wait page has none and page_busy's children carry no rect), so nothing reads these
+    // yet; they are here for the day the shell publishes a spinner phase, exactly as the returned hunk asks.
+    bool busyWas_=false;
+    qint64 busySinceMs_=0;
     static constexpr double psHoldBlackMs=1052;    // the whole frame is black from here after the press
     static constexpr double psHoldTextStartMs=1279;// the entries' first ink
     static constexpr double psHoldTextMs=1326;     // both entries' text at full opacity
@@ -186,7 +192,9 @@ private:
     void drawSubtitle(QPainter& painter,const QString& cue);
     // A 64x64 RCO tile (the notification plaque) stretched to any size without turning its rounded corners
     // into ellipses: the corners keep their pixels, the edges and centre stretch.
-    void drawNineSlice(QPainter& painter,const QString& container,const QString& texture,const QRectF& rect,qreal inset,qreal opacity);
+    // `sourceInset` drops that many pixels of the tile's own border from the source grid (the info bar's
+    // tile carries a 1 px, ~4% alpha margin row/column that must not be drawn as part of the plate).
+    void drawNineSlice(QPainter& painter,const QString& container,const QString& texture,const QRectF& rect,qreal inset,qreal opacity,qreal sourceInset=0.);
     QVector<Column> columns_;
     QVector<Column> outgoing_;
     int outgoingCategory_=6;
@@ -394,6 +402,20 @@ private:
     // D5 page keeps every other Information message unchanged. Measured: rules 199/879, rows on the
     // 40 px pitch from ink 291, labels right at 939, values left at 979, Back hint ink 897, no clock.
     void drawMessageTablePage(QPainter& painter);    // depth-2 read-only table page
+    // The console's busy/wait page (page_busy, DIALOGS-FIRMWARE 2.8; FIDELITY-BEHAVIOUR N12/X5). It is not
+    // a MessageKind: the shell raises it with one flag (Shell::busy(), its status text and the operation's
+    // progress), so the scene draws it beside the message surface. Measured on the Internet Connection Test
+    // wait burst (error/ictest2-burst, full frame, 57.9 fps): the D4 chrome - header on the message page's
+    // boxes, the rule pair y199/y879 at 0.693 - one centred status line (ink 529..547), the Back hint at
+    // 1155..1240 x 897..916, the page behind it dimmed and the info bar kept. progress < 0 (the default)
+    // draws that measured indeterminate page; 0..1 adds the RCO-derived progress row (a stated fit - no
+    // console frame of a progress page exists). spinnerPhase < 0 (the default) draws no D8 ring: the
+    // measured page has none and page_busy's own rect is not recoverable from the RCO.
+    void drawBusySurface(QPainter& painter,double progress=-1.,double spinnerPhase=-1.);
+    // True while the busy page owns the screen: Shell::busy() with no message up and no media player
+    // (those draw their own chrome). It is the class view.cpp's page wash and info-bar gate must include,
+    // and drawPageChrome suppresses the page's own clock while it is true (the bar's face is the clock).
+    bool busyPageUp() const;
     // The two modal message-page classes the 2026-10-28 frames measure (DIALOGS-FIRMWARE 13.7): the D4
     // titled page (MessageKind::Page) and the D2 error-code page (ErrorCode). They are the only surfaces
     // that sit on the console's dimmed page - page-network-test-error and page-network-connection-settings
@@ -407,8 +429,9 @@ private:
     bool modalMessagePage() const;
     // The D4 chrome: icon + left title above rule 1 at the measured ink box (icon 109..149 x 154..189,
     // title ink 165 / 167), the page class's two flat rules - y and alpha are the caller's, because the
-    // modal message page and the box measure 199/879 at 177/255 while the D5 information page keeps the
-    // D4 fit of 198/872 at 56/51 - and the analog clock face these pages keep.
+    // modal message page, the confirm box and the D5 information page each measure a pair (199/879 at
+    // 177/255 on all three 1080p frames; the D5 page's own frame is information-page-01.png) while the
+    // depth-2 table page carries its own 199/879 at 92 - and the analog clock face these pages keep.
     void drawPageChrome(QPainter& painter,const QString& title,double ruleTop,int ruleTopAlpha,double ruleBottom,int ruleBottomAlpha);
     void drawPageClock(QPainter& painter);
     // One button hint: a page_btnnavi glyph (30x30 texture, alpha-bounds fitted) and a system_plugin
