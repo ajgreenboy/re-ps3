@@ -103,6 +103,8 @@ bool Preferences::validBare(const QString& key,const QVariant& value) {
     };
     if(key=="appearance/colour")return integer(0,5);
     if(key=="appearance/background" || key=="appearance/font" || key=="clock/dateFormat")return integer(0,2);
+    // The tenth column's switch (FIDELITY-SURFACES 15.6): off draws the console's nine categories.
+    if(key=="appearance/tvColumn")return value.metaType().id()==QMetaType::Bool;
     if(key=="clock/hourFormat" || key=="photo/fit")return integer(0,1);
     if(key=="audio/volume")return integer(0,100);
     if(key=="photo/interval")return integer(1000,60000);
