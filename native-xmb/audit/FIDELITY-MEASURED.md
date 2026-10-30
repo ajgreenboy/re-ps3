@@ -413,3 +413,101 @@ score rows.
 Nothing in this pass re-baselined a reference, edited a budget, or touched a source file. The only writes
 are `work/fidelity-*.ts`, `work/fidelity-pairs.json`, `work/fidelity-sheet.py`, everything under
 `C:\dev\out\fidelity-sweep\`, and this document.
+
+---
+
+## 9. The canonical frame layer's content-differs annotation (2026-10-29, data wave)
+
+The data wave legitimately changed the Game column: the build now draws the console's own row art
+(solid folder glyphs) across its ten rows, while the stored firmware frame
+`out/native-reference/ab-rpcs3-root.png` holds one row (`Corrupted Data`; measured maximum luma
+80.01 and zero pixels above luma 90 in x 520..620, y 660..1060). On
+`C:\dev\out\native-data1\re-ps3-native.exe` the canonical gate's `frame` layer falls 19.21 -> 18.01
+dB (-1.20) and 0.8475 -> 0.8404 SSIM (-0.0071), while the five content-neutral layers are
+byte-identical at +0.00. That is a content difference, not a rendering regression, so the layer is
+annotated instead of re-baselined: no baseline moved, no floor lowered, the text-presence guard
+unchanged.
+
+**Mechanism.** `work/ab-layers.thresholds.json` carries `contentDiffers: true` and a mandatory
+one-line `contentDiffersReason` on the layer. `work/ab-layers.ts` validates both (a missing reason
+is a load error), scores the layer and prints its numbers and its reason on every run, but does not
+let it gate; `--strict` puts it back in the gate. The annotation applies to a live candidate
+(`--capture` / `--native`); the stored baseline pair is two frozen artifacts and keeps gating, so
+its table and summary do not change. This mirrors `work/parity.ts`'s region annotations.
+
+Reason, verbatim:
+
+> the stored firmware frame's Game column holds one row (Corrupted Data, no icon ink above luma 90
+> in x 520..620 y 660..1060) while this build draws the console's own row art across its ten rows,
+> so this whole-frame score measures the row-set difference, not the renderer
+
+Default `--capture` on the current build (text presence 1703 bright pixels, minimum 900, PASS):
+
+| layer | PSNR | baseline | delta | SSIM | baseline | delta | gate |
+|---|---:|---:|---:|---:|---:|---:|---|
+| frame | 18.01 | 19.21 | -1.20 | 0.8404 | 0.8475 | -0.0071 | FAIL (informative) |
+| top background | 21.06 | 21.06 | +0.00 | 0.9434 | 0.9434 | +0.0000 | PASS |
+| category icon row | 21.62 | 21.62 | +0.00 | 0.9062 | 0.9062 | +0.0000 | PASS |
+| item label row | 12.06 | 12.06 | +0.00 | 0.4171 | 0.4171 | +0.0000 | PASS |
+| clock text | 11.52 | 11.52 | +0.00 | 0.4662 | 0.4662 | +0.0000 | PASS |
+| info bar | 15.15 | 15.15 | +0.00 | 0.7738 | 0.7738 | +0.0000 | PASS |
+
+Summary `PASS: 6/6 layers - 5 pass, 1 informative (content differs)`, exit 0. The informative frame
+is printed outside its floor (18.01 vs 18.71 dB, 0.8404 vs 0.8435) with the reason above.
+
+**Strict control** (`--strict`, same executable): the numbers are identical to the run above and the
+summary reverts to the original text, `FAIL: 5/6 layers within budget` / `failed layers: frame`, exit
+1 - the pre-annotation result, so the annotation is auditable. Only the gate column (`FAIL (strict:
+gated)`) and the content line (`STRICT: gated again`) differ.
+
+**Stored pair** (no live candidate, annotation inert): PASS 6/6, frame 18.20 / 0.8388 and every
+other layer +0.00, exactly as before; only one informational `content` line is added.
+
+**`--all`**: stored pair PASS, canonical capture PASS (5 gating + 1 informative), named states 3/12
+PASS, whole set FAIL (metric gate). The nine named-state failures are self-baseline drift, not the
+annotation: their references were written at 20:46 and the current executable at 21:12, and
+`--state steam-game-root --exe C:/dev/out/native-merge4/re-ps3-native.exe` (the 20:40 build)
+reproduces the stored reference at inf / 1.0000 where the current build scores 24.68 / 0.9795. The
+annotation cannot reach `runStates`.
+
+**Catalogue sync** (`work/parity-catalogue.json`), from the same data wave:
+
+| state | change |
+|---|---|
+| page-settings-theme | entryCount 6 -> 4; log `settings: theme page from the RCO row set: 4 rows, 0 native-only`; the two native-only picker rows are gone (Install and Select Wallpaper moved into the lists) |
+| theme-list | entryCount 1 -> 2 (Install + Original); entryId `appearance/theme/0` -> `appearance/theme/1` because the focus starts on the stored current theme, Original; band log still 4 items from capture |
+| background-list | entryCount 4 -> 5; log `... -> 5 items from capture`; Brightness is now drawn as a disabled row and Select Wallpaper is the fifth item, so the band-rows reason was corrected |
+| column-video | catalogueHas `["continue","library"]` -> `["bddata","dlna-scan","video-editor","continue","library"]` (continue/library now index 3/4; membership-based, meaning unchanged) |
+| column-music | catalogueHas added `["dlna-scan","playlists"]` |
+| column-photo | catalogueHas added `["dlna-scan","gallery","playlists"]` |
+
+`video/options` and `music/options` were not in the catalogue's expectations to remove (verified:
+the only occurrences are theme entry-icon keys in `src/shell.cpp`, not row ids), and the rebuilt
+columns carry no such rows, so the new assertions do not introduce them. `options-panel` and the
+per-layer `video-options-panel` state were left untouched.
+
+**Parity re-run** on the current build, `bun work/parity.ts --capture --score --state
+page-settings-theme,theme-list,background-list,column-video,column-music,column-photo,options-panel
+--exe C:/dev/out/native-data1/re-ps3-native.exe`:
+
+| state | class | Tier A | Tier B | Tier C |
+|---|---|---|---|---|
+| page-settings-theme | text-heavy | PASS | fail | n/a |
+| theme-list | composite | PASS | fail | n/a |
+| background-list | composite | PASS | fail | n/a |
+| column-video | icon-heavy | PASS | fail | n/a |
+| column-music | icon-heavy | PASS | fail | n/a |
+| column-photo | icon-heavy | PASS | fail | n/a |
+| options-panel | composite | PASS | informative | PASS |
+
+Tier A 7/7 PASS after the sync. Tier B: six gating failures and one informative. The failures are
+the columns' frame and icon-row regions and the two list pages' bands sitting below their class
+budgets (e.g. column-video frame 17.20 / 0.8240 against 20.00 / 0.9000, page-settings-theme page rows
+15.94 / 0.7540) - the pre-existing fidelity gap section 4 records, not a catalogue mismatch.
+options-panel's only failing region is its `contentDiffers` panel (19.65 / 0.8346), so it is B
+informative and its Tier A + C claim stands.
+
+Evidence: `out/ab-layers-wave/stored.txt`, `capture.txt`, `capture-strict.txt`, `all.txt`,
+`stored.json`, `parity-final.txt`; `out/parity/run-20261029-213440/`;
+`out/parity/scorecards/scorecard-20261029-213718.{json,md}`. No source file was edited, no layer
+re-baselined, no floor lowered.

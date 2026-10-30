@@ -78,9 +78,10 @@
       "class": "icon-heavy",
       "pageModel": "native",
       "xmbml": { "document": "category_photo.xml", "view": "root" },
-      "native": { "reachable": "yes", "how": "LEFT to the Photo column" },
+      "native": { "reachable": "yes", "how": "LEFT to the Photo column; the console's three utility rows come first, then the native library rows" },
       "route": { "column": "photo" },
-      "expect": { "category": "photo", "depth": 0, "pageKind": "root" },
+      "expect": { "category": "photo", "depth": 0, "pageKind": "root", "catalogueHas": ["dlna-scan", "gallery", "playlists"] },
+      "tierANote": "The three asserted rows are the console's own, in its order: category_photo.xml's root view is Search for Media Servers, Photo Gallery, Playlists, and Shell::resolveMediaColumns reads them from the definition. The native Photo Library, folder-picker and Photo Settings rows follow them and are not asserted here.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
@@ -93,9 +94,10 @@
       "class": "icon-heavy",
       "pageModel": "native",
       "xmbml": { "document": "category_music.xml", "view": "root" },
-      "native": { "reachable": "yes", "how": "LEFT to the Music column" },
+      "native": { "reachable": "yes", "how": "LEFT to the Music column; the console's two utility rows come first, then the native library rows" },
       "route": { "column": "music" },
-      "expect": { "category": "music", "depth": 0, "pageKind": "root" },
+      "expect": { "category": "music", "depth": 0, "pageKind": "root", "catalogueHas": ["dlna-scan", "playlists"] },
+      "tierANote": "The two asserted rows are the console's own, in its order: category_music.xml's root view is Search for Media Servers, Playlists, and Shell::resolveMediaColumns reads them from the definition. The native Music Library and folder-picker rows follow them. The retired built-in Music Settings row is gone and is not asserted.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
@@ -108,9 +110,10 @@
       "class": "icon-heavy",
       "pageModel": "native",
       "xmbml": { "document": "category_video.xml", "view": "root" },
-      "native": { "reachable": "yes", "how": "LEFT to the Video column; Continue Watching is its first row" },
+      "native": { "reachable": "yes", "how": "LEFT to the Video column; the console's three utility rows come first, then Continue Watching" },
       "route": { "column": "video" },
-      "expect": { "category": "video", "depth": 0, "pageKind": "root", "catalogueHas": ["continue", "library"] },
+      "expect": { "category": "video", "depth": 0, "pageKind": "root", "catalogueHas": ["bddata", "dlna-scan", "video-editor", "continue", "library"] },
+      "tierANote": "The console's three utility rows (BD Data Utility, Search for Media Servers, Video Editor & Uploader) lead the rebuilt column and are read from category_video.xml, so the two native rows this state has always asserted now sit at index 3 (Continue Watching) and index 4 (Video Library); catalogueHas is membership-based, so the assertion keeps its meaning. The retired built-in Video Settings row is gone and is not asserted anywhere.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "category icon row", "crop": [0, 240, 1920, 120], "required": true },
@@ -280,18 +283,18 @@
       "class": "text-heavy",
       "pageModel": "native",
       "xmbml": { "document": "category_sysconf.xml", "view": "seg_fixed_items" },
-      "xmbmlNote": "The Theme Settings row is one of seg_fixed_items' 16 Settings-column rows (1-based row 7). The page body is built from sysconf_plugin's page_theme_config sub-pages (theme, color, background, font), and the at-rest page is the four firmware rows followed by this build's two native-only pickers (Select Theme, Select Wallpaper).",
+      "xmbmlNote": "The Theme Settings row is one of seg_fixed_items' 16 Settings-column rows (1-based row 7). The page body is built from sysconf_plugin's page_theme_config sub-pages (theme, color, background, font), and the at-rest page is exactly those four firmware rows - the two native-only pickers the page used to carry moved into the Theme list's Install item and the Background list's Select Wallpaper item (SETTINGS-FIRMWARE.md 12.4/D11).",
       "native": { "reachable": "yes", "how": "Settings column, Theme Settings row, ENTER" },
       "route": { "column": "settings", "stages": [{ "catalogueId": "theme" }] },
       "expect": {
         "category": "settings",
         "depth": 1,
         "entryId": "theme",
-        "entryCount": 6,
+        "entryCount": 4,
         "pageKind": "page",
-        "log": [{ "pattern": "settings: theme page from the RCO row set: 6 rows, 2 native-only" }]
+        "log": [{ "pattern": "settings: theme page from the RCO row set: 4 rows, 0 native-only" }]
       },
-      "tierANote": "Row set: the firmware's four rows (Theme, Color, Background, Font) plus two native-only rows, which are this build's only way to load a .p3t theme or a wallpaper (SETTINGS-FIRMWARE.md 5.6/12.4). The 6-vs-4 row count is a stated design difference, not a route miss.",
+      "tierANote": "Row set: exactly the firmware's four rows (Theme, Color, Background, Font), no native-only rows - the page now matches the console's row set and count, and the two pickers it used to add live inside the Theme list (Install) and the Background list (Select Wallpaper). The row contents and current values are still this build's, which is why the Theme lists below keep their own content-difference annotations.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "page rows", "crop": [400, 380, 1000, 620], "required": true },
@@ -310,12 +313,12 @@
       "expect": {
         "category": "settings",
         "depth": 2,
-        "entryId": "appearance/theme/0",
-        "entryCount": 1,
+        "entryId": "appearance/theme/1",
+        "entryCount": 2,
         "pageKind": "page",
         "log": [{ "pattern": "view: settings choice band appearance/theme -> 4 items from capture" }]
       },
-      "tierANote": "Two different row counts, both true: the choice page the shell pushes carries this build's own one-item model (Original), and the view draws the firmware's captured four over it - so the sidecar's entryCount is 1 while the band log says 4 items from capture. The branch that draws a firmware band needs a list whose source is rco or capture; Theme is one of the four on this page that qualifies. The band's own extent is measured (left border x 1324, geometric zero about x 1744, item text left 1341, rows 261/494/532/576), which is what the regions frame.",
+      "tierANote": "Two different row counts, both true: the choice page the shell pushes carries this build's own two-item model (Install, Original), and the view draws the firmware's captured four over it - so the sidecar's entryCount is 2 while the band log says 4 items from capture. The focus lands on Original (index 1) because Original is the current theme and openChoices starts on the stored value, so the assertion names appearance/theme/1 rather than the first row. The branch that draws a firmware band needs a list whose source is rco or capture; Theme is one of the four on this page that qualifies. The band's own extent is measured (left border x 1324, geometric zero about x 1744, item text left 1341, rows 261/494/532/576), which is what the regions frame.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
@@ -352,22 +355,22 @@
       "class": "composite",
       "pageModel": "native",
       "xmbml": null,
-      "xmbmlNote": "No XMBML view: page_theme_config_background has no LowerMenu items in sysconf_plugin.rco, so the list is built at run time (SETTINGS-FIRMWARE.md 12.4c). The firmware's list is `Brightness >` (a submenu row), then Original (current), Classic, Wallpaper; this build's is its own three values drawn as its own options panel.",
+      "xmbmlNote": "No XMBML view: page_theme_config_background has no LowerMenu items in sysconf_plugin.rco, so the list is built at run time (SETTINGS-FIRMWARE.md 12.4c). The firmware's list is `Brightness >` (a submenu row), then Original (current), Classic, Wallpaper; this build draws a five-item list as its own options panel - Brightness as a disabled submenu row, then Original, Classic, Wallpaper and the Select Wallpaper picker the console folds into Wallpaper.",
       "native": { "reachable": "yes", "how": "Theme Settings page, Background row, ENTER: this build's background list opens as its own options panel over the page" },
       "route": { "column": "settings", "stages": [{ "catalogueId": "theme" }, { "rowIndex": 2 }] },
       "expect": {
         "category": "settings",
         "depth": 2,
         "entryId": "appearance/background/1",
-        "entryCount": 4,
+        "entryCount": 5,
         "pageKind": "page",
-        "log": [{ "pattern": "view: settings choice band appearance/background -> 4 items from capture" }]
+        "log": [{ "pattern": "view: settings choice band appearance/background -> 5 items from capture" }]
       },
-      "tierANote": "Content difference by construction: the firmware has a fourth row (the Brightness submenu) this build does not draw, and the labels below it are this build's three; the view logs that it keeps its own panel rather than the firmware band. Regions use the Theme page's measured band origin (x 1324) and the firmware's measured row ink tops 381/537/581/621.",
+      "tierANote": "Content difference by construction: the firmware has four items (the Brightness submenu, then Original, Classic, Wallpaper); this build draws those four plus a fifth Select Wallpaper picker item (the wallpaper chooser the console folds into the Wallpaper item), and the view logs that it keeps its own panel rather than the firmware band. Regions use the Theme page's measured band origin (x 1324) and the firmware's measured row ink tops 381/537/581/621; the fifth row sits below that measured block.",
       "regions": [
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "band column", "crop": [1324, 0, 420, 1080], "required": true },
-        { "name": "band rows", "crop": [1324, 360, 420, 300], "required": true, "contentDiffers": true, "contentDiffersReason": "reference rows are Brightness (submenu), Original, Classic, Wallpaper; the native list has three values and no Brightness row" }
+        { "name": "band rows", "crop": [1324, 360, 420, 300], "required": true, "contentDiffers": true, "contentDiffersReason": "reference rows are Brightness (submenu), Original, Classic, Wallpaper; the native list draws Brightness as a disabled row plus Original, Classic and Wallpaper, then a fifth Select Wallpaper picker item" }
       ]
     },
     {

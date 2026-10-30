@@ -13,6 +13,14 @@ import { dirname, join, resolve } from 'node:path';
 // deterministic native render of the same state instead: a self-baseline
 // regression gate, explicitly not a firmware-fidelity number.
 //
+// One scoring-validity rule, mirroring work/parity.ts's region annotations: a layer
+// annotated contentDiffers in the thresholds file has a stored reference whose content
+// the build cannot reproduce from the same frame, so it is measured and printed on every
+// run but does not gate. --strict gates it again, and the annotation and its mandatory
+// one-line reason are printed on every run, so the informative set cannot grow silently.
+// The annotation applies to a live candidate (--capture or --native); the stored baseline
+// pair is two frozen artifacts and stays a pure tooling gate.
+//
 //   bun work/ab-layers.ts                     score the stored baseline pair
 //   bun work/ab-layers.ts --capture           run the native, then score it
 //   bun work/ab-layers.ts --native <png>      score an existing native frame
@@ -38,6 +46,13 @@ type Layer = {
   crop: Rect;
   baseline: Baseline;
   captureBaseline?: Baseline;
+  // The stored reference's content cannot be reproduced from the same frame (a console
+  // row set, account or service the build replaces with its own data). The layer is
+  // still scored and printed, but it is informative rather than gating on a live
+  // capture/--native candidate; --strict gates it again. The reason is mandatory so the
+  // annotation is auditable.
+  contentDiffers?: boolean;
+  contentDiffersReason?: string;
 };
 type StateRegion = { name: string; crop: Rect };
 // A navigation stage. `categoryId` (first stage only) moves the cursor to another
@@ -140,6 +155,9 @@ const usage = `usage: bun work/ab-layers.ts [options]
   --list                   list layer names and crops, then exit
   --list-states            list named-state recipes and references, then exit
   --json                   print a JSON report instead of a table
+  --strict                 gate content-differs layers again (strict audit mode; the
+                           default scores them as informative on --capture/--native, and
+                           the stored baseline pair always gates)
   --exe <path>             capture executable (default from the thresholds file)
   --flash <dir>            dev_flash directory for capture
   --steam-root <dir>       Steam library root for capture; an empty directory is
@@ -228,6 +246,13 @@ function parseThresholds(path: string): Thresholds {
     if (!isScore(layer.baseline)) fail(`${path}: ${layer.name}: baseline must be {psnr,ssim}`);
     if (layer.captureBaseline !== undefined && !isScore(layer.captureBaseline))
       fail(`${path}: ${layer.name}: captureBaseline must be {psnr,ssim}`);
+    if (layer.contentDiffers !== undefined && typeof layer.contentDiffers !== 'boolean')
+      fail(`${path}: ${layer.name}: contentDiffers must be a boolean`);
+    if (layer.contentDiffers === true &&
+      (typeof layer.contentDiffersReason !== 'string' || !layer.contentDiffersReason.trim()))
+      fail(`${path}: ${layer.name}: contentDiffers needs a one-line contentDiffersReason`);
+    if (layer.contentDiffers !== true && layer.contentDiffersReason !== undefined)
+      fail(`${path}: ${layer.name}: contentDiffersReason is only valid with contentDiffers: true`);
   }
   const self = t.stateSelfBaseline;
   if (self !== undefined) {
@@ -397,6 +422,7 @@ function parseArgs(argv: string[]) {
     list: false,
     listStates: false,
     json: false,
+    strict: false,
     states: false,
     state: '',
     all: false,
@@ -424,6 +450,7 @@ function parseArgs(argv: string[]) {
     if (a === '--list') { opts.list = true; continue; }
     if (a === '--list-states') { opts.listStates = true; continue; }
     if (a === '--json') { opts.json = true; continue; }
+    if (a === '--strict') { opts.strict = true; continue; }
     if (a === '--states') { opts.states = true; continue; }
     if (a === '--all') { opts.all = true; continue; }
     if (a === '--save-reference') { opts.saveReference = true; continue; }
@@ -535,14 +562,18 @@ function readCaptureState(grab: string) {
   }
 }
 
-function scoreLayer(layer: Layer, ref: PngImage, native: PngImage, captureMode: boolean) {
+// `informative` is decided by the caller: it is true only for a layer annotated
+// contentDiffers that is being scored against a live candidate and outside --strict. An
+// informative layer is still measured and its numbers printed; it simply cannot fail the
+// run, which is why `pass` stays the gate outcome rather than the raw budget test.
+function scoreLayer(layer: Layer, ref: PngImage, native: PngImage, captureMode: boolean, informative: boolean) {
   const baseline = captureMode && layer.captureBaseline ? layer.captureBaseline : layer.baseline;
   const p = psnr(ref, native, layer.crop as Crop);
   const s = ssim(ref, native, layer.crop as Crop);
   const minPsnr = baseline.psnr - tolerance.psnrDb;
   const minSsim = baseline.ssim - tolerance.ssim;
-  const pass = p >= minPsnr && s >= minSsim;
-  return { layer, baseline, p, s, minPsnr, minSsim, pass };
+  const withinBudget = p >= minPsnr && s >= minSsim;
+  return { layer, baseline, p, s, minPsnr, minSsim, withinBudget, informative, pass: informative || withinBudget };
 }
 
 function pad(value: string, width: number, right = false) {
@@ -1231,10 +1262,17 @@ async function runLayerGate(thresholds: Thresholds, opts: ReturnType<typeof pars
     console.log(`  text presence: ${bright} bright pixels in the clock crop (minimum ${minimum}) PASS`);
   }
 
+  // A content-differs annotation only relaxes scoring against a LIVE candidate: the stored
+  // baseline pair is two frozen artifacts, kept byte-for-byte as the tooling gate its note
+  // describes, so it cannot become informative.
+  const liveCandidate = captureMode || !!opts.native;
   const rows = thresholds.layers.map(layer => {
     checkCropInImage(layer, ref);
-    return scoreLayer(layer, ref, native, captureMode);
+    const informative = liveCandidate && !opts.strict && layer.contentDiffers === true;
+    return scoreLayer(layer, ref, native, captureMode, informative);
   });
+  const annotated = rows.filter(row => row.layer.contentDiffers === true);
+  const informativeRows = rows.filter(row => row.informative);
   const failed = rows.filter(row => !row.pass);
   const ok = failed.length === 0;
 
@@ -1242,6 +1280,7 @@ async function runLayerGate(thresholds: Thresholds, opts: ReturnType<typeof pars
     console.log(JSON.stringify({
       schema: 'xmb-per-layer-report/1',
       mode: captureMode ? 'capture' : 'stored-pair',
+      strict: opts.strict,
       reference: referencePath,
       native: nativePath,
       captureDir: captureDir || undefined,
@@ -1250,6 +1289,12 @@ async function runLayerGate(thresholds: Thresholds, opts: ReturnType<typeof pars
       height: ref.h,
       tolerance: thresholds.tolerance,
       pass: ok,
+      annotations: annotated.map(row => ({
+        layer: row.layer.name,
+        reason: row.layer.contentDiffersReason,
+        informative: row.informative,
+      })),
+      informative: informativeRows.map(row => row.layer.name),
       layers: rows.map(row => ({
         name: row.layer.name,
         crop: row.layer.crop,
@@ -1261,6 +1306,12 @@ async function runLayerGate(thresholds: Thresholds, opts: ReturnType<typeof pars
         minSsim: +row.minSsim.toFixed(4),
         psnrOk: row.p >= row.minPsnr,
         ssimOk: row.s >= row.minSsim,
+        withinBudget: row.withinBudget,
+        contentDiffers: row.layer.contentDiffers === true,
+        contentDiffersReason: row.layer.contentDiffersReason,
+        informative: row.informative,
+        gating: !row.informative,
+        status: row.informative ? 'informative' : row.withinBudget ? 'pass' : 'fail',
         pass: row.pass,
       })),
     }, null, 2));
@@ -1272,6 +1323,12 @@ async function runLayerGate(thresholds: Thresholds, opts: ReturnType<typeof pars
     if (captureState)
       console.log(`  state      category=${captureState.category} depth=${captureState.depth} selection=${captureState.selection} clock="${captureState.clock}"`);
     console.log(`  budget     PSNR >= baseline - ${thresholds.tolerance.psnrDb.toFixed(2)} dB, SSIM >= baseline - ${thresholds.tolerance.ssim.toFixed(4)}`);
+    if (annotated.length) {
+      const scope = !liveCandidate ? 'stored baseline pair: still gated'
+        : opts.strict ? 'STRICT: gated again'
+        : 'informative: not gating, --strict gates it';
+      console.log(`  content    ${annotated.length} layer(s) annotated contentDiffers (${scope})`);
+    }
     console.log('');
     const nameWidth = Math.max(5, ...thresholds.layers.map(l => l.name.length));
     const cropWidth = Math.max(4, ...thresholds.layers.map(l => l.crop.join(',').length));
@@ -1279,6 +1336,13 @@ async function runLayerGate(thresholds: Thresholds, opts: ReturnType<typeof pars
     console.log(header);
     console.log(`${'-'.repeat(nameWidth)}  ${'-'.repeat(cropWidth)}  ${'-'.repeat(7)}  ${'-'.repeat(7)}  ${'-'.repeat(6)}  ${'-'.repeat(6)}  ${'-'.repeat(6)}  ${'-'.repeat(7)}  ${'-'.repeat(4)}`);
     for (const row of rows) {
+      // The gate column says why a result is (or is not) gating; the numbers themselves are
+      // never altered by the annotation.
+      const gate = row.informative
+        ? (row.withinBudget ? 'PASS (informative)' : 'FAIL (informative)')
+        : row.layer.contentDiffers === true && liveCandidate && opts.strict
+          ? (row.withinBudget ? 'PASS (strict: gated)' : 'FAIL (strict: gated)')
+          : (row.withinBudget ? 'PASS' : 'FAIL');
       console.log([
         pad(row.layer.name, nameWidth, true),
         pad(row.layer.crop.join(','), cropWidth, true),
@@ -1288,12 +1352,25 @@ async function runLayerGate(thresholds: Thresholds, opts: ReturnType<typeof pars
         pad(fmtSsim(row.s), 6),
         pad(row.baseline.ssim.toFixed(4), 6),
         pad(fmtDeltaSsim(row.s - row.baseline.ssim), 7),
-        row.pass ? 'PASS' : 'FAIL',
+        gate,
       ].join('  '));
     }
     console.log('');
-    console.log(`${ok ? 'PASS' : 'FAIL'}: ${rows.length - failed.length}/${rows.length} layers within budget`);
-    if (!ok) console.log(`failed layers: ${failed.map(row => row.layer.name).join(', ')}`);
+    if (informativeRows.length) {
+      const passCount = rows.filter(row => !row.informative && row.withinBudget).length;
+      const informativeNote = `${informativeRows.length} informative (content differs)`;
+      console.log(`${ok ? 'PASS' : 'FAIL'}: ${rows.length}/${rows.length} layers - ${passCount} pass`
+        + `${failed.length ? `, ${failed.length} fail` : ''}, ${informativeNote}`);
+      for (const row of informativeRows.filter(candidate => !candidate.withinBudget))
+        console.log(`  informative ${row.layer.name} is outside its budget `
+          + `(${fmtDb(row.p)} dB / ${fmtSsim(row.s)} vs floor ${fmtDb(row.minPsnr)} dB / ${fmtSsim(row.minSsim)}): `
+          + 'scored and printed, not gating');
+      for (const row of annotated)
+        console.log(`  annotation ${row.layer.name}: ${row.layer.contentDiffersReason}`);
+    } else {
+      console.log(`${ok ? 'PASS' : 'FAIL'}: ${rows.length - failed.length}/${rows.length} layers within budget`);
+      if (!ok) console.log(`failed layers: ${failed.map(row => row.layer.name).join(', ')}`);
+    }
   }
   return { code: ok ? 0 : 1 };
 }
@@ -1321,7 +1398,8 @@ async function main() {
   }
   if (opts.list) {
     for (const layer of thresholds.layers)
-      console.log(`${layer.name.padEnd(18)} ${layer.crop.join(',').padEnd(18)} baseline ${layer.baseline.psnr.toFixed(2)} dB / ${layer.baseline.ssim.toFixed(4)}`);
+      console.log(`${layer.name.padEnd(18)} ${layer.crop.join(',').padEnd(18)} baseline ${layer.baseline.psnr.toFixed(2)} dB / ${layer.baseline.ssim.toFixed(4)}`
+        + (layer.contentDiffers === true ? '  [content differs]' : ''));
     return;
   }
   if (opts.all && opts.json) fail('--json does not combine with --all; run --capture or --states with --json instead');
