@@ -612,3 +612,450 @@ XMB_INTRO_GRAB=<dir>@2.5,5.4,5.7,9.9 (no --script; the intro is disabled by --sc
 The `grab=` sidecar is the state oracle used throughout: `category`, `categoryIndex`, `depth`, `selection`,
 `entryTitle`, `entryCount`, `pageKind`, `notificationCount/RemainingMs`, `signInState`, `mediaOpen`,
 `displayOffRequested`, `padEventsIgnored`, `windowWidth/Height`.
+
+---
+
+## 16. Behaviour pass, 2026-10-29: the five top gaps (appended)
+
+Scope: gaps 1 (I77), 10 (U4), 5 (I43/I45/I48-I50), 3 (S2) and 12 (N10/N11/N12/X5) of section 13. This pass
+wrote `src/shell.cpp`, `src/shell.h` and this section only; `view.cpp`/`view.h` are another pass's fence, so
+everything that needs them is returned as hunks in 16.8 and was build-tested in a scratch copy
+(`C:\dev\out\beh2-hunk-src` equivalent: `C:\dev\out\beh2-hunk\native-xmb`, binary
+`C:\dev\out\beh2-hunk-build\re-ps3-native.exe`). The deliverable build is `C:\dev\out\native-beh2\re-ps3-native.exe`.
+
+Two conditions were found in the tree and are disclosed rather than smoothed over:
+
+1. **`view.cpp`/`view.h` move under this pass** (they are another pass's uncommitted work: 19:55, 20:21 and
+   20:33 edits; the 20:21 one added declarations for a `drawBusySurface(progress, spinnerPhase)` and
+   `busyPageUp()` that have no definition in `view.cpp` yet). The hunks in 16.8 were cut against `view.cpp` as it
+   stood at 19:55; apply them by their anchor lines, not by line number. The 20:21 `view.h` declaration collides
+   with hunk 1 and must be reconciled by the lead: the shell half needs only `Shell::busy()` and
+   `Shell::status()`, which both designs use, so either side can land first.
+2. **The canonical frame is not the one the gate's baseline was re-measured on.** Another pass re-baselined
+   `work/ab-layers.thresholds.json` at 20:29 against the 19:55 render (frame 19.21/0.8475), then changed
+   `view.cpp` again at 20:33; the current tree renders 18.91/0.8468 (-0.30 dB, still inside the gate's -0.50 dB
+   budget). This pass does not contribute to that movement, and 16.7 proves it with an isolation build.
+
+### 16.1 What changed, file by file
+
+| file | change |
+|---|---|
+| `src/shell.cpp` | the writable-row chain (`beginSettingWrite`/`beginResetWrite`/`startSettingsWritePage`/`runSettingWrite`/`finishSettingWrite`/`cancelSettingWrite`, `WriteStage`); `Action::SetSetting` now enters it instead of committing and popping; `Action::ResetPreferences` runs the console's `top|proceed|finish` chain; the Users column gains a `Steam Account` row and the whole account page (`openSteamAccounts`, `steamAccountSelected`, `steamSwitchNextStep`/`Confirmed`/`Run`/`Result`/`Cancel`); `host::noteUserActivity()` is called from one funnel (`touch()`) and `touch()` from every input entry point; `horizontal()` refuses Left/Right while busy instead of cancelling the scan, and `vertical()`/`activate()`/`toggleOptions()` now gate on `busy()` (scan + write) rather than `loading_`; `busy: ...` log lines on raise, refusal and release; SELECT's Display state (`mediaDisplayPinned()`, `toggleMediaDisplay()`); the store's latest refusal is recorded from `Preferences::failed` (`lastPreferencesError_`) so a failed write can show it; the mojibake status text is fixed (`Reading media folder...`). |
+| `src/shell.h` | `Action::SteamAccounts`/`SteamAccountSwitch`; `SettingsWrite` + `WriteStage` + the chain methods; `busy()` = `loading_ || busy_`; `mediaDisplayPinned()`; the Steam page state and its methods; `Page::steamAccounts`. |
+| `native-xmb/audit/FIDELITY-BEHAVIOUR.md` | this section. |
+
+### 16.2 The settings write chain (I77; C12/C13 of the older audit)
+
+**Console.** A write is a chain, not a frame. `audit/SETTINGS-FIRMWARE.md` section 4 names the three shapes the
+plugin resolves a setting into: a result page (`page_*_finish` with a finished-text `Text`), the full chain
+`page_*_top -> *_ask -> *_proceed -> *_finish`, or nothing at all. The per-row choice this pass made is a
+function of which of those the RCO and the measured frames support, and the sentences are all read from
+`sysconf_plugin` at run time (never hard-coded):
+
+| row class | ask | proceed | finish | evidence |
+|---|---|---|---|---|
+| `host/volume`, `host/muted`, `host/keyRepeatDelay`, `host/keyRepeatSpeed`, `host/mouseButtons`, `host/pointerSpeed` | `msg_setting_ask_back_prev_setting` ("Do you want to accept this setting?") | no (the write is one API call) | `msg_saved` / `msg_error_setting` | the settings plugin's own accept-a-setting page and save/failure sentences; a host write is the one class that leaves the app and changes the computer |
+| `appearance/theme|colour|background|font`, `clock/dateFormat|hourFormat|timeZone`, `display/screensaverMinutes`, `power/idleMinutes`, `audio/keyTone`, `audio/volume` | none | no | `msg_saved`, or `msg_set_datetime_completed` ("Date and time set completed.") for the clock rows; `msg_error_setting` + the store's own error on failure | no ask: SETTINGS-FIRMWARE 4.3 ("the value changes on the row and the list redraws ... this is what most of the 16 pages do"), DIALOGS-FIRMWARE 3.6 ("a successful settings change has no dialog") and the measured Color chip commit (SETTINGS-FIRMWARE 16.5: the band closes and the page is back at depth 1) |
+| Restore Default Settings | `msg_setting_init_ask1` + `ask2` | `msg_initializing` ("Restoring default settings...") | `msg_initialized` ("Restore completed.") / `msg_error_init` | the console's own chain for this row: `page_console_setting_init_top|proceed|finish` (SETTINGS-FIRMWARE 4.2). The restart sentence in `msg_initialized` is dropped because this reset is the app's own store and restarts nothing |
+
+The stages reuse surfaces that already existed - the ask is the two-answer box (`MessageKind::Box`, D1), the
+proceed is the `page_busy` state, the finish is the page message (D3/D4) - so no new art is introduced. The
+finish page names the value that was written; on failure it carries the write's real error. After a *successful*
+write the band is popped, so the row list returns with the row focused (the console's `page_*_finish` returns the
+same way). **A failed write leaves the list up**: the console's refused choice keeps the page and its focus so
+another item can be picked (SETTINGS-FIRMWARE 16.5's disabled-chip run stays at depth 2), and this pass preserves
+that - only the new page in front of it is added.
+
+**Rows left direct, and why** (all named in `beginSettingWrite`'s header comment):
+
+- `media/repeatMode`, `media/shuffle`, `media/repeat`: the player panel's own cycling rows; the console changes
+  them in place (MEDIA-PANELS-FIRMWARE 4, 11.4).
+- `photo/*`: this build's own page; the sysconf inventory has no photo-settings page.
+- `display/fullscreen`: a native window mode; the console has no such setting (S5).
+- `Action::SelectUser`: kept a one-step session switch. Section 13's keep-untouched list names user switching,
+  and U1 is a measured match (`shell: user switched ... volume= 20 ... to ... volume= 80`); the console has no
+  ask string for it and no frame shows a confirm. Changing it would have broken a match to add nothing.
+- The display-awake hold and the display-off request are host writes the shell makes from playback state and the
+  idle timer, not from a row, so no row can ask about them; their behaviour is 16.5.
+
+**Also deliberate:** an app-store write's success page is a departure from DIALOGS-FIRMWARE 3.6's "no dialog on a
+successful settings change" for those rows. It is the result page this brief asks for, in the plugin's own words;
+if strict 3.6 is preferred on the appearance/clock/power rows, clearing `okText` for them makes the write commit
+with no page while the failure page stays.
+
+**Proof** (`C:\dev\out\beh2-proof\`; `XMB_LOG` + `XMB_DIALOG_LOG=1`, screenshots from the same runs):
+
+- host write, ask -> finish -> row list (`mute-chain.log.txt`, `mute-ask.png`, `mute-finish.png`,
+  `mute-row.png`; the run mutes and unmutes, so it is self-restoring):
+
+  ```
+  settings: write stage=ask key=host/muted row="On" value="On" ask=msg_setting_ask_back_prev_setting
+      proceed=no finish="Save completed."+"msg_error_setting" source=sysconf_plugin
+  dialog: box show choices=yes choice=no
+  dialog: box move choice= yes
+  dialog: box enter choice= yes commit= 1
+  settings: write stage=finish-ok key=host/muted value="On"
+  settings: write stage=done key=host/muted result=ok returned depth=1 selection=4
+  ```
+
+  `mute-ask.png` is the firmware's sentence over Yes/No; `mute-finish.png` is "Save completed." over "On";
+  `mute-row.png` is the Sound page with the Host Mute row focused. The second pass of the same run repeats it
+  with "Off" and leaves the endpoint unmuted (state `selection 4`, depth 1).
+
+- Restore Default Settings, ask -> proceed -> finish (`reset-chain.log.txt`, `reset-ask.png`,
+  `reset-proceed.png`, `reset-finish.png`):
+
+  ```
+  settings: write stage=ask key=settings/restoreDefaults ask=msg_setting_init_ask1+ask2
+      proceed=msg_initializing finish=msg_initialized+msg_error_init source=sysconf_plugin
+  settings: write stage=proceed key=settings/restoreDefaults page=busy text="Restoring default settings..."
+  settings: Restore Default Settings confirmed; 18 settings reset to defaults for profile "" (...)
+  settings: write stage=finish-ok key=settings/restoreDefaults value=""
+  settings: write stage=done key=settings/restoreDefaults result=ok returned depth=1 selection=21
+  ```
+
+- failure, with the real error (`write-failed.log.txt`, `write-failed.png`; the data directory holds a
+  `preferences.json` with `"version":99`, so the store refuses every write and says why):
+
+  ```
+  settings: write stage=ask key=display/screensaverMinutes row="After 30 Minutes" value="After 30 Minutes"
+      ask=none proceed=no finish="Save completed."+"msg_error_setting" source=sysconf_plugin
+  settings: write stage=finish-failed key=display/screensaverMinutes value="After 30 Minutes"
+      error="Preferences have an invalid or newer format. The existing file has been preserved."
+  settings: write stage=done key=display/screensaverMinutes result=failed returned depth=2 selection=3
+  ```
+
+  The failure page is `msg_error_setting` over that sentence, and the band is not popped: depth 2 is the band
+  with the refused value still focused.
+
+- a refused *value* (the store's own validation, not an I/O error) keeps the measured list behaviour
+  (`refused-chip.log.txt`, `refused-chip.png`; Theme > Color > February, the disabled chip that commits the
+  sentinel 1002):
+
+  ```
+  settings: write stage=finish-failed key=appearance/colour value="" error="The setting value is invalid."
+  settings: write stage=done key=appearance/colour result=failed returned depth=2 selection=2
+  ```
+
+  depth 2, selection 2 (`appearance/colour/2`) is exactly the state SETTINGS-FIRMWARE 16.5 records for the same
+  Cross ("the page stays at depth 2, selection 2"), so the failure page sits in front of an unchanged refusal.
+
+### 16.3 The Steam account surface (U4)
+
+**Console.** None: the 4.93 XMB's account surface is the PSN binding (U4, and PARITY-GAPS 4 item 9 excludes PSN
+account binding by decision). No firmware frame of a console account-switch page exists under `C:\dev\out`: the
+captures hold the Users column (`rpcs3-allgraphics-*/frames/col-users-r00..r10.png`), the create-user page and the
+PSN column (`col-psn-r00..r07.png`), and nothing else. So this is **not** a reconstructed console page: it is this
+app's ordinary page class (rows, `vertical()`/`activate()`/`back()`, the column cross-fade) carrying the data
+layer's own text. The two prompt steps are the existing box, which is how the console draws every Yes/No page.
+
+**Wiring.** The Users column gains one native-only row, `Steam Account`, last in the column (it is about the Steam
+client on this computer, not a user of the XMB), icon `explore_category_psn:item_tex_account` (the firmware's own
+account item art, no new texture). Opening it runs `scanSteamAccounts(steamRoot_)`; each account is a row whose
+right-hand value is Steam's own active mark (`*` in a circle, U+25CF, as the user rows use) or, when the client is
+signed out, the word "Auto sign-in" for the account its own auto-login marker names; the row's detail line is the
+login name plus "Last used yyyy/MM/dd". Selecting a non-active account runs `steamSwitchPlanFor()`: step 1
+("Switch Steam Account" / Close Steam / Cancel), step 2 ("Start Steam Again" / Start Steam / Not Now), each a box
+whose accepted answer advances `SteamSwitchConfirmation`; only `Ready` reaches the handoff, which closes the client
+(`steam.exe -shutdown`, a short-lived child so its own error string is available) and starts it again detached. The
+result page is `SteamSwitchPrompt::outcomeText` on success - it never claims a sign-in - or the real failure
+(`steam.exe was not found at ...`, or the client's own start error). No account with `switchPossible=false` and no
+already-active account starts anything: the data layer's blocked text is the result page and its machine-readable
+reason is logged.
+
+**Proof** (`steam-chain.log.txt`, `steam-step1.png`, `steam-step2.png`, `steam-result.png`,
+`steam-chain.entries.json.steam-accounts.json`; `XMB_STEAM_SWITCH_HOLD=1` is a test-only hold that logs the two
+command lines and starts nothing):
+
+  ```
+  steam accounts: page opened rows=2 active=0 steamExe=C:/program files (x86)/steam/steam.exe
+  state ... "pageKind":"steamAccounts" ... "entryCount":2 ... "entryTitle":"ajgreenboy"
+  steam: switch requested account=c1234po steps=2 hold=1
+  steam: prompt 1 heading="Switch Steam Account" confirm="Close Steam" cancel="Cancel" nothing started yet
+  dialog: box enter choice= yes commit= 1
+  steam: step 1 accepted (1/2)
+  steam: prompt 2 heading="Start Steam Again" confirm="Start Steam" cancel="Not Now" nothing started yet
+  steam: step 2 accepted (2/2)
+  steam: dry run command: "C:/program files (x86)/steam/steam.exe" -shutdown
+  steam: dry run command: "C:/program files (x86)/steam/steam.exe"
+  steam: handoff held (XMB_STEAM_SWITCH_HOLD=1): "...steam.exe" -shutdown ; "...steam.exe"
+  steam: handoff started
+  ```
+
+The page's dump (`...steam-accounts.json`) carries both accounts, `active`/`autoLogin`, `switchPossible`,
+`alreadyActive`, `clientSignedIn`, the step count and the blocked body. The failure path is proved by pointing
+`XMB_STEAM_ROOT` at an empty directory (`steam-error.png`): the page is the scanner's own sentence, "Steam was
+not found. Looked for XMB_STEAM_ROOT, the registry Steam path and the default installation folders."
+
+Two accounts are remembered on this machine (`ajgreenboy`, `c1234po`, neither signed in, both
+`switchPossible:true`); that is why the page marks the auto-login one in words instead of a dot.
+
+### 16.4 Media input mapping (I43/I45/I48-I50)
+
+With the player open the map now matches the container's hint art and strings:
+
+| key | action | console evidence |
+|---|---|---|
+| L2 / R2 | seek -10 s / +10 s, one step per press | the hint art pair `tex_cp_help_l2_left` / `_r2_right` with `msg_fast_r_with_icon` / `msg_fast_f_with_icon` (MEDIA-PANELS 3.4/3.6/11.5 item 9); the step itself is unmeasured (I43), so it stays the existing `Shell::seekMedia` step and is labelled a fit |
+| d-pad Left / Right | seek -10 s / +10 s | no d-pad hint art exists for this container (I49, unprovable). Kept as the native binding and labelled a fit of the same 10 s step; the log is `media: seek <delta> ms from <a> to <b>` under `XMB_MEDIA_TRACE=1` |
+| Square | shuffle on/off | NO console binding: the container's hint set has no Square key (I45). Kept because the shell's shuffle row is real and the panel shows its state; recorded as native-only |
+| SELECT | Display: pin/unpin the player's own chrome | **proved from the container's text**: `msg_display_display_with_icon` is "Display " + U+F88E, and `friendim_plugin`'s `msg_select_gaiji` is U+F88E, so the container labels SELECT "Display". `tex_cp_help_select` is in the same 86x30 hint-strip art set |
+| START | open the control panel (the surface Triangle opens) | no container string carries a START glyph (the `*_with_icon` family covers cross, l1, r1, l2, r2 and select only), so its function is unprovable; it is bound to the control panel rather than left dead, and the choice is recorded as a fit. `tex_cp_help_start` exists in the same art set (I48) |
+
+`Shell::mediaDisplayPinned()` / `toggleMediaDisplay()` own the Display state; the chrome hunk is 16.8. Cleared when
+playback ends, the user switches or the player closes.
+
+**Proof** (`media.log.txt`, `media2.log.txt`, `media-panel.png`, `media2-display.png`):
+
+  ```
+  media: seek -10000 ms from 1557 to 0
+  media: seek 10000 ms from 960 to 10960
+  media: seek 10000 ms from 11562 to 20000
+  shell: playback panel opened rows= 5 subtitles= 0 audio= 1 Subtitles Off|...|Shuffle: On
+  ```
+
+and in the hunk build (`SELECT`/`START` are scratch-only script tokens that tap the same handlers the pad bits
+call, like the earlier pass's `TRIGGERL2`):
+
+  ```
+  script: SELECT (Display) key
+  media: display pinned (SELECT)
+  script: SELECT (Display) key
+  media: display released (SELECT)
+  script: START (control panel) key
+  shell: playback panel opened rows= 7 ... Subtitles: On (SRT)|... Shuffle: On
+  ```
+
+`media2-display.png` is the pinned state: the time bar, the track line and the six hint slots (Quit Playback /
+Pause / Fast Reverse / Fast Forward / Previous / Next) stay up while the film plays, where the 3 s hide timer
+would otherwise have dropped them.
+
+### 16.5 Auto-Off re-arm (S2)
+
+**Console.** Any input ends the idle period, and a later idle period may ask for the display-off again.
+
+**Change.** `Shell::touch()` - the one funnel every input entry goes through, reached by `horizontal`,
+`vertical`, `activate`, `back`, `toggleOptions`, `optionsMove/Activate/Close`, `psTapped/Held`, `psMenuMove/
+Activate/Close`, `skipMedia`, `cycleMediaRepeat`, `toggleMediaShuffle`, `rotatePhoto`, `seekMedia`,
+`togglePlayback`, `toggleMediaDisplay` and View's key/mouse/wheel/pad handlers via `noteActivity()` - now calls
+`host::noteUserActivity()`. Before this, that function had no caller and the only re-arm was the display-on
+notification (`host.cpp:1013-1015`), so an ignored request repeated on the 60 s window. `touch()` also keeps
+restarting the shell's own idle clock, so the two halves of the console rule are one call.
+
+**Proof** (`autoff-control.log.txt`, `autoff-input.log.txt`, `autoff-rearm.log.txt` and their sidecars; data
+directory seeded with `power/idleMinutes=1`, so a period is 60 s):
+
+| run | script | result |
+|---|---|---|
+| control, no input | `full,wait x10,pause=62000,grab` | `power: Auto-Off at idle 60991 ms`; `power: display-off requested (Auto-Off; ...)`; sidecar `displayOffRequested:true`, `displayState:0` |
+| input at ~53 s | `...,pause=50000,DOWN,pause=12000,grab,pause=50000,grab` | after the DOWN: sidecar `idleMilliseconds:13057`, `displayOffRequested:false` (the 60 s request did **not** fire); 60 s later `power: Auto-Off at idle 60686 ms`, `display-off requested (Auto-Off; ...)`, sidecar `idleMilliseconds:63945`, `displayOffRequested:true` |
+| re-arm after a request | `...,pause=62000,DOWN,wait,grab,pause=62000,grab` | request at `idle 60985 ms`; then `power: user activity after Auto-Off; the next idle period may request it again` (the previously dead line), sidecar `displayOffRequested:false`; then `power: Auto-Off at idle 60201 ms` and a fresh `display-off requested (Auto-Off; ...)`, sidecar `displayOffRequested:true` |
+
+The old build could not produce the second row: its period restarted only on a display-on notification, which a
+scripted run cannot deliver.
+
+### 16.6 The busy page and the lockout (N10/N11/N12/X5)
+
+**Console.** `page_busy` (DIALOGS-FIRMWARE 2.8: `busy_icon_shadow`, `busy_icon` with `busy_short`/`busy_long` 8x36
+children, textures `tex_busy` 36x36, `tex_busy_s`/`_l` 8x36, `tex_busy_shadow` 46x46) is shown while a list loads,
+and the busy state blocks list actions; Left/Right is not a cancel.
+
+**Change.** `Shell::busy()` is `loading_ || busy_`: the list-scan paths (`openDirectory`, `refreshDirectory`) raise
+it, and a settings write's proceed stage holds it too. `vertical()`, `activate()` and `toggleOptions()` gate on
+`busy()`; `horizontal()` no longer cancels the scan at the root (`library_.cancel()` there was an escape the
+console does not document) and is refused while busy; `back()` refuses Circle only while the *write's* proceed
+stage is up (a scan can still be left with Circle, because the console has no cancel and stranding a user on a
+hung network path is worse than the difference - recorded). Raise, each refusal and release are logged:
+
+  ```
+  busy: page_busy raised (list scan) page="...\bigdirs" request=1
+  busy: navigation refused (Up/Down) while a list loads
+  busy: page_busy released (list scan landed) rows=5000 page="...\bigdirs"
+  ```
+
+**Proof** (`busy5.log.txt`, `busy-a.png`; a 5,500-directory library makes the scan long enough to observe):
+
+  ```
+  state: depth 1, entryCount 0       <- the busy page, at the first press after ENTER
+  busy: page_busy raised (list scan) ...
+  busy: navigation refused (Up/Down) while a list loads
+  busy: page_busy released (list scan landed) rows=5000 ...
+  state: depth 1, entryCount 5000, selection 1   <- the refused press moved nothing; the later one did
+  ```
+
+and the proceed stage of the settings chain (16.2) is the second client of the same state
+(`settings: write stage=proceed ... page=busy`). The view half - the spinner - is hunk 2 in 16.8; it was built
+and captured in the scratch tree (`hunk-busy.png`): the 46x46 shadow plane, the 36x36 ring and the two 8x36 strips
+rotating about the ring's centre, with the shell's status line under it.
+
+### 16.7 Verification: gate, determinism, parity
+
+The final binary is `C:\dev\out\native-beh2\re-ps3-native.exe`, built from `shell.cpp`/`shell.h` as this section
+describes and the *working* `view.cpp`/`view.h` (which other passes changed at 20:33, after this pass's code was
+complete; `work/ab-layers.thresholds.json` was re-baselined by another pass in the same window). Every number
+below is from that binary.
+
+| check | command | result |
+|---|---|---|
+| canonical layer gate | `bun work/ab-layers.ts --capture --exe C:/dev/out/native-beh2/re-ps3-native.exe` | `text presence: 1703 bright pixels in the clock crop (minimum 900) PASS`; **PASS: 6/6 layers within budget** (frame 18.91/0.8468 delta -0.30, top background 21.06/0.9434, category icon row 21.62/0.9062, item label row 12.06/0.4171, clock text 11.52/0.4662, info bar 15.15/0.7738) |
+| is the frame movement mine? | the same capture with `C:\dev\out\beh2-isolate-build\re-ps3-native.exe` - the *same current* `view.cpp`/`view.h` with `shell.cpp`/`shell.h` reset to `HEAD` | both `1D91C09AF5BF12F8C4F1EF94E77714B714F789EF505EEE9A75A426CA479E7960` - **byte-identical**, so this pass does not move the canonical frame |
+| canonical frame vs the 20:24 state | the pre-pass build `C:\dev\out\native-beh2-base` (same tree, my changes absent, `view.cpp` at 19:55) | `897711880A4E80C2B28924A50E23DAD4BE21648830F3666CD795733C7CB99EA3` then vs `1D91C09A...` now: the frame moved **0.30 dB / 0.0007 SSIM** when the other pass rewrote part of `view.cpp` at 20:33, not from this pass. The gate still passes (budget -0.50 dB / -0.0040), and the layer deltas are `+0.00` except `frame`. The stored `captureBaseline` (19.21/0.8475) is the other pass's 20:29 re-measurement of the *19:55* render, which is why the 20:33 render reads -0.30 against it; the lead should decide which render is canonical |
+| determinism | two `--render-clock 20 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-25T12:32:00 --focus-time 2000` captures (`det-e.png`, `det-f.png`) | both `8E03240D316EF18568A116C2093A52AD572D8D8039E6F1D622F5CB036D7C6E82` - **hash-equal** (the pre-pass pair was `92BD41C6...`; that pair was hash-equal too, and the change between them is the 20:33 `view.cpp` edit) |
+| parity | `bun work/parity.ts --capture --score --state page-settings-system,page-settings-theme,page-settings-network,dialog-box,osk --exe ...` | 5/5 cells captured, **Tier A 5 PASS**; Tier B frame PASS in all five; `out/parity/scorecards/scorecard-20261029-204025.md` |
+
+Parity, per cell (`text-heavy` 18.00 dB / 0.8500; `composite` 18.00 / 0.8800):
+
+| cell | Tier A | frame | content regions |
+|---|---|---|---|
+| page-settings-system | PASS (26 rows) | 20.03 / 0.8930 PASS | page rows 18.10 / 0.8271 (informative: the values are this machine's) |
+| page-settings-theme | PASS (6 rows) | 18.64 / 0.8590 PASS | page rows 15.84 / 0.7406 (informative/fail by construction) |
+| page-settings-network | PASS (5 rows) | 18.74 / 0.8906 PASS | page rows 16.45 / 0.8130 (informative) |
+| dialog-box | PASS | 20.69 / 0.9159 PASS | answers 22.56 / 0.9137 PASS, footer 27.36 / 0.9805 PASS, plate 12.10 / 0.3815 informative |
+| osk | PASS | 26.34 / 0.9004 PASS | osk panel 21.23 / 0.7720 FAIL |
+
+`0/36` remains the headline because Tier C is `n/a` in four cells and Tier B is informative/failing on the
+content regions. The same five cells captured with the pre-pass build (`C:\dev\out\native-beh2-base`,
+`scorecard-20261029-203144.md`) give the same rows and numbers to within 0.0002 (Tier A 5 PASS; system page rows
+18.10/0.8269, osk panel 21.20/0.7719, box plate 12.10/0.3815), so nothing here is attributable to this pass: it
+draws nothing on these states.
+
+### 16.8 Returned hunks (view.cpp / view.h - another pass's fence)
+
+Cut against `view.cpp` as it stood at 19:55 and `view.h` at 20:19; apply with the anchor lines, because the
+working files moved afterwards (at 20:21 `view.h` gained four unrelated lines, at 20:33 `view.cpp` changed under
+another pass - which is also what moved the canonical frame; see 16.7). Build-tested as
+`C:\dev\out\beh2-hunk\native-xmb` (all five blocks applied, binary `C:\dev\out\beh2-hunk-build`), including a
+scratch-only `SELECT`/`START` script token in that copy's `main.cpp` (not part of the hunks). **The 20:21
+`view.h` edit declares `drawBusySurface(progress, spinnerPhase)` and `busyPageUp()` for the same surface these
+hunks draw**; the two are alternatives and the lead should take one, not both. The shell side depends only on
+`Shell::busy()` and `Shell::status()`, so either form works without touching `shell.cpp`.
+
+**Hunk 1 - `src/view.h`, the busy page's clock** (after `qint64 psPressAt_=0;`):
+
+```cpp
+    // The busy page's own clock (page_busy; DIALOGS-FIRMWARE 2.8). busyWas_ is the edge that latches
+    // busySinceMs_, so the ring's phase comes from the frame clock and a --render-clock capture is stable.
+    bool busyWas_=false;
+    qint64 busySinceMs_=0;
+```
+
+**Hunk 2 - `src/view.cpp`, the busy page** (replace the one status-line draw after the column stack, i.e.
+`if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},...);`), plus the wash constant after
+`constexpr int kMessagePageDimAlpha=68;`:
+
+```cpp
+constexpr int kBusyPageDimAlpha=140;   // a fit: no frame of the console's page_busy exists (DIALOGS 8.2)
+```
+
+```cpp
+        // page_busy (DIALOGS-FIRMWARE 2.8; FIDELITY-BEHAVIOUR N12/X5). The four parts are the container's own
+        // object set: busy_icon_shadow 46x46, busy_icon 36x36 (tex_busy) and its two 8x36 children
+        // busy_short/busy_long (tex_busy_s / tex_busy_l), the sweep of the ring. No local frame shows the
+        // console's busy page, so the page position, the 1 s per turn period and the strips' opposite placement
+        // are fits; the parts themselves are the art. The status line under it is the shell's own text for the
+        // operation that is busy.
+        const bool busyPage=shell_.busy() && !messageScreen;
+        if(busyPage && !busyWas_){busyWas_=true;busySinceMs_=clock_.elapsed();}
+        else if(!busyPage)busyWas_=false;
+        if(busyPage) {
+            const QImage& busyShadow=assets_.image("system_plugin","tex_busy_shadow");
+            const QImage& busyRing=assets_.image("system_plugin","tex_busy");
+            const QImage& busyShort=assets_.image("system_plugin","tex_busy_s");
+            const QImage& busyLong=assets_.image("system_plugin","tex_busy_l");
+            const double turn=double((clock_.elapsed()-busySinceMs_)%1000)/1000.;
+            p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,kBusyPageDimAlpha));
+            if(!busyShadow.isNull()) {
+                // busy_icon_shadow is a white 46x46 mask with no transparent pixel (every alpha is 255): it is
+                // the plane's drop shadow, which the container leaves at alphaScale 0 until the plugin publishes
+                // it (MEDIA-PANELS 3.7 has the same rule for the video panel). Drawing it as an image would paint
+                // a white square, so it is tinted black here and drawn under the ring.
+                static QImage shadowTint;
+                if(shadowTint.isNull()) {
+                    shadowTint=QImage(busyShadow.size(),QImage::Format_ARGB32_Premultiplied);
+                    shadowTint.fill(Qt::transparent);
+                    QPainter tint(&shadowTint);
+                    tint.drawImage(0,0,busyShadow);
+                    tint.setCompositionMode(QPainter::CompositionMode_SourceIn);
+                    tint.fillRect(shadowTint.rect(),QColor(0,0,0,150));
+                }
+                p.drawImage(QRectF(960-23,520-23,46,46),shadowTint);
+            }
+            if(!busyRing.isNull())p.drawImage(QRectF(960-18,520-18,36,36),busyRing);
+            for(int strip=0;strip<2;++strip) {
+                const QImage& art=strip?busyLong:busyShort;
+                if(art.isNull())continue;
+                // The two 8x36 strips are the ring's sweep: each cell's ink is a short dash near the cell's top
+                // (rows 8..17 in busy_short, 3..17 in busy_long), so the cell is placed above the centre and
+                // rotated about it, which walks the dash around the 36 px ring. Opposite placement and the 1 s
+                // period are fits.
+                p.save();
+                p.translate(960,520);
+                p.rotate(turn*360.+strip*180.);
+                p.drawImage(QRectF(-4,-36,8,36),art);
+                p.restore();
+            }
+            if(!shell_.status().isEmpty())text({680,596,1100,50},shell_.status(),26,QColor(230,230,230));
+        }
+        else if(!messageScreen && !shell_.status().isEmpty())text({680,850,1100,50},shell_.status(),26,QColor(230,230,230));
+```
+
+**Hunk 3 - `src/view.cpp`, the Display pin on the player chrome** (replace the chrome's `p.setOpacity(...)`):
+
+```cpp
+        // SELECT's Display state (Shell::mediaDisplayPinned): the console's Display key keeps the player's own
+        // chrome up instead of letting the 3 s hide timer drop it (MEDIA-PANELS 4.3/11.5 item 9).
+        const double controlOpacity=shell_.mediaOpen() && shell_.mediaDisplayPinned()
+            ?1.:(shell_.videoOpen()?mediaControls_.state(now).opacity:1.);
+        p.save();p.setOpacity(controlOpacity*panelDim);
+```
+
+**Hunk 4 - `src/view.cpp`, SELECT and START on the pad** (inside `if(shell_.mediaOpen())`, after the Square line):
+
+```cpp
+        // SELECT and START are both in the video container's direct-key hint set (tex_cp_help_select and
+        // tex_cp_help_start, 86x30 each). SELECT's function is proved by the container's own text:
+        // msg_display_display_with_icon is "Display " + U+F88E and friendim_plugin's msg_select_gaiji is the same
+        // code point, so SELECT is the Display key. START has no string of its own in the container (no
+        // *_with_icon carries a START glyph), so it opens the one surface the container's keys reach - the
+        // control panel Triangle opens - instead of staying dead (FIDELITY-BEHAVIOUR I48).
+        if(edge&XINPUT_GAMEPAD_BACK)shell_.toggleMediaDisplay();
+        if(edge&XINPUT_GAMEPAD_START)shell_.toggleOptions();
+```
+
+**Hunk 5 - `src/view.cpp`, keyboard substitutes** (after `case Qt::Key_T:...` in `keyPressEvent`):
+
+```cpp
+    // SELECT/START keyboard substitutes while media is open (the console's own keys have no keyboard
+    // equivalent): I is the Display key, S the control panel. Neither key does anything at the XMB root.
+    case Qt::Key_I:if(shell_.mediaOpen())shell_.toggleMediaDisplay();break;
+    case Qt::Key_S:if(shell_.mediaOpen())shell_.toggleOptions();break;
+```
+
+### 16.9 What this pass does not close
+
+- The per-row ask evidence: only the host-write class and Restore Default Settings have an ask body in the RCO.
+  Whether the console asks before a host volume change in particular is unproved; the ask is there because the
+  settings plugin ships the exact sentence and a host write is irreversible-from-the-XMB-ish. If a capture shows
+  the console's volume row committing without it, delete `askBody` for `host/*` in `beginSettingWrite`.
+- The app-store rows' success page (see 16.2's "Also deliberate").
+- `page_busy`'s measured layout: no frame exists (DIALOGS-FIRMWARE 8.2), so the page's position, wash and the
+  spinner's period are fits. The art is the container's.
+- The Steam handoff's real path is proven up to the two launches only as a held dry run (`XMB_STEAM_SWITCH_HOLD`);
+  the unheld path needs a machine whose Steam client can be closed, and it is the data layer's own two commands.
+- Start's function in the video container remains unprovable (no string, no frame); the binding is a stated fit.
+- I45's Square binding stays native-only; I49's d-pad seek and I43's step stay fits of 10 s.
+- Still open from section 13, untouched: the photo control panel (I51-I58), the OSK's four keys and its fade
+  (I64-I67, T16), gameboot/XMB return (B5/U16), the in-game XMB (U17), multi-select (X3/X6), the PS menu's power
+  semantics (P5/P7/P8) and the settings Auto-Off ladder (S3).
+
+### 16.10 Where the evidence lives
+
+Everything is under `C:\dev\out\beh2-proof\` (scratch, not part of the tree): `run.ps1` (the runner),
+`mute-chain.*`, `reset-chain.*`, `reset-proceed.*`, `write-failed.*`, `refused-chip.*`, `steam-chain.*`,
+`steam-error.*`, `media.*`, `media2.*`, `autoff-control/input/rearm.*`, `busy5.*`, `gate.txt`, `gate-isolate.txt`,
+`parity.txt`, `parity-base.txt`, `parity-final.txt`, `det-c/d.png`, `det-e/f.png`, `canon-base.png`,
+`canon-final.png`, `canon-isolate.png`, the sidecar `.json` of every `grab=`, and the data directories (`data-*`,
+`bigdirs`, `biglib`). The hunk build is `C:\dev\out\beh2-hunk\native-xmb` + `C:\dev\out\beh2-hunk-build`, with
+`hunk-busy.png` and `media2-display.png` as its two captures. The isolation build that proves the canonical frame
+is frame-neutral is `C:\dev\out\beh2-isolate\native-xmb` (HEAD `shell.cpp`/`shell.h` + the current `view.cpp`)
+and `C:\dev\out\beh2-isolate-build`.

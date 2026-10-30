@@ -2984,3 +2984,50 @@ label and it is byte-identical.
 
 Files touched by this pass: `src/view.cpp`, `src/view.h`, and this note. No reference, threshold, parity
 tool, shell, settings_menu, main, assets or RCO was touched.
+
+---
+
+## 18. Dated correction - 2026-10-29: the Theme page is four rows, and the two pickers moved into the lists
+
+Written by the row-data pass (`FIDELITY-SURFACES.md` section 15, item 4). Files touched: `src/settings_menu.h`,
+`src/settings_menu.cpp`, `src/shell.cpp` and this note. No other settings surface changed.
+
+**What 5.6 and 12.4 recorded.** 5.6: "Theme (`msg_theme`), Color (`msg_color`), Background
+(`msg_background`), Font (`msg_font`) - the frame shows exactly these four, in this order ... Native:
+Theme, Select Theme, Color, Background, Select Wallpaper, Font - two invented rows." 12.4 opened the four
+choice lists and measured their contents.
+
+**What was wrong in the build.** The two invented rows were real page rows: the Theme page carried six
+(`Select Theme` and `Select Wallpaper` at 820 and 891, past the console's last row at 749), so the list
+the console ends after `Font` kept going. The audit had recorded the two rows as a deliberate stopgap
+because they were the only way to load a .p3t theme or a user wallpaper ("D11: the firmware folds theme
+and wallpaper selection into the Theme and Background choice pages, which this build cannot bind yet").
+
+**What it is now.** The page is the console's four rows and no native row at all (`settings: theme page
+from the RCO row set: 4 rows, 0 native-only`). The two functions moved to the lists 5.6/D11 already said
+they belong to, and neither is a stub:
+
+| function | was (page row) | now (list item) | what Cross does |
+|---|---|---|---|
+| .p3t theme picker | `Select Theme` at y 820 | the **`Install`** item of the `Theme` list - the console's own first label for it, present in the capture's four items (12.4a) and previously modelled as a disabled row | opens the .p3t file dialog; the chosen theme then appears in the list as its own item |
+| wallpaper picker | `Select Wallpaper` at y 891 | a new **`Select Wallpaper`** item at the end of the `Background` list, after `Brightness` / `Original` / `Classic` / `Wallpaper` | opens the image file dialog |
+
+Both items carry a sentinel value that no bounded Preferences key accepts, and `Shell::activate()`
+intercepts it before the write chain, so a picker can never be stored as a setting value.
+
+**What this changes in 12.4's measured lists.** The `Background` list gains one item (5 instead of 4);
+its four measured rows keep their order and their measured origins (381/537/581/621), which is why the
+new item is last. The `Theme` list keeps its measured four labels and its 40 px pitch; `Install` is the
+same first item the capture measured, and it now works instead of being dimmed. The Color (13 rows) and
+Font (3 rows) lists are untouched.
+
+**What the named states must follow** (they are outside this pass's fence): `page-settings-theme`'s
+`entryCount` 6 -> 4 and its log line, `theme-list`'s `entryCount` 1 -> 2, `background-list`'s
+`entryCount` 4 -> 5 and its band log. The Theme page's captures also stop one row earlier, which is the
+console's own row grid.
+
+**Not verified end to end.** The two pickers open a modal file dialog, and the harness has no token that
+drives one, so the measurement stops at the log line that names the dialog
+(`settings: theme picker row -> .p3t file dialog`). Everything before that line - the page's row set, the
+list's items, the intercept - is exercised by the scripted run.
+

@@ -375,6 +375,161 @@ void Shell::resolveNetworkColumn() {
         .arg(QString::number(timer.nsecsElapsed()/1e6,'f',2))
         .arg(unresolved?QStringLiteral(", %1 untitleable rows").arg(unresolved):QString());
 }
+// --- The three media columns, from the firmware's XMBML ---------------------------------------------
+// audit/FIDELITY-MEDIA.md V1/M1/P1 (and audit/MENUS-XMBML.md's column mechanism): category_video.xml,
+// category_music.xml and category_photo.xml describe each media column as the root view's ordered <Query>
+// list, and each query names the pixmap view whose <Table> carries the row's title_rsc and icon_rsc. The
+// Network column proved this reader (resolveNetworkColumn above); the media columns are the same mechanism
+// with one difference the console frames decide: a column at rest shows only the rows the console always
+// registers - the utility rows - because every other query is a provider (an inserted disc, a DLNA server,
+// the HDD contents, an install in progress) that has nothing to list on this rig and needs no row.
+//   Video  3 rows: BD Data Utility, Search for Media Servers, Video Editor & Uploader  (col2-video-r00..r02)
+//   Music  2 rows: Search for Media Servers, Playlists                                (col-music-r00/r01)
+//   Photo  3 rows: Search for Media Servers, Photo Gallery, Playlists                 (col-photo-r00..r02)
+// The rows this build adds for its own features (the library folder, the folder picker, Photo Settings)
+// follow the console's rows in that order and carry source = "native", so a dump separates the two sets
+// without a second list. A definition that cannot be read keeps the built-in table in the constructor,
+// which is written in the same order, and says so.
+void Shell::resolveMediaColumns() {
+    struct Spec {
+        const char* id;         // the native row id (what the catalogue and the activation path know)
+        Action action;          // what Cross does; Unavailable carries `why` on its page
+        const char* titleRsc;   // the column RCO's own key, used when the definition's view has none
+        const char* icon;       // the texture, used when the definition's view has none
+        const char* container;  // the RCO the icon is read from
+        const char* why;        // the reason Cross cannot perform the firmware's action
+    };
+    static const QHash<QString,Spec> specs{
+        // Video (category_video.xml root view, in document order)
+        {"video:seg_bddata_mgmt",{"bddata",Action::Unavailable,"msg_bd_data_utility","item_tex_plain_folder","explore_category_video",
+            "BD Data Management lists the bonus data a Blu-ray disc wrote to the console's hard disk. This computer has "
+            "no Blu-ray drive and no PS3 BD data store, so there is nothing to manage."}},
+        {"video:seg_dlna_scan",{"dlna-scan",Action::Unavailable,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_video",
+            "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
+            "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
+        {"video:seg_editingvideo_mgmt",{"video-editor",Action::Unavailable,"msg_video_editor_and_upload","item_tex_upload","explore_category_video",
+            "Video Editor & Uploader is the console's own scene editor (scenefolder_plugin) for clips recorded on the "
+            "system. No capture device and no editor exist in this build, so the row lists the firmware's function "
+            "and opens this page instead."}},
+        // Music (category_music.xml)
+        {"music:seg_dlna_scan",{"dlna-scan",Action::Unavailable,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_music",
+            "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
+            "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
+        {"music:seg_playlist_mgmt",{"playlists",Action::Unavailable,"msg_playlists","tex_playlist","explore_category_music",
+            "Playlists is the console's playlist manager (playlist_plugin). This build's queue is the folder a track was "
+            "started from, so there is no stored playlist to list or edit."}},
+        // Photo (category_photo.xml)
+        {"photo:seg_dlna_scan",{"dlna-scan",Action::Unavailable,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_photo",
+            "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
+            "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
+        {"photo:seg_hakoniwa",{"gallery",Action::Unavailable,"msg_photo_gallery","","file",
+            "Photo Gallery is the console's own 3D gallery application (hakoniwa). This build's photo viewer is the "
+            "full-screen slideshow Photo Library opens."}},
+        {"photo:seg_playlist_mgmt",{"playlists",Action::Unavailable,"msg_playlists","tex_playlist","explore_category_photo",
+            "Playlists is the console's playlist manager (playlist_plugin). This build's queue is the folder a photo was "
+            "started from, so there is no stored playlist to list or edit."}}};
+    // The queries a media column never draws at rest, each with the reason it is not a row here. A provider with
+    // nothing attached produces no row on the console either, which is why these are skipped rather than listed.
+    static const QHash<QString,QString> skipped{
+        {"video:seg_welcome","the PlayStation Store video page: this build has no store session"},
+        {"video:seg_gameexit","an in-game XMB row"},
+        {"video:gameDir","the installed-content scan owns these rows (this build lists none for Video)"},
+        {"video:seg_dlna_device","a discovered DLNA server: nothing is discoverable without the client"},
+        {"video:seg_bdmav_device","an inserted Blu-ray disc: no drive"},
+        {"video:seg_avchd_device","an inserted AVCHD disc: no drive"},
+        {"video:seg_dvdv_device","an inserted DVD: no drive"},
+        {"video:seg_data_device","a data disc: no drive"},
+        {"video:seg_hdd_install","an install in progress: the console's own download queue"},
+        {"video:seg_hdd_contents","the HDD's video contents: Video Library is this build's version of it"},
+        {"music:seg_now","the now-playing provider: this build has no XMB music player page"},
+        {"music:seg_welcome","the PlayStation Store music page: this build has no store session"},
+        {"music:seg_gameexit","an in-game XMB row"},
+        {"music:gameDir","the installed-content scan owns these rows (this build lists none for Music)"},
+        {"music:seg_dlna_device","a discovered DLNA server: nothing is discoverable without the client"},
+        {"music:seg_sacd_device","an inserted SA-CD: no drive"},
+        {"music:seg_cdda_device","an inserted audio CD: no drive"},
+        {"music:seg_dsd_device","an inserted DSD disc: no drive"},
+        {"music:seg_data_device","a data disc: no drive"},
+        {"music:seg_hdd_contents","the HDD's music contents: Music Library is this build's version of it"},
+        {"photo:seg_screenshot","the screenshot list: a console capture store this build does not keep"},
+        {"photo:seg_gameexit","an in-game XMB row"},
+        {"photo:gameDir","the installed-content scan owns these rows (this build lists none for Photo)"},
+        {"photo:seg_dlna_device","a discovered DLNA server: nothing is discoverable without the client"},
+        {"photo:seg_data_device","a data disc: no drive"},
+        {"photo:seg_hdd_contents","the HDD's photo contents: Photo Library is this build's version of it"}};
+    // The native rows each column appends, by the ids the built-in table already declared. They are taken
+    // from the current entries so their action/value/setting stay exactly as the table wrote them.
+    static const QHash<QString,QStringList> nativeIds{
+        {"video",{"continue","library","choose"}},{"music",{"library","choose"}},
+        {"photo",{"library","choose","options"}}};
+    static const QHash<QString,QString> xmlFiles{
+        {"video","category_video.xml"},{"music","category_music.xml"},{"photo","category_photo.xml"}};
+    const bool verbose=qEnvironmentVariableIsSet("XMB_XMBML_LOG") && qEnvironmentVariable("XMB_XMBML_LOG")!=QStringLiteral("0");
+    for(auto& category:categories_) {
+        const auto& file=xmlFiles.value(category.id);
+        if(file.isEmpty())continue;
+        const auto container=xmlFiles.contains(category.id)?QStringLiteral("explore_category_")+category.id:QString();
+        QVector<Entry> native;
+        for(const auto& entry:category.entries)if(nativeIds.value(category.id).contains(entry.id))native.push_back(entry);
+        if(native.isEmpty())continue;
+        QElapsedTimer timer;timer.start();
+        const auto column=readCategoryView(QDir(assets_.root()).filePath(QStringLiteral("vsh/resource/explore/xmb/")+file));
+        const auto builtin=[&](const QString& reason) {
+            for(auto& entry:category.entries)
+                entry.source=nativeIds.value(category.id).contains(entry.id)?QStringLiteral("native"):QStringLiteral("fallback");
+            qWarning().noquote()<<"xmbml:"<<category.id<<"column keeps its built-in rows:"<<reason<<column.path;
+        };
+        if(!column.ok()){builtin(column.error);continue;}
+        QVector<Entry> rows;
+        int skippedRows=0,nativeRows=0;
+        for(const auto& row:column.rows) {
+            const QString key=category.id+QLatin1Char(':')+row.key;
+            const auto spec=specs.constFind(key);
+            if(spec==specs.cend()) {
+                ++skippedRows;
+                if(verbose)qInfo().noquote()<<"xmbml:"<<category.id<<"skip"<<row.key
+                    <<"("+skipped.value(key,QStringLiteral("no row of this build's definition names it"))+")";
+                continue;
+            }
+            QString title;
+            if(!row.titleRsc.isEmpty())title=assets_.text(container,row.titleRsc);
+            if(title.isEmpty())title=assets_.text(container,QString::fromLatin1(spec->titleRsc));
+            if(title.isEmpty()){++skippedRows;qWarning().noquote()<<"xmbml:"<<category.id<<"row"<<row.key<<"has no title";continue;}
+            QString texture=row.iconRsc;
+            QString iconContainer=container;
+            if(texture.isEmpty()) {
+                texture=QString::fromLatin1(spec->icon);
+                iconContainer=QString::fromLatin1(spec->container);
+            }
+            Entry entry=item(QString::fromLatin1(spec->id),title,texture,iconContainer,spec->action);
+            entry.detail=QString::fromLatin1(spec->why);
+            // Photo Gallery's art is the firmware's own hakoniwa.png on dev_flash, not an RCO texture; it is
+            // square (180x180) where an installed title's ICON0 is a wide card, so the row says so and the view
+            // keeps it in the icon box (Entry::iconSized).
+            if(texture.isEmpty() && iconContainer==QLatin1String("file")) {
+                entry.texture=QDir(assets_.root()).filePath(QStringLiteral("vsh/resource/explore/icon/hakoniwa.png"));
+                entry.iconSized=true;
+            }
+            entry.source=row.titleRsc.isEmpty()?QStringLiteral("xmbml+plugin"):QStringLiteral("xmbml");
+            // The Settings column's icon override map and the theme's entry icons key off these ids, so a
+            // resolved media row keeps the container the definition gave it.
+            if(verbose)qInfo().noquote()<<"xmbml:"<<category.id<<"row"<<entry.id<<"key="+row.key
+                <<"view="+(row.viewId.isEmpty()?QStringLiteral("-"):row.viewId)
+                <<"title=\""+entry.title+"\""<<"titleRsc="+(row.titleRsc.isEmpty()?QString::fromLatin1(spec->titleRsc):row.titleRsc)
+                <<"texture="+entry.texture<<"container="+iconContainer
+                <<"action="+QString::number(int(entry.action))<<"source="+entry.source;
+            rows.push_back(std::move(entry));
+        }
+        for(auto& entry:native){entry.source=QStringLiteral("native");rows.push_back(entry);++nativeRows;}
+        if(rows.size()==native.size()){builtin(QStringLiteral("no row of the definition is a row of this column"));continue;}
+        category.entries=rows;
+        qInfo().noquote()<<QStringLiteral("xmbml: %1 column resolved %2 rows from %3 (queries %4, sha256 %5): "
+            "%6 from the definition, %7 native, %8 queries skipped, parsed in %9 ms")
+            .arg(category.id).arg(int(rows.size())).arg(file).arg(column.queries).arg(column.sha256.left(12))
+            .arg(int(rows.size())-nativeRows).arg(nativeRows).arg(skippedRows)
+            .arg(QString::number(timer.nsecsElapsed()/1e6,'f',2));
+    }
+}
 // Launches a child and keeps it parented so the XMB knows when it returns. While it runs the
 // idle auto-close is suppressed; on exit the library is rescanned and the column restored,
 // which is the return lifecycle a launched game needs (audit/FEATURE-COVERAGE.md, ISC-20).
@@ -893,7 +1048,9 @@ void Shell::refreshContent() {
             for(const auto& app:contentApps_)if(app.category==category.id) {
                 auto e=item("custom:"+app.id,app.title,app.kind=="game"?"game_tex_default_ps3":"tex_video","explore_plugin_full",
                     app.kind=="game"?Action::LaunchApp:app.kind=="jellyfin"?Action::JellyfinApp:Action::OpenUrl,app.kind=="web"?app.url:app.id);
-                e.detail=app.kind=="game"?QString{}:app.kind=="jellyfin"?"Jellyfin":"Service app Â· Opens in your browser";
+                // The separator is the console's U+00B7. It was double-encoded here (U+00C2 U+00B7, rendered
+                // as two glyphs) until this fix; the source stays ASCII, the code point is built explicitly.
+                e.detail=app.kind=="game"?QString{}:app.kind=="jellyfin"?QStringLiteral("Jellyfin"):QStringLiteral("Service app ")+QChar(0x00B7)+QStringLiteral(" Opens in your browser");
                 e.artwork=result.art.value("custom:"+app.id);e.gameTile=app.kind=="game";providers.push_back(std::move(e));
             }
             category.entries=providers+category.entries;
@@ -917,8 +1074,13 @@ void Shell::refreshContent() {
             for(const auto& category:categories_) {
                 QJsonArray entries;
                 for(const auto& e:category.entries) {
+                    // `container`/`texture` travel with every row: the row-art pass's binding (Game rows from
+                    // category_game.xml's icon_rsc, media rows from their column's RCO) is then checkable from
+                    // this dump instead of from pixels.
                     QJsonObject row{{"id",e.id},{"title",e.title},{"detail",e.detail},
-                        {"action",int(e.action)},{"value",e.value},{"hasArtwork",!e.artwork.isNull()}};
+                        {"action",int(e.action)},{"value",e.value},{"hasArtwork",!e.artwork.isNull()},
+                        {"container",e.container},{"texture",e.texture}};
+                    if(e.iconSized)row.insert("iconSized",true);
                     // Only generated rows carry an origin, so the dump stays quiet about the rest.
                     if(!e.source.isEmpty())row.insert("source",e.source);
                     entries.push_back(row);
@@ -974,7 +1136,7 @@ void Shell::importApps(const QString& file) {
 }
 void Shell::refreshSteamFriends(bool showErrors,bool force) {
     if(friendsRefreshing_ && !force)return;
-    showFriendsErrors_=showErrors;friendsRefreshing_=true;steamFriendsError_="Refreshing Steam friendsâ€¦";rebuildFriends();emit changed();
+    showFriendsErrors_=showErrors;friendsRefreshing_=true;steamFriendsError_=QStringLiteral("Refreshing Steam friends")+QChar(0x2026);rebuildFriends();emit changed();
     steamFriends_.refresh(qEnvironmentVariable("XMB_STEAM_ID",steamId_));
 }
 void Shell::rebuildFriends() {
@@ -1021,32 +1183,66 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("print","Printer Settings","tex_printer",sys,Action::SettingsPage,"print"),item("display","Display Settings","tex_display",sys,Action::SettingsPage,"display"),
             item("sound","Sound Settings","tex_sound",sys,Action::SettingsPage,"sound"),item("security","Security Settings","tex_security",sys,Action::SettingsPage,"security"),
             item("remote","Remote Play Settings","tex_remote",sys,Action::SettingsPage,"remote"),item("network","Network Settings","tex_network",sys,Action::SettingsPage,"network")}},
-        {"photo","Photo","qgl/icontex","3n",{item("library","Photo Library","photo_tex_album_pic",full,Action::Library),item("options","Photo Settings","tex_photo",full,Action::SettingsPage,"photo"),item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
-        {"music","Music","qgl/icontex","4n",{item("library","Music Library","music_tex_album_pic",full,Action::Library),item("options","Music Settings","tex_music",full,Action::SettingsPage,"music"),item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
+        // ---- The three media columns ------------------------------------------------------------------
+        // The console's own row sets, in its own order, then this build's host-folder rows LAST and marked
+        // native (Entry::source = "native"). FIDELITY-MEDIA V1/M1/P1 measured 0 of the console's 8 media-column
+        // rows in this build: Video is BD Data Utility / Search for Media Servers / Video Editor & Uploader,
+        // Music is Search for Media Servers / Playlists and Photo is Search for Media Servers / Photo Gallery /
+        // Playlists, from category_video|music|photo.xml's root views. resolveMediaColumns() re-reads those
+        // definitions on every start and rewrites these rows from them (titles through the column's own RCO,
+        // icons from the definition's icon_rsc where it carries one); this table is both the fallback for a
+        // flash image without them and the declaration of the native rows. Order is the whole point, so the
+        // console's rows come first even in the fallback.
+        {"photo","Photo","qgl/icontex","3n",{
+            item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_photo"),
+            item("gallery","Photo Gallery","","file"),
+            item("playlists","Playlists","tex_playlist","explore_category_photo"),
+            // Native rows (FIDELITY-MEDIA P1's "10 native-only rows"): the library folder, the one settings page
+            // that has no other surface, and the folder picker. They stay because each is a feature's only door.
+            item("library","Photo Library","photo_tex_album_pic",full,Action::Library),
+            item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary),
+            item("options","Photo Settings","tex_photo",full,Action::SettingsPage,"photo")}},
+        {"music","Music","qgl/icontex","4n",{
+            item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_music"),
+            item("playlists","Playlists","tex_playlist","explore_category_music"),
+            // Native rows: the library and the picker. Music Settings is dropped from this column because the
+            // Settings column's own "Music Settings" row opens the same page (id "music", Action::SettingsPage).
+            item("library","Music Library","music_tex_album_pic",full,Action::Library),
+            item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
         {"video","Video","qgl/icontex","5n",{
-            // Continue Watching is the first row of the Video column: it is the surface a couch user wants
-            // first, it needs no new category or menu level, and it is the one row that works before any
-            // library folder has been chosen. Action::Library is the existing "open a collection of this
-            // column's own content" action (labelled Open, no new enum member), and Shell::activate()
-            // recognises this row by id and builds the page from the remembered resume points instead of
-            // reading a folder (audit/MEDIA-CONTROLS.md).
+            item("bddata","BD Data Utility","item_tex_plain_folder","explore_category_video"),
+            item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_video"),
+            item("video-editor","Video Editor & Uploader","item_tex_upload","explore_category_video"),
+            // Native rows. Continue Watching is the surface a couch user wants first and the one row that works
+            // before any library folder has been chosen; Action::Library is the existing "open a collection of
+            // this column's own content" action and Shell::activate() recognises this row by id and builds the
+            // page from the remembered resume points instead of reading a folder (audit/MEDIA-CONTROLS.md).
+            // Video Settings is dropped here for the same reason as Music Settings above.
             item("continue","Continue Watching","video_tex_album_default",full,Action::Library),
             item("library","Video Library","video_tex_album_default",full,Action::Library),
-            item("options","Video Settings","tex_video",full,Action::SettingsPage,"video"),
             item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
         {"tv","TV/Video Services","qgl/icontex","35n", /* normal-mapped like the others; tex_video is 46 px */{item("services","My Channels","tex_video")}},
         {"game","Game","qgl/icontex","6n",{
-            item("vita","PS Vita System Application Utility","item_tex_vitaformat"),item("data","Game Data Utility","item_tex_ps3game_folder"),
-            item("memory","Memory Card Utility","item_tex_ps12util"),item("ps2","Saved Data Utility (PS2)","item_tex_ps2game_folder"),
-            item("psp","Saved Data Utility (PSP)","item_tex_pspgame_folder"),item("ps3","Saved Data Utility (PS3)","item_tex_ps3sd_folder"),
-            item("store","PlayStation Store","item_tex_ps_store")}},
+            // Row art is the firmware's own `icon_rsc` per segment view of category_game.xml, read this pass.
+            // Five of the seven rows bound a texture the definition does not name there (FIDELITY-SURFACES
+            // 3.1b, top gap 2): the Vita and Game Data rows are the folder-pixmap placeholder `tex_album_icon`
+            // (a plain folder - the same art the folder rows share, NOT item_tex_vitaformat's 110x28 wordmark and
+            // not a folder with a gamepad), and the three Saved Data rows take the two utility folders the
+            // definition names - `item_tex_ps3util` (folder + gamepad) on seg_sdps2 and seg_sdps3, and
+            // `item_tex_psputil` (folder + card slot) on seg_sdpsp. item_tex_psputil lives in
+            // explore_category_game.rco, so its row carries that container. The resolved table is logged and
+            // dumped (resolveGameColumnProof below is the same list the audit's table cites).
+            item("vita","PS Vita System Application Utility","tex_album_icon","explore_plugin_full"),item("data","Game Data Utility","tex_album_icon","explore_plugin_full"),
+            item("memory","Memory Card Utility","item_tex_ps12util","explore_plugin_full"),item("ps2","Saved Data Utility (PS2)","item_tex_ps3util","explore_plugin_full"),
+            item("psp","Saved Data Utility (PSP)","item_tex_psputil","explore_category_game"),item("ps3","Saved Data Utility (PS3)","item_tex_ps3util","explore_plugin_full"),
+            item("store","PlayStation Store","item_tex_ps_store","explore_plugin_full")}},
         {"network","Network","qgl/icontex","7n",{
             item("manual","Online Instruction Manuals","tex_onlinemanual","explore_category_network"),
             item("remote","Remote Play","tex_premo","explore_category_network"),
             item("browser","Internet Browser","tex_browser","explore_category_network"),
             item("search","Internet Search","tex_kensaku","explore_category_network"),
             item("downloads","Download Management","tex_dl_manage","explore_category_network",Action::SteamDownloads)}},
-        {"psn","PlayStation Network","xmb_plugin_normal","tex_psn", /* 128x128; explore_plugin_full holds a 46x46 copy */{item("signin","Sign In","tex_Sign_In"),item("trophy","Trophy Collection","item_tex_trophy"),item("store","PlayStation Store","item_tex_ps_store")}},
+        {"psn","PlayStation Network","xmb_plugin_normal","tex_psn", /* 128x128; explore_plugin_full holds a 46x46 copy */{item("signin","Sign In","tex_Sign_In"),item("trophy","Trophy Collection","item_tex_trophy"),item("store","PlayStation Store","item_tex_ps_store","explore_plugin_full")}},
         {"friends","Friends","qgl/icontex","8n",{
             // category_friend.xml: items, icons and titles are the firmware's (explore_category_friend); PSN-backed
             // features answer with the firmware's own empty-state messages.
@@ -1060,6 +1256,17 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     // The Network column's rows come from the firmware's own category_network.xml (the proof of the
     // XMBML-driven column mechanism); it keeps the list above when the definition cannot be read.
     resolveNetworkColumn();
+    // The three media columns are the same mechanism (category_video|music|photo.xml): the console's own rows
+    // in its own order, then this build's native rows marked as such. See resolveMediaColumns().
+    resolveMediaColumns();
+    // The Game column's row art, as one line per row: the texture each row binds and the container it is read
+    // from. Five of the seven rows changed binding this pass (category_game.xml's icon_rsc), so the log is the
+    // record a scripted run greps instead of reading pixels (FIDELITY-SURFACES 3.1b).
+    for(const auto& category:categories_)if(category.id==QStringLiteral("game")) {
+        QStringList bound;
+        for(const auto& entry:category.entries)bound<<entry.id+QStringLiteral("=")+entry.container+QLatin1Char(':')+entry.texture;
+        qInfo().noquote()<<"xmbml: game column row art ("<<bound.size()<<" rows)"<<bound.join(QStringLiteral(" "));
+    }
     // The Settings column is the firmware's own definition (Phase 11.1, audit/SETTINGS-FIRMWARE.md
     // 1.1-1.2): category_sysconf.xml's root view names #seg_fixed_items, whose 18 tables give the
     // column's rows in document order. The 16 rows a retail console shows keep that order, with the
@@ -1103,6 +1310,9 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         for(auto& entry:category.entries)entry.themeIcon=themeEntryIcons.value(category.id+"/"+entry.id);
     }
     selections_.fill(0,categories_.size());
+    // The tenth column (FIDELITY-ROOT-BAR C1/#5): built like every other category above, then dropped here when
+    // `appearance/tvColumn` is off, so the bar, the navigation clamps and the entry dump all follow categories_.
+    syncTvColumn();
     rebuildUsers();
     addInstalledApps();
     connect(&steamFriends_,&SteamFriends::loaded,this,[this](const SteamFriendList& friends,const QString& error){
@@ -1184,7 +1394,10 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     connect(&profiles_,&Profiles::changed,this,[this]{rebuildUsers();emit changed();});
     connect(&profiles_,&Profiles::failed,this,[this](const QString& error){showMessage(error,MessageKind::Page);emit changed();});
     player_->setAudioOutput(audio_.get());player_->setVideoSink(video_.get());
-    connect(&preferences_,&Preferences::failed,this,[this](const QString& error){showMessage(error,MessageKind::Page);emit changed();});
+    connect(&preferences_,&Preferences::failed,this,[this](const QString& error){
+        // The store reports its reason on this signal and only keeps it in error() for the read/format cases,
+        // so the chain records the latest one: a refused value ("The setting value is invalid.") arrives here.
+        lastPreferencesError_=error;showMessage(error,MessageKind::Page);emit changed();});
     connect(&preferences_,&Preferences::changed,this,[this]{applyPreferences();emit changed();});
     // The store's documented profile switch (preferences.h). Re-applying the settings here is what makes
     // a user switch a session change rather than an activeId rewrite (BEHAVIOUR-GAP-AUDIT D16): the
@@ -1198,6 +1411,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         const bool refreshed=directoryRefresh_;directoryRefresh_=false;
         if(request!=scanRequest_ || pages_.isEmpty())return;
         loading_=false;scanRequest_=0;
+        qInfo().noquote()<<QStringLiteral("busy: page_busy released (list scan landed) rows=%1 page=\"%2\"")
+            .arg(files.size()).arg(QDir::toNativeSeparators(path));
         auto& page=pages_.last();
         const QString previous=page.entries.isEmpty()?QString{}:page.entries[page.selection].id;
         page.directory=path;page.entries.clear();page.selection=0;
@@ -1205,7 +1420,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         for(const auto& file:files) {
             page.entries.push_back(item(file.path,file.title,file.isDirectory?"item_tex_plain_folder":kind=="photo"?"photo_tex_album_pic":kind=="music"?"music_tex_album_pic":"video_tex_album_default","explore_plugin_full",file.isDirectory?Action::Folder:Action::File,file.path));
             auto& entry=page.entries.last();
-            entry.detail=file.isDirectory?QString{}:QString::number(file.size/1024)+" KB  Â·  "+file.modified.toString("yyyy/MM/dd");
+            entry.detail=file.isDirectory?QString{}:QString::number(file.size/1024)+QStringLiteral(" KB  ")+QChar(0x00B7)+QStringLiteral("  ")+file.modified.toString("yyyy/MM/dd");
             if(entry.id==previous)page.selection=int(page.entries.size())-1;
         }
         // An open page with no rows is the firmware's inline empty state: the line sits in the list's own
@@ -1442,7 +1657,13 @@ void Shell::horizontal(int delta) {
         return;
     }
     if(!pages_.isEmpty())return;
-    library_.cancel();scanRequest_=0;loading_=false;status_.clear();
+    // A busy console does not treat Left/Right as a cancel (FIDELITY-BEHAVIOUR N11: the earlier build
+    // cancelled the scan here and cleared the status line, an escape the console does not document). The
+    // scan keeps running and the page lands; Circle is still the way off the page.
+    if(busy()) {
+        qInfo().noquote()<<"busy: navigation refused (Left/Right at the root) while a list loads";
+        return;
+    }
     const int previous=category_;category_=std::clamp(category_+delta,0,int(categories_.size())-1);
     if(previous!=category_ && categories_[category_].id=="friends" && SteamOwned::hasApiKey()
        && (!friendsAge_.isValid() || friendsAge_.elapsed()>30000))refreshSteamFriends();
@@ -1461,7 +1682,11 @@ void Shell::vertical(int delta) {
         if(photoOpen())qInfo().noquote()<<"photo: Up/Down are the viewer's pan cursor; nothing to pan (no rotation)";
         return;
     }
-    if(!message_.isEmpty() || loading_)return;
+    if(!message_.isEmpty() || busy()) {
+        // The busy state blocks list actions (DIALOGS-FIRMWARE 2.8; FIDELITY-BEHAVIOUR N10).
+        if(busy() && message_.isEmpty())qInfo().noquote()<<"busy: navigation refused (Up/Down) while a list loads";
+        return;
+    }
     const int previous=selection();currentSelection()=std::clamp(selection()+delta,0,std::max(0,int(entries().size())-1));
     if(previous!=selection()){columnSink_=0;interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();}
     else if(delta>0 && !entries().isEmpty()){++columnSink_;emit changed();}
@@ -1487,47 +1712,51 @@ void Shell::activate() {
             <<"commit="<<(commit?1:0);
         clearMessage();
         if(commit && accepted)accepted();
+        else if(steamPrompt_)steamSwitchCancel(QStringLiteral("No on the prompt"));
+        else if(settingsWrite_.stage==WriteStage::Ask)cancelSettingWrite(QStringLiteral("No on the ask page"));
         emit changed();
         return;
     }
-    if(!message_.isEmpty()){interactionAudio_.play(InteractionAudio::Cue::Accept);clearMessage();emit changed();return;}
+    if(!message_.isEmpty()){interactionAudio_.play(InteractionAudio::Cue::Accept);clearMessage();
+        // Cross on a result page returns to the row list (the console's *_finish page does the same): the band
+        // the write came from is popped here, and the parent page's focused row re-reads its value.
+        if(settingsWrite_.stage==WriteStage::FinishOk || settingsWrite_.stage==WriteStage::FinishFailed)finishSettingWrite();
+        emit changed();return;}
     if(mediaOpen_){togglePlayback();return;}
-    if(entries().isEmpty() || loading_)return;
+    if(entries().isEmpty() || busy()) {
+        if(busy())qInfo().noquote()<<"busy: action refused (Cross) while a list loads";
+        return;
+    }
     const auto entry=entries()[selection()];
     // Committing a value is the firmware's module-action path: snd_system_ok when the action completes
     // (explore_plugin.prx FUN_00030954 / FUN_00062e6c). SetSetting is silent here and plays Cue::Accept
     // after its write below (audit/INTERACTION-AUDIO.md section 10).
-    if(entry.action!=Action::SetSetting)
+        if(entry.action!=Action::SetSetting)
         interactionAudio_.play(entry.action==Action::Unavailable?InteractionAudio::Cue::Error:
             entry.action==Action::SettingChoices?InteractionAudio::Cue::Options:InteractionAudio::Cue::Confirm);
-    switch(entry.action) {
+        switch(entry.action) {
     case Action::SettingsPage:openSettings(entry.value);break;
     case Action::SettingChoices:openChoices(entry.setting,entry.title);break;
     case Action::SetSetting:
+        // The two file pickers that live inside the Theme and Background lists (`Install` and `Select
+        // Wallpaper`): their items carry a sentinel value no bounded Preferences key accepts, so Cross asks the
+        // view for the file dialog instead of starting a write. The rows are ordinary SetSetting rows of a
+        // choice band, so nothing about the band's own class changes.
+        if(entry.option.toString()==QLatin1String(kThemePickerValue)) {
+            qInfo().noquote()<<"settings: theme picker row -> .p3t file dialog (Install, appearance/theme band)";
+            emit requestTheme();break;
+        }
+        if(entry.option.toString()==QLatin1String(kWallpaperPickerValue)) {
+            qInfo().noquote()<<"settings: wallpaper picker row -> image file dialog (Select Wallpaper, appearance/background band)";
+            emit requestWallpaper();break;
+        }
+        // A picker row writes nothing yet, so it has no chain: a Background row that needs a file asks the
+        // view for one (the file dialog's result comes back through chooseWallpaper()).
         if(entry.setting=="appearance/background" && entry.option.toInt()==2 && wallpaper().isEmpty() && theme_.background.isNull()){emit requestWallpaper();break;}
-        if(entry.setting=="appearance/theme" && entry.option.toString().isEmpty() && backgroundMode()==2 && wallpaper().isEmpty()) {
-            // Back to the system's theme with no wallpaper of the user's own: the original background returns.
-            if(preferences_.setValues({{"appearance/theme",QString{}},{"appearance/background",0}})) {
-                interactionAudio_.play(InteractionAudio::Cue::Accept);
-                if(!pages_.isEmpty())pages_.removeLast();
-            } else interactionAudio_.play(InteractionAudio::Cue::Error);
-            break;
-        }
-        if(entry.setting.startsWith("host/")) { // the computer's own settings, written straight to the host
-            // Volume and mute go to the default endpoint through Core Audio (the media keys' own path); the
-            // Accessory page's four rows go through the host layer's documented SystemParametersInfo pair.
-            // Every one of them is reversible from the same list and needs no elevation.
-            const bool ok=entry.setting=="host/volume"?host::setMasterVolume(entry.option.toInt()):
-                entry.setting=="host/muted"?host::setMasterMuted(entry.option.toBool()):
-                host::setHostChoice(entry.setting,entry.option.toInt());
-            if(!ok){interactionAudio_.play(InteractionAudio::Cue::Error);showMessage("The system setting could not be changed.",MessageKind::Page);}
-            else {interactionAudio_.play(InteractionAudio::Cue::Accept);if(!pages_.isEmpty())pages_.removeLast();}
-            break;
-        }
-        if(preferences_.setValue(entry.setting,entry.option)) {
-            interactionAudio_.play(InteractionAudio::Cue::Accept);
-            if(!pages_.isEmpty())pages_.removeLast();
-        } else interactionAudio_.play(InteractionAudio::Cue::Error); // rejected write: guess
+        // Every other write now runs the console's chain (ask -> [proceed] -> finish) instead of committing
+        // and popping in one frame (FIDELITY-BEHAVIOUR I77). beginSettingWrite() decides the stages per row
+        // class and names the evidence for each.
+        beginSettingWrite(entry);
         break;
     case Action::EditName:emit requestSystemName(preferences_.value("system/name").toString());break;
     case Action::CreateUser:emit requestNewUser();break;
@@ -1558,7 +1787,7 @@ void Shell::activate() {
         // called again because selecting the already-active user emits nothing.
         ++mediaRequest_;++photoRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;
         mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};photoRotation_=0;player_->stop();player_->setSource(QUrl{});
-        resumePath_.clear();resumePending_=0;loading_=false;status_.clear();
+        resumePath_.clear();resumePending_=0;mediaDisplayPinned_=false;loading_=false;status_.clear();
         pages_.clear();resetOptions();clearMessage();
         applyPreferences();
         rebuildUsers();
@@ -1586,6 +1815,17 @@ void Shell::activate() {
         // reads the payload, not the text).
         const host::Label label=[this](const QString& id,const QString& fallback){return assets_.text("sysconf_plugin",id,fallback);};
         QString body;
+        // The console answers the two network rows with the firmware's own D4 message page, not a report:
+        // page-network-connection-settings.png carries the heading msg_internet_connect_test and the body
+        // "Please wait..." on the page class's rule pair, while this build drew the D5 info page there
+        // (FIDELITY-SURFACES 14.5). The live report stays reachable from the status-list row, which is the
+        // row the console shows it on (
+        // [TRACED: the page class, both strings, the two row ids. FIT: none.]
+        if(entry.value=="host:network" && (entry.id=="net_internet_setting" || entry.id=="net_internet_test")) {
+            showMessage(assets_.text("sysconf_plugin","msg_internet_connect_test","Internet Connection Test"),
+                        assets_.text("sysconf_plugin","msg_wait","Please wait..."),MessageKind::Page);
+            break;
+        }
         if(entry.value=="host:network")body=host::networkStatus(label);
         else if(entry.value=="host:display")body=host::displayOutput();
         else if(entry.value=="host:audio")body=host::audioOutput();
@@ -1699,14 +1939,17 @@ void Shell::activate() {
             :QObject::tr("This feature is not available in the native recreation yet."),MessageKind::Page);
         break;
     case Action::ResetPreferences:
-        // A real, confirm-gated write: the box names what is reset (this profile's settings, nothing else),
-        // the default answer is No, and the reset runs only after Yes. The console's own row is a confirm
-        // chain too (SETTINGS 4.2: page_console_setting_init_top -> proceed -> finish).
-        showConfirm(entry.title,
-            QObject::tr("Restore every XMB setting on this system to its default? "
-                        "Libraries, the system name, the users and the time zone are kept."),
-            [this]{restoreDefaultSettings();});
+        // The console's own chain for this row (SETTINGS 4.2: page_console_setting_init_top -> proceed ->
+        // finish), with the strings that chain uses: msg_setting_init_ask1/ask2, msg_initializing and
+        // msg_initialized/msg_error_init. It was a native-worded box before; the write itself is unchanged
+        // (restoreDefaultSettings in settings_menu.cpp, one atomic multi-key call, app state only).
+        beginResetWrite();
         break;
+    case Action::SteamAccounts:openSteamAccounts();break;
+    case Action::SteamAccountSwitch:steamAccountSelected(entry.value);break;
+    // A letter folder of a page the item menu's Group Content rebuilt: it opens that key's rows as an ordinary
+    // page, so Circle returns to the letter list and the item menu's All puts the page back together.
+    case Action::GroupFolder:openGroupFolder(entry);break;
     }
     emit changed();
 }
@@ -1715,13 +1958,19 @@ void Shell::activate() {
 // XMB and flashes the controller indicator; a hold opens a black system menu with Turn Off the System and
 // Turn Off the Controller (and Quit Game while a title runs). A power action asks once before doing it.
 void Shell::psTapped() {
+    touch();
     if(psMenu_) { psMenuClose(); return; }
+    // A PS tap pulls the user away from whatever surface was up, so a settings write waiting on its ask page
+    // is abandoned rather than left half-asked: the value is not written and the store is untouched.
+    if(settingsWrite_.stage==WriteStage::Ask)cancelSettingWrite(QStringLiteral("PS tap"));
+    if(steamPrompt_)steamSwitchCancel(QStringLiteral("PS tap"));
     // Bring the XMB back over whatever the user was doing; the indicator itself is drawn by the view.
     clearMessage();status_.clear();
     emit psTapIndicator();
     emit changed();
 }
 void Shell::psHeld() {
+    touch();
     if(psMenu_)return;
     psMenu_=true;psConfirmOff_=false;psSelection_=0;
     qInfo().noquote()<<"shell: PS menu opened";
@@ -1734,6 +1983,7 @@ QStringList Shell::psMenuItems() const {
     return items;
 }
 void Shell::psMenuMove(int delta) {
+    touch();
     if(!psMenu_ || delta==0)return;
     if(psConfirmOff_){psSelection_=0;emit changed();return;}
     const int count=psMenuItems().size();
@@ -1742,6 +1992,7 @@ void Shell::psMenuMove(int delta) {
     emit changed();
 }
 void Shell::psMenuActivate() {
+    touch();
     if(!psMenu_)return;
     if(psConfirmOff_){ emit requestQuit(); return; }
     const auto items=psMenuItems();
@@ -1775,6 +2026,7 @@ void Shell::psMenuActivate() {
     emit changed();
 }
 void Shell::psMenuClose() {
+    touch();
     if(!psMenu_ && !psConfirmOff_)return;
     psMenu_=false;psConfirmOff_=false;
     emit changed();
@@ -1839,6 +2091,35 @@ bool Shell::optionIsLocalContent(const Entry& entry) const {
 bool Shell::optionPageSortable() const {
     return !pages_.isEmpty() && !pages_.last().directory.isEmpty() && entries().size()>1;
 }
+// True on the row class the captured Game-column menu belongs to: a title that runs (installed, imported or
+// Steam). The settled frame is that menu, and it is the only class whose full five-row shape is measured
+// (frames/menu-options-open.png: Sort By / Group Content at ink 301-323 / 341-362, then Start / Delete /
+// Information at 539-638), so only this class is rebuilt to it. The media and Continue Watching menus keep
+// their measured row sets (F3/H2): no frame covers them with this item-menu source.
+static bool isGameTitleRow(const Entry& entry) {
+    return entry.action==Action::Launch || entry.action==Action::LaunchSteam || entry.action==Action::LaunchApp;
+}
+bool Shell::optionGroupable() const {
+    // Group Content needs a list of titled rows and nothing else: this build groups by first letter, which every
+    // ordinary list can do. A form (the sign-in page), a provider page (Steam store, Jellyfin, downloads) and a
+    // Continue Watching page are not lists this build will reorder, so the row stays out there rather than
+    // appearing over rows it cannot name. A page that is already grouped is still groupable (All / re-group).
+    if(pages_.isEmpty() || entries().size()<2)return false;
+    const auto& page=pages_.last();
+    if(page.signIn || page.downloads || page.jellyfin || page.jellyfinViews || page.jellyfinSearch
+       || page.steamAccounts || page.continuePage)return false;
+    for(const auto& entry:entries())if(entry.title.trimmed().isEmpty())return false;
+    return true;
+}
+QString Shell::groupLetter(const QString& title) {
+    // The group key of one row: its first letter, upper-cased; anything that is not a letter or a digit goes to
+    // "#" so no row is lost and no group is invented. QString::toUpper() is used rather than a locale table so
+    // the same title always lands in the same folder.
+    const QString trimmed=title.trimmed();
+    if(trimmed.isEmpty())return QStringLiteral("#");
+    const QChar first=trimmed.at(0).toUpper();
+    return first.isLetterOrNumber()?QString(first):QStringLiteral("#");
+}
 QString Shell::entryKind(const Entry& entry) const {
     // A Continue Watching row is always a remembered playable file, so the kind comes from the column it
     // is listed in rather than from the action (which is Unavailable on a stale row, and that is already
@@ -1871,6 +2152,35 @@ void Shell::buildOptions() {
     resetOptions();
     if(entries().isEmpty())return;
     const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
+    // ---- The Game-row class: the firmware's five rows, in its two groups -------------------------------
+    // The settled 4.93 frame (frames/menu-options-open.png, re-measured this pass) is this menu: Sort By and
+    // Group Content at ink 301-323 / 341-362 with a right-pointing chevron at x 1573..1583 on both and the
+    // small purple square after Group Content at x 1517..1529 y 345..358, then a gap, then Start, Delete and
+    // Information at 539-560 / 581-598 / 621-638. The previous build offered two rows here (Start,
+    // Information), no utility group and no break (FIDELITY-SURFACES 6.3/6.4: 2 rows against 5).
+    // Only this class is rebuilt: the media and Continue Watching menus keep their measured row sets.
+    if(isGameTitleRow(entry)) {
+        addOption({"msg_sort","Sort By"},OptionCommand::SortMenu,"game-row-list");
+        options_.last().submenu=true;
+        // Group Content opens the level the frame's own submenu shows (frames/menu-submenu-group-content.png:
+        // By Format / By Album / All for that console's list). This build groups by first letter, so its level
+        // offers By Title and All; the row still carries the frame's chevron and its gate badge.
+        if(optionGroupable()) {
+            addOption({"msg_folder_class","Group Content"},OptionCommand::GroupMenu,"game-row-list");
+            options_.last().submenu=true;options_.last().gateBadge=true;
+        }
+        const int actionGroup=options_.size();
+        addOption({"msg_game_start","Start"},OptionCommand::Activate,"game-title");
+        // Delete is the firmware's always-present row (A4 row 4). This build has no delete backend for a title:
+        // a Steam title's files belong to the client and an imported one to the emulator's install folder, so
+        // the row is listed and cannot be chosen and its note says exactly that (the panel's disabled-row rule).
+        addOption({"msg_del","Delete"},OptionCommand::Delete,"game-title",false,
+                  tr("This native build does not delete a title's files; Steam and the emulator's install "
+                     "folder own them."));
+        addOption({"msg_info","Information"},OptionCommand::Information,"always-last");
+        if(actionGroup>0 && actionGroup<int(options_.size()))options_[actionGroup].dividerBefore=true;
+        return;
+    }
     const qint64 resumeAt=entry.action==Action::Unavailable?0:optionResumePoint(entry);
     // Two groups, in the order the settled firmware frame shows them (ITEM-MENU-INFO-FIRMWARE G2: Sort By
     // and Group Content at ink 301-323 / 341-362, then Start, Delete, Information at 539-560 / 581-598 /
@@ -1940,6 +2250,18 @@ void Shell::logOptions(const Entry& entry) {
     // this build has no optical drive. The check is that the table resolves the firmware's own words.
     qInfo().noquote()<<"shell: options eject labels msg_eject="<<optionLabel({"msg_eject","Remove"})
         <<"msg_disc_eject="<<optionLabel({"msg_disc_eject","Remove Disc"});
+    // What each row asks the view to draw beside it (FIDELITY-SURFACES 6.5/6.6): a submenu chevron and the
+    // gate badge. Empty on every row that carries neither, so a media-row menu prints an empty tail.
+    {
+        QStringList submenu,gate;
+        for(int i=0;i<options_.size();++i) {
+            if(options_[i].submenu)submenu<<options_[i].title;
+            if(options_[i].gateBadge)gate<<options_[i].title;
+        }
+        qInfo().noquote()<<"shell: options flags entry="<<entry.id
+            <<"submenu="<<(submenu.isEmpty()?QStringLiteral("(none)"):submenu.join('|'))
+            <<"gateBadge="<<(gate.isEmpty()?QStringLiteral("(none)"):gate.join('|'));
+    }
     if(!qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES"))return;
     // Every label the audit's map names (A3), resolved whether or not this build has a row for it: a key with
     // no row still proves what the firmware string says and keeps the omission checkable.
@@ -1967,7 +2289,8 @@ void Shell::logOptions(const Entry& entry) {
     QJsonArray rows,labels,groupsJson;
     for(const auto& option:options_) {
         QJsonObject row{{"title",option.title},{"command",int(option.command)},{"enabled",option.enabled},
-                        {"condition",option.condition},{"dividerBefore",option.dividerBefore}};
+                        {"condition",option.condition},{"dividerBefore",option.dividerBefore},
+                        {"submenu",option.submenu},{"gateBadge",option.gateBadge}};
         if(!option.labelKey.isEmpty())row.insert("key",option.labelKey);
         if(!option.note.isEmpty())row.insert("note",option.note);
         rows.push_back(row);
@@ -2004,7 +2327,7 @@ void Shell::logOptions(const Entry& entry) {
 void Shell::toggleOptions() {
     touch();
     if(optionsOpen_){dismissOptions();return;}
-    if(!message_.isEmpty() || psMenu_ || loading_)return;
+    if(!message_.isEmpty() || psMenu_ || busy())return;
     // The sign-in page is a form, not a content list: its five rows have no item-level options, and a panel
     // offering "Start"/"Information" over a password field is exactly the kind of noise a credential page
     // should not have. Triangle therefore does nothing there.
@@ -2046,6 +2369,7 @@ void Shell::toggleOptions() {
     emit changed();
 }
 void Shell::optionsMove(int delta) {
+    touch();
     if(!optionsOpen_ || options_.isEmpty() || delta==0)return;
     const int count=options_.size();
     // The item menu clamps at its ends: the firmware's Down x4 stops on Information and does not wrap or
@@ -2061,6 +2385,7 @@ void Shell::optionsMove(int delta) {
     emit changed();
 }
 void Shell::optionsActivate() {
+    touch();
     if(!optionsOpen_ || options_.isEmpty())return;
     const int index=std::clamp(optionsSelection_,0,int(options_.size())-1);
     const auto option=options_[index];
@@ -2115,11 +2440,27 @@ void Shell::optionsActivate() {
                   OptionCommand::SortUpdatedAscending,"sort-row");
         addOption({"msg_updated_date_r",QStringLiteral("Update Date ")+QChar(0x25BC)},
                   OptionCommand::SortUpdatedDescending,"sort-row");
+        // The Game-row class opens this level too (the frame's first utility row), and a title list has no file
+        // to read a date from: the rows are then listed and cannot be chosen, with the reason on the row, rather
+        // than offered as a sort that would reorder nothing. A local folder page keeps them enabled.
+        {
+            bool anyDate=false;
+            if(!pages_.isEmpty())for(const auto& row:pages_.last().entries) {
+                if(row.value.isEmpty())continue;
+                const QFileInfo info(row.value);
+                if(info.exists() && (info.birthTime().isValid() || info.lastModified().isValid())){anyDate=true;break;}
+            }
+            if(!anyDate)for(auto& row:options_) {
+                row.enabled=false;
+                row.note=tr("No row on this page carries a file date, so there is nothing for a date sort to order.");
+            }
+        }
         optionsSelection_=0;
         interactionAudio_.play(InteractionAudio::Cue::Options);
         qInfo().noquote()<<"shell: options sort menu opened rows="<<options_.size()
             <<"labels=creation/update date pairs groups=1 parentGroups="<<parentGroups
             <<"heading=fit(unmeasured)"
+            <<"enabled="<<(options_.isEmpty()?0:(options_.first().enabled?1:0))
             <<"unsupported=msg_importeddate_f/_r(no import record),msg_sale_year_f/_r(no per-row year),"
               "msg_shootdate_f/_r(no EXIF date),msg_trophy_earned_f/_r(no trophy data)";
         // The machine-readable half of the same record: the rows this build offers, and the four firmware
@@ -2158,6 +2499,23 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     }
+    // Group Content, the frame's second utility row (frames/menu-submenu-group-content.png shows the level it
+    // opens: a list of `By ...` keys with All last, focused on the current choice). The level's own rows are
+    // built by buildGroupContentMenu(); choosing one rebuilds the page, and Circle steps back to the item list
+    // exactly like Sort By.
+    case OptionCommand::GroupMenu: {
+        buildGroupContentMenu();
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        emit changed();
+        break;
+    }
+    case OptionCommand::GroupByTitle:
+    case OptionCommand::GroupAll:
+        resetOptions();
+        groupPageBy(option.command);
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        emit changed();
+        break;
     // Forget this row's remembered position and rebuild the page it was listed on. Removing is a
     // destructive change to this build's own state, so it asks first with the firmware's two-button box:
     // buttons msg_ok/msg_cancel on Cross/Circle, snd_decide only when Cross accepts (TRACED 0x00341870).
@@ -2213,6 +2571,7 @@ void Shell::optionsActivate() {
     }
 }
 void Shell::optionsClose() {
+    touch();
     if(!optionsOpen_)return;
     if(optionsNested_) { // Circle steps back to the item list; the menu stays open
         // optionsParent_ is the same row vector that was on screen, so its `dividerBefore` flag survives the
@@ -2558,8 +2917,103 @@ void Shell::showEntryInformation(const Entry& entry) {
     showMessage(entry.title,rows.join('\n'),MessageKind::Info);
     qInfo().noquote()<<"shell: options information title="<<entry.title<<"rows="<<rows.size();
 }
-void Shell::sortPageByDate(bool ascending,bool created) {
+QStringList Shell::optionsStructure() const {
+    // The panel's own shape as data, in build order: a row's title plus the flags it carries, so a scripted run
+    // can assert the two groups and the two chevron/badge rows without reading the drawing code.
+    QStringList lines;
+    for(const auto& option:options_) {
+        QString flags;
+        if(option.dividerBefore)flags+=QLatin1Char('B');   // the group break starts on this row
+        if(option.submenu)flags+=QLatin1Char('>');
+        if(option.gateBadge)flags+=QLatin1Char('G');
+        if(!option.enabled)flags+=QLatin1Char('X');
+        lines<<option.title+(flags.isEmpty()?QString():QStringLiteral("[")+flags+QLatin1Char(']'));
+    }
+    return lines;
+}
+void Shell::buildGroupContentMenu() {
+    // The frame's level (frames/menu-submenu-group-content.png) lists the group keys with All last and focuses
+    // the current choice. The keys a list can offer depend on the list: that console's game list offered By
+    // Format and By Album because its rows carry a media format. This build's rows carry a title and nothing
+    // else, so the one key it can compute is the first letter - and All, which makes the grouping reversible.
+    // The seven other keys the firmware's table carries (msg_album_folder, msg_artist_folder, msg_genre_folder,
+    // msg_format_folder, msg_month_folder, msg_year_folder, msg_track_folder, msg_sale_year_folder) would group
+    // nothing here, so they are not listed: a label that groups nothing is worse than its absence (F3/H3).
+    int parentGroups=options_.isEmpty()?0:1;
+    for(const auto& row:options_)if(row.dividerBefore)++parentGroups;
+    optionsParent_=options_;optionsNested_=true;optionsTitle_=optionLabel({"msg_folder_class","Group Content"});
+    options_.clear();
+    const bool grouped=!pages_.isEmpty()&&pages_.last().grouped;
+    addOption({"msg_title_folder","By Title"},OptionCommand::GroupByTitle,"group-title");
+    options_.last().active=grouped;
+    addOption({"msg_all","All"},OptionCommand::GroupAll,"group-all");
+    options_.last().active=!grouped;
+    optionsSelection_=grouped?0:1;
+    interactionAudio_.play(InteractionAudio::Cue::Options);
+    QStringList titles;for(const auto& row:options_)titles<<row.title;
+    qInfo().noquote()<<"shell: options group menu opened rows="<<options_.size()
+        <<"labels="<<titles.join('|')<<"groups=1 parentGroups="<<parentGroups
+        <<"current="<<(grouped?QStringLiteral("by-title"):QStringLiteral("all"))
+        <<"unlisted=msg_album_folder,msg_artist_folder,msg_genre_folder,msg_format_folder,msg_month_folder,"
+          "msg_year_folder,msg_track_folder,msg_sale_year_folder(no row on these pages carries the key)";
+    if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
+        QJsonArray rows;
+        for(const auto& row:options_)rows.push_back(QJsonObject{{"title",row.title},{"key",row.labelKey},
+            {"command",int(row.command)},{"active",row.active}});
+        QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".group.json");
+        if(file.open(QIODevice::WriteOnly))
+            file.write(QJsonDocument(QJsonObject{{"page",pages_.isEmpty()?QString{}:pages_.last().title},
+                {"rows",rows},{"grouped",grouped},
+                {"unlisted","msg_album_folder,msg_artist_folder,msg_genre_folder,msg_format_folder,"
+                            "msg_month_folder,msg_year_folder,msg_track_folder,msg_sale_year_folder"}}).toJson());
+    }
+}
+void Shell::groupPageBy(OptionCommand command) {
     if(pages_.isEmpty())return;
+    auto& page=pages_.last();
+    if(command==OptionCommand::GroupAll) {
+        if(!page.grouped)return;
+        const int count=page.groupedSource.size();
+        page.entries=page.groupedSource;page.groupedSource.clear();page.grouped=false;
+        page.selection=0;
+        qInfo().noquote()<<QStringLiteral("shell: group content restored page=\"%1\" rows=%2")
+            .arg(page.title).arg(count);
+        return;
+    }
+    // By Title. The ungrouped rows are kept on the page, so All puts them back without a rescan and a group
+    // folder can be opened from them. The folders are ordinary rows of the page, so the cursor, the label
+    // column, the value column and the information page all work without a second row class.
+    if(!page.grouped)page.groupedSource=page.entries;
+    QMap<QString,QVector<Entry>> groups;
+    for(const auto& row:page.groupedSource)groups[groupLetter(row.title)].push_back(row);
+    page.entries.clear();
+    for(auto it=groups.cbegin();it!=groups.cend();++it) {
+        auto folder=item(QStringLiteral("group:")+it.key(),it.key(),QStringLiteral("item_tex_plain_folder"),
+            QStringLiteral("explore_plugin_full"),Action::GroupFolder,it.key());
+        folder.detail=QObject::tr("%1 item(s)").arg(it.value().size());
+        folder.source=QStringLiteral("native");
+        page.entries.push_back(std::move(folder));
+    }
+    page.grouped=true;page.selection=0;
+    qInfo().noquote()<<QStringLiteral("shell: group content by title page=\"%1\" rows=%2 groups=%3 keys=%4")
+        .arg(page.title).arg(page.groupedSource.size()).arg(page.entries.size())
+        .arg([&groups]{QStringList keys;for(auto it=groups.cbegin();it!=groups.cend();++it)keys<<it.key();
+            return keys.join(QChar(','));}());
+}
+void Shell::openGroupFolder(const Entry& entry) {
+    // A group folder is a page of the rows that share one key: the same entries, in the same order, so a row's
+    // action, value and information page are unchanged. Circle returns to the letter list, whose All puts the
+    // page back together.
+    if(pages_.isEmpty() || !pages_.last().grouped)return;
+    Page page;page.title=entry.value;
+    for(const auto& row:pages_.last().groupedSource)
+        if(groupLetter(row.title)==entry.value)page.entries.push_back(row);
+    if(page.entries.isEmpty())return;
+    pages_.push_back(std::move(page));
+    qInfo().noquote()<<QStringLiteral("shell: group folder opened key=%1 rows=%2")
+        .arg(entry.value).arg(int(pages_.last().entries.size()));
+}
+void Shell::sortPageByDate(bool ascending,bool created) {
     auto& page=pages_.last();
     if(page.entries.size()<2)return;
     const QString selected=page.entries.value(page.selection).id;
@@ -2584,6 +3038,13 @@ void Shell::sortPageByDate(bool ascending,bool created) {
 }
 void Shell::back() {
     touch();
+    // The busy page blocks list actions (DIALOGS-FIRMWARE 2.8; FIDELITY-BEHAVIOUR N10), and Circle is a list
+    // action: the console has no way out of page_busy and neither does this. The one exception is kept below -
+    // a message page is dismissed first, so a result page is never trapped behind a busy flag.
+    if(busy_ && message_.isEmpty()) {
+        qInfo().noquote()<<"busy: navigation refused (Circle) while the busy page is up";
+        return;
+    }
     if(!message_.isEmpty() || mediaOpen_ || !pages_.isEmpty())interactionAudio_.play(InteractionAudio::Cue::Back);
     // Circle dismisses any surface; on a box it is the cancel button, so the accepted action is dropped
     // with the message (clearMessage forgets it). snd_cancel (Cue::Back) is the obvious cancel cue but is
@@ -2594,7 +3055,10 @@ void Shell::back() {
         if(dialogLog_ && messageKind_==MessageKind::Box)
             qInfo().noquote()<<"dialog: box cancel choice="
                 <<(messageBoxChoices_?(messageBoxChoice_==BoxChoice::Yes?"yes":"no"):"none");
+        if(settingsWrite_.stage==WriteStage::Ask)cancelSettingWrite(QStringLiteral("Circle on the ask page"));
+        if(steamPrompt_)steamSwitchCancel(QStringLiteral("Circle on the prompt"));
         clearMessage();
+        if(settingsWrite_.stage==WriteStage::FinishOk || settingsWrite_.stage==WriteStage::FinishFailed)finishSettingWrite();
     }
     else if(mediaOpen_){
         // Leaving playback remembers where it was, so reopening resumes there. Ten seconds in and
@@ -2604,7 +3068,7 @@ void Shell::back() {
         if(!worth && total>0 && total<=60000)worth=at>total/10 && at<total*9/10;
         if(!resumePath_.isEmpty() && worth)storeResumePosition(resumePath_,at,total,mediaTitle_);
         else clearResumePosition(resumePath_);
-        resumePath_.clear();resumePending_=0;
+        resumePath_.clear();resumePending_=0;mediaDisplayPinned_=false;
         ++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});
         // Nothing is playing, so no subtitle file or audio track is current. The per-file choice stays in
         // subtitleChoice_, which is what makes reopening the same file come back on the same track.
@@ -2625,8 +3089,12 @@ void Shell::openDirectory(const QString& path) {
     Page page;page.title=QFileInfo(path).fileName();page.directory=path;
     const QString kind=categories_[category_].id;
     pages_.push_back(std::move(page));
-    loading_=true;status_="Reading media folderâ€¦";
+    loading_=true;status_=QObject::tr("Reading media folder...");
     scanRequest_=library_.scan(path,kind=="photo"?MediaKind::Photo:kind=="music"?MediaKind::Music:MediaKind::Video);
+    // The busy page is a state, not a status line (FIDELITY-BEHAVIOUR N12/X5): from here until the scan's
+    // rows land, busy() is true, navigation is refused (N10/N11) and View draws page_busy.
+    qInfo().noquote()<<QStringLiteral("busy: page_busy raised (list scan) page=\"%1\" request=%2")
+        .arg(QDir::toNativeSeparators(path)).arg(scanRequest_);
 }
 void Shell::openFile(const Entry& entry) {
     jellyfinQueue_=false;
@@ -2826,6 +3294,231 @@ void Shell::openContinueWatching() {
     Page page;page.title=title;page.entries=std::move(rows);page.continuePage=true;
     pages_.push_back(std::move(page));
 }
+// --- The settings write chain ----------------------------------------------------------------------
+// audit/SETTINGS-FIRMWARE.md section 4 names the console's three shapes for applying a setting: a result
+// page (page_*_finish), a full confirmation chain (page_*_top -> *_ask -> *_proceed -> *_finish), or nothing
+// at all (the value changes on the row and the list redraws). FIDELITY-BEHAVIOUR I77 records that this build
+// only ever did the third. The chain below is the second shape, run on the surfaces this app already draws -
+// the two-answer Box for the ask, the page_busy state for the proceed, the page message for the result - and
+// every sentence is read from sysconf_plugin (the settings plugin) where that plugin ships one. Which stages
+// a row gets is a per-class decision, and each class names its evidence:
+//
+//   host/* writes            ask + finish. sysconf_plugin ships the settings plugin's own accept-a-setting
+//                            page (msg_setting_ask_back_prev_setting, "Do you want to accept this setting?"),
+//                            its save result (msg_saved, "Save completed.") and its failure
+//                            (msg_error_setting, "The setting could not be completed."). A host write is the
+//                            one class that leaves this app and changes the computer, and the one whose
+//                            failure the user has to see.
+//   app-store writes         finish only. The console's value writes were measured to commit from the band
+//                            and redraw the row with no ask page: SETTINGS-FIRMWARE 4.3 ("the value changes on
+//                            the row and the list redraws ... this is what most of the 16 pages do"),
+//                            DIALOGS-FIRMWARE 3.6 ("a successful settings change has no dialog") and the
+//                            Color chip commit (SETTINGS-FIRMWARE 16.5 write-test: the band closes and the
+//                            page is back at depth 1). So they keep the one-step commit; the stage they gain
+//                            is the result page, in the plugin's own words - msg_saved, or
+//                            msg_set_datetime_completed ("Date and time set completed.") for the clock rows -
+//                            and msg_error_setting plus the store's own error when the write is refused.
+//   Restore Default Settings ask + proceed + finish. The console's own chain for this row is
+//                            page_console_setting_init_top|proceed|finish with msg_setting_init_ask1/ask2,
+//                            msg_initializing ("Restoring default settings...") and msg_initialized. It is
+//                            the one multi-key write here, so it is the one row that gets the proceed stage.
+//
+// Left direct, with the reason: media/repeatMode, media/shuffle and media/repeat are the player panel's own
+// cycling rows and the console changes them in place (MEDIA-PANELS-FIRMWARE 4, 11.4); photo/* is this
+// build's own page with no console row; display/fullscreen is a native window mode; and Action::SelectUser
+// stays a one-step session switch because that is the measured behaviour the audit scores as a match (U1:
+// "shell: user switched ... volume= 20 ... to ... volume= 80"). The display-awake hold and the display-off
+// request are host writes made from playback state and the idle timer, not from a row, so no row asks for
+// them (S1/S2, proved in that section instead).
+namespace {
+constexpr int kWriteProceedMinMs=900;   // the proceed page's minimum visible time (a fit: untimed in 4.93)
+// The first line of a firmware string: the console's ask-page body carries a second line ("If you do not
+// press any buttons, the system will automatically go back to the previous setting.") that this build has no
+// revert timer to honour, so promising it would be false. The dropped line is named in the log.
+QString firstLine(const QString& text) {
+    const int at=text.indexOf('\n');
+    return at<0?text:text.left(at);
+}
+}
+void Shell::beginSettingWrite(const Entry& entry) {
+    SettingsWrite write;
+    write.key=entry.setting;write.label=entry.title;write.value=entry.option;
+    write.valueText=entry.title;                       // the band row's own label is the chosen item
+    write.popBand=!pages_.isEmpty();                    // a band is open: the finish returns to the row list
+    write.host=entry.setting.startsWith(QLatin1String("host/"));
+    const auto sysconf=[this](const QString& key,const QString& fallback) {
+        return assets_.text("sysconf_plugin",key,fallback);
+    };
+    // The result page's two sentences, and the failure body, are the settings plugin's own.
+    write.okText=sysconf("msg_saved",QObject::tr("Save completed."));
+    write.failText=sysconf("msg_error_setting",QObject::tr("The setting could not be completed."));
+    if(write.key.startsWith(QLatin1String("clock/")))
+        write.okText=sysconf("msg_set_datetime_completed",QObject::tr("Date and time set completed."));
+    if(write.host) {
+        // Accept-a-setting: the settings plugin's own ask body. Its second line is dropped (no revert timer).
+        const QString ask=sysconf("msg_setting_ask_back_prev_setting",
+            QObject::tr("Do you want to accept this setting?\nIf you do not press any buttons, the system will automatically go back to the previous setting."));
+        write.askBody=firstLine(ask);
+        if(write.askBody.isEmpty())write.askBody=QObject::tr("Do you want to accept this setting?");
+    }
+    write.slow=false;
+    // Back to the system's theme with no wallpaper of the user's own: the original background returns, so
+    // the write is two keys and must stay atomic (the earlier single-frame path did the same).
+    write.themeToSystem=entry.setting=="appearance/theme" && entry.option.toString().isEmpty()
+        && backgroundMode()==2 && wallpaper().isEmpty();
+    settingsWrite_=write;
+    qInfo().noquote()<<QStringLiteral("settings: write stage=ask key=%1 row=\"%2\" value=\"%3\" ask=%4 "
+        "proceed=no finish=\"%5\"+\"msg_error_setting\" source=sysconf_plugin")
+        .arg(write.key,entry.title,write.valueText,
+             write.askBody.isEmpty()?QStringLiteral("none"):QStringLiteral("msg_setting_ask_back_prev_setting"),
+             write.okText);
+    if(!settingsWrite_.askBody.isEmpty()) {
+        settingsWrite_.stage=WriteStage::Ask;
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        showConfirm(QObject::tr("Settings"),settingsWrite_.askBody,[this]{startSettingsWritePage();});
+        emit changed();
+        return;
+    }
+    startSettingsWritePage();
+}
+void Shell::beginResetWrite() {
+    // page_console_setting_init_top -> proceed -> finish, with the strings that chain uses in sysconf_plugin:
+    // msg_setting_init_ask1 ("The settings below will be restored:"), msg_setting_init_ask2 ("Are you sure you
+    // want to restore settings?"), msg_initializing ("Restoring default settings...") and msg_initialized.
+    // The last sentence of msg_initialized ("Press the %e button to restart.") is dropped: this reset is the
+    // app's own store and needs no restart, so quoting it would instruct an action that does not exist.
+    const auto sysconf=[this](const QString& key,const QString& fallback) {
+        return assets_.text("sysconf_plugin",key,fallback);
+    };
+    SettingsWrite write;
+    write.key=QStringLiteral("settings/restoreDefaults");
+    write.label=QObject::tr("Restore Default Settings");
+    write.resetAll=true;write.slow=true;write.popBand=false;
+    const QString ask1=sysconf("msg_setting_init_ask1",QObject::tr("The settings below will be restored:"));
+    const QString ask2=sysconf("msg_setting_init_ask2",QObject::tr("Are you sure you want to restore settings?"));
+    write.askBody=ask1+QStringLiteral("\n")+QObject::tr("Appearance, clock, sound, power save and media playback settings.")
+        +QStringLiteral("\n\n")+ask2;
+    write.proceedText=firstLine(sysconf("msg_initializing",QObject::tr("Restoring default settings...\nDo not turn off the system.")));
+    write.okText=firstLine(sysconf("msg_initialized",QObject::tr("Restore completed.\nPress the %e button to restart.")));
+    write.failText=sysconf("msg_error_init",QObject::tr("An error occurred during the restore operation."));
+    write.stage=WriteStage::Ask;
+    settingsWrite_=write;
+    qInfo().noquote()<<QStringLiteral("settings: write stage=ask key=%1 ask=msg_setting_init_ask1+ask2 "
+        "proceed=msg_initializing finish=msg_initialized+msg_error_init source=sysconf_plugin")
+        .arg(write.key);
+    interactionAudio_.play(InteractionAudio::Cue::Confirm);
+    showConfirm(write.label,write.askBody,[this]{startSettingsWritePage();});
+    emit changed();
+}
+void Shell::startSettingsWritePage() {
+    if(settingsWrite_.key.isEmpty())return;
+    if(settingsWrite_.slow) {
+        // The console's *_proceed page: the busy page holds the screen while the write runs. This build's
+        // write is one store call, so the page is held for a minimum visible time (a fit: no local artifact
+        // times the console's proceed page) and the write itself runs when it expires.
+        settingsWrite_.stage=WriteStage::Proceed;
+        busy_=true;busyClock_.start();
+        status_=settingsWrite_.proceedText;
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        qInfo().noquote()<<QStringLiteral("settings: write stage=proceed key=%1 page=busy text=\"%2\"")
+            .arg(settingsWrite_.key,settingsWrite_.proceedText);
+        emit changed();
+        QTimer::singleShot(kWriteProceedMinMs,this,&Shell::runSettingWrite);
+        return;
+    }
+    runSettingWrite();
+}
+void Shell::runSettingWrite() {
+    if(settingsWrite_.key.isEmpty())return;
+    QString error;
+    bool ok=false;
+    if(settingsWrite_.resetAll) {
+        // Restore Default Settings keeps its one atomic write (settings_menu.cpp) and its own error string;
+        // this chain owns the pages around it. The write raises its own page, so the finish page below
+        // replaces it in the same turn and no frame shows the intermediate one.
+        restoreDefaultSettings();
+        ok=preferences_.error().isEmpty();
+        if(!ok)error=preferences_.error();
+    } else if(settingsWrite_.host) {
+        const QString key=settingsWrite_.key;
+        ok=key=="host/volume"?host::setMasterVolume(settingsWrite_.value.toInt())
+            :key=="host/muted"?host::setMasterMuted(settingsWrite_.value.toBool())
+            :host::setHostChoice(key,settingsWrite_.value.toInt());
+        if(ok) {
+            // The read-back is the write's own proof: the console's row shows the value it stored, so this
+            // one does not report success on a call that returned true and changed nothing.
+            if(key=="host/volume") {
+                const int read=host::masterVolume(),asked=settingsWrite_.value.toInt();
+                if(read>=0 && std::abs(read-asked)>1) {
+                    ok=false;
+                    error=QObject::tr("the endpoint still reads %1%").arg(read);
+                }
+            } else if(key=="host/muted") {
+                if(host::masterMuted()!=settingsWrite_.value.toBool()) {
+                    ok=false;
+                    error=QObject::tr("the endpoint still reads %1").arg(host::masterMuted()?QObject::tr("muted"):QObject::tr("unmuted"));
+                }
+            } else {
+                const int read=host::hostChoiceIndex(key);
+                if(read!=settingsWrite_.value.toInt()) {
+                    ok=false;
+                    error=QObject::tr("the computer still reports item %1 of the list (asked for %2)")
+                        .arg(read).arg(settingsWrite_.value.toInt());
+                }
+            }
+        } else {
+            // The host layer answers with a bool, so the observed value is the error: the write was refused
+            // and the computer still reports what it had. Naming that reading is more use than "failed".
+            const QString read=key=="host/volume"?QString::number(host::masterVolume())+"%"
+                :key=="host/muted"?(host::masterMuted()?QObject::tr("On"):QObject::tr("Off"))
+                :QString::number(host::hostChoiceIndex(key));
+            error=QObject::tr("the computer refused the write (it still reads %1)").arg(read);
+        }
+    } else {
+        if(settingsWrite_.themeToSystem)
+            ok=preferences_.setValues({{"appearance/theme",QString{}},{"appearance/background",0}});
+        else ok=preferences_.setValue(settingsWrite_.key,settingsWrite_.value);
+        if(!ok)error=lastPreferencesError_.isEmpty()?preferences_.error():lastPreferencesError_;
+        if(ok)applyPreferences();
+    }
+    settingsWrite_.result=ok?settingsWrite_.okText:settingsWrite_.failText+QStringLiteral(": ")+error;
+    if(settingsWrite_.stage==WriteStage::Proceed) {
+        busy_=false;status_.clear();
+    }
+    settingsWrite_.stage=ok?WriteStage::FinishOk:WriteStage::FinishFailed;
+    interactionAudio_.play(ok?InteractionAudio::Cue::Accept:InteractionAudio::Cue::Error);
+    qInfo().noquote()<<QStringLiteral("settings: write stage=%1 key=%2 value=\"%3\"%4")
+        .arg(ok?QStringLiteral("finish-ok"):QStringLiteral("finish-failed"),settingsWrite_.key,
+             settingsWrite_.valueText,
+             ok?QString{}:QStringLiteral(" error=\"")+error+QStringLiteral("\""));
+    const QString title=settingsWrite_.label.isEmpty()?QObject::tr("Settings"):settingsWrite_.label;
+    showMessage(title,ok?settingsWrite_.okText+"\n\n"+settingsWrite_.valueText
+                        :settingsWrite_.failText+"\n\n"+error,MessageKind::Page);
+    emit changed();
+}
+void Shell::finishSettingWrite() {
+    if(settingsWrite_.stage!=WriteStage::FinishOk && settingsWrite_.stage!=WriteStage::FinishFailed)return;
+    const QString key=settingsWrite_.key;
+    const bool ok=settingsWrite_.stage==WriteStage::FinishOk;
+    // A failed write leaves the list up (the console's refused choice keeps the page and its focus, so the
+    // user can pick another item; SETTINGS-FIRMWARE 16.5's disabled-chip run stays at depth 2), and only a
+    // successful one returns to the row list with the new value on the row.
+    const bool pop=ok && settingsWrite_.popBand && !pages_.isEmpty();
+    settingsWrite_=SettingsWrite{};
+    if(pop)pages_.removeLast();
+    qInfo().noquote()<<QStringLiteral("settings: write stage=done key=%1 result=%2 returned depth=%3 selection=%4")
+        .arg(key,ok?QStringLiteral("ok"):QStringLiteral("failed"))
+        .arg(pages_.size()).arg(pages_.isEmpty()?selections_[category_]:pages_.last().selection);
+    emit changed();
+}
+void Shell::cancelSettingWrite(const QString& why) {
+    if(settingsWrite_.stage==WriteStage::None)return;
+    qInfo().noquote()<<QStringLiteral("settings: write stage=cancelled key=%1 (%2)").arg(settingsWrite_.key,why);
+    if(settingsWrite_.stage==WriteStage::Proceed) {
+        busy_=false;status_.clear();
+    }
+    settingsWrite_=SettingsWrite{};
+}
 // Rebuilds the open page in place after a removal, and closes it when the last row goes: the list the
 // user is looking at must be the list that exists, and an empty list says so instead of showing zero rows.
 void Shell::reloadContinueWatching() {
@@ -2901,27 +3594,31 @@ void Shell::advanceMedia(bool failed,const QString& error) {
     startQueuedMedia();
 }
 void Shell::skipMedia(int direction) {
+    touch();
     touch();if(!mediaOpen_ || !message_.isEmpty() || !direction)return;
     if(photoOpen()){stepPhoto(direction<0?-1:1);return;}
     const int next=direction<0?mediaQueue_.previous():mediaQueue_.next(false);
     if(next>=0){mediaFailures_=0;startQueuedMedia();}
 }
 void Shell::cycleMediaRepeat() {
+    touch();
     if(mediaOpen_ && !photoOpen() && message_.isEmpty())preferences_.setValue("media/repeatMode",(mediaRepeatMode()+1)%3);
 }
 void Shell::toggleMediaShuffle() {
+    touch();
     if(mediaOpen_ && !photoOpen() && message_.isEmpty())preferences_.setValue("media/shuffle",!preferences_.value("media/shuffle").toBool());
 }
 QString Shell::mediaQueueSummary() const {
     if(!mediaOpen_ || photoOpen() || mediaQueue_.empty())return {};
     QString result=QString("Track %1 of %2").arg(mediaQueue_.currentIndex()+1).arg(mediaQueue_.items().size());
-    if(preferences_.value("media/shuffle").toBool())result+="  Â·  Shuffle";
-    if(mediaRepeatMode()==1)result+="  Â·  Repeat One";else if(mediaRepeatMode()==2)result+="  Â·  Repeat All";
-    if(player_->playbackState()==QMediaPlayer::PausedState)result+="  Â·  Paused";
-    if(!status_.isEmpty())result+="  Â·  "+status_;
+    if(preferences_.value("media/shuffle").toBool())result+=QStringLiteral("  ")+QChar(0x00B7)+QStringLiteral("  Shuffle");
+    if(mediaRepeatMode()==1)result+=QStringLiteral("  ")+QChar(0x00B7)+QStringLiteral("  Repeat One");else if(mediaRepeatMode()==2)result+=QStringLiteral("  ")+QChar(0x00B7)+QStringLiteral("  Repeat All");
+    if(player_->playbackState()==QMediaPlayer::PausedState)result+=QStringLiteral("  ")+QChar(0x00B7)+QStringLiteral("  Paused");
+    if(!status_.isEmpty())result+=QStringLiteral("  ")+QChar(0x00B7)+QStringLiteral("  ")+status_;
     return result;
 }
 void Shell::rotatePhoto(int delta) {
+    touch();
     touch();
     if(!photoOpen() || photo_.isNull() || !delta)return;
     // 90 degrees per press, either way, kept inside 0..270. The console rotates from its photo control
@@ -2949,7 +3646,14 @@ void Shell::togglePlayback(){
     if(player_->playbackState()==QMediaPlayer::PlayingState)player_->pause();else if(!player_->source().isEmpty()){status_.clear();if(player_->playbackState()==QMediaPlayer::StoppedState)player_->setPosition(0);player_->play();}
     emit changed();
 }
-void Shell::touch(){idleTimeOverride_=-1;activity_.restart();}
+void Shell::touch(){
+    // One funnel for "the user did something". Every input entry point calls it, and View's key, mouse,
+    // wheel and pad handlers reach it through noteActivity(), so the console's power rule holds: any
+    // activity ends the current idle period AND re-arms the display-off request, so a later idle period may
+    // ask again (FIDELITY-BEHAVIOUR S2). Before this, host::noteUserActivity() had no caller and the only
+    // re-arm was the display-on notification, so an ignored request repeated on the 60 s window.
+    idleTimeOverride_=-1;activity_.restart();host::noteUserActivity();
+}
 QString Shell::appRegistryPath()const{return QDir(dataDirectory_).filePath("apps.json");}
 bool Shell::idleDisplayAllowed()const{return !mediaOpen_ && !gameRunning() && message_.isEmpty() && !QApplication::activeModalWidget();}
 bool Shell::mediaPaused()const{return photoOpen()?!slideshow_.isActive():player_->playbackState()!=QMediaPlayer::PlayingState;}
@@ -2966,6 +3670,18 @@ void Shell::seekMedia(qint64 delta){
         qInfo().noquote()<<"media: seek"<<delta<<"ms from"<<from<<"to"<<player_->position();
     emit changed();
 }
+void Shell::toggleMediaDisplay() {
+    // SELECT in the video container (audit/MEDIA-PANELS-FIRMWARE.md 3.4/3.6; FIDELITY-BEHAVIOUR I48). The
+    // evidence for the binding is the container's own text: msg_display_display_with_icon is "Display " +
+    // U+F88E, and friendim_plugin's msg_select_gaiji is U+F88E, so the container labels SELECT "Display".
+    // What it displays is this player's own chrome - the time bar and the six-slot hint strip - which is what
+    // View hides after MEDIA-PANELS 4.3's 3 s. Pinning keeps it up; releasing hands it back to that timer.
+    if(!mediaOpen_ || photoOpen())return;
+    touch();
+    mediaDisplayPinned_=!mediaDisplayPinned_;
+    qInfo().noquote()<<"media: display"<<(mediaDisplayPinned_?"pinned":"released")<<"(SELECT)";
+    emit changed();
+}
 void Shell::applyPreferences(){
     audio_->setVolume(preferences_.value("audio/volume").toInt()/100.f);audio_->setMuted(preferences_.value("audio/muted").toBool());
     interactionAudio_.setEnabled(preferences_.value("audio/keyTone").toBool() && !preferences_.value("audio/muted").toBool());
@@ -2973,7 +3689,51 @@ void Shell::applyPreferences(){
     if(slideshow_.isActive())slideshow_.setInterval(preferences_.value("photo/interval").toInt());
     mediaQueue_.setRepeat(static_cast<PlaybackQueue::Repeat>(mediaRepeatMode()));
     mediaQueue_.setShuffle(preferences_.value("media/shuffle").toBool());
+    // `appearance/tvColumn` is the one preference that changes the category set, so it is applied here with
+    // every other stored setting: hiding or restoring the column is an erase/insert of one entry, and the
+    // open page stack is untouched because no page belongs to a column.
+    syncTvColumn();
     loadTheme();
+}
+// The tenth column's switch. The console's own rule (category_tv.xml) is that the column exists only when
+// something is registered to it: its root view lists nothing but content providers, so an unregistered console
+// draws nine categories. This build's TV column is where an imported channel app - and the Jellyfin surface -
+// lives, so the preference defaults to ON and turning it off is the console-parity state (nine columns, every
+// icon after Video in the console's own cell).
+bool Shell::tvColumnVisible() const {
+    // 1. The environment override: the capture switch, and the only form available before the store can hold
+    //    the key (preferences.cpp's bounded key table is a returned hunk, see the audit section).
+    const auto raw=qEnvironmentVariable("XMB_TV_COLUMN").trimmed().toLower();
+    if(!raw.isEmpty())return !(raw=="0" || raw=="off" || raw=="false" || raw=="no");
+    // 2. The store. An unset key means ON, so a data directory that never wrote it keeps today's XMB.
+    const auto stored=preferences_.value("appearance/tvColumn");
+    return stored.isValid()?stored.toBool():true;
+}
+void Shell::syncTvColumn() {
+    const bool want=tvColumnVisible();
+    int at=-1;
+    for(int i=0;i<categories_.size();++i)if(categories_[i].id==QStringLiteral("tv")){at=i;break;}
+    if(want) {
+        if(at>=0 || tvCategory_.id.isEmpty())return;
+        // Back where it was authored: between Video and Game, which is where the bar draws it.
+        int before=categories_.size();
+        for(int i=0;i<categories_.size();++i)if(categories_[i].id==QStringLiteral("game")){before=i;break;}
+        categories_.insert(before,tvCategory_);
+        selections_.insert(before,0);
+        if(category_>=before)++category_;
+        qInfo().noquote()<<QStringLiteral("xmb: tv column restored at %1 (categories %2) preference=appearance/tvColumn")
+            .arg(before).arg(int(categories_.size()));
+        return;
+    }
+    if(at<0)return;
+    tvCategory_=categories_[at];tvColumnStashed_=true;
+    categories_.removeAt(at);
+    selections_.removeAt(at);
+    if(category_==at)category_=std::max(0,at-1);
+    else if(category_>at)--category_;
+    qInfo().noquote()<<QStringLiteral("xmb: tv column hidden (categories %1) preference=appearance/tvColumn - "
+        "the bar reflows to the console's nine; the Jellyfin and channel rows live in that column and are not "
+        "reachable until it is shown again").arg(int(categories_.size()));
 }
 void Shell::loadTheme() {
     const auto path=preferences_.value("appearance/theme").toString();
@@ -3004,11 +3764,14 @@ void Shell::refreshDirectory(){
         return;
     }
     if(pages_.isEmpty() || pages_.last().directory.isEmpty() || mediaOpen_)return;
-    loading_=true;status_="Reading media folderâ€¦";
+    loading_=true;status_=QObject::tr("Reading media folder...");
     const auto kind=categories_[category_].id;
     // A rescan of a page that is already open (F5 / Refresh Directory) is reported when it lands.
     directoryRefresh_=true;
-    scanRequest_=library_.scan(pages_.last().directory,kind=="photo"?MediaKind::Photo:kind=="music"?MediaKind::Music:MediaKind::Video);emit changed();
+    scanRequest_=library_.scan(pages_.last().directory,kind=="photo"?MediaKind::Photo:kind=="music"?MediaKind::Music:MediaKind::Video);
+    qInfo().noquote()<<QStringLiteral("busy: page_busy raised (list rescan) page=\"%1\" request=%2")
+        .arg(QDir::toNativeSeparators(pages_.last().directory)).arg(scanRequest_);
+    emit changed();
 }
 void Shell::rebuildUsers(){
     auto& users=categories_[0].entries;
@@ -3019,11 +3782,206 @@ void Shell::rebuildUsers(){
         users.last().themeIcon="icon_user";
         if(profile.id==profiles_.activeId())selections_[0]=int(users.size())-1;
     }
+    // The Steam account surface (FIDELITY-BEHAVIOUR U4). It is a native-only row: the 4.93 console's account
+    // story is the PSN binding, which has no local implementation, and the data layer's two-step switch prompt
+    // had no UI at all. It sits last in the column, after the users, because it is about the Steam client on
+    // this computer rather than a user of the XMB. The icon is the firmware's own account item art from the
+    // PSN category container (item_tex_account), not a new texture.
+    {
+        auto steam=item("steam-accounts",QObject::tr("Steam Account"),"item_tex_account","explore_category_psn",Action::SteamAccounts);
+        steam.themeIcon="icon_accountmanage";
+        users.push_back(std::move(steam));
+    }
+}
+// --- Users > Steam Account (FIDELITY-BEHAVIOUR U4) -------------------------------------------------
+// The data layer has carried the account list and the honest two-step handoff since audit/STEAM-ACCOUNTS.md
+// (scanSteamAccounts, steamSwitchPlanFor, SteamSwitchConfirmation); there was no surface. The console has no
+// analogue at all - its account surface is the PSN binding, which this build does not implement - and no
+// firmware frame for a console account-switch page exists under C:\dev\out (the captures hold the Users
+// column, the create-user page and the PSN column only). So this is NOT a reconstruction of a console page:
+// it is this app's ordinary page class - rows, vertical()/activate()/back(), the column cross-fade - carrying
+// the data layer's own text. The account-switch confirmation is the existing two-answer box, which is also
+// how the console's own Yes/No pages are drawn.
+bool Shell::steamAccountsOpen() const {
+    for(const auto& page:pages_)if(page.steamAccounts)return true;
+    return false;
+}
+void Shell::openSteamAccounts() {
+    steamAccountsError_.clear();
+    steamAccounts_=scanSteamAccounts(steamRoot_,&steamAccountsError_);
+    const QString title=QObject::tr("Steam Account");
+    if(steamAccounts_.isEmpty()) {
+        const QString reason=!steamAccountsError_.isEmpty()?steamAccountsError_
+            :QObject::tr("The Steam client on this computer remembers no account. Sign in once in Steam, then reopen this page.");
+        qWarning().noquote()<<"steam accounts: no page:"<<reason;
+        showMessage(title,reason,MessageKind::Page);
+        emit changed();
+        return;
+    }
+    const bool anyActive=std::any_of(steamAccounts_.cbegin(),steamAccounts_.cend(),[](const SteamAccount& a){return a.active;});
+    Page page;page.title=title;page.steamAccounts=true;
+    for(const auto& account:steamAccounts_) {
+        auto e=item("steam-account:"+account.steamId64,
+            account.personaName.isEmpty()?account.accountName:account.personaName,
+            "item_tex_account","explore_category_psn",Action::SteamAccountSwitch,account.steamId64);
+        // The current account is marked where every row shows its value: Steam's own active record is the
+        // dot the Users column already uses; when the client is signed out, the account its own auto-login
+        // marker names is named in words instead, because nothing is signed in to mark.
+        if(account.active)e.fieldValue=QString(QChar(0x25cf));
+        else if(account.autoLogin && !anyActive)e.fieldValue=QObject::tr("Auto sign-in");
+        QString detail=account.accountName;
+        if(account.lastLoginUnix>0)
+            detail+=" "+QObject::tr("Last used %1").arg(QDateTime::fromSecsSinceEpoch(account.lastLoginUnix).toString("yyyy/MM/dd"));
+        else detail+=" "+QObject::tr("No recorded sign-in");
+        if(account.active)detail+=" - "+QObject::tr("signed in");
+        e.detail=detail;
+        page.entries.push_back(std::move(e));
+    }
+    if(!steamAccountsError_.isEmpty())
+        qWarning().noquote()<<"steam accounts: partial list:"<<steamAccountsError_;
+    qInfo().noquote()<<QStringLiteral("steam accounts: page opened rows=%1 active=%2 steamExe=%3")
+        .arg(page.entries.size()).arg(anyActive?1:0)
+        .arg(steamAccounts_.isEmpty()?QString{}:steamSwitchPlanFor(steamAccounts_.first(),steamRoot_).steamExe);
+    // Verification hook, beside the item-menu and store dumps a scripted run already asks for: the page's
+    // rows and the honest switch plan per account, so U4 is checkable without reading pixels.
+    if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
+        QJsonArray rows;
+        for(const auto& account:steamAccounts_) {
+            QString planError;
+            const auto prompt=steamSwitchPlanFor(account,steamRoot_,&planError);
+            rows.push_back(QJsonObject{{"steamId64",account.steamId64},{"accountName",account.accountName},
+                {"personaName",account.personaName},{"active",account.active},{"autoLogin",account.autoLogin},
+                {"switchPossible",prompt.possible},{"alreadyActive",prompt.alreadyActive},
+                {"clientSignedIn",prompt.clientSignedIn},{"steps",prompt.steps.size()},
+                {"blocked",prompt.blocked.body},{"error",planError}});
+        }
+        QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".steam-accounts.json");
+        if(file.open(QIODevice::WriteOnly))
+            file.write(QJsonDocument(QJsonObject{{"title",title},{"rows",rows},{"count",rows.size()},
+                {"error",steamAccountsError_}}).toJson());
+    }
+    pages_.push_back(std::move(page));
+    emit changed();
+}
+void Shell::steamAccountSelected(const QString& steamId64) {
+    const auto it=std::find_if(steamAccounts_.cbegin(),steamAccounts_.cend(),
+        [&](const SteamAccount& a){return a.steamId64==steamId64;});
+    if(it==steamAccounts_.cend())return;
+    QString error;
+    steamSwitch_=steamSwitchPlanFor(*it,steamRoot_,&error);
+    steamSwitchId_=steamId64;
+    if(!steamSwitch_.possible || steamSwitch_.steps.size()!=2) {
+        // Not possible, or nothing to switch: the data layer's own blocked text is the result page, and its
+        // machine-facing reason goes to the log. Nothing is started.
+        const QString body=steamSwitch_.blocked.body.isEmpty()?error:steamSwitch_.blocked.body;
+        qWarning().noquote()<<"steam: switch not started:"<<(error.isEmpty()?body:error);
+        showMessage(steamSwitch_.blocked.heading.isEmpty()?QObject::tr("Steam Account"):steamSwitch_.blocked.heading,
+            body,MessageKind::Page);
+        emit changed();
+        return;
+    }
+    // The two-step model starts here; the first box is step 1 and only its accepted answer advances it.
+    steamSwitchHold_=qEnvironmentVariableIsSet("XMB_STEAM_SWITCH_HOLD");
+    steamSwitchConfirmation_=SteamSwitchConfirmation{};
+    steamSwitchConfirmation_.stage=SteamSwitchConfirmation::Stage::ConfirmClose;
+    qInfo().noquote()<<QStringLiteral("steam: switch requested account=%1 steps=%2 hold=%3")
+        .arg(steamSwitch_.accountLabel).arg(steamSwitch_.steps.size()).arg(steamSwitchHold_?1:0);
+    steamSwitchNextStep();
+}
+void Shell::steamSwitchNextStep() {
+    if(steamSwitch_.steps.size()!=2)return;
+    const bool first=steamSwitchConfirmation_.stage==SteamSwitchConfirmation::Stage::ConfirmClose;
+    const auto& step=steamSwitch_.steps.at(first?0:1);
+    qInfo().noquote()<<QStringLiteral("steam: prompt %1 heading=\"%2\" confirm=\"%3\" cancel=\"%4\" "
+        "nothing started yet")
+        .arg(first?1:2).arg(step.heading,step.confirmLabel,step.cancelLabel);
+    showConfirm(step.heading,step.body,[this]{steamSwitchConfirmed();});
+    steamPrompt_=true;
+    emit changed();
+}
+void Shell::steamSwitchConfirmed() {
+    const auto before=steamSwitchConfirmation_.stage;
+    if(!steamSwitchConfirmation_.confirm()) {
+        steamSwitchCancel(QStringLiteral("the confirmation model refused the step"));
+        return;
+    }
+    qInfo().noquote()<<QStringLiteral("steam: step %1 accepted (%2/2)")
+        .arg(before==SteamSwitchConfirmation::Stage::ConfirmClose?1:2).arg(steamSwitchConfirmation_.accepted);
+    if(steamSwitchConfirmation_.ready()){steamSwitchRun();return;}
+    steamSwitchNextStep();
+}
+void Shell::steamSwitchRun() {
+    // Both steps are accepted, so the handoff may run: close the client, then start it again with no account
+    // argument (steam_accounts.h: the XMB never passes -login, a name, a password or a token). A dry run of
+    // the same model is logged first, so the record shows the exact command lines and that nothing ran early.
+    const auto account=std::find_if(steamAccounts_.cbegin(),steamAccounts_.cend(),
+        [&](const SteamAccount& a){return a.steamId64==steamSwitchId_;});
+    if(account==steamAccounts_.cend()) {
+        steamSwitchResult(false,QObject::tr("The account is no longer in the Steam client's list."));
+        return;
+    }
+    const auto dry=steamSwitchDryRun(*account,steamRoot_);
+    for(const auto& line:dry.commands)qInfo().noquote()<<"steam: dry run command:"<<line;
+    const QString exe=steamSwitch_.steamExe;
+    if(steamSwitchHold_) {
+        qInfo().noquote()<<QStringLiteral("steam: handoff held (XMB_STEAM_SWITCH_HOLD=1): %1 ; %2")
+            .arg(dry.commands.value(0),dry.commands.value(1));
+        steamSwitchResult(true,QString{});
+        return;
+    }
+    if(exe.isEmpty() || !QFileInfo(exe).isFile()) {
+        steamSwitchResult(false,QObject::tr("steam.exe was not found at %1").arg(exe.isEmpty()?QObject::tr("(no path)"):exe));
+        return;
+    }
+    // Step 1: ask the running client to exit. It is a short-lived child, so its own error string is
+    // available when the launch fails (a detached start would report only false).
+    QProcess close;
+    close.start(exe,steamSwitch_.shutdownArguments);
+    if(!close.waitForStarted(5000)) {
+        steamSwitchResult(false,QObject::tr("Steam could not be asked to close: %1").arg(close.errorString()));
+        return;
+    }
+    close.waitForFinished(10000);
+    qInfo().noquote()<<QStringLiteral("steam: close requested (%1) exit=%2").arg(exe).arg(close.exitCode());
+    // Step 2: start the client again, detached so it outlives the XMB. Its failure is reported from the
+    // launch's own result, and the success text never claims a sign-in: Steam's window does that.
+    if(!QProcess::startDetached(exe,steamSwitch_.relaunchArguments)) {
+        steamSwitchResult(false,QObject::tr("Steam could not be started again from %1").arg(exe));
+        return;
+    }
+    steamSwitchResult(true,QString{});
+}
+void Shell::steamSwitchResult(bool ok,const QString& error) {
+    steamPrompt_=false;
+    const QString title=QObject::tr("Steam Account");
+    const QString body=ok?steamSwitch_.outcomeText
+        :QObject::tr("The account handoff did not start. %1").arg(error);
+    qInfo().noquote()<<QStringLiteral("steam: handoff %1%2").arg(ok?QStringLiteral("started"):QStringLiteral("failed"),
+        ok?QString{}:QStringLiteral(": ")+error);
+    showMessage(title,body,MessageKind::Page);
+    emit changed();
+}
+void Shell::steamSwitchCancel(const QString& why) {
+    steamPrompt_=false;
+    if(steamSwitchConfirmation_.stage!=SteamSwitchConfirmation::Stage::Cancelled)
+        steamSwitchConfirmation_.cancel();
+    qInfo().noquote()<<QStringLiteral("steam: switch cancelled (%1); nothing was started").arg(why);
+    steamSwitch_=SteamSwitchPrompt{};
 }
 void Shell::createUser(const QString& name){profiles_.create(name);}
 QString Shell::subtitleText(const Entry& entry) const {
-    // User-scoped data carries the active user's name, as in the reference (Trophy Collection, PS3 saved data).
-    if(entry.id=="trophy" || entry.id=="ps3")return profiles_.activeName();
+    // The returned hunk from the render pass (audit/FIDELITY-SURFACES.md 14.10 A). A user-scoped row's second
+    // line is the firmware's own scope marker, not the active user's name. Measured there: col-game-r00 (Vita,
+    // focused), col-game-r03 (Saved Data (minis/PSP)) and col-game-r04 (Saved Data (PS3)) all read "*User" at
+    // x 682..730, y 528..542, while the two system-wide rows (Game Data Utility, Memory Card Utility) carry
+    // nothing in that slot. This build drew the active profile name there instead, so only the marker was
+    // missing. [TRACED: which rows carry it, the string, the rect. FIT: none.]
+    static const QSet<QString> userScope{QStringLiteral("vita"),QStringLiteral("psp"),
+                                         QStringLiteral("ps3"),QStringLiteral("trophy")};
+    if(userScope.contains(entry.id))return QStringLiteral("*User");
+    // A Steam account row shows its login name and when Steam last used it: the row's title is the persona
+    // name and the detail is the account's own record, which is what a switch decision needs.
+    if(entry.action==Action::SteamAccountSwitch)return entry.detail;
     // A Download Management row shows its state and progress under the title, which is the one line the
     // page draws for every row (the row's own detail string). The information page carries the rest.
     if(entry.id.startsWith("download:"))return entry.detail;
@@ -3063,6 +4021,7 @@ QString Shell::pageKind() const {
     if(pages_.isEmpty())return QStringLiteral("root");
     const auto& page=pages_.last();
     if(page.signIn)return QStringLiteral("jellyfinSignIn");
+    if(page.steamAccounts)return QStringLiteral("steamAccounts");
     if(page.jellyfin)return page.jellyfinViews?QStringLiteral("jellyfinViews"):page.jellyfinSearch?QStringLiteral("jellyfinSearch"):QStringLiteral("jellyfinFolder");
     if(page.downloads)return QStringLiteral("downloads");
     if(page.continuePage)return QStringLiteral("continueWatching");

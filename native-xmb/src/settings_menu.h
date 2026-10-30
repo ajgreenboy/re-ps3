@@ -4,6 +4,14 @@
 
 namespace xmb {
 
+// The two file pickers that live inside the Theme and Background choice lists rather than on the Theme page.
+// The console's Theme page is Theme / Color / Background / Font and stops there (SETTINGS-FIRMWARE 5.6), and the
+// lists are the two places the firmware folds theme and wallpaper selection into (D11), so `Install` (the Theme
+// list's own first item) and `Select Wallpaper` (the Background list's last) carry these sentinel values. No
+// bounded Preferences key accepts them: Shell::activate() turns a SetSetting row with one of these values into
+// the .p3t / image file dialog before the write chain runs, so nothing is ever stored.
+inline constexpr const char* kThemePickerValue = "install-theme-file";
+inline constexpr const char* kWallpaperPickerValue = "select-wallpaper-file";
 // The Settings column's rows, resolved from the firmware's own definition (Phase 11.1,
 // audit/SETTINGS-FIRMWARE.md 1.1-1.2). `category_sysconf.xml`'s root view names `#seg_fixed_items`,
 // whose 18 tables list the column's 18 rows in document order. The 16 rows a retail console shows are

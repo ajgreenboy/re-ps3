@@ -10,6 +10,7 @@
 #include "jellyfin_client.h"
 #include "jellyfin_stream.h"
 #include "steam_owned.h"
+#include "steam_accounts.h"
 #include "steam_collections.h"
 #include "steam_family.h"
 #include "steam_store.h"
@@ -47,7 +48,16 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // Settings > System Settings > Restore Default Settings: a real, confirm-gated action that puts every
     // preference this build owns back to its default for the active profile. It is app state only - no host
     // setting, library path or profile is touched - and the confirmation box names exactly what is reset.
-    ResetPreferences };
+    ResetPreferences,
+    // Users > Steam Account (FIDELITY-BEHAVIOUR U4): the two-step account-switch surface the data layer
+    // (steam_accounts.h) has carried with no UI. SteamAccounts opens the page, SteamAccountSwitch is one
+    // account's row and runs the existing handoff plan for it. There is no console analogue: the 4.93 XMB
+    // binds a PSN account, and no local frame shows a console account-switch page, so the surface is this
+    // app's ordinary page of rows (see openSteamAccounts()).
+    SteamAccounts, SteamAccountSwitch,
+    // One group folder of a page the item menu's Group Content rebuilt (an "A".."Z"/"#" letter row). Its
+    // value is the group's key; activating it pushes that key's rows. It exists only inside a grouped page.
+    GroupFolder };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -67,6 +77,11 @@ struct Entry {
     // visible: drawn dimmed, and only the Continue Watching page sets it today (a remembered title whose
     // file is gone). Everything else leaves it false, so no other row renders differently.
     bool disabled=false;
+    // This row's artwork is an icon-sized picture even though it is loaded from a file (container "file"):
+    // the Photo column's `Photo Gallery` row draws the firmware's own hakoniwa.png, which is 180x180, where an
+    // installed title's ICON0.PNG is a wide card. The view's wide-tile rule reads this so the gallery keeps the
+    // icon box the console gives it (the one-line view hunk in audit/FIDELITY-SURFACES.md's appended section).
+    bool iconSized=false;
     // The value drawn on the right of a focused row, above every other source the view consults. The sign-in
     // page's three fields use it (server URL, user name, and the password as dots); every other row leaves it
     // empty, so the view falls through to Shell::valueText() exactly as before and no existing frame changes.
@@ -100,7 +115,11 @@ enum class OptionCommand { Activate, Information,
     // firmware row, so its label is the one native wording the item menu keeps.
     RemoveResume,
     // msg_play_begin: restart from the top when a resume record exists (a Jellyfin item or a local file).
-    PlayFromBeginning };
+    PlayFromBeginning,
+    // Group Content's level and its two answers (msg_folder_class, msg_title_folder "By Title", msg_all "All"),
+    // offered only where optionGroupable() holds. They rebuild the open page's row vector; the page keeps the
+    // ungrouped rows so All is reversible and no rescan is needed.
+    GroupMenu, GroupByTitle, GroupAll };
 // A label read from the RCO text table: the key plus the English string it should resolve to. The fallback
 // is used only when the local flash image has no table; whenever the RCO is present, its value is the label.
 struct OptionLabel { const char* key=nullptr; QString fallback; };
@@ -119,6 +138,15 @@ struct MenuOption {
     // (audit/ITEM-MENU-INFO-FIRMWARE.md G2: Sort By/Group Content ink 301-362, Start/Delete/Information
     // 539-638, with the gap between).
     bool dividerBefore=false;
+    // The two flags the firmware's item menu draws and this build's shell did not carry
+    // (FIDELITY-SURFACES 6.3/6.5/6.6, re-measured on frames/menu-options-open.png this pass):
+    //   submenu    the row opens a second level, so the view draws the right-pointing chevron at x 1573..1583
+    //              on this row's centre line. True on Sort By and Group Content.
+    //   gateBadge  the row carries the small purple square the frame shows after its label (13x14 px at
+    //              x 1517..1529, y 345..358, fill #BF4EA6 with a dark inner rect). True on Group Content only.
+    // Neither is a capability claim: both are what the settled 4.93 frame draws on these two rows.
+    bool submenu=false;
+    bool gateBadge=false;
 };
 // One audio track QMediaPlayer reports for the loaded media. `switchable` turns false the moment this
 // build asked for it and the player's own activeAudioTrack() did not follow, and then `reason` says so.
@@ -199,6 +227,14 @@ public:
     void setClockOverride(const QDateTime& when) { clockOverride_=when;emit changed(); }
     int backgroundMode() const { return preferences_.value("appearance/background").toInt(); }
     QString wallpaper() const { return preferences_.value("appearance/wallpaper").toString(); }
+    // The tenth column (FIDELITY-ROOT-BAR C1/#5). The 4.93 console draws NINE categories and no TV / Video
+    // Services column: category_tv.xml's root view lists only content providers (the welcome store query, the
+    // in-game exit and the tv content list), so with nothing registered the column has no rows and the bar
+    // never shows it. This build's TV column is where imported channel apps (and the Jellyfin surface) live,
+    // so it stays on by default; `appearance/tvColumn` = false drops the category and the bar reflows to the
+    // console's nine. That is the console-parity setting, and the only one that changes the category count.
+    // An unset or unreadable value means ON, so a data directory that never wrote the key keeps today's XMB.
+    bool tvColumnVisible() const;
     // The PS3 theme in use (Theme Settings > Theme), decoded in memory from its .p3t: empty path = the system's own.
     QString themePath() const { return theme_.path; }
     const QImage& themeBackground() const { return theme_.background; }
@@ -207,8 +243,18 @@ public:
     bool photoFill() const { return preferences_.value("photo/fit").toInt()==1; }
     bool photoOpen() const;
     bool slideshowActive() const { return slideshow_.isActive(); }
-    bool busy() const { return loading_; }
+    // The console's busy state (audit DIALOGS-FIRMWARE 2.8 page_busy; FIDELITY-BEHAVIOUR N10/N12/X5).
+    // True from the moment a list scan is asked for until its rows land, and while a settings write's
+    // proceed stage holds the page. Navigation is refused while it is true (N11: the console does not treat
+    // Left/Right as a cancel), and View draws page_busy from this one flag.
+    bool busy() const { return loading_ || busy_; }
     QString status() const { return status_; }
+    // The determinate form of the busy page: 0..1 while the operation publishing it knows its total, -1
+    // (the default) for the indeterminate wait page the console frame shows.
+    double busyProgress() const { return busyProgress_; }
+    // The D8 busy_icon sweep, 0..1 per turn. -1 draws no ring: the measured wait page has none and
+    // page_busy's children carry no rect in the RCO, so no frame can place one.
+    double busySpinnerPhase() const { return busySpinnerPhase_; }
     qint64 mediaPosition() const;
     qint64 mediaDuration() const;
     bool mediaPaused() const;
@@ -231,6 +277,22 @@ public:
     void toggleMediaShuffle();
     void horizontal(int delta);
     void vertical(int delta);
+    // ---- The writable-row chain (audit/SETTINGS-FIRMWARE.md 4; FIDELITY-BEHAVIOUR I77) ----------------
+    // In the console a settings write is a chain, not a frame: the row's own page (page_*_top) -> an ask
+    // page (*_ask) -> the proceed page (*_proceed) while the write runs -> the result page (*_finish). This
+    // build committed and popped in one frame. The chain below runs the same three stages on the surfaces
+    // this app already draws - Ask is the two-answer box (D1), Proceed is the page_busy state, Finish is the
+    // page message (D3/D4) - and every sentence is read from sysconf_plugin where that plugin has one.
+    // The stage is exposed so a scripted run (and the capture sidecar's reader) can name what is on screen.
+    QString settingsWriteStage() const;   // "ask"/"proceed"/"finish-ok"/"finish-failed"/"" 
+    QString settingsWriteKey() const { return settingsWrite_.key; }
+    QString settingsWriteResult() const { return settingsWrite_.result; }
+    // ---- Media: the Display key (audit/MEDIA-PANELS-FIRMWARE.md 3.4/3.6; FIDELITY-BEHAVIOUR I48) -------
+    // The video container labels SELECT "Display" (msg_display_display_with_icon ends in U+F88E, and
+    // friendim_plugin's msg_select_gaiji is the same code point). This flag is that state: START and the
+    // in-player chrome keep the time bar and the hint strip up while it is set. View draws from it.
+    bool mediaDisplayPinned() const { return mediaDisplayPinned_; }
+    void toggleMediaDisplay();            // SELECT: pin/unpin the player's own display
     // The photo viewer's rotate pair. The console puts Rotate Left/Right on the viewer's own control
     // panel (audit/MEDIA-PANELS-FIRMWARE.md 6.2, the same panel's Up/Down/Left/Right are the cursor
     // buttons), and this build does not draw that panel; the native keyboard keeps the function on Q/E
@@ -256,8 +318,7 @@ public:
     // in-flight one. The values live in this process's memory only - nothing is written to disk and no log
     // line carries them.
     void openJellyfinSignInPage(QUrl server);
-    bool jellyfinSignInOpen() const;
-    void setJellyfinSignInField(const QString& field,const QString& value);
+    bool jellyfinSignInOpen() const;    void setJellyfinSignInField(const QString& field,const QString& value);
     void submitJellyfinSignIn();
     void cancelJellyfinSignInPage();
     QString jellyfinSignInServer() const { return signInServer_; }
@@ -268,8 +329,18 @@ public:
     QString jellyfinSignInState() const;
     QString jellyfinSignInError() const { return signInError_; }
     // What the page under the cursor is, for the capture sidecar: "jellyfinSignIn", "jellyfinViews",
-    // "jellyfinFolder", "downloads", "continueWatching", "folder", "page" or "root".
+    // "jellyfinFolder", "downloads", "continueWatching", "steamAccounts", "folder", "page" or "root".
     QString pageKind() const;
+    // ---- Users > Steam Account (FIDELITY-BEHAVIOUR U4) -------------------------------------------------
+    // The page lists the accounts scanSteamAccounts() reports for the installed client, marks Steam's own
+    // active record (or, when the client is signed out, the account its own auto-login marker names), and a
+    // selection runs steamSwitchPlanFor()'s two-step handoff: a box per step, then the two launches, then a
+    // result page carrying prompt.outcomeText or the real failure. No credential is read, written or logged;
+    // nothing starts before both steps are confirmed (SteamSwitchConfirmation).
+    void openSteamAccounts();
+    bool steamAccountsOpen() const;
+    // The accounts on the open page, for the dump and the scripted check.
+    int steamAccountCount() const { return steamAccounts_.size(); }
     // The open Jellyfin page's backdrop, fetched through the authenticated image route and kept for
     // the view's hero surface. Nothing draws it yet: the view has no page-level artwork slot, so the
     // hunk that would use it is reported in audit/JELLYFIN-NATIVE.md instead of being written here.
@@ -303,6 +374,13 @@ public:
     void optionsActivate();        // Cross
     void optionsClose();           // Circle: step back one level, then close
     bool optionsArePlayer() const { return optionsOpen_ && playerPanel_; } // the in-player panel is up
+    // True while a second level (Sort By, or Group Content's `By ...`/All list) is up. The settled frame of an
+    // open group list (frames/menu-submenu-group-content.png) marks it with a left-pointing chevron beside the
+    // focused row's label column: the view draws that from this flag (see the returned view hunk).
+    bool optionsNested() const { return optionsNested_; }
+    // The list-level rows this build can offer on the selected row: what the item menu's group 0 holds.
+    // Exposed so a scripted run can see the structure without reading the panel log.
+    QStringList optionsStructure() const;
     // ---- Sidecar subtitles and audio tracks (audit/SUBTITLES.md) ----
     // The subtitle files discovered beside the video being played, the chosen one (index -1 = Off) and
     // the cue under the player's own position. The choice is remembered per file for this session only.
@@ -431,6 +509,17 @@ private:
     void reloadSteamDownloads();
     quint64 scanRequest_=0,photoRequest_=0;
     bool loading_=false;
+    // The settings-chain proceed stage holds the busy page (see busy()). Separate from loading_ so a scan
+    // and a write can never clear each other's state.
+    bool busy_=false;
+    // The two values the busy page's determinate form reads (see busyProgress()/busySpinnerPhase()); both
+    // stay -1 until an operation publishes a total or a phase.
+    double busyProgress_=-1.;
+    double busySpinnerPhase_=-1.;
+    QElapsedTimer busyClock_;
+    // The store's latest refusal, from Preferences::failed (the signal carries the reason for every case; the
+    // store's error() only keeps the read/format ones). The write chain's failure page shows this text.
+    QString lastPreferencesError_;
     QString status_;
     QTimer slideshow_,idle_;
     QElapsedTimer activity_;
@@ -441,7 +530,9 @@ private:
     QVector<Category> categories_;
     QVector<int> selections_;
     int columnSink_=0;
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; };
+    // `grouped` is a page the item menu's Group Content level rebuilt into letter folders: `groupedSource` keeps
+    // the ungrouped rows so All can put them back without a rescan, and the folders' rows are the same entries.
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step
@@ -462,6 +553,15 @@ private:
     qint64 optionResumePoint(const Entry& entry) const;   // 0 = no resume record for this row
     bool optionIsLocalContent(const Entry& entry) const;
     bool optionPageSortable() const;
+    // Group Content: the list-level row the settled frame draws between Sort By and the item actions, and the
+    // level it opens. `optionGroupable` is true on a page whose rows carry titles this build can group by first
+    // letter (every ordinary list, never a provider or form page); `buildGroupContentMenu` is the level's own
+    // row set; `groupPageBy` rebuilds the open page (GroupTitle / GroupAll).
+    bool optionGroupable() const;
+    void buildGroupContentMenu();
+    void groupPageBy(OptionCommand command);
+    void openGroupFolder(const Entry& entry);
+    QString groupLetter(const QString& title);
     void logOptions(const Entry& entry);
     // The in-player variant of the same panel: Subtitles Off / one row per sidecar file, the audio
     // tracks the player reports, then Repeat and Shuffle (which used to hold the face buttons).
@@ -474,6 +574,14 @@ private:
     QString entryKind(const Entry& entry) const;
     void showEntryInformation(const Entry& entry);
     void sortPageByDate(bool ascending,bool created);
+    // The TV column's presence: the category is built like every other one and then stashed or restored here,
+    // so hiding it is one erase (and the bar, the navigation indices and the entry dump all follow categories_).
+    void syncTvColumn();
+    Category tvCategory_;
+    bool tvColumnStashed_=false;
+    // The media columns, resolved from category_video/music/photo.xml on every start (the same mechanism as the
+    // Network column). Declared here because they are built once from the firmware definition, not per frame.
+    void resolveMediaColumns();
     // Subtitle and audio-track state. Discovery and parsing live in subtitles.cpp; this class owns the
     // choice, the cue lookup against the player's position and the session memory of that choice.
     bool subtitleLog_=false;
@@ -552,8 +660,47 @@ private:
     // Set by refreshDirectory() so the scan's result reports itself as a rescan of an already-open page
     // (the deterministic media event behind a "library updated" notification).
     bool directoryRefresh_=false;
+    // The Display key's state (see mediaDisplayPinned()); cleared when playback ends.
+    bool mediaDisplayPinned_=false;
+    // ---- Steam accounts page state (Users > Steam Account) --------------------------------------------
+    QVector<SteamAccount> steamAccounts_;
+    QString steamAccountsError_;
+    SteamSwitchPrompt steamSwitch_;
+    SteamSwitchConfirmation steamSwitchConfirmation_;
+    QString steamSwitchId_;
+    bool steamSwitchHold_=false;      // XMB_STEAM_SWITCH_HOLD=1: log the handoff, start nothing (a test hook)
+    bool steamPrompt_=false;          // one of the two prompt boxes is up
+    void steamAccountSelected(const QString& steamId64);
+    void steamSwitchNextStep();       // push the next Box of the two-step prompt
+    void steamSwitchConfirmed();      // the model advanced one step: push step 2 or run the handoff
+    void steamSwitchRun();
+    void steamSwitchResult(bool ok,const QString& error);
+    void steamSwitchCancel(const QString& why);
     void openSettings(const QString& page);
     void openChoices(const QString& key,const QString& title);
+    // ---- The settings write chain ---------------------------------------------------------------------
+    // One write in flight. The Ask stage is a Box (its accepted callback is this object's own, so the two
+    // answers are the two branches of Shell::activate's Box path); the Proceed stage raises the busy page;
+    // the Finish stage is a Page message that names the new value or the write's real error.
+    enum class WriteStage { None, Ask, Proceed, FinishOk, FinishFailed };
+    struct SettingsWrite {
+        WriteStage stage=WriteStage::None;
+        QString key,label,valueText,result;
+        QVariant value;
+        QString askBody,proceedText,okText,failText;
+        bool slow=false;      // the write gets the Proceed stage
+        bool popBand=false;   // a band was open: the finish returns to the row list
+        bool host=false;      // the write goes to the computer, not the app's store
+        bool resetAll=false;  // Restore Default Settings: one atomic multi-key write
+        bool themeToSystem=false; // "Original" over a wallpaper: clears the theme AND the background mode
+    };
+    SettingsWrite settingsWrite_;
+    void beginSettingWrite(const Entry& entry);
+    void beginResetWrite();           // Restore Default Settings: the console's own top|proceed|finish chain
+    void startSettingsWritePage();    // Ask accepted (or skipped): Proceed, then runSettingWrite()
+    void runSettingWrite();           // the write itself, then the Finish stage
+    void finishSettingWrite();        // the Finish page was dismissed: back to the row list
+    void cancelSettingWrite(const QString& why);
     // Restore Default Settings: every key this build stores, set back to the default Preferences documents
     // (preferences.cpp defaultValue). Called only from the confirmed box, and logged with the count.
     void restoreDefaultSettings();

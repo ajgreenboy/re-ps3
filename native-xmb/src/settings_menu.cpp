@@ -56,7 +56,14 @@ struct ThemeItemSpec {
     quint32 colour=0;               // the swatch measured on the capture, 0xRRGGBB (0: no swatch)
     bool submenu=false;             // the firmware's right-hand chevron row (`Brightness`)
     const char* note=nullptr;       // why the item cannot be committed (empty when it writes)
+    // A file picker the console folds into this list rather than drawing as a page row (SETTINGS 5.6/D11: the
+    // Theme page is Theme/Color/Background/Font and nothing else). `picker` is the sentinel value the item
+    // carries: no bounded preferences key accepts it, and Shell::openChoices turns it into an Action::Theme /
+    // Action::Wallpaper row instead of a write, so Cross opens the file dialog.
+    const char* picker=nullptr;
 };
+// The Theme list's `Install` item and the Background list's wallpaper item carry these sentinels
+// (kThemePickerValue / kWallpaperPickerValue, settings_menu.h): activate() opens the file dialog for them.
 const char* kMonthNote="this build has no theme tint for this month's palette; its six tints are Original, "
     "Blue=August, Purple=June, Red=December, Green=May, Silver=January";
 const QVector<ThemeItemSpec>& themeColourSpec() {
@@ -89,7 +96,13 @@ const QVector<ThemeItemSpec>& themeBackgroundSpec() {
             "12.4c/12.8), so the row is shown where the firmware puts it and cannot be committed"},
         {"Original","Original",0,true,0,false,nullptr},
         {"Classic","Classic",1,true,0,false,nullptr},
-        {"Wallpaper","Wallpaper",2,true,0,false,nullptr}};
+        {"Wallpaper","Wallpaper",2,true,0,false,nullptr},
+        // The wallpaper picker, moved here from the Theme page's own row list. On the console the background's
+        // Wallpaper item IS the way a user wallpaper is chosen (the page has no picker row of its own), so this
+        // is where the console's structure puts it; the item is last so the captured four-item block keeps its
+        // measured order and origins (SETTINGS 12.4c: Brightness/Original/Classic/Wallpaper at 381/537/581/621).
+        {"Select Wallpaper","",0,false,0,false,
+            nullptr,kWallpaperPickerValue}};
     return table;
 }
 const QVector<ThemeItemSpec>& themeFontSpec() {
@@ -110,8 +123,11 @@ QVector<Choice> themeChoices(const QVector<ThemeItemSpec>& spec) {
     int index=0;
     for(const auto& item:spec) {
         const char* title=item.valueName?item.valueName:item.label;
-        result.push_back({title?QString::fromLatin1(title):QString{},
-            item.writes?QVariant(item.value):QVariant(kInertValue+index)});
+        // A picker item carries its sentinel so the page and the list agree on which row it is; openChoices
+        // makes it an action row instead of a write.
+        const QVariant value=item.picker?QVariant(QString::fromLatin1(item.picker))
+            :item.writes?QVariant(item.value):QVariant(kInertValue+index);
+        result.push_back({title?QString::fromLatin1(title):QString{},value});
         ++index;
     }
     return result;
@@ -131,8 +147,11 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
     // (Original, Silver, Green, Purple, Blue, Red), and every item is present so the focus can reach it - a
     // disabled item's option is a sentinel Preferences refuses (kInertValue).
     if(key=="appearance/colour")return themeChoices(themeColourSpec());
-    // The theme chosen with Select Theme joins this list in openChoices (it is read from the user's .p3t).
-    if(key=="appearance/theme")return {{text("msg_theme_default","Original"),QString{}}};
+    // The Theme list's `Install` is the .p3t picker: the console's own first item (SETTINGS 12.4a) and the only
+    // way to load a theme file since the page's own picker row was removed. Its sentinel value makes
+    // openChoices() build an Action::Theme row; the current theme joins the list below in openChoices.
+    if(key=="appearance/theme")return {{QString::fromLatin1("Install"),QString::fromLatin1(kThemePickerValue)},
+        {text("msg_theme_default","Original"),QString{}}};
     if(key=="appearance/background")return themeChoices(themeBackgroundSpec());
     if(key=="appearance/font")return themeChoices(themeFontSpec());
     if(key=="clock/dateFormat")return {{text("msg_datetime_fmt_dmy","DD/MM/YYYY"),0},{text("msg_datetime_fmt_mdy","MM/DD/YYYY"),1},{text("msg_datetime_fmt_ymd","YYYY/MM/DD"),2}};
@@ -332,15 +351,12 @@ const QVector<RowSpec>* firmwareRows(const QString& id) {
 // Rows the firmware's page does not have. They stay only where this build's own feature would otherwise
 // lose its only surface; each one is marked in the dump and in SETTINGS-FIRMWARE.md section 9.
 const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
-    // D11: the firmware folds theme and wallpaper selection into the Theme and Background choice pages,
-    // which this build cannot bind yet (the choice page class is Phase 11.3), so the two pickers stay as
-    // native-only rows at the end of the page. Removing them would delete the only way to load a .p3t
-    // theme or a wallpaper.
-    static const QVector<RowSpec> theme{
-        {"themefile",nullptr,nullptr,Action::Theme,nullptr,nullptr,"Select Theme",
-            "Opens a PS3 theme file (.p3t): its background and icons replace the system's."},
-        {"wallpaper",nullptr,nullptr,Action::Wallpaper,nullptr,nullptr,"Select Wallpaper",
-            "Selects a local image for the XMB background."}};
+    // The Theme page previously carried two native-only rows ("Select Theme", "Select Wallpaper") at 820 and
+    // 891. The console's page is Theme / Color / Background / Font and stops at 749 (SETTINGS 5.6: the frame
+    // "shows exactly these four, in this order"), so both rows are gone from the page. They are not lost: the
+    // Theme list's own `Install` item is the .p3t picker and the Background list's new `Select Wallpaper` item
+    // is the image picker - the two lists the firmware folds these functions into (D11). See themeCaptureChoices
+    // and themeBackgroundSpec.
     // D6/D7: the firmware's Video and Music pages are BD/DVD and audio-CD rows (listed above from the
     // measured batch); neither drive nor decoder exists in this build, so every one of them is an
     // explained refusal. These three are this build's own media settings and stay as native-only rows
@@ -352,7 +368,6 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
             "Plays every file in a random order before starting another cycle."},
         {"volume",nullptr,nullptr,Action::SettingChoices,"audio/volume",nullptr,"Volume",
             "Sets native media playback volume."}};
-    if(id=="theme")return &theme;
     if(id=="music" || id=="video")return &media;
     // The Sound page's firmware set is three rows (D16 removed the four invented power rows). The host's
     // volume and mute are this build's own settings, so they are listed as native-only rows at the end of
@@ -767,8 +782,9 @@ RcoChoicePage readChoicePage(Assets& assets,const QString& containerName,const Q
     return result;
 }
 // The captured Theme list: page_theme_config_theme is an empty Page in the RCO (9.3f), so the labels are
-// the 2026-10-28 capture's (settings/theme-choice.png). Only Original is installable in this build: the
-// other three are firmware themes this build has no asset for, and Install is the native file picker.
+// the 2026-10-28 capture's (settings/theme-choice.png). `Install` is the .p3t picker - the console's own first
+// item - and Original is the system theme; Classic and Air Paint are firmware themes this build has no asset
+// for, so they are listed and cannot be committed.
 ChoiceList themeCaptureChoices(const QVariant& current) {
     ChoiceList list;
     list.pageId=QStringLiteral("theme");list.rowId=QStringLiteral("theme");list.rowTitle=QStringLiteral("Theme");
@@ -776,18 +792,24 @@ ChoiceList themeCaptureChoices(const QVariant& current) {
     list.source=QStringLiteral("capture");
     list.note=QStringLiteral("page_theme_config_theme is an empty Page in sysconf_plugin.rco (0 children), so the "
         "plugin builds this list at run time; these four labels are the capture batch's "
-        "(out/rpcs3-ref-2026-10-28/settings/theme-choice.png). Original is the only item this build can install; "
-        "Install is the native .p3t picker and Classic/Air Paint ship no asset here.");
-    struct Spec {const char* label;bool writes;};
-    static const Spec specs[]{{"Install",false},{"Original",true},{"Classic",false},{"Air Paint",false}};
+        "(out/rpcs3-ref-2026-10-28/settings/theme-choice.png). Install is the .p3t picker; Original is the only "
+        "installed theme this build ships; Classic and Air Paint ship no asset here.");
+    struct Spec {const char* label;bool writes;const char* picker;};
+    static const Spec specs[]{{"Install",false,kThemePickerValue},{"Original",true,nullptr},
+        {"Classic",false,nullptr},{"Air Paint",false,nullptr}};
     int index=0;
     for(const auto& spec:specs) {
         ChoiceItem item;
         item.label=QString::fromLatin1(spec.label);
         item.source=QStringLiteral("capture");
         item.rcoIndex=index++;
-        item.writes=spec.writes;
-        if(spec.writes) {
+        if(spec.picker) {
+            // The picker: a real row (so the band does not dim it and the focus can reach it), carrying the
+            // sentinel value Shell::openChoices turns into an Action::Theme row.
+            item.value=QString::fromLatin1(spec.picker);
+            item.writes=true;
+        } else if(spec.writes) {
+            item.writes=true;
             item.value=QString{};
             item.isCurrent=choiceValueMatches(current,item.value);
         }
@@ -862,7 +884,12 @@ ChoiceList themeRunTimeChoices(const QString& rowId,const QString& rowTitle,cons
         item.swatch=theme.colour!=0;
         item.colour=theme.colour;
         item.submenu=theme.submenu;
-        if(theme.writes) {
+        if(theme.picker) {
+            // The wallpaper picker: a real item of the list (the console's own `Wallpaper` item is how a user
+            // wallpaper is chosen), carrying the sentinel Shell::openChoices turns into an Action::Wallpaper row.
+            item.value=QString::fromLatin1(theme.picker);item.writes=true;
+            item.source=QStringLiteral("native");
+        } else if(theme.writes) {
             item.value=theme.value;item.writes=true;
             item.isCurrent=choiceValueMatches(current,item.value);
         } else {
