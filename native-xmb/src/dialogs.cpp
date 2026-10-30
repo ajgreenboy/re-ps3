@@ -18,6 +18,7 @@
 #include "shell.h"
 #include <QFontMetrics>
 #include <QPainter>
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -39,15 +40,21 @@ constexpr double kChromeTitleTop=155.;                                   // 23 p
 // This replaces the D4 fit of 198/872 at 0.218/0.201, which no 1080p message-page frame shows.
 constexpr double kPageRuleTop=199.,kPageRuleBottom=879.;
 constexpr int kPageRuleAlpha=177;
-// The D5 information page is the one message shape with no 1080p reference in the corpus, so it keeps
-// the D4 fit unchanged (198 alpha 0.218, 872 alpha 0.201) instead of being re-fitted to a frame it does
-// not have. The table page's own pair (199/879 at 92) is declared with that page below.
-constexpr double kInfoRuleTop=198.,kInfoRuleBottom=872.;
-constexpr int kInfoRuleAlphaTop=56,kInfoRuleAlphaBottom=51;
-// D4 body: line 1 ink y 509, line 2 ink y 543 (pitch 34 by measurement, 31..33 in the audit's rounding),
-// font ~24 px. AlignTop puts the font's own ascent above the ink, so the rect starts five pixels above the
-// measured ink row.
-constexpr double kBodyLeft=260.,kBodyWidth=1400.,kBodyTop=504.;
+// The D5 information page has a 1080p frame of its own and it measures the same pair as the message
+// page: out/rpcs3-ref-2026-10-28/dialogs/information-page-01.png (Game > Corrupted Data > Triangle >
+// Information) puts rule 1 at y 199 as one row of 176.9 luma over a 0.0 background (alpha 0.694) and
+// rule 2 at y 879, 182.4 over 17.6 (alpha 0.694). The 198/872 at 56/51 pair this page used to carry was
+// the D4 800p window-recording fit; the 1080p frame supersedes it, and it is the frame audit section 8.1
+// already cites (that table gives the means 176.8/182.0; the alphas are measured here). The pair stays a
+// per-class constant so the two classes cannot drift back into each other, but both values are measured.
+constexpr double kInfoRuleTop=199.,kInfoRuleBottom=879.;
+constexpr int kInfoRuleAlphaTop=177,kInfoRuleAlphaBottom=177;
+// D4 body: the 1080p frames put the first line's ink at y 529..547 - the Internet Connection Test message
+// page at 530..546 and the wait page of the same class at 529..547 - on a 32 px line pitch. The 509 this
+// constant used to draw is the 1262x800 window recording's row, 21 px high. AlignTop puts the font's
+// ascent above the ink (a 24 px face at rect top 504 drew ink at 509), so a rect top of 525 draws the cap
+// ink at 530.
+constexpr double kBodyLeft=260.,kBodyWidth=1400.,kBodyTop=525.;
 constexpr double kBodyPitch=32.;
 constexpr int kBodySize=24,kTitleSize=23,kInfoRowSize=22;
 // Hint row, one measured pair for every message-surface page: the O glyph's ink is 1155..1174 x
@@ -218,7 +225,12 @@ void View::drawPageChrome(QPainter& p,const QString& title,double ruleTop,int ru
     p.setBrush(QColor(255,255,255,ruleTopAlpha));p.drawRect(QRectF(0,ruleTop,1920,1));
     p.setBrush(QColor(255,255,255,ruleBottomAlpha));p.drawRect(QRectF(0,ruleBottom,1920,1));
     p.restore();
-    if(!modalMessagePage())drawPageClock(p);
+    // The clock: a modal message page keeps the info bar's clock (the bar is chrome and draws over the
+    // wash), so its own face is suppressed. The D5 information page has no bar and keeps the page clock.
+    // The busy page has no bar of its own either, but view.cpp's wash/bar gate puts it in the modalPage
+    // class (the console's wait frame keeps the bar's plate, clock text and face), so it gets the bar's
+    // measured face and must not also get this one.
+    if(!modalMessagePage() && !busyPageUp())drawPageClock(p);
 }
 void View::drawPageClock(QPainter& p) {
     // The measured pages keep only the clock face: no plate, no date text. The hands and their drop
@@ -398,7 +410,15 @@ void View::drawMessageBox(QPainter& p) {
     p.restore();
 }
 
-// ---- D2 error-code page ---------------------------------------------------------------------------
+// ---- D2 error-code page (UNREACHABLE - no console frame exists) ------------------------------------
+// The firmware's numeric error page is traced (TRACED 0x0034002C: mbox_try_button, the scroll body, the
+// Enter/Back getters, msgdialog_plugin's msg_errorcode_* strings) but no console frame of it exists on this
+// rig: DIALOGS-FIRMWARE 9.3 tried four routes and none produces an 800xxxxx page - the console answers a
+// cable condition with the D4 page (page-network-test-error), and a classified failure needs PSN, a PKG or
+// a disc. The native's own route is gone as well: Shell::showError() (MessageKind::ErrorCode) has no call
+// site, so this path never draws today. It is kept as the traced structure - the two headings, the body,
+// the Enter/Back label pair - and its chrome now measures the family's 199/879 at 0.693; its body slot
+// moved with the message page's when the 1080p frames put the ink at 529..547. Nothing here is scored.
 void View::drawErrorMessagePage(QPainter& p) {
     QString text=messageShown_.text;
     const QString heading=takeHeading(text);
@@ -497,6 +517,85 @@ void View::drawMessageTablePage(QPainter& p) {
         ++row;
     }
     drawHintRow(p,{{"tex_circle",assets_.text("system_plugin","msg_back","Back")}},kTableHintInkTop,dialogHintEase_.value);
+}
+
+// ---- The busy / wait page (MEASURED 2026-10-28, full frame) ---------------------------------------
+// The console's wait page is not a message: page_busy owns the screen while a list loads or a write runs
+// (DIALOGS-FIRMWARE 2.8; FIDELITY-BEHAVIOUR N12/X5), and the shell raises it with one flag (Shell::busy(),
+// "View draws page_busy from this one flag"). Its only full-frame console reference is the Internet
+// Connection Test wait, burst error/ictest2-burst/ (full frame, 57.9 fps, Cross at 908 ms); the settled
+// frame f_0003013.png measures the D4 chrome - the header title's cap ink starts at y 168, the row the
+// message page measures, and the rule pair is y199/y879 at 0.693 - with `Please wait...` as the body (ink
+// 885..1033 x 529..547, centre 959, cap 19 px), the O Back hint at the family's anchors (ink
+// 1155..1240 x 897..916), the page behind it dimmed (the ghosted page content reads 28 luma in the band
+// y 480..525, max 35) and the info bar kept with its clock. So the surface is the D4 page class with a
+// status line where the body goes.
+//
+// The determinate form - the progress row - has NO console frame: this rig's VFS holds no copyable object,
+// so copy/delete progress was never photographed (DIALOGS-FIRMWARE 8.2 item 5 and 8.3). It is drawn from
+// the firmware's own Progress art and model (system_plugin tex_default_progress_base / _slider, the 24x20
+// pair the music panel's progress_bar_playing_time object draws as paf's default progression art,
+// MEDIA-PANELS 11.5), at a rect stated as a FIT here: the art's own 20 px height (1:1, so no vertical
+// stretch), 360 px wide and centred on x 960, top 561 - the second line of the measured body pitch
+// (529 + 32). The percentage is native text: no RCO string in any container carries a percentage.
+//
+// The D8 sweep (page_busy's busy_icon, tex_busy 36x36 with the two 8x36 strips) has no recoverable screen
+// rect - every page_busy child's pos/size is 0 in the RCO because the plugin lays it out at run time - and
+// no console frame shows it on a page (the circle in the wait frame's top-right corner is the info bar's
+// analog clock face, at the clock's measured 1774..1805 x 88..119). It is therefore drawn only when a
+// caller supplies a phase, at a stated fit, and the default draws none: the measured page has no spinner.
+constexpr double kBusyBarX=780.,kBusyBarTop=561.,kBusyBarWidth=360.,kBusyBarHeight=20.;
+constexpr double kBusySpinnerX=1500.,kBusySpinnerY=523.;
+bool View::busyPageUp() const {
+    // The page owns the screen only when nothing else does: a message surface, the media player and the
+    // photo viewer each draw their own chrome (the player's own "Loading..." line is view.cpp's).
+    if(!shell_.busy())return false;
+    if(!shell_.message().isEmpty())return false;
+    if(shell_.mediaOpen()||shell_.photoOpen())return false;
+    return true;
+}
+void View::drawBusySurface(QPainter& p,double progress,double spinnerPhase) {
+    // Header: the page the wait belongs to. The console's wait page is titled with its own page ("Internet
+    // Connection Test"); pageTitle() is the pushed page's title and the focused row's is the fallback at
+    // the root. The icon is drawPageChrome's usual source (the focused row, or its parent for a settings
+    // bullet's "23n" marker), which is the page header's icon on the measured frame too.
+    QString title=shell_.pageTitle();
+    if(title.isEmpty()) {
+        const auto& rows=shell_.entriesAt(shell_.depth());
+        const int selection=shell_.selectionAt(shell_.depth());
+        if(selection>=0 && selection<rows.size())title=rows[selection].title;
+    }
+    drawPageChrome(p,title,kPageRuleTop,kPageRuleAlpha,kPageRuleBottom,kPageRuleAlpha);
+    // Body: the shell's own status where it has one, else the firmware's wait string (system_plugin
+    // msg_wait, "Please wait..."). It goes on the measured body slot, the same one the message page uses.
+    const QString status=shell_.status().isEmpty()
+        ?assets_.text("system_plugin","msg_wait","Please wait..."):shell_.status();
+    drawMessageLines(p,status,kBodyTop,kBodyPitch,kBodySize,QColor(240,240,240),kBodyLeft,kBodyWidth);
+    // The determinate row (RCO-derived, see the fit above). progress < 0 is the measured wait page.
+    if(progress>=0.) {
+        const double ratio=std::clamp(progress,0.,1.);
+        const QRectF bar(kBusyBarX,kBusyBarTop,kBusyBarWidth,kBusyBarHeight);
+        const QImage& base=assets_.image("system_plugin","tex_default_progress_base");
+        const QImage& fill=assets_.image("system_plugin","tex_default_progress_slider");
+        if(!base.isNull())p.drawImage(bar,base);
+        if(!fill.isNull() && ratio>0.)
+            p.drawImage(QRectF(bar.left(),bar.top(),bar.width()*ratio,bar.height()),fill);
+        drawMessageText(p,{bar.right()+16.,kBusyBarTop-2.,140.,kBusyBarHeight+4.},
+            QString::number(int(std::lround(ratio*100.)))+QStringLiteral("%"),kHintSize,QColor(235,235,235));
+    }
+    // The D8 sweep: only when a caller supplies one (the measured page has none; see the block comment).
+    if(spinnerPhase>=0.) {
+        const double turns=spinnerPhase-std::floor(spinnerPhase);
+        p.save();
+        p.translate(kBusySpinnerX+18.,kBusySpinnerY+18.);
+        p.rotate(turns*360.);
+        drawImage(p,"system_plugin","tex_busy",{-18.,-18.,36.,36.});
+        p.restore();
+    }
+    // One Back hint, at the family's measured anchors. The wait page keeps it at full strength for as long
+    // as it is up (the 100-unit hint fade is the button group's entrance on a *message*, and no burst of a
+    // wait page's entrance exists), so it does not read dialogHintEase_, which is 0 while no message is up.
+    drawHintRow(p,{{"tex_circle",assets_.text("system_plugin","msg_back","Back")}},kHintInkTop,1.);
 }
 
 // ---- The button-hint row --------------------------------------------------------------------------

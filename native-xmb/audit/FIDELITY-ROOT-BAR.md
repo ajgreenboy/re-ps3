@@ -300,3 +300,177 @@ Each line is a measurement from this session, not a code read.
   composite, not an independent confirmation of `PIPELINE`'s -0.0594 linear value.
 - A live instance of the build was already running (`PID 34392`, started 19:23); every capture in this
   pass is a separate scripted instance with its own `--data-dir`.
+
+---
+
+## 11. Dated implementation pass - 2026-10-29: five measured fixes, and a BG1 frame that has no plate
+
+The first pass in this document that edits source. Files written: `src/view.cpp` and `src/view.h` (the five
+fixes, plus the `drawNineSlice` source inset they need) and `work/ab-layers.thresholds.json` (the four
+captureBaselines these fixes move, plus a dated revision note). No reference frame, budget, tool or other
+source file was touched.
+
+Pair: the same console frame as section 0 (`out/rpcs3-allgraphics-2026-10-28/frames/col-game-r00.png`), the
+same pins, and two captures of one source tree. "Before" is HEAD `07a4fe4` built into
+`out/native-rootfix/re-ps3-native.exe`; "after" is the same output directory rebuilt with the fixes
+(`out/rootfix-base/native.png` and `out/rootfix-after/native3.png`, both 1920x1080, `--render-clock 30
+--background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-28T21:40:00 --focus-time 2000`, empty
+`XMB_STEAM_ROOT`). Numbers below are Rec.709 luma means of the stated rects, and `work/ab-compare.ts` for
+PSNR/SSIM, both run in this session.
+
+### 11.1 Target vs achieved
+
+| gap | audit target | achieved on the fixed build | verdict |
+|---|---|---|---|
+| 4 - item focus plate `BG1` | 405,419 -> 724,594, 319x175, +43..+60 luma lift, soft fill | plate drawn at exactly (405,419) 319x175: left edge steps 72.65 -> 104.93 at x405, right edge ends at x723 (116.36 -> 87.30), top y419, bottom y594; composite alpha per row 0.173 / 0.191 / 0.207 / 0.209 / 0.214 / 0.200 / 0.179 / 0.158 (y 421/433/445/469/493/529/541/553) against the console's 0.17 / 0.19 / 0.21 / 0.21 / 0.21 / 0.20 / 0.18 / 0.15 | **met** |
+| 6 - clock face dark disc | ring 1774,88 -> 1805,119; interior 28.1 = black at ~0.606 | interior (r<=11, median) **30.7** vs the console's 27.7 and the audit's 28.1 block; the face's ring ink is x1774..1804 / rows 88..119 (console 1774..1805 / 88..119) | **met** |
+| 8 - focused item glyph | ink 128 px (console 50 -> 128 = 2.56x), quad 184.8 | box 104 -> **128 px**, i.e. 50 -> 128 = **2.56x**; focused folder ink measured **x501..628 (128 px)** against the console's **502..627 (126 px)** on the same Vita folder row; unfocused folder ink **50x34 at x540..589** against the console's **50x35 at 540..589** | **met** |
+| 7 - info-bar plate ramps | y75 alpha 0.351, y132 0.352; no 1 px oversize | top **0.351**, bottom **0.351** (was 0.291 / 0.292); plate core exactly rows 75..132, columns 1329..1919, no 4%-alpha row outside (y74 was 95.74 -> now 86.45 = the background; y133 94.13 -> 85.07; x1328 102.35 -> 95.38) | **met** |
+| 9 - bottom band rise | y780..1075 rises 6.90 | rise **6.60** (was 3.15), band absolute **50.07 -> 56.67** against the console's **49.94 -> 56.84** | **met (-46% -> -4%)** |
+
+### 11.2 Gap 4: the plate exists, but not in this frame
+
+`BG1` has no firmware rectangle and no texture: `GEOMETRY-ROOT` 2.2/10.1 records its planes as
+`posX/posY/width/height = 0` with `image=null`, and `explore_plugin_full` ships nothing that could be it. So
+this is a drawn plane, and its numbers come from the frame: the rect from 11.1 of `GEOMETRY-ROOT` (five frames)
+and from this audit's I10, the fill from the frame's own edge steps. Sampling the step at the plate's left
+edge (x396..404 outside, x406..414 inside) and its right edge (x700..722 inside, x727..750 outside) on
+`col-game-idle-hint.png` gives a per-row composite alpha of 0.17 at the top edge, 0.19..0.22 through y 443..535,
+0.14 at y566 and 0.11 at y588 over white 230 - the implemented stops are those numbers, and the achieved
+alpha re-measured the same way on the fixed build's own frame is within 0.01 of them at every sampled row.
+
+**One finding this pass adds: `col-game-r00.png` has no plate at all.** Its left-edge step at x405 measures
+-0.02..0.03 alpha on every row from 421 to 591, i.e. no step (raw row 470: 88.6 at x398 through 88.6 at x423;
+the right edge x714..739 is flat at 70.6..71.6), while `ab-rpcs3-root.png` (the stored gate reference),
+`col-game-idle-hint.png` and the six frames of `GEOMETRY-ROOT` 11.1 all carry it (0.16..0.23). Eight of the
+nine console frames I sampled show the plate and this one does not; nothing in the local corpus says which
+state suppresses it - the two frames differ in scroll position and capture batch, not in theme or preset - so
+this pass draws it unconditionally at the top level and records the exception rather than inventing a
+condition. It also means this document's own rank-4 crop score (`item label row` 12.05 dB / 0.4098) was
+measured against the one frame without a plate, which is why drawing the plate moves that crop two ways in
+11.4 below.
+
+### 11.3 Gap 6: the disc needs F6's ring under it
+
+The disc alone cannot be measured at the audit's own block: (1778,106) is 11.8 px from the face centre, which
+is inside the console's ring interior (inner radius 13.0) but *on* the old root ring (centre 1791/104, 2.7 px
+stroke, inner edge 12.65), and it also carries this build's minute hand at the pinned 21:40. The fix therefore
+lifts the whole measured face to the root - centre 1789.5/103.5, a 3 px stroke on the same 14 px radius (that
+reproduces the console's ink exactly: 1774..1776 and 1803..1805 on row 103), the message page's 13 / 9.5 px
+hands, and the one disc at two measured alphas (0.606 at the root, 0.8 on a message page). Ring and disc are
+F6 and F7 and they are the same object set, so they move together.
+
+Measured on the fixed frame: the interior's median over the disc's r<=11 core is **30.7** (before 77.9,
+console 27.7), and the hand-free block at (1783,108) reads 30.84 against the console's 25.15 (before 82.61).
+The residual +3 is the plate's own +12.8 residue passing through the disc's 0.394 transmission, not a disc
+error. At the audit's exact block (1778,106) this build reads 156.3 because the minute hand is there at 21:40 -
+the same content-bound trap this document's F7 crop note already records for the hand angles.
+
+### 11.4 The crop scores, both ways
+
+Against `col-game-r00.png` (the audit's frame) and against `ab-rpcs3-root.png` (the stored gate reference,
+which carries the plate), before -> after:
+
+| crop | rect | vs col-game-r00 | vs ab-rpcs3-root |
+|---|---|---|---|
+| item label row | 400,425,800,100 | 12.05 / 0.4098 -> 11.69 / 0.3987 | 11.99 / 0.3895 -> **12.06 / 0.4171** |
+| BG1 plate | 405,419,319,175 | 12.24 / 0.4971 -> 11.24 / 0.4766 | 14.17 / 0.4793 -> 13.98 / **0.4971** |
+| focused icon | 480,430,180,150 | 12.66 / 0.4699 -> 11.46 / 0.4404 | 14.55 / 0.4439 -> 13.67 / **0.4790** |
+| clock face | 1768,84,46,40 | 11.46 / 0.5135 -> 10.87 / **0.5665** | 11.62 / 0.5222 -> 10.84 / **0.5708** |
+| plate top ramp | 1420,74,260,10 | 26.56 / 0.9587 -> 27.18 / **0.9922** | 30.71 / 0.9696 -> 32.38 / **0.9979** |
+| plate bottom ramp | 1420,128,260,10 | 26.03 / 0.9570 -> 26.57 / **0.9904** | 29.45 / 0.9670 -> 30.68 / **0.9965** |
+| bottom band | 20,780,280,295 | 26.70 / 0.9762 -> **34.84 / 0.9953** | 27.28 / 0.9784 -> **38.68 / 0.9956** |
+
+Three of these are content-bound and must not be read as fidelity, exactly as section 0 says: the plate rect
+and the focused icon are scored against a frame that either has no plate or draws a folder where this build
+draws a Steam shopping bag, and the clock crop carries different hand angles. In all three the SSIM *rises*
+(the structure is now the console's) while PSNR falls or stalls (the remaining error is now a bright glyph in
+the wrong place, which PSNR punishes harder than a smooth wrong field). The PSNR-loss column is therefore the
+price of moving the geometry to the measured value on a row whose art belongs to a different surface, and it
+is the reason gap 8 is verified on the folder row (128 vs 126 px) instead of on this crop.
+
+### 11.5 The gate, and what moved
+
+`bun work/ab-layers.ts --capture --exe out/native-rootfix/re-ps3-native.exe`, twice, identical:
+
+| layer | before (2026-10-28) | after (measured) | delta |
+|---|---|---|---|
+| frame | 18.76 / 0.8360 | **19.2081 / 0.8475** | +0.45 dB / +0.0115 |
+| top background | 21.06 / 0.9434 | 21.0612 / 0.9434 | 0 / 0 |
+| category icon row | 21.62 / 0.9062 | 21.6196 / 0.9062 | 0 / 0 |
+| item label row | 11.99 / 0.3895 | **12.0606 / 0.4171** | +0.07 dB / +0.0276 |
+| clock text | 11.41 / 0.4528 | **11.5202 / 0.4662** | +0.11 dB / +0.0134 |
+| info bar | 15.05 / 0.7667 | **15.1517 / 0.7738** | +0.10 dB / +0.0071 |
+
+6/6 PASS, and the text-presence guard reads 1703 bright pixels in the clock crop (minimum 900). Top
+background and the category icon row are unchanged to the last digit, which is the evidence that the category
+grid, the label typography and the upper field were not touched. The four moved layers are the four this pass
+predicts, and `revisionNote20261029` in the thresholds file records them.
+
+Named states: **12/12 references re-saved** (`--states --save-reference`). All twelve moved, because the clock
+face, the info bar and the lower-field veil are on every XMB surface; the three depth-0 root states
+(`steam-game-root`, `xmb-notification`, `xmb-volume-hud`) additionally carry the plate and the 128 px focused
+glyph. Old reference against the new capture, per state: `steam-all-games` 28.26 / 0.9814,
+`steam-store-sections` 27.96 / 0.9808, `steam-not-installed` 28.52 / 0.9876, `xmb-notification` 26.85 / 0.9772,
+`xmb-volume-hud` 26.32 / 0.9732, `video-options-panel` 28.96 / 0.9855, `continue-watching` 28.24 / 0.9827,
+`continue-watching-empty` 27.77 / 0.9836, `subtitle-cue` inf / 1.0000 (the video surface covers the frame, so
+this one did not move), `jellyfin-signin` 28.13 / 0.9833, `steam-download-page` 28.31 / 0.9844;
+`steam-game-root`'s own line scrolled out of the run log, so its previous score is not quoted here.
+
+The volume-HUD state needed a host condition to save: its recipe asserts `Windows reports 25% (muted 0)` and
+the default playback endpoint was muted, so the first attempt failed at that assertion; with the endpoint
+unmuted the reference saved (26.32 / 0.9732 against the old one). No tool or recipe was changed for it.
+
+Determinism: two `--render-clock 20 --background-clock 2026-10-28T10:00:00 --ui-clock 2026-10-28T21:40:00
+--focus-time 2000` captures are byte-identical, SHA256 `CA5A0F5A0CEDFF774B373FF7AE2EBA3AE472005A4C0EE1E2F5F8C6CC5AFF203B`
+both times.
+
+### 11.6 Gap 9 is B6's tail, and the veil is a stand-in with a removal criterion
+
+The band's shortfall is not a gradient stop this build forgot: the whole lower field is 10..16 luma high and
+the display response there is compressed (measured: a 13.2-step rise in the raw HDR scene maps to only 3.9
+luma in the composite), so no multiplicative gain can widen the band - raising it would darken the top of the
+band more than the bottom. The correction is therefore a display-space veil whose alpha is exactly
+1 - (console/native) at each measured row: 0.253 at y640, 0.221 at y780, 0.194 at y900, 0.153 at y1020,
+0.155 at y1075, ramped in from y560 so that nothing above it enters (the top background, category row and
+item label row crops are unchanged to the last digit, which is the proof). It is a FIT standing in for the
+tone-map/glare response - the `-0.0594` linear residue `PIPELINE` records and this document's B6 - which
+lives in `hdr.cpp`, outside this pass's write fence. **Remove it when B6 is fixed there**; it is written as a
+veil, not as art, for exactly that reason. One side effect to know: it darkens the ribbon and the dust in the
+same band by the same ratio, which is what the console's own composite does to them, but it also makes the
+native dust dimmer against `PARTICLES.md`'s peak-delta figure.
+
+### 11.7 Gap 11 is shell data, not this file - hunk returned
+
+The `PS Vita System Application Utility` row's icon is `item_tex_vitaformat` (`src/shell.cpp:1039`). That
+asset is **110x28** (`work/explore-full-images.txt`), i.e. one of the firmware's format *badges* -
+`item_tex_ps3format`, `item_tex_ps4format`, `item_tex_ps1format`, `item_tex_ps2format`, `item_tex_pspformat`
+and five more are all 110x28 - not an item glyph. That is exactly the horizontal pale strip I3 measures. The
+column's other rows carry 314x178 folder art (`item_tex_ps3game_folder`, `item_tex_ps2game_folder`,
+`item_tex_pspgame_folder`, `item_tex_ps3sd_folder`, `item_tex_plain_folder`), and the firmware's own column
+definition puts this row in the same family: `MENUS-XMBML` 3.3 lists `#seg_psp2appdata` with icon
+`tex_album_icon`, the placeholder name `#gamedata` also carries and which this build already draws as
+`item_tex_ps3game_folder`. The hunk:
+
+```diff
+-            item("vita","PS Vita System Application Utility","item_tex_vitaformat"),item("data","Game Data Utility","item_tex_ps3game_folder"),
++            item("vita","PS Vita System Application Utility","item_tex_pspgame_folder"),item("data","Game Data Utility","item_tex_ps3game_folder"),
+```
+
+Open: `explore_plugin_full` ships no Vita-emblem folder - the 314x178 set is plain / ps3game / ps2game /
+ps1game / pspgame / ps3sd / ps1game_plain - so *which* emblem the console draws on this row (the PSP folder's,
+the plain folder's, or a composition of the plain folder with the 110x28 `item_tex_vitaformat` badge inside it)
+is not settled by luma alone at this crop's resolution. The hunk takes the nearest evidenced family member and
+wants a 1:1 crop check before it is committed; if the console composites folder + badge, the fix needs a
+two-image path and belongs back in this file's `drawItemGlyph`.
+
+### 11.8 What this pass did not do
+
+- Did not touch the category grid, the label typography, the row-block geometry or the PS-tap plate.
+- Did not open B6/B3 (the whole-field residue) or the ribbon: both are outside this pass's fence (`hdr.cpp`,
+  `ribbon.cpp`), and the veil in 11.6 is deliberately the only trace of them here.
+- Did not resolve why `col-game-r00.png` lacks the plate that eight other console frames carry (11.2).
+- Did not re-measure the night preset, another month, or another theme; every number here is the day preset at
+  2026-10-28 10:00.
+- Did not run a category-move or page-move burst: the plate, the veil and the disc are drawn inside the same
+  eases the rest frame already uses, so motion is unchanged in construction but unmeasured in this pass.
