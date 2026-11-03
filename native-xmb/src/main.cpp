@@ -318,7 +318,7 @@ int main(int argc,char** argv) {
     QCommandLineParser parser;parser.setApplicationDescription("Native C++ XMB recreation");parser.addHelpOption();parser.addVersionOption();
     parser.addOption({"dev-flash","Local dev_flash asset directory","directory"});
     parser.addOption({"dev-hdd0","Local dev_hdd0 directory (default: next to dev_flash)","directory"});
-    parser.addOption({"vsh-modules","Local directory of decrypted VSH modules (*.prx), for data tables the plugins carry","directory"});
+    parser.addOption({"vsh-modules","Local directory of decrypted VSH modules (*.prx), for data tables the plugins carry (default: XMB_VSH_MODULES)","directory"});
     parser.addOption({"data-dir","Writable native application data directory","directory"});
     parser.addOption({"inventory","Write the local XMBML definition inventory and exit","json-file"});
     parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
@@ -664,7 +664,9 @@ int main(int argc,char** argv) {
         return 0;
     }
     if(parser.isSet("dev-hdd0"))assets.setHddRoot(parser.value("dev-hdd0"));
+    // The ribbon's rest state is in custom_render_plugin.prx; without it the cloth settles an approximate start.
     if(parser.isSet("vsh-modules"))assets.setModulesRoot(parser.value("vsh-modules"));
+    else if(qEnvironmentVariableIsSet("XMB_VSH_MODULES"))assets.setModulesRoot(qEnvironmentVariable("XMB_VSH_MODULES"));
     if(parser.isSet("settings-report")) {
         // The whole Settings surface as one JSON document (audit/SETTINGS-COVERAGE.md 5.1): the machine
         // snapshot, the RCO container every label was read from, the choice model's provenance, and every

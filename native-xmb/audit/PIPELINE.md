@@ -1291,6 +1291,14 @@ Either the capture path passes `--vsh-modules` (harness work, out of this fence)
 documented, licensed local artifact. Nothing in `ribbon.cpp` can reconstruct the table's velocities, which is what
 makes its state the console's and the settle's not.
 
+### 4a. Resolution, 2026-11-03
+
+The capture path now passes the modules directory (`work/ab-layers.ts`, `capture.vshModules`; the app also reads
+`XMB_VSH_MODULES`), so the gate scores the preset-1 table state, and the no-intro branch pins the boot clock so the
+LINE1 preset is the clock's rather than coldboot1. Canonical frame 18.84 -> 19.85 dB, byte-identical across runs.
+Advancing the cloth by the pinned render clock (30 s) was measured and rejected (frame 18.42). HANDOFF-PHASES.md has
+the numbers.
+
 ### 5. Verification of this build (`C:\dev\out\native-ribbon2`)
 
 * Before/after are the same drawing: the ribbon map's silhouette is identical (left-strip crest 552.5 in both, band

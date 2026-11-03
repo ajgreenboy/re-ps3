@@ -55,6 +55,34 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-03: ribbon fixed (rest table + settled preset)
+
+The inverted crest (FIDELITY-ROOT-BAR R1-R3) and the thin, hard, over-bright sheet were two separate causes, and both
+are fixed with traced data, no fit:
+- **Shape.** Captures never passed `--vsh-modules`, so the cloth settled from the approximate fallback start and drew
+  the sheet's slope inverted. The plugin's preset-1 rest table (`custom_render_plugin.prx` 0x97c18/0x98d04) is what
+  matched the console's own vertex buffer to 4 px (PIPELINE.md "Ribbon extent"). `work/ab-layers.ts` now passes
+  `capture.vshModules` (`C:/dev/xmb/fw493/vsh_module`, local only, never committed) to every capture, with a
+  `--vsh-modules` override and a warning when the directory is absent. The app also reads `XMB_VSH_MODULES` when
+  the flag is not given, so other tools and normal launches can pick the table up by setting one variable.
+- **Look.** With the intro off, `view.cpp` now pins the ribbon's boot clock past the schedule
+  (`setBootTime(1e9,Coldboot::normalBg)` in the no-intro branch), so it holds the clock preset like HDR, particles and
+  the background instead of coldboot1 (FRESNEL 2, FFD SCALE2 Y 1.0).
+
+Result, canonical capture against the RPCS3 frame: frame **19.85 dB / 0.8608** (was 18.84 on 11-02; stored base
+19.21), category icon row 22.10 (+0.48 on base), item label row 14.45 (+2.39; still contentDiffers), top background,
+clock and info bar unchanged. Three captures are byte-identical (D77B979A...), so the settle variance seen on 11-02
+is gone: it came from the fallback start, not the preset. Named states re-saved on purpose; `--all` exits 0 (6/6,
+12/12).
+
+Measured and not kept: starting the cloth `--render-clock` seconds into its simulation (1,800 steps at 30 s) moved
+the sheet up into the icon row (frame 18.42, icon row 18.79). The rest table is the console's own state.
+
+Still open on the ribbon: the band sits ~120 px lower than in the reference still at both ends (the still is a later
+instant of the live swell than the vertex burst the table matches; do not fit the step count to it), and the
+sparkle particles are sparser than the console's. `work/parity.ts`, `fidelity-sweep.ts` and the other capture
+scripts do not pass the modules yet; set `XMB_VSH_MODULES` before running them or their ribbon is the fallback.
+
 ## 2026-11-02: visual review pass (captured, compared with the RPCS3 corpus, fixed)
 
 The app was run with `--script` across every category, a settings page, the options panel and the PS menu, and
