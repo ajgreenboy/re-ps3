@@ -37,6 +37,9 @@ public:
     // Crest of the ribbon centre line as a fraction of screen height from the top, sampled left to right across
     // the screen after the last render (for the procedural background and for measurement).
     const std::array<float,33>& crest() const { return crest_; }
+    // The drawn sheet after the last render, every stride-th vertex of the 128x128 grid in both directions:
+    // (ndc x, ndc y, camera depth w), row-major, side x side points. Empty before the first render.
+    std::vector<QVector3D> sheetSample(int stride,int& side) const;
     // LINE1.mnu, the values the cloth and the spline task read.
     struct Preset {
         float damping=.0001f,length=.306001f,tension=.25f,timestep=2,perturbation=.0998587f,endY=.4f,endZ=.2f,ffdParam=-1.33509f;

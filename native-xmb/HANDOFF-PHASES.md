@@ -55,6 +55,38 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-03: particles fixed (traced motion and light, dust born on the ribbon)
+
+The dust was nearly invisible: 115 flecks in the UI-free side strips (x 0..380 and 1540..1919) peaking 51 luma
+above their surroundings, against the console's 573..966 peaking 155..193 over seven allgraphics frames. Four causes,
+three of them traced from the firmware:
+- **Motion (traced, particles.elf 0x06f64-0x07134).** The kernel is semi-implicit Euler with dt = DELTA TIME:
+  `vel += (gravity + BROWNIAN x R - FRICTION x vel) x dt`, `pos += vel x dt`, and the spin advances SPIN TIME SCALE
+  x 1/60 per step. The port added the whole velocity every step (112x too fast, a newborn fleck crossed ~540 px in
+  a second) with friction per step; `kBrownianStep` is gone.
+- **Light (traced, particles_quads.vpo r[4] / .fpo).** SPOT POS is a point light: the light vector is
+  normalize(spot - particle) per particle, and the fresnel alpha is taken against it, not the view axis. The 10-27
+  "z sign fix" had applied it as one fixed direction, which is what dropped the peaks 127 -> 48.
+- **Alpha.** The fitted squared depth fade (0.04..0.38 at the dust's depth) is removed. The life-bounds box it partly
+  stood in for is +/-10000 (FUN_0005d234 from 0x93024/0x93028), so the vpo's edge fade is 1. NEAR/FAR DARKNESS
+  and the DoF packing are still not ported (6-B3).
+- **Emission and size (evidence, not traced).** Births go through a PPU command queue (FUN_0005cad0, type 0 =
+  FUN_0005b6bc) whose producer is not decompiled, so the origin stays untraced. Every console frame shows the dust
+  hugging the ribbon sheet, and NEAR/FAR FOCUS (6.1/12.8) and the spot depth (7.6) bracket the sheet's camera depth
+  (6.6..11), so dust is now born on the sheet (`Ribbon::sheetSample` -> `Particles::setEmitter`, bilinear in a
+  16x16 sample). The flakes keep their own orientation (edge-on ones draw as slivers, as on the console; the vpo's
+  blend toward _FrontFacingQuaternion by _NearControl is untraced), and size goes through the ribbon camera's
+  perspective (fovy 53) instead of the 1.15 fit. The box emitter remains the no-ribbon fallback.
+
+Result: 262..391 flecks in the strips, contrast 45..52 (console 33..37), peaks 119..156, confined to the sheet's band.
+Canonical gate: frame 19.64 (-0.21 against 11-03's ribbon run: three times as many randomly placed flecks cost
+PSNR against a still they cannot match point for point), icon row 22.11, label row 14.49; byte-stable across runs.
+Named states re-saved; `--all` exits 0.
+
+Still open: the console has about twice the flecks and they are a bit dimmer (the darkness/DoF terms and the
+front-facing blend are the likely gap); the dust sits ~120 px low because the sheet does; no iridescent colour
+glints yet.
+
 ## 2026-11-03: ribbon fixed (rest table + settled preset)
 
 The inverted crest (FIDELITY-ROOT-BAR R1-R3) and the thin, hard, over-bright sheet were two separate causes, and both

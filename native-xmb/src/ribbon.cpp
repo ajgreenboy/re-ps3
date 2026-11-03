@@ -472,6 +472,18 @@ void Ribbon::advancePresets(double dt,double dayFraction) {
     current_=coldboot1_.mix(coldboot2_,w.toColdboot2).mix(clockPreset(dayFraction),w.toClock);
 }
 
+std::vector<QVector3D> Ribbon::sheetSample(int stride,int& side) const {
+    side=0;
+    if(!ready_ || stride<1 || lastSeconds_<0)return {};
+    side=(grid_-1)/stride+1;
+    std::vector<QVector3D> out;out.reserve(size_t(side)*side);
+    for(int r=0;r<grid_;r+=stride)for(int c=0;c<grid_;c+=stride) {
+        const float* v=&vertices_[(size_t(r)*grid_+c)*12];
+        out.emplace_back(v[3]>0?v[0]/v[3]:0.f,v[3]>0?v[1]/v[3]:0.f,v[3]);
+    }
+    return out;
+}
+
 void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFraction,int pixelWidth,int pixelHeight,GLuint targetFbo) {
     if(!ready_ || pixelWidth<=0 || pixelHeight<=0)return;
     gl.glDisable(GL_DEPTH_TEST);gl.glDisable(GL_SCISSOR_TEST);gl.glDisable(GL_CULL_FACE);
