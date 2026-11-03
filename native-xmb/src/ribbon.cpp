@@ -489,9 +489,14 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
     gl.glDisable(GL_DEPTH_TEST);gl.glDisable(GL_SCISSOR_TEST);gl.glDisable(GL_CULL_FACE);
     // 1. The cloth (FUN_0004f814): 60 fixed steps per second, the drawn lattice interpolated between the last two.
     const double dt=lastSeconds_<0?1.0/60:std::clamp(seconds-lastSeconds_,0.0,.25);
+    const bool firstFrame=lastSeconds_<0;
     lastSeconds_=seconds;
     advancePresets(dt,dayFraction);
     const Preset p=current_;
+    // Measurement: XMB_RIBBON_ADVANCE=1 starts the cloth `seconds` into its animation, so a pinned --render-clock
+    // shows the sheet at that time since boot instead of the boot-instant rest table (audit/PIPELINE.md "Ribbon
+    // over time"). Off by default: the rest table is the state the console's vertex buffer matches.
+    if(firstFrame && qEnvironmentVariableIsSet("XMB_RIBBON_ADVANCE"))for(int i=0,n=int(std::min(seconds,3600.)*60);i<n;++i)cloth_.step(p);
     cloth_.acc+=float(dt*60);
     while(cloth_.acc>1){cloth_.step(p);cloth_.acc-=1;}
     cloth_.swell(p);

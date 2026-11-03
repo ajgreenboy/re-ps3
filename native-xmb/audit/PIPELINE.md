@@ -1326,3 +1326,25 @@ the numbers.
 `ribbon.cpp` and `ribbon.h` are the only source files touched (comments only); `view.cpp`, `hdr.cpp`,
 `particles.cpp`, `shell.*`, `main.cpp`, the harness, the parity tooling, the budgets and the references were not
 edited.
+
+## Ribbon over time, 2026-11-03
+
+The canonical capture's sheet sits ~120 px below the reference still (right end ~160 px). Measured, it is not a
+renderer error, so nothing in the drawing changed:
+- **Over time the positions agree.** Crest y in two UI-free column bands (x 40..240 / 1680..1880, icon row masked),
+  all 83 `col-*` console frames over four minutes: left **546 +/- 110**, right **560 +/- 105**. Native with the cloth
+  advanced to 20 times over ten minutes: left **613 +/- 106**, right **541 +/- 89**. The right is the same, the left
+  within ~2.5 standard errors and far inside either side's own swing.
+- **The boot state agrees.** The rest table reproduces the console's vertex burst to 4 px (section "Ribbon extent").
+- **The pinned capture is the outlier.** With the cloth frozen at the boot-instant table, the crest is 493 / **722**,
+  which is the right end hanging ~160 px below its long-run mean. The reference still was taken an unknown time
+  after boot, so it shows a different instant of the swell.
+- **No frame-exact sync is possible.** `boot-02-15s.png` dates boot 2 to 17:09:01, so every `col-*` frame has a known
+  time since boot (230..436 s). Rendering the native at those times gives the same family of shapes, and some crests
+  agree (t324: 752 vs 754; t424: 538/468 vs 535/476), but most pairs differ. The cloth takes a random kick every step
+  and RPCS3 runs its own step count, so two runs diverge within seconds.
+
+Choosing a render time that makes the pinned frame match one still would fit a chaotic animation to a single frame.
+The audit already refused that, so the canonical capture stays at the rest table. `XMB_RIBBON_ADVANCE=1` (in
+`ribbon.cpp`) starts the cloth at the pinned `--render-clock`, which is the instrument for these over-time
+comparisons.
