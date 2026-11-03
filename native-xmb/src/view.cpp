@@ -818,6 +818,11 @@ void View::paintGL() {
         const double fade=std::clamp(boot/7.5,0.,1.); // DAT_00091e20, the 7.5 s that BootBG2 passes with the clock preset
         backgroundAlpha_=float(fade*fade*(3-2*fade));
         backgroundToColdboot2_=weights.toColdboot2;backgroundToClock_=weights.toClock;
+    } else {
+        // No intro: the XMB is already past boot, so the ribbon holds the clock preset like HDR, particles and the
+        // background do. Left on its own frame time it would replay coldboot1 -> clock, and under a pinned
+        // --render-clock it would stay on coldboot1 (FRESNEL 2, FFD SCALE2 Y 1.0) for good.
+        ribbon_.setBootTime(1e9,Coldboot::normalBg);
     }
     if(glReady_) {
         const auto time=QTime::currentTime();

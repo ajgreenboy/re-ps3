@@ -127,6 +127,7 @@ type Thresholds = {
   capture: {
     exe: string;
     flash: string;
+    vshModules?: string;
     tokens: string;
     renderClock: number;
     backgroundClock: string;
@@ -160,6 +161,9 @@ const usage = `usage: bun work/ab-layers.ts [options]
                            the stored baseline pair always gates)
   --exe <path>             capture executable (default from the thresholds file)
   --flash <dir>            dev_flash directory for capture
+  --vsh-modules <dir>      decrypted VSH modules for capture (default from the thresholds
+                           file; skipped when the directory is absent). The ribbon reads its
+                           rest state from custom_render_plugin.prx there
   --steam-root <dir>       Steam library root for capture; an empty directory is
                            created inside the capture directory by default
   --render-clock <sec>     frozen animation time for capture (default 30)
@@ -412,6 +416,20 @@ function parseThresholds(path: string): Thresholds {
   return t;
 }
 
+// The ribbon's rest state (preset-1 tables) lives only in the decrypted plugin, a local artifact that is never
+// committed. Without it the app settles an approximate start and draws the sheet's slope inverted (PIPELINE.md
+// "Ribbon extent"), so captures pass the directory whenever it exists. An explicit --vsh-modules must exist.
+function pushModules(args: string[], t: Thresholds, opts: ReturnType<typeof parseArgs>) {
+  const dir = opts.vshModules || (t.capture.vshModules ? resolveRepo(t.capture.vshModules) : '');
+  if (!dir) return;
+  if (!existsSync(join(dir, 'custom_render_plugin.prx'))) {
+    if (opts.vshModules) fail(`--vsh-modules ${dir}: custom_render_plugin.prx not found`);
+    console.warn(`ab-layers: ${dir} has no custom_render_plugin.prx; the ribbon falls back to its settled start`);
+    return;
+  }
+  args.push('--vsh-modules', dir);
+}
+
 function resolveRepo(path: string) {
   return resolve(repo, path);
 }
@@ -432,6 +450,7 @@ function parseArgs(argv: string[]) {
     thresholds: join(repo, 'work', 'ab-layers.thresholds.json'),
     exe: '' as string,
     flash: '' as string,
+    vshModules: '' as string,
     steamRoot: '' as string,
     renderClock: '' as string,
     bgClock: '' as string,
@@ -441,7 +460,7 @@ function parseArgs(argv: string[]) {
     timeoutMs: '' as string,
   };
   const seen = new Set<string>();
-  const valued = new Set(['--ref', '--native', '--thresholds', '--exe', '--flash', '--steam-root',
+  const valued = new Set(['--ref', '--native', '--thresholds', '--exe', '--flash', '--vsh-modules', '--steam-root',
     '--render-clock', '--bg-clock', '--ui-clock', '--focus-time', '--tokens', '--timeout-ms', '--state']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -465,6 +484,7 @@ function parseArgs(argv: string[]) {
     else if (a === '--thresholds') opts.thresholds = resolve(value);
     else if (a === '--exe') opts.exe = value;
     else if (a === '--flash') opts.flash = value;
+    else if (a === '--vsh-modules') opts.vshModules = value;
     else if (a === '--steam-root') opts.steamRoot = value;
     else if (a === '--render-clock') opts.renderClock = value;
     else if (a === '--bg-clock') opts.bgClock = value;
@@ -525,6 +545,7 @@ async function captureFrame(t: Thresholds, opts: ReturnType<typeof parseArgs>) {
     '--render-clock', String(renderClock)];
   const bgClock = opts.bgClock || t.capture.backgroundClock;
   const uiClock = opts.uiClock || t.capture.uiClock;
+  pushModules(args, t, opts);
   if (bgClock) args.push('--background-clock', bgClock);
   if (uiClock) args.push('--ui-clock', uiClock);
   args.push('--focus-time', focusTime, '--script', [...steps, `grab=${grab}`, 'quit'].join(','));
@@ -649,6 +670,7 @@ async function runStateProcess(t: Thresholds, opts: ReturnType<typeof parseArgs>
   const bgClock = opts.bgClock || t.capture.backgroundClock;
   const uiClock = opts.uiClock || t.capture.uiClock;
   const args = ['--dev-flash', flash, '--data-dir', dataDir, '--render-clock', String(renderClock)];
+  pushModules(args, t, opts);
   if (bgClock) args.push('--background-clock', bgClock);
   if (uiClock) args.push('--ui-clock', uiClock);
   args.push('--focus-time', focusTime, '--script', finalTokens.join(','));
