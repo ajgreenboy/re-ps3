@@ -1979,7 +1979,21 @@ void View::drawScene(QPainter& p) {
             // no plate (SETTINGS 12.6) and a parent column behind an open page keeps the frame it had, so it fades
             // with (1-behind). [TRACED: the rect, the edge rows and the per-row alphas. FIT: the stop interpolation
             // and white 230.]
-            if(level==0 && columnAlpha>0. && !column.entries.isEmpty()) {
+            // ICON0 thumbnails are wide. The tile rule is the media album ART, not every texture whose name
+            // contains "album": category_game.xml's folder placeholder is tex_album_icon, and matching that
+            // turned two 50 px folder rows into wide ICON0 cards (-1.20 dB on the canonical frame until the
+            // distinction was measured, FIDELITY-SURFACES 3.1b + 15.8). The media thumbnail names are
+            // *_tex_album_default / *_tex_album_pic. A picture that is not wide (the Photo column's 180x180
+            // hakoniwa.png gallery icon, Entry::iconSized) keeps the icon box the console gives it.
+            const auto isTile=[](const auto& entry){
+                const bool albumArt=entry.texture.contains("album_default") || entry.texture.contains("album_pic");
+                return !entry.iconSized && (entry.gameTile || albumArt || entry.container=="file");
+            };
+            // The plate is the empty ICON0 backdrop (GEOMETRY-ROOT 12.7: the BG1 artwork plane with image=null), so it
+            // belongs to a focused tile row only. Glyph rows (folders, the Store bag, settings) have none on the
+            // console (col-game-r00/r03, col-settings-r02, col-photo-r00).
+            const bool plateRow=column.selection>=0 && column.selection<column.entries.size() && isTile(column.entries[column.selection]);
+            if(level==0 && columnAlpha>0. && plateRow) {
                 const double plateDistance=column.selection-column.position;
                 const double plateFocus=std::max(0.,1.-std::abs(plateDistance));
                 const double plateDepth=behind*(1.-plateFocus);
@@ -2046,15 +2060,7 @@ void View::drawScene(QPainter& p) {
                 // library folders keep.
                 const QString itemTexture=entry.texture=="item_tex_plain_folder" && entry.action==Action::SteamFolder?
                     QStringLiteral("item_tex_ps3game_folder"):entry.texture;
-                // ICON0 thumbnails are wide. The tile rule is the media album ART, not every texture whose name
-                // contains "album": category_game.xml's folder placeholder is tex_album_icon, and matching that
-                // turned two 50 px folder rows into wide ICON0 cards (-1.20 dB on the canonical frame until the
-                // distinction was measured, FIDELITY-SURFACES 3.1b + 15.8). The media thumbnail names are
-                // *_tex_album_default / *_tex_album_pic.
-                const bool albumArt=itemTexture.contains("album_default") || itemTexture.contains("album_pic");
-                // ICON0 thumbnails are wide; a picture that is not (the Photo column's 180x180 hakoniwa.png
-                // gallery icon, Entry::iconSized) keeps the icon box the console gives it.
-                const bool tile=!entry.iconSized && (entry.gameTile || albumArt || entry.container=="file");
+                const bool tile=isTile(entry);
                 // A row behind an open page is the parent column, and every captured parent-column row is an item icon
                 // (77.616 unfocused / 184.800 focused, 2857.2/0.247 below focus). Keeping the wide album/ICON0 card
                 // there drew a 320x180 placeholder on the same spot as the open category icon (Video Library over the
@@ -2118,7 +2124,16 @@ void View::drawScene(QPainter& p) {
                 // A row's own value wins when it sets one (the sign-in page's fields: server URL, user name and
                 // the password as dots). Every other row leaves Entry::fieldValue empty, so this falls through to
                 // Shell::valueText() exactly as before and no existing frame changes.
-                const auto value=active?(entry.fieldValue.isEmpty()?shell_.valueText(entry):entry.fieldValue):QString{};
+                auto value=active?(entry.fieldValue.isEmpty()?shell_.valueText(entry):entry.fieldValue):QString{};
+                // The signed-in user is not a value: the console marks it with the firmware's tex_indi_Me diamond just
+                // left of the avatar (col-users-r00: centre x510 against the 50 px icon at 565), and draws nothing in
+                // the value column, so the shell's "current" dot moves there.
+                const bool activeUser=entry.action==Action::SelectUser && value==QString(QChar(0x25cf));
+                if(activeUser) {
+                    value.clear();
+                    drawItemGlyph(p,QStringLiteral("explore_plugin_full"),QStringLiteral("tex_indi_Me"),
+                                  {iconX-size/2-35,y-5,10,10},p.opacity());
+                }
                 QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(32);
                 // Elision keeps the firmware's shape (audit/TEXT-RENDERER.md section 4): PAF draws a character
                 // range and explore_plugin positions a separate label2_text_ellipsis Text object after the last
@@ -2466,11 +2481,19 @@ void View::drawScene(QPainter& p) {
                 const int size=focused?24:23;
                 const QString label=shell_.psMenuConfirmingOff() && i==0?QObject::tr("Turn Off the System?"):psItems[i];
                 const QRectF row(831,psTop+i*40.,1000,34);
+                // Bloom strength 1.8 is a FIT by side-by-side crops against ps-menu__original__day__1080p: at 3.6 the
+                // clamped mask filled the letters into one white block, at 1.4 the halo was fainter than the console's.
                 if(focused && bloom>.01) {
                     QFont bloomFont(shell_.fontFamily());bloomFont.setPixelSize(size);
-                    drawTextBloom(p,bloomFont,row,label,3.6*bloom);
+                    drawTextBloom(p,bloomFont,row,label,1.8*bloom);
                 }
-                text(row,label,size,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
+                // The label's drop shadow is a dark copy offset down-right: over the bloom it printed as a second,
+                // dark "Turn Off the System" behind the white one. The console's PS menu has no shadow on either
+                // entry (ps-menu__original__day__1080p: clean ink inside a soft halo), so it is drawn without one.
+                if(textRenderer_.ready()) {
+                    QFont f(shell_.fontFamily());f.setPixelSize(size);
+                    textRenderer_.draw(*this,p,row,label,f,Qt::white,Qt::AlignLeft|Qt::AlignVCenter,0,false);
+                } else text(row,label,size,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
             }
             if(shell_.psMenuConfirmingOff())
                 text({830,psTop+80,1000,34},QObject::tr("X turns the XMB off; the PC stays on   O cancels"),20,QColor(170,170,170),Qt::AlignLeft|Qt::AlignVCenter);

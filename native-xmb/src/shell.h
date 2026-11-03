@@ -57,7 +57,10 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     SteamAccounts, SteamAccountSwitch,
     // One group folder of a page the item menu's Group Content rebuilt (an "A".."Z"/"#" letter row). Its
     // value is the group's key; activating it pushes that key's rows. It exists only inside a grouped page.
-    GroupFolder };
+    GroupFolder,
+    // Users > Turn Off System (category_user.xml's first query, #seg_poweroff, class xmlpoweroff): opens the same
+    // "Turn Off the System?" confirmation the PS menu reaches, so the shutdown path stays one implementation.
+    TurnOffSystem };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
