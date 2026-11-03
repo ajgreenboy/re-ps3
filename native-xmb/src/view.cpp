@@ -1755,27 +1755,6 @@ void View::drawScene(QPainter& p) {
             drawMusicPanel(p,musicPanelEase_.value);
     } else {
         previousMediaOpen_=false;
-        // The lower field's own gradient (FIDELITY-ROOT-BAR B4, the audit's gap 9). The console's band x20..300
-        // rises 6.90 luma from y780 to y1075; this build's field rises 3.15 there, because the whole lower field
-        // sits 10..16 luma high and the display response is compressed at that level - the field residue the audit
-        // files as B6, whose cause is the HDR tone-map/glare chain in hdr.cpp, outside this pass's write fence. The
-        // correction is multiplicative and local rather than a retuned fade: the console/native ratio at each
-        // measured row (0.747 at y640, 0.779 at y780, 0.806 at y840, 0.822 at y900, 0.842 at y960, 0.845 at y1075)
-        // is exactly a black veil of alpha 1-ratio. Drawn first in the layer, it darkens the field and the ribbon
-        // that are already on screen and sits under every surface drawn after it; nothing above y560 enters it, so
-        // the top background, the category row and the item label row are untouched.
-        // [TRACED: the console and native row means the ratios come from. FIT: a display-space veil standing in for
-        // the tone-map response - remove it when B6 is fixed in hdr.cpp.]
-        if(shell_.backgroundMode()!=2) {
-            QLinearGradient veil(0,560.,0,1080.);
-            veil.setColorAt(0.,QColor(0,0,0,0));
-            veil.setColorAt(80./520.,QColor(0,0,0,int(std::lround(.253*255.))));   // y 640, measured ratio 0.747
-            veil.setColorAt(220./520.,QColor(0,0,0,int(std::lround(.221*255.))));  // y 780, measured ratio 0.779
-            veil.setColorAt(340./520.,QColor(0,0,0,int(std::lround(.194*255.))));  // y 900, measured ratio 0.822
-            veil.setColorAt(460./520.,QColor(0,0,0,int(std::lround(.153*255.))));  // y 1020, measured ratio 0.847
-            veil.setColorAt(1.,QColor(0,0,0,int(std::lround(.155*255.))));         // y 1075, measured ratio 0.845
-            p.fillRect(QRectF(0,560,1920,520),QBrush(veil));
-        }
         const auto& categories=shell_.categories();
         // Two depth channels (audit/PAGE-MOVE.md section 15). `childAmount` is the page content's progress
         // (the icon's 262 px travel, the item columns, the label's fade): 18 rendered frames = 300 ms mode 4,

@@ -30,8 +30,20 @@ bool Hdr::load(Assets& assets,Pass& pass,const char* fragment,const char* vertex
         if(vertexName && pass.cg.valid())vertexCg=CgProgram::load(assets.qglFile("lines",QString("lib/glutils/")+vertexName),&error);
     } catch(const std::exception& e) { error=e.what(); }
     if(!pass.cg.valid() || (vertexName && !vertexCg.valid())){qWarning().noquote()<<"hdr:"<<fragment<<"unavailable:"<<error;return false;}
+    // The console never draws ToneMap.fpo: LinesController writes the scene through two 128x128 pre-expose tables
+    // (custom_render_plugin FUN_00071794, rebuilt every frame), texel i holding the curve at 16 i / 127 while the
+    // composite samples texel centres at 16 u. So the value the tone curve and the glare weight see is
+    // (128 c - 8) / 127, clamped to the table's 0..16 - an achromatic -0.063 that is the whole day-field residue
+    // (audit/PIPELINE.md "The pre-expose tables"). Both programs that read the scene take it through that lookup.
+    QString fragmentGlsl=pass.cg.glsl;
+    const QString sceneFetch="texture(tex0, (v_tc[0]).xy)";
+    if(QByteArray(fragment)=="ToneMap.fpo" || QByteArray(fragment)=="GlareSourceNoTone.fpo") {
+        if(fragmentGlsl.count(sceneFetch)==1)
+            fragmentGlsl.replace(sceneFetch,"(vec4(clamp((128.0*texture(tex0, (v_tc[0]).xy).rgb-8.0)/127.0,0.0,16.0),texture(tex0, (v_tc[0]).xy).a))");
+        else qWarning()<<"hdr:"<<fragment<<"scene fetch not found; the pre-expose table offset is not applied";
+    }
     if(!pass.program.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexName?vertexCg.glsl:QString(fullscreenVertex)) ||
-       !pass.program.addShaderFromSourceCode(QOpenGLShader::Fragment,pass.cg.glsl) || !pass.program.link()) {
+       !pass.program.addShaderFromSourceCode(QOpenGLShader::Fragment,fragmentGlsl) || !pass.program.link()) {
         qWarning().noquote()<<"hdr:"<<fragment<<"failed:"<<pass.program.log();return false;
     }
     return true;
