@@ -461,7 +461,11 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     }
     // Particles belong to the HDR scene: the firmware draws particles_quads before the tone map and its
     // radial halo into the glare source (audit/PARTICLES.md), so dust picks up the tone map and the glare.
-    if(originalParticles) { glBindFramebuffer(GL_FRAMEBUFFER,GLuint(scene)); particles_.render(*this,seconds,pixelWidth,pixelHeight); }
+    if(originalParticles) {
+        int side=0;auto sheet=ribbon_.sheetSample(8,side); // the dust is born on the ribbon sheet (Particles::setEmitter)
+        particles_.setEmitter(std::move(sheet),side);
+        glBindFramebuffer(GL_FRAMEBUFFER,GLuint(scene)); particles_.render(*this,seconds,pixelWidth,pixelHeight);
+    }
     if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),[this,seconds,originalParticles](int width,int height){
         // Second firmware pass: the same dust drawn into the glare source so the mip blur blooms it
         // (particles_second). Re-running the sim for the same `seconds` advances no steps.

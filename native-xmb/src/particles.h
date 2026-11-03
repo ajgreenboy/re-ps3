@@ -92,6 +92,10 @@ public:
     // PARTICLES.mnu GLOBAL ALPHA (_Transparency.y) during the cold boot: 0 until NormalBG2, then to 1.
     // The value is driven by View from the boot weights (RPCS3 capture), not read from the preset.
     void setGlobalAlpha(float alpha) { globalAlpha_=alpha; }
+    // The emitter: points on the ribbon sheet as (ndc x, ndc y, camera depth), side x side, row-major
+    // (Ribbon::sheetSample). New dust is born on the sheet between four neighbouring points. Empty = the
+    // fitted box below (no ribbon).
+    void setEmitter(std::vector<QVector3D> points,int side) { emitter_=std::move(points);emitterSide_=side; }
     // Simulation state, for determinism logging (XMB_PARTICLE_LOG) and the audit's parity table.
     int liveCount() const { return live_; }
     long long stepIndex() const { return step_; }
@@ -190,13 +194,16 @@ private:
     float spawnAccumulator_=0;
     float aspect_=16.f/9.f;
     float globalAlpha_=1;
+    std::vector<QVector3D> emitter_;
+    int emitterSide_=0;
     // The reader's values: the base physics block, the base look, the four theme looks and the
     // blended look the shaders get.
     Physics physics_;
     Look lookBase_,look_,themes_[4]; // 0 night, 1 yoake, 2 day, 3 higure
-    // normalize(PARTICLES.mnu spot pos x/y/z). The initializer is the firmware's own value, used only by the
-    // no-Assets entry point (init(gl)), which cannot read the MNU; loadMaterials() replaces it with the read value.
-    QVector3D spotDirection_=QVector3D(4.16f,2.63f,-7.6f).normalized(); // fallback: PARTICLES.mnu spot pos
+    // PARTICLES.mnu spot pos x/y/z, the point light both programs light the dust from. The initializer is the
+    // firmware's own value, used only by the no-Assets entry point (init(gl)), which cannot read the MNU;
+    // loadMaterials() replaces it with the read value.
+    QVector3D spotPosition_=QVector3D(4.16f,2.63f,-7.6f); // fallback: PARTICLES.mnu spot pos
     QDateTime clockOverride_;   // --background-clock, the same option View resolves for the ribbon
     // Upload bookkeeping: the VBO is refreshed only when the simulation state or the vertex count
     // changed, so the second pass of a frame re-uses the first pass's buffer verbatim.

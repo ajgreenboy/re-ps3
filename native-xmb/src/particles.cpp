@@ -65,10 +65,8 @@ constexpr float kLifeFull=0.94f;           // captured: kernel life envelope ful
 constexpr float kLifeFade=0.06f;           // captured: ... then linear to 0 over this much life
 constexpr float kLifeIn=0.02f;             // captured: ... and the matching clamp at the start of life
 constexpr float kReferenceFrameRate=60.f;  // captured: EMIT PER FRAME is a 60 Hz budget (audit 3.3/3.5)
-// Fitted semantics for the two open constants (audit 6-A3: FRICTION is applied per step, which the
-// 0.287..0.394 per-step speeds and the ~3 s lifetime make self-consistent; BROWNIAN's per-step
-// velocity kick amplitude is fitted so the dust wanders without dominating the drift).
-constexpr float kBrownianStep=0.05f;       // fit: per-step Brownian kick amplitude
+constexpr float kSpinStep=1.f/60;          // captured: the kernel advances the spin by SPIN TIME SCALE x 1/60 per
+                                           // step (constant 0x3c888888 at 0x070e8), not by DELTA TIME
 constexpr int kMaxCatchUpSteps=4096;       // derived: 4096 * 0.0088883 s ~= 36 s of sim, so
                                            // --render-clock 30 reaches t=30 in one call while a long
                                            // stall cannot freeze the app for more than that.
@@ -80,10 +78,9 @@ constexpr unsigned int kSeed=0x5053u;      // fit: fixed seed so --render-clock 
 // captures, and the 0.287..0.394 units/step speeds then cross ~half the screen over a mean lifetime.
 constexpr float kScreenHeight=22.f;        // fit: world-units-per-viewport-height fitted to the captures
 constexpr float kHalfHeight=kScreenHeight*.5f;
-// Emission origin is the one unknown the audit leaves open (6-A2: no emitter asset exists and the
-// program's state block is physics, not an emitter mesh). Fitted to the reference frames: dust is
-// emitted across the full width, denser below the centre line (where the XMB's dust reads), in a
-// depth band between the near and far bounds.
+// Emission origin is the one unknown the audit leaves open (6-A2: births come through a PPU command queue
+// whose producer is not decompiled). With the ribbon drawn, dust is born on its sheet (spawnParticle); this
+// box is the fallback when there is no ribbon: the full width, below the centre line, in a depth band.
 constexpr float kEmitYCentre=-3.f;   // fit: emission volume, world units (+11 is the top edge)
 constexpr float kEmitYSpread=5.5f;   // fit: triangular spread around that centre
 constexpr float kEmitZNear=-3.f;     // fit: depth band (world z is negative, away from the camera)
@@ -108,7 +105,7 @@ layout(location=8) in vec2 aUv;
 layout(location=11) in vec4 aRot;
 uniform vec2 uHalfExtent;   // world units spanned by half the viewport (screen height = 22 units)
 uniform float uGlobalAlpha; // PARTICLES.mnu GLOBAL ALPHA (_Transparency.y)
-uniform vec3 uSpotDir;      // normalize(PARTICLES.mnu SPOT POS)
+uniform vec3 uSpotPos;      // PARTICLES.mnu SPOT POS, a point light (_LightPack)
 uniform float uSpecularPower;   // PARTICLES.mnu SPECULAR POWER
 uniform float uSizeMiddle;      // PARTICLES.mnu SIZE MIDDLE (theme preset)
 uniform float uSizeFar;         // PARTICLES.mnu SIZE FAR
@@ -123,27 +120,25 @@ out vec2 vIridescent;
 out float vDefocus;
 vec3 rotateQuat(vec4 q,vec3 v){return v+2.0*cross(q.xyz,cross(q.xyz,v)+q.w*v);}
 void main(){
-    // The firmware's spot, normalised (uSpotDir). The vpo's use of the spot is not decoded: it may
-    // normalise (spot - particle) per vertex, but a fixed direction is what the port has evidence for.
-    vec3 lightDir=uSpotDir;
-    vec3 halfVector=normalize(lightDir+vec3(0.0,0.0,1.0));   // the camera looks down the view axis, +z
+    // The spot is a point light: particles_quads.vpo builds normalize(_LightPack position - particle) per vertex
+    // (r[4]) and the fpo the same vector per pixel, so dust in front of SPOT POS is lit from behind and dust behind
+    // it from the front. The camera looks down the view axis, +z.
+    vec3 lightDir=normalize(uSpotPos-aPos.xyz);
+    vec3 halfVector=normalize(lightDir+vec3(0.0,0.0,1.0));
     vec4 q=aRot/length(aRot);
     // Depth of field: sharp at NEAR FOCUS, fully defocused at FAR FOCUS (both PARTICLES.mnu). The
-    // defocus term only reaches part of the way to SIZE FAR (the fully defocused bound), and the 1.15
-    // size gain is fitted to the RPCS3 reference captures - the fpo's SIZE->corner mapping is the
-    // piece of DoF packing the audit could not recover (6-B3). Most dust ends up a 3-5 px speck, with
-    // the far particles as the big soft glints.
+    // defocus term only reaches part of the way to SIZE FAR (the fully defocused bound) - the fpo's
+    // SIZE->corner mapping is the piece of DoF packing the audit could not recover (6-B3).
     float depth=-aPos.z;
     float defocus=clamp(abs(depth-uNearFocus)/max(uFarFocus-uNearFocus,1e-4),0.0,1.0);
-    float size=mix(uSizeMiddle,uSizeFar,defocus*defocus*0.12)*1.15; // fit: 0.12 span gain, 1.15 size gain
-    // Billboarding: the firmware's _FrontFacingQuaternion keeps the quads camera-facing, so the corner
-    // spins in the screen plane and the quad never turns edge-on into a streak. The full quaternion
-    // still drives the shading normal below, which is what makes the dust glint as it turns.
-    float yaw=atan(2.0*(q.x*q.y+q.w*q.z),1.0-2.0*(q.y*q.y+q.z*q.z));
-    float cs=cos(yaw),sn=sin(yaw);
+    // Perspective: the dust shares the ribbon's camera (fovy 53, ribbon.cpp), so a SIZE in world units spans
+    // halfHeight / (tan(26.5 deg) x depth) of this layer's flat viewport units. Replaces the earlier 1.15 fit.
+    float size=mix(uSizeMiddle,uSizeFar,defocus*defocus*0.12)*uHalfExtent.y/(tan(radians(26.5))*max(depth,1.0)); // fit: 0.12 span gain
+    // Orientation: the vpo blends the particle's quaternion toward _FrontFacingQuaternion by a factor from
+    // _NearControl (SIZE ALIGN / NEAR FUZZINESS / NEAR ALIGN), whose packing is untraced; here the factor is 0,
+    // so each flake keeps its own tilt and one seen edge-on draws as a sliver, as the console's dust does.
     vec2 corner=aUv*2.0-1.0;
-    vec2 spun=vec2(corner.x*cs-corner.y*sn,corner.x*sn+corner.y*cs);
-    vec3 world=aPos.xyz+vec3(spun*size*0.5,0.0);
+    vec3 world=aPos.xyz+rotateQuat(q,vec3(corner*size*0.5,0.0));
     gl_Position=vec4(world.x/uHalfExtent.x,world.y/uHalfExtent.y,0.0,1.0);
     vec3 normal=rotateQuat(q,vec3(0.0,0.0,1.0));
     vLambert=max(dot(normal,lightDir),0.0);
@@ -153,13 +148,13 @@ void main(){
     // shifts hue as it spins instead of showing the ramp across the quad.
     vIridescent=normal.xy*0.5+0.5;
     // Alpha chain (vpo lines 186-203, applied per vertex as the program does): fresnel edge term
-    // T = 1 - fresnel^FRESNEL, then GLOBAL ALPHA, the SPU's per-vertex life alpha, and the depth
-    // stand-in for the life-bounds box / NEAR-FAR DARKNESS / DoF fades (audit 6-B3 leaves their
-    // packing open; this is the same fitted curve the layer was tuned with).
-    float fresnel=1.0-abs(dot(normal,vec3(0.0,0.0,1.0)));
+    // T = 1 - fresnel^FRESNEL, GLOBAL ALPHA and the SPU's per-vertex life alpha. The vpo's life-bounds edge
+    // fade is 1 for the plugin's +/-10000 box (FUN_0005d234 from 0x93024/0x93028); its NEAR/FAR DARKNESS and
+    // DoF terms are not ported (6-B3), and the fitted depth fade that stood in for them is gone.
+    // The vpo's fresnel term is taken against the light vector, not the view axis: 1 - (1 - |L.N|)^FRESNEL.
+    float fresnel=1.0-abs(dot(normal,lightDir));
     float T=clamp(1.0-pow(fresnel,uFresnelExp),0.0,1.0);
-    float depthFade=clamp(1.0-(depth-3.0)/10.5,0.10,1.0); // fit: depth fade stand-in for 6-B3
-    vLife=aPos.w*uGlobalAlpha*T*depthFade*depthFade;
+    vLife=aPos.w*uGlobalAlpha*T;
     vUv=aUv;
     vDefocus=defocus;
 })";
@@ -216,7 +211,7 @@ layout(location=8) in vec2 aUv;
 layout(location=11) in vec4 aRot;
 uniform vec2 uHalfExtent;
 uniform float uGlobalAlpha;
-uniform vec3 uSpotDir;
+uniform vec3 uSpotPos;
 uniform float uSpecularPower;
 uniform float uSizeMiddle;
 uniform float uSizeFar;
@@ -230,14 +225,14 @@ out float vLambert;
 out float vSpecular;
 vec3 rotateQuat(vec4 q,vec3 v){return v+2.0*cross(q.xyz,cross(q.xyz,v)+q.w*v);}
 void main(){
-    vec3 lightDir=uSpotDir;
+    vec3 lightDir=normalize(uSpotPos-aPos.xyz); // the same point light as pass 1
     vec3 halfVector=normalize(lightDir+vec3(0.0,0.0,1.0));
     vec4 q=aRot/length(aRot);
     float depth=-aPos.z;
     float defocus=clamp(abs(depth-uNearFocus)/max(uFarFocus-uNearFocus,1e-4),0.0,1.0);
     // GLARE SCALE is what makes the glints read as bloom seeds rather than dots; the second vpo
     // multiplies the corner extent by _Glare.y (slot 459) - glsl/particles_second.vpo.glsl line 172-175.
-    float size=mix(uSizeMiddle,uSizeFar,defocus*defocus*0.12)*1.15*uGlareScale; // fit: 0.12 span, 1.15 size
+    float size=mix(uSizeMiddle,uSizeFar,defocus*defocus*0.12)*uHalfExtent.y/(tan(radians(26.5))*max(depth,1.0))*uGlareScale; // as pass 1
     float yaw=atan(2.0*(q.x*q.y+q.w*q.z),1.0-2.0*(q.y*q.y+q.z*q.z));
     float cs=cos(yaw),sn=sin(yaw);
     vec2 corner=aUv*2.0-1.0;
@@ -250,10 +245,9 @@ void main(){
     // The fpo carries the alpha chain in o[10].w only, which an additive blend into the glare source
     // cannot use. Riding the same chain in the intensity is what stops the glare from blooming dust
     // that pass 1 does not draw (fresnel edge, depth fade, GLOBAL ALPHA 0 during the cold boot).
-    float fresnel=1.0-abs(dot(normal,vec3(0.0,0.0,1.0)));
+    float fresnel=1.0-abs(dot(normal,lightDir));
     float T=clamp(1.0-pow(fresnel,uFresnelExp),0.0,1.0);
-    float depthFade=clamp(1.0-(depth-3.0)/10.5,0.10,1.0); // fit: depth fade stand-in for 6-B3
-    vLife=aPos.w*uGlobalAlpha*T*depthFade*depthFade;
+    vLife=aPos.w*uGlobalAlpha*T;
     vUv=aUv;
 })";
 const char* glareFragmentSource=R"(#version 330 core
@@ -443,13 +437,7 @@ void Particles::loadMaterials(Assets& assets) {
         sy=base.number(QStringLiteral("spot pos y"),sy);
         sz=base.number(QStringLiteral("spot pos z"),sz);
     }
-    QVector3D spot{float(sx),float(sy),float(sz)};
-    if(spot.lengthSquared()>1e-8f) {
-        spotDirection_=spot.normalized();
-    } else {
-        // A zero SPOT POS cannot be normalised; keep the header's fallback (the same firmware value) and say so.
-        qWarning()<<"particles: PARTICLES.mnu SPOT POS is zero; keeping normalize(4.16, 2.63, -7.6)";
-    }
+    spotPosition_=QVector3D(float(sx),float(sy),float(sz));
     // --background-clock: the theme look follows the same option View resolves for the ribbon.
     const QStringList arguments=QCoreApplication::arguments();
     for(int i=0;i<arguments.size();++i) {
@@ -470,10 +458,24 @@ void Particles::loadMaterials(Assets& assets) {
 
 void Particles::spawnParticle() {
     Particle& p=pool_[size_t(live_++)];
-    // Emission volume (see kEmit* above).
-    p.px=(2.f*random()-1.f)*kHalfHeight*aspect_*kEmitXMargin;
-    p.py=kEmitYCentre+(random()+random()-1.f)*kEmitYSpread;
-    p.pz=kEmitZNear+random()*(kEmitZFar-kEmitZNear);
+    if(emitterSide_>1 && emitter_.size()==size_t(emitterSide_)*emitterSide_) {
+        // On the ribbon sheet: a random cell of the sampled grid, bilinear inside it. The console's dust hugs the
+        // sheet and follows its curve in every reference frame, and its NEAR/FAR FOCUS (6.1 / 12.8) and SPOT POS
+        // depth (7.6) bracket the sheet's camera depth (6.6..11), so it is born there. fit: the firmware's emit
+        // command producer is not decompiled (audit/PARTICLES.md 6-A2), the surface is the evidence.
+        const int n=emitterSide_-1;
+        const int r=std::min(n-1,int(random()*n)),c=std::min(n-1,int(random()*n));
+        const float u=random(),v=random();
+        const auto at=[&](int rr,int cc){return emitter_[size_t(rr*emitterSide_+cc)];};
+        const QVector3D e=(at(r,c)*(1-u)+at(r,c+1)*u)*(1-v)+(at(r+1,c)*(1-u)+at(r+1,c+1)*u)*v;
+        p.px=e.x()*kHalfHeight*aspect_;
+        p.py=e.y()*kHalfHeight;
+        p.pz=-e.z();
+    } else { // no ribbon: the emission volume (see kEmit* above)
+        p.px=(2.f*random()-1.f)*kHalfHeight*aspect_*kEmitXMargin;
+        p.py=kEmitYCentre+(random()+random()-1.f)*kEmitYSpread;
+        p.pz=kEmitZNear+random()*(kEmitZFar-kEmitZNear);
+    }
     // Velocity: speed EMIT VEL MIN + MUL*(1 +/- VAR), in a cone around +x in the screen plane, z
     // flattened by EMIT VEL ZSCALE (0 in every XMB preset this build schedules), with EMIT NEG PROB
     // of the spawns mirrored. The z axis of the cone is not traced, so the read zscale only has to
@@ -511,23 +513,27 @@ void Particles::step() {
         const bool accepted=random()<physics_.emitProb; // always drawn, so the sequence depends only on time
         if(accepted && live_<kCapacity)spawnParticle();
     }
-    const float drag=1.f-physics_.friction;
-    const float kick=physics_.brownian*kBrownianStep;
+    // particles.elf 0x06f64-0x07098, semi-implicit Euler with dt = DELTA TIME: vel += (gravity + BROWNIAN x R -
+    // FRICTION x vel) x dt, then pos += vel x dt (R in [-1, 1)^3 from the Park-Miller call at 0x06fe4). The flow
+    // field and wind terms of the same bracket are not ported: WIND SCALE is 0 and the 32x16 field is untraced.
+    const float dt=float(physics_.deltaTime);
+    const float drag=1.f-physics_.friction*dt;
+    const float kick=physics_.brownian*dt;
     // Quaternion spin: q = spinStep * q, SPIN TIME SCALE radians per second.
-    const float halfSpin=.5f*physics_.spinTimeScale*float(physics_.deltaTime);
+    const float halfSpin=.5f*physics_.spinTimeScale*kSpinStep;
     const float spinC=std::cos(halfSpin),spinS=std::sin(halfSpin);
     for(int i=live_-1;i>=0;--i) {
         Particle& p=pool_[size_t(i)];
-        // Brownian velocity kick, one RNG draw per axis (audit 3.3), then gravity and per-step friction.
+        // Brownian velocity kick, one RNG draw per axis (audit 3.3), gravity and friction, all scaled by dt.
         p.vx+=kick*(2.f*random()-1.f);
-        p.vy+=kick*(2.f*random()-1.f)+physics_.gravity;
+        p.vy+=kick*(2.f*random()-1.f)+physics_.gravity*dt;
         p.vz+=kick*(2.f*random()-1.f);
         p.vx*=drag;
         p.vy*=drag;
         p.vz*=drag;
-        p.px+=p.vx;
-        p.py+=p.vy;
-        p.pz+=p.vz;
+        p.px+=p.vx*dt;
+        p.py+=p.vy*dt;
+        p.pz+=p.vz*dt;
         p.age+=p.ageRate;
         if(p.age>=1.f) { // life over: swap the last live particle in, it was already stepped this frame
             pool_[size_t(i)]=pool_[size_t(--live_)];
@@ -700,7 +706,7 @@ bool Particles::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
            <<", FRICTION"<<physics_.friction<<", GRAVITY"<<physics_.gravity<<", BROWNIAN"<<physics_.brownian
            <<", SPIN"<<physics_.spinTimeScale<<"rad/s, seed"<<kSeed
            <<(materialsLoaded_?"(PARTICLES.mnu)":"(fallback)");
-    qInfo()<<"particles: spot"<<spotDirection_<<"SIZE"<<look_.sizeMiddle<<"->"<<look_.sizeFar
+    qInfo()<<"particles: spot at"<<spotPosition_<<"SIZE"<<look_.sizeMiddle<<"->"<<look_.sizeFar
            <<"NEAR/FAR FOCUS"<<look_.nearFocus<<"/"<<look_.farFocus
            <<"GLARE"<<look_.glare<<"P1"<<look_.glareP1<<"P2"<<look_.glareP2<<"SCALE"<<look_.glareScale
            <<"SPEC"<<look_.specularPower<<"; look from the clock preset blend, _Color*_Gamma gain"<<kColorGammaGain;
@@ -780,7 +786,7 @@ void Particles::drawQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixel
     program_.setUniformValue("uIridescentExp",look_.iridescentExp);
     program_.setUniformValue("uHasIridescent",iridescent_?1.f:0.f);
     program_.setUniformValue("uIridescent",0);
-    program_.setUniformValue("uSpotDir",spotDirection_);
+    program_.setUniformValue("uSpotPos",spotPosition_);
     program_.setUniformValue("uSpecularPower",look_.specularPower);
     program_.setUniformValue("uSizeMiddle",look_.sizeMiddle);
     program_.setUniformValue("uSizeFar",look_.sizeFar);
@@ -810,7 +816,7 @@ void Particles::drawGlare(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixel
     glareProgram_.setUniformValue("uHalfExtent",float(kHalfHeight*aspect),kHalfHeight);
     glareProgram_.setUniformValue("uGlobalAlpha",globalAlpha_);
     glareProgram_.setUniformValue("uColorGain",kColorGammaGain);
-    glareProgram_.setUniformValue("uSpotDir",spotDirection_);
+    glareProgram_.setUniformValue("uSpotPos",spotPosition_);
     glareProgram_.setUniformValue("uSpecularPower",look_.specularPower);
     glareProgram_.setUniformValue("uSizeMiddle",look_.sizeMiddle);
     glareProgram_.setUniformValue("uSizeFar",look_.sizeFar);
