@@ -1348,3 +1348,31 @@ Choosing a render time that makes the pinned frame match one still would fit a c
 The audit already refused that, so the canonical capture stays at the rest table. `XMB_RIBBON_ADVANCE=1` (in
 `ribbon.cpp`) starts the cloth at the pinned `--render-clock`, which is the instrument for these over-time
 comparisons.
+
+## The pre-expose tables, 2026-11-03
+
+The background field's day excess (FIDELITY-ROOT-BAR B3/B4/B6, the "pedestal" four passes chased) is the console's
+pre-expose tables, now ported.
+- **Traced (custom_render_plugin):** the console never draws ToneMap.fpo. LinesController writes the scene through
+  preexpose_ExposeTex0/1 (units 15/14), two 128x128 two-channel half-float tables that `FUN_00071794` rebuilds every
+  frame from `HDR::beginFrame` (`FUN_00071cc4`). Texel i holds the tone curve x(1 + x/W^2)/(1 + x) at
+  x = 16 i/127 x EXPOSURE (constants 0x93210..0x93234), plus the glare weight G = max(1,t)(t - GLARE THRESH)/8 indexed
+  by max(R,G). The noise texture is Hugo-Elias noise at 1/255 that ToneApplyDisplay subtracts again.
+- **The offset:** the table is built at i/127 but sampled at texel centres, so the curve sees (128c - 8)/127,
+  clamped to 0..16: an achromatic -0.063 in scene units. Against the fourth pass's CPU numbers it predicts the
+  console's top window to 0.002 (0.3638/0.2914/0.1527 against 0.3641/0.2926/0.1549), and the night lower half
+  (band 8: 0.059/0.018/0.000 against 0.062/0.020/0.001) that the third pass had filed as a separate palette gap.
+  The one input not traced is the composite's lookup scale (u = c/16); the match is what supports it.
+- **Change:** `Hdr::load` patches the scene fetch of ToneMap.fpo and GlareSourceNoTone.fpo to that lookup, and the
+  fitted lower-field veil in `view.cpp` (its own comment said to remove it once B6 was fixed) is gone.
+
+Result, mean luma native - console per 90 px band, canonical capture: ribbon-free bands 0..3 from +10..+14 to
+-3..-7, bands 9..11 from +2.5..+4 (with the veil) to -0.7..-1.7 (without it). Gate: top background 21.06 -> **23.69**,
+category icon row 22.11 -> **23.28**, frame 19.64 -> 19.21, item label row 14.49 -> 13.17 (contentDiffers). The
+frame and label losses sit in bands 4..8, where the native and console ribbons are at different instants (see
+"the ribbon offset is timing"); the veil had been darkening the native sheet there. Named states re-saved;
+`--all` exits 0; byte-stable.
+
+Still open: the top 70 rows read 4..8 levels dark and the bottom-left corner 6..9 dark, which is about the size of
+the month-phase `+t` term (B2) and the half-float/8-bit quantisation of the tables; the glare path still differs
+(GlareSourcePre on the encoded buffer, not ported).
