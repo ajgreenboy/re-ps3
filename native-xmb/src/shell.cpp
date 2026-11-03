@@ -1027,11 +1027,18 @@ void Shell::refreshContent() {
             category.entries.erase(std::remove_if(category.entries.begin(),category.entries.end(),[](const Entry& e){
                 return e.id.startsWith("steam:") || e.id.startsWith("steam-folder-") || e.id.startsWith("steam-store") || e.id.startsWith("custom:");
             }),category.entries.end());
-            QVector<Entry> providers;
+            QVector<Entry> providers,installed;
             if(category.id=="game") {
-                // Steam Store first, then one All Games folder carrying the whole library:
-                // installed and owned titles launch or install from the collection folders on
-                // its page, so the column itself no longer carries the installed rows inline.
+                // Installed titles lead the column as ICON0 tiles that launch directly, the way a real PS3
+                // lists its installed games at the top of Game (user direction 2026-11-02; the RPCS3 corpus has
+                // only one installed title, Corrupted Data, so it cannot show the order). Then Steam Store and
+                // one All Games folder carrying the whole library (collections, Not Installed, Family Shared).
+                for(const auto& game:result.steam.games) {
+                    auto e=item("steam:"+game.appId,game.title,"game_tex_default_ps3","explore_plugin_full",
+                        Action::LaunchSteam,game.appId);
+                    e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;
+                    e.detail=collectionLabel(game.appId);installed.push_back(std::move(e));
+                }
                 {
                     // Browsing the public storefront: the only place to find something not owned yet.
                     auto e=item("steam-store",QObject::tr("Steam Store"),"item_tex_ps_store","explore_plugin_full",
@@ -1053,7 +1060,7 @@ void Shell::refreshContent() {
                 e.detail=app.kind=="game"?QString{}:app.kind=="jellyfin"?QStringLiteral("Jellyfin"):QStringLiteral("Service app ")+QChar(0x00B7)+QStringLiteral(" Opens in your browser");
                 e.artwork=result.art.value("custom:"+app.id);e.gameTile=app.kind=="game";providers.push_back(std::move(e));
             }
-            category.entries=providers+category.entries;
+            category.entries=installed+providers+category.entries;
             selections_[c]=0;
             for(int i=0;i<category.entries.size();++i)if(category.entries[i].id==selected){selections_[c]=i;break;}
             if(!contentLoaded_ && category.id=="game" && !providers.isEmpty())selections_[c]=0;
@@ -1199,7 +1206,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("playlists","Playlists","tex_playlist","explore_category_photo"),
             // Native rows (FIDELITY-MEDIA P1's "10 native-only rows"): the library folder, the one settings page
             // that has no other surface, and the folder picker. They stay because each is a feature's only door.
-            item("library","Photo Library","photo_tex_album_pic",full,Action::Library),
+            item("library","Photo Library","item_tex_plain_folder",full,Action::Library),
             item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary),
             item("options","Photo Settings","tex_photo",full,Action::SettingsPage,"photo")}},
         {"music","Music","qgl/icontex","4n",{
@@ -1207,7 +1214,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("playlists","Playlists","tex_playlist","explore_category_music"),
             // Native rows: the library and the picker. Music Settings is dropped from this column because the
             // Settings column's own "Music Settings" row opens the same page (id "music", Action::SettingsPage).
-            item("library","Music Library","music_tex_album_pic",full,Action::Library),
+            item("library","Music Library","item_tex_plain_folder",full,Action::Library),
             item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
         {"video","Video","qgl/icontex","5n",{
             item("bddata","BD Data Utility","item_tex_plain_folder","explore_category_video"),
@@ -1218,8 +1225,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             // this column's own content" action and Shell::activate() recognises this row by id and builds the
             // page from the remembered resume points instead of reading a folder (audit/MEDIA-CONTROLS.md).
             // Video Settings is dropped here for the same reason as Music Settings above.
-            item("continue","Continue Watching","video_tex_album_default",full,Action::Library),
-            item("library","Video Library","video_tex_album_default",full,Action::Library),
+            item("continue","Continue Watching","item_tex_plain_folder",full,Action::Library),
+            item("library","Video Library","item_tex_plain_folder",full,Action::Library),
             item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
         {"tv","TV/Video Services","qgl/icontex","35n", /* normal-mapped like the others; tex_video is 46 px */{item("services","My Channels","tex_video")}},
         {"game","Game","qgl/icontex","6n",{
@@ -1760,6 +1767,7 @@ void Shell::activate() {
         break;
     case Action::EditName:emit requestSystemName(preferences_.value("system/name").toString());break;
     case Action::CreateUser:emit requestNewUser();break;
+    case Action::TurnOffSystem:psHeld();psConfirmOff_=true;emit changed();break;
     case Action::SelectUser: {
         // D16 (BEHAVIOUR-GAP-AUDIT): selecting a user switches the whole session - that user's settings,
         // libraries, friends and trophies - not just the id in profiles.json. The settings store's
@@ -3775,10 +3783,16 @@ void Shell::refreshDirectory(){
 }
 void Shell::rebuildUsers(){
     auto& users=categories_[0].entries;
-    users={item("new-user","Create New User","item_tex_NewUser","explore_plugin_full",Action::CreateUser)};
-    users[0].themeIcon="icon_newuser";
+    // category_user.xml's root view: #seg_poweroff, then user://localhost/create, then the users (console frame
+    // col-users-r00 / users-row1-turn-off-system). The power row's art is explore_category_user:tex_power_off.
+    users={item("poweroff",QObject::tr("Turn Off System"),"tex_power_off","explore_category_user",Action::TurnOffSystem),
+           item("new-user","Create New User","item_tex_NewUser","explore_category_user",Action::CreateUser)};
+    users[1].themeIcon="icon_newuser";
     for(const auto& profile:profiles_.profiles()) {
-        users.push_back(item(profile.id,profile.name,"user_tex_login","explore_plugin_full",Action::SelectUser,profile.id));
+        // The console draws a user as the default avatar (explore_plugin_full:tex_Avatar_Default, col-users-r00), not
+        // user_tex_login (the 40x17 arrow); explore_category_user:item_tex_NewUser is the smiley-with-plus, while
+        // explore_plugin_full's same-named art is the house-on-a-disc.
+        users.push_back(item(profile.id,profile.name,"tex_Avatar_Default","explore_plugin_full",Action::SelectUser,profile.id));
         users.last().themeIcon="icon_user";
         if(profile.id==profiles_.activeId())selections_[0]=int(users.size())-1;
     }

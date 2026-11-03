@@ -55,6 +55,42 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-02: visual review pass (captured, compared with the RPCS3 corpus, fixed)
+
+The app was run with `--script` across every category, a settings page, the options panel and the PS menu, and
+each frame was compared with `C:\dev\out\rpcs3-allgraphics-2026-10-28\frames`. Capture note: use `full`, not
+`size=1920x1080` - the window size includes the title bar, so the frame comes out 1920x1065 and scaled 1.4%
+(13 px side strips, rows ~7 px high), which reads as layout bugs that are not there.
+
+Fixed and verified on captures:
+- BG1 plate only behind a focused ICON0 tile row (it is the empty ICON0 backdrop, GEOMETRY-ROOT 12.7); it was drawn
+  behind every focused row. The tile rule is one `isTile` lambda in `view.cpp` used by both.
+- Photo/Music/Video Library and Continue Watching rows use `item_tex_plain_folder`; their album-art texture names
+  made them wide album cards that overlapped the next rows and pushed the label to x741.
+- Users column follows `category_user.xml`: Turn Off System (`explore_category_user:tex_power_off`,
+  `Action::TurnOffSystem` -> the PS menu's confirm), Create New User (`explore_category_user:item_tex_NewUser`, the
+  smiley with a plus), then the users with `tex_Avatar_Default`; the signed-in user is marked with the `tex_indi_Me`
+  diamond left of the avatar instead of a dot in the value column. Steam Account stays last.
+- PS menu: the focused entry was drawn with the label's dark drop shadow over a saturated bloom (a double-struck
+  "Turn Off the System"); it is drawn without the shadow and the bloom strength is 1.8 (fit by crops; was 3.6).
+- Installed Steam games are inline at the head of the Game column as ICON0 tiles that launch directly (user
+  direction), ahead of Steam Store and the All Games folder; b046673 had moved them into the folder only.
+
+Gate: `bun work/ab-layers.ts --all` exits 0 - canonical 6/6 (frame 18.84, -0.37; item label row annotated
+contentDiffers because the reference's row is the Corrupted Data tile and the native's is Steam Store), named states
+12/12 after a deliberate `--states --save-reference`. `catalogueRowIds` accepts `steam:*` for the run of installed
+Steam rows (checked against the dump's installedSteam count), so the gate does not hard-code this PC's library.
+
+**Found, not kept - the next ribbon task.** With the intro off, nothing settles the ribbon's boot clock (HDR and
+particles default to the clock preset; the ribbon starts at boot 0). Unpinned, it replays coldboot1 -> clock over the
+first seconds; under `--render-clock` (dt = 0) it stays on coldboot1 for good: FRESNEL 2, FFD SCALE2 Y 1.0, no
+perturbation - the thin, hard, over-bright sheet in every pinned capture and baseline. `ribbon_.setBootTime(1e9,
+Coldboot::normalBg)` in paintGL's no-intro branch gives the correct day sheet (broad and soft like the console), but
+it scored worse (frame -1.28, top background -1.13, category icon row up to -5.68 dB, and not stable between runs)
+because the settled sheet exposes the cloth's wrong phase (FIDELITY-ROOT-BAR R2/R3: crest high on the right where the
+console's is low). Fix the phase, and the settle's run-to-run variance, first; then land the settled preset and
+re-baseline.
+
 ## Next steps (recommended order)
 
 Latest user direction adds Steam games/Friends and future content tooling. The implemented first slice and its
