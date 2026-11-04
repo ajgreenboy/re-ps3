@@ -1063,3 +1063,25 @@ PARTICLES.mnu fields (renderer+0x12b0+4 x key index). The hand-written program s
 Result: specks in the side strips 297 -> 419 (console 543..1063 over six frames), now small flakes instead of large
 ellipses, mean contrast 46 -> 31 (console 29..37). Gate: frame 19.41 -> **19.51**, other layers unchanged, 6/6; named
 states re-saved deliberately, 12/12; byte-stable across runs.
+
+## The firmware glare pass, 2026-11-04
+
+Pass 2 now runs the firmware's own `lib/particles/particles_second.vpo/.fpo` through the same path as pass 1
+(`Particles::drawFirmwarePass`), with every uniform packed by the same `FUN_0005c254` setters, plus `_Glare`.
+- **`_Glare` (traced, 0x5c5a8-0x5c5d4).** (GLARE, GLARE SCALE, GLARE P1, GLARE P2) from renderer+0x1438..0x1444 in key
+  order, to both programs. The vpo reads only .y; the fpo's halo is .x x exp(-.w x r^.z) on the centred uv radius
+  (the z/w roles are read from the fpo, the order from the key layout).
+- **What pass 2 is.** A camera-facing quad (`_FrontFacingQuaternion` alone) of size S x GLARE SCALE x |N.H|^SPECULAR
+  POWER, with S the pass-1 depth-of-field size: only a particle catching the spot's specular highlight gets a glare
+  quad. Same darkness, notch, life box and fresnel terms; `_Color` and `_Gamma` scale it like pass 1.
+- **Target (traced, corrects the audit).** `FUN_00060660` draws pass 1 then pass 2 (holder field 0x75 = 2, both bits;
+  no preset key) into the one bound target with ONE/ONE and no framebuffer bind between them. Pass 2 is therefore drawn
+  into the HDR scene right after pass 1, not into the glare source: the dust reaches the glare chain through the scene.
+  The audit's "pass 2 into the glare source" was a reading of the shader's purpose, not of the draw. With the firmware
+  programs loaded, `renderGlare` is a no-op; the hand-written glare program remains the fallback.
+
+Result: the glare quads are glint-only, so the effect is small (speck histogram within 3 of the previous run in every
+bin). Gate: frame 19.51 -> **19.61**, other layers unchanged, 6/6; named states re-saved deliberately, 12/12;
+byte-stable across runs. Still open: the `_Color` grey (measured 0.2), the life box's camera transform,
+PARTICLES_SPE's offsets (playback only), and the caller `FUN_0002b710`'s target bind (not traced, assumed the scene
+because pass 1 must be there).

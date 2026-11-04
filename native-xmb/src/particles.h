@@ -197,14 +197,15 @@ private:
     bool ready_=false;
     QOpenGLShaderProgram program_;      // particles_quads
     QOpenGLShaderProgram glareProgram_; // particles_second
-    // Pass 1 on the firmware's own programs (lib/particles/particles_quads.vpo/.fpo out of lines.qrc). The hand-written
-    // program_ stays as the fallback for a tree without the qrc.
-    CgProgram firmwareVertex_,firmwareFragment_;
-    QOpenGLShaderProgram firmwareProgram_;
-    bool firmwareQuads_=false;
+    // Both passes on the firmware's own programs out of lines.qrc: [0] lib/particles/particles_quads.vpo/.fpo,
+    // [1] lib/particles/particles_second.vpo/.fpo. The hand-written program_/glareProgram_ stay as the fallbacks for a
+    // tree without the qrc (or XMB_PARTICLES_FALLBACK=1).
+    CgProgram firmwareVertex_[2],firmwareFragment_[2];
+    QOpenGLShaderProgram firmwareProgram_[2];
+    bool firmwareReady_[2]={false,false};
     QVector3D spotAttenuation_=QVector3D(1,0,0); // fallback: PARTICLES.mnu spot attn x/y/z
-    void initFirmwareQuads(Assets& assets);
-    void drawFirmwareQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight);
+    void initFirmwarePass(Assets& assets,int pass);
+    void drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixelWidth,int pixelHeight);
     std::unique_ptr<QOpenGLTexture> iridescent_;
     bool iridescentFromFirmware_=false;
     bool materialsLoaded_=false;
