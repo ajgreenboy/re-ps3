@@ -55,6 +55,36 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-04: particles on the firmware programs (particles_quads.vpo/.fpo, traced packing)
+
+Pass 1 now runs the firmware's own `lib/particles/particles_quads.vpo/.fpo` (lines.qrc, through `CgProgram`), with
+the vertex and fragment constants packed as `FUN_0005c254` (custom_render_plugin 0x5c254) packs them from the renderer's
+PARTICLES.mnu fields (renderer+0x12b0+4 x key index). The hand-written program stays as the fallback
+(`XMB_PARTICLES_FALLBACK=1`, or a tree without the qrc).
+- **Traced packing.** `_ParticleSize` = (size middle, size near, size far); `_Transparency` = (fresnel, global alpha);
+  `_Focus` = (near focus, near focus + near focus_dist, far focus, far focus + far focus_dist); `_FocusCurves` =
+  (near focus_pow, far focus_pow, camera fovy in radians); `_NearControl` = (size align, near fuzziness, near align);
+  `_Darkness` = (near darkness, far darkness); `_LightPack` rows (eye), (spot pos, specular power), (spot attn),
+  (specular coeff, lambert coeff, exposure, color_control) stored as columns - the fpo's slot table only resolves with
+  that transpose. Blend ONE/ONE, FUNC_ADD, alpha test GREATER 0 (`FUN_00060660`).
+- **What the vpo does with them.** Size and defocus follow the true distance to the eye: SIZE NEAR inside the near band,
+  SIZE MIDDLE in focus, SIZE FAR past far focus + dist; NEAR/FAR DARKNESS fade a particle by its angular size; flakes
+  blend toward the camera-facing quaternion by angular size x SIZE ALIGN + near defocus x NEAR ALIGN.
+- **Space.** The simulation keeps flat viewport x/y and camera depth; a patch on `in_0` rebuilds camera-space positions
+  under the ribbon camera (fovy 53) so each particle projects where it did. `_Modelview` is the identity, the eye the
+  origin, `_FrontFacingQuaternion` the identity rotation.
+- **Measured, not traced.** `_Color` is one grey the shell pushes from a state-machine message (`FUN_0001afdc`), never
+  from a preset; its steady-state value is not traced. g = 0.2 puts the speck contrast histogram in the UI-free strips
+  on the console still's (24..48 bins 108/147/23 against 128/140/26). `_Gamma` is its initialiser 1.0 (a fade: the
+  draw is skipped at 0). Replace g with fc[34] from an `XMB_FP_SERIES` capture of the particle draw.
+- **Open.** The life box is a constant world box (0x940b0/0x940c0: -10,-10,-12 .. 10,10,7) whose camera transform is not
+  traced, so it is not applied; pass 2 (`particles_second`) is still the hand-written program; the console's dimmest
+  specks (16..24) and its bright tail (128+) are both thinner in the native.
+
+Result: specks in the side strips 297 -> 419 (console 543..1063 over six frames), now small flakes instead of large
+ellipses, mean contrast 46 -> 31 (console 29..37). Gate: frame 19.41 -> **19.51**, other layers unchanged, 6/6; named
+states re-saved deliberately, 12/12; byte-stable across runs.
+
 ## 2026-11-03: the glare weights traced (GLARE LEVEL squared, _GlareWeight = 1)
 
 The two glare weights the glare port left as reconstructions are now traced. The field map comes from a hand

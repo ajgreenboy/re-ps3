@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QImage>
+#include <QMatrix4x4>
 #include <QStringList>
 #include <algorithm>
 #include <cmath>
@@ -96,6 +97,7 @@ constexpr float kEmitXMargin=1.25f;  // fit: emit past the viewport edges so the
 // random quaternion, so E[|N.V|] = 0.5 and E[T] = 1 - 1/(1 + FRESNEL/2) = 1 - 1/2.333 = 0.571.
 // 1.05 / 0.571 = 1.84 keeps the same average exposure with the evidenced alpha chain in place.
 constexpr float kColorGammaGain=1.84f;     // fit: _Color * _Gamma (audit 6-B2, still untraced)
+constexpr float kParticleColorGrey=0.2f; // measured: the firmware pass 1 _Color grey (drawFirmwareQuads)
 // --- pass 1: particles_quads ---------------------------------------------------------------------
 const char* vertexSource=R"(#version 330 core
 // particles_quads vertex contract (audit/PARTICLES.md 2.2): float4 position with the per-vertex life
@@ -315,6 +317,20 @@ double Particles::dayFraction() const {
     return double(when.time().msecsSinceStartOfDay())/86400000.0;
 }
 
+const std::vector<std::pair<const char*,float Particles::Look::*>>& Particles::lookKeys() {
+    static const std::vector<std::pair<const char*,float Look::*>> keys={
+        {"size middle",&Look::sizeMiddle},{"size near",&Look::sizeNear},{"size far",&Look::sizeFar},
+        {"near focus",&Look::nearFocus},{"near focus_dist",&Look::nearFocusDist},{"near focus_pow",&Look::nearFocusPow},
+        {"near darkness",&Look::nearDarkness},{"near fuzziness",&Look::nearFuzziness},
+        {"far focus",&Look::farFocus},{"far focus_dist",&Look::farFocusDist},{"far focus_pow",&Look::farFocusPow},
+        {"far darkness",&Look::farDarkness},{"near align",&Look::nearAlign},{"size align",&Look::sizeAlign},
+        {"glare",&Look::glare},{"glare scale",&Look::glareScale},{"glare p1",&Look::glareP1},{"glare p2",&Look::glareP2},
+        {"specular power",&Look::specularPower},{"specular coeff",&Look::specularCoeff},{"lambert coeff",&Look::lambertCoeff},
+        {"exposure",&Look::exposure},{"fresnel",&Look::fresnel},{"iridescent exp",&Look::iridescentExp},
+        {"color_control",&Look::colorControl},{"global alpha",&Look::globalAlpha}};
+    return keys;
+}
+
 void Particles::refreshLook() {
     // The plugin's keyframe table (FUN_00011600, the same one ribbon.cpp clockPreset uses): night to
     // 01:00, to yoake by 05:00, held to 07:00, to day by 11:00, held to 13:00, to higure by 17:00,
@@ -331,22 +347,8 @@ void Particles::refreshLook() {
         }
     const Look& A=themes_[a];
     const Look& B=themes_[b];
-    const auto mix=[f](float x,float y){return x+(y-x)*float(f);};
     Look out;
-    out.sizeMiddle=mix(A.sizeMiddle,B.sizeMiddle);
-    out.sizeFar=mix(A.sizeFar,B.sizeFar);
-    out.nearFocus=mix(A.nearFocus,B.nearFocus);
-    out.farFocus=mix(A.farFocus,B.farFocus);
-    out.glare=mix(A.glare,B.glare);
-    out.glareScale=mix(A.glareScale,B.glareScale);
-    out.glareP1=mix(A.glareP1,B.glareP1);
-    out.glareP2=mix(A.glareP2,B.glareP2);
-    out.specularPower=mix(A.specularPower,B.specularPower);
-    out.specularCoeff=mix(A.specularCoeff,B.specularCoeff);
-    out.lambertCoeff=mix(A.lambertCoeff,B.lambertCoeff);
-    out.exposure=mix(A.exposure,B.exposure);
-    out.fresnel=mix(A.fresnel,B.fresnel);
-    out.iridescentExp=mix(A.iridescentExp,B.iridescentExp);
+    for(const auto& [key,member]:lookKeys())out.*member=A.*member+(B.*member-A.*member)*float(f);
     look_=out;
 }
 
@@ -380,21 +382,7 @@ void Particles::loadMaterials(Assets& assets) {
         // A non-zero one (welcome_1/2) is out of scope, and the log says so instead of silently flattening.
         if(physics_.emitVelZScale!=0.f)
             qWarning()<<"particles: EMIT VEL ZSCALE"<<physics_.emitVelZScale<<"is not ported; the cone stays flat";
-        const auto look=[&](const char* key,float& out){out=float(base.number(QString::fromLatin1(key),out));};
-        look("size middle",lookBase_.sizeMiddle);
-        look("size far",lookBase_.sizeFar);
-        look("near focus",lookBase_.nearFocus);
-        look("far focus",lookBase_.farFocus);
-        look("glare",lookBase_.glare);
-        look("glare scale",lookBase_.glareScale);
-        look("glare p1",lookBase_.glareP1);
-        look("glare p2",lookBase_.glareP2);
-        look("specular power",lookBase_.specularPower);
-        look("specular coeff",lookBase_.specularCoeff);
-        look("lambert coeff",lookBase_.lambertCoeff);
-        look("exposure",lookBase_.exposure);
-        look("fresnel",lookBase_.fresnel);
-        look("iridescent exp",lookBase_.iridescentExp);
+        for(const auto& [key,member]:lookKeys())lookBase_.*member=float(base.number(QString::fromLatin1(key),lookBase_.*member));
         materialsLoaded_=true;
     } else {
         qWarning().noquote()<<"particles: PARTICLES.mnu unavailable ("<<base.source()<<base.error
@@ -406,21 +394,7 @@ void Particles::loadMaterials(Assets& assets) {
     const auto lookFrom=[&](const Materials::Mnu& mnu,const Look& fallback){
         Look out=fallback;
         if(!mnu.ok)return out;
-        const auto get=[&](const char* key,float& out){out=float(mnu.number(QString::fromLatin1(key),out));};
-        get("size middle",out.sizeMiddle);
-        get("size far",out.sizeFar);
-        get("near focus",out.nearFocus);
-        get("far focus",out.farFocus);
-        get("glare",out.glare);
-        get("glare scale",out.glareScale);
-        get("glare p1",out.glareP1);
-        get("glare p2",out.glareP2);
-        get("specular power",out.specularPower);
-        get("specular coeff",out.specularCoeff);
-        get("lambert coeff",out.lambertCoeff);
-        get("exposure",out.exposure);
-        get("fresnel",out.fresnel);
-        get("iridescent exp",out.iridescentExp);
+        for(const auto& [key,member]:lookKeys())out.*member=float(mnu.number(QString::fromLatin1(key),out.*member));
         return out;
     };
     static const char* const names[4]={"night","yoake","day","higure"};
@@ -438,6 +412,8 @@ void Particles::loadMaterials(Assets& assets) {
         sz=base.number(QStringLiteral("spot pos z"),sz);
     }
     spotPosition_=QVector3D(float(sx),float(sy),float(sz));
+    if(base.ok)spotAttenuation_=QVector3D(float(base.number(QStringLiteral("spot attn x"),1.)),
+        float(base.number(QStringLiteral("spot attn y"),0.)),float(base.number(QStringLiteral("spot attn z"),0.)));
     // --background-clock: the theme look follows the same option View resolves for the ribbon.
     const QStringList arguments=QCoreApplication::arguments();
     for(int i=0;i<arguments.size();++i) {
@@ -700,12 +676,14 @@ bool Particles::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
         createTexture(white);
     }
     if(!initResources(gl))return false;
+    initFirmwareQuads(assets);
     qInfo()<<"particles: firmware pool"<<kCapacity<<"records, DELTA TIME"<<physics_.deltaTime<<"s,"
            <<"EMIT"<<physics_.emitPerFrame<<"x"<<physics_.emitProb<<"(60 Hz), cone"<<physics_.emitConeDegrees<<"deg"
            <<"("<<physics_.emitNegProb<<" mirrored), AGING"<<physics_.agingSpeed<<"+/-"<<physics_.agingVariance
            <<", FRICTION"<<physics_.friction<<", GRAVITY"<<physics_.gravity<<", BROWNIAN"<<physics_.brownian
            <<", SPIN"<<physics_.spinTimeScale<<"rad/s, seed"<<kSeed
-           <<(materialsLoaded_?"(PARTICLES.mnu)":"(fallback)");
+           <<(materialsLoaded_?"(PARTICLES.mnu)":"(fallback)")
+           <<"; pass 1"<<(firmwareQuads_?"on the firmware particles_quads programs":"on the fallback program");
     qInfo()<<"particles: spot at"<<spotPosition_<<"SIZE"<<look_.sizeMiddle<<"->"<<look_.sizeFar
            <<"NEAR/FAR FOCUS"<<look_.nearFocus<<"/"<<look_.farFocus
            <<"GLARE"<<look_.glare<<"P1"<<look_.glareP1<<"P2"<<look_.glareP2<<"SCALE"<<look_.glareScale
@@ -770,8 +748,113 @@ void Particles::logState(const char* pass,int width,int height) const {
         <<"target"<<width<<"x"<<height<<"lut"<<(iridescentFromFirmware_?"tga":"fallback");
 }
 
+// The simulation keeps its positions as (x, y) in flat viewport units (kScreenHeight tall at every depth) and z as
+// the camera depth, the space the sheet emitter and the fallback programs work in. The firmware vpo wants camera space
+// under the ribbon camera (fovy 53, ribbon.cpp): the same screen point at depth d sits at x = flat x * tan(26.5 deg) *
+// d / kHalfHeight. The patch below rebuilds in_0 that way before the program runs, so the projection lands every
+// particle where the fallback drew it; _Modelview is then the identity, the eye the origin and
+// _FrontFacingQuaternion the identity rotation (a quad in the camera's xy plane).
+void Particles::initFirmwareQuads(Assets& assets) {
+    QString error;
+    try {
+        firmwareVertex_=CgProgram::load(assets.qglFile("lines","lib/particles/particles_quads.vpo"),&error);
+        if(firmwareVertex_.valid())firmwareFragment_=CgProgram::load(assets.qglFile("lines","lib/particles/particles_quads.fpo"),&error);
+    } catch(const std::exception& e) { error=e.what(); }
+    if(!firmwareVertex_.valid() || !firmwareFragment_.valid()) {
+        qWarning().noquote()<<"particles: firmware particles_quads unavailable ("<<error<<"); pass 1 uses the fallback program";
+        return;
+    }
+    QString vertex=firmwareVertex_.glsl;
+    const QString attribute="layout(location=0) in vec4 in_0;";
+    if(vertex.count(attribute)!=1 || vertex.count("void main() {")!=1) {
+        qWarning()<<"particles: particles_quads.vpo translation has an unexpected shape; pass 1 uses the fallback program";
+        return;
+    }
+    vertex.replace(attribute,"layout(location=0) in vec4 flatPos_;\nuniform float flatToView_;\nvec4 in_0;");
+    vertex.replace("void main() {","void main() {\n  in_0=vec4(flatPos_.xy*(flatToView_*-flatPos_.z),flatPos_.z,flatPos_.w);");
+    if(!firmwareProgram_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) ||
+       !firmwareProgram_.addShaderFromSourceCode(QOpenGLShader::Fragment,firmwareFragment_.glsl) || !firmwareProgram_.link()) {
+        qWarning().noquote()<<"particles: firmware particles_quads link failed:"<<firmwareProgram_.log();
+        return;
+    }
+    firmwareQuads_=!qEnvironmentVariableIsSet("XMB_PARTICLES_FALLBACK");
+}
+
+void Particles::drawFirmwareQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) {
+    // Vertex constants exactly as FUN_0005c254 (custom_render_plugin 0x5c254) packs them from the renderer's PARTICLES.mnu
+    // fields (audit/PARTICLES.md "The firmware particle programs"); both passes get the same values.
+    std::vector<QVector4D> vc(468);
+    for(const auto& p:firmwareVertex_.parameters)
+        if(p.resourceIndex>=0 && p.resourceIndex<468 && !p.defaults.isEmpty())
+            vc[size_t(p.resourceIndex)]=QVector4D(p.defaults.value(0),p.defaults.value(1),p.defaults.value(2),p.defaults.value(3));
+    const auto setV=[&](const char* name,const QVector4D& v){const int i=firmwareVertex_.parameters.value(name).resourceIndex;if(i>=0&&i<468)vc[size_t(i)]=v;};
+    constexpr float fovy=53.f*3.14159265f/180.f; // the ribbon camera (ribbon.cpp, captured)
+    const float aspect=float(pixelWidth)/float(pixelHeight);
+    QMatrix4x4 projection;projection.perspective(53.f,aspect,.1f,1000.f);
+    for(int r=0;r<4;++r) {
+        setV(QStringLiteral("_ModelviewProjection[%1]").arg(r).toLatin1().constData(),projection.row(r));
+        setV(QStringLiteral("_Modelview[%1]").arg(r).toLatin1().constData(),QMatrix4x4().row(r));
+    }
+    // _LightPack: rows (eye), (spot pos, specular power), (spot attn), (specular coeff, lambert, exposure, color_control),
+    // stored as columns - the vpo reads the eye from vc[264..266].x, and the fpo's slot table (fc 1/10/3 the eye,
+    // 2/4/0 the spot, 28/26/25 the attenuation, 29/24/30 the coefficients, 16.y specular power, 6.w color_control)
+    // only resolves with that transpose.
+    const Look& l=look_;
+    const QVector4D pack[4]={
+        QVector4D(0,spotPosition_.x(),spotAttenuation_.x(),l.specularCoeff),
+        QVector4D(0,spotPosition_.y(),spotAttenuation_.y(),l.lambertCoeff),
+        QVector4D(0,spotPosition_.z(),spotAttenuation_.z(),l.exposure),
+        QVector4D(1,l.specularPower,0,l.colorControl)};
+    for(int r=0;r<4;++r)setV(QStringLiteral("_LightPack[%1]").arg(r).toLatin1().constData(),pack[r]);
+    setV("_ParticleSize",QVector4D(l.sizeMiddle,l.sizeNear,l.sizeFar,0));
+    setV("_Transparency",QVector4D(l.fresnel,l.globalAlpha*globalAlpha_,0,0));
+    setV("_Focus",QVector4D(l.nearFocus,l.nearFocus+l.nearFocusDist,l.farFocus,l.farFocus+l.farFocusDist));
+    // _FocusCurves.z is the float FUN_0005de2c copies from the camera module, whose getter also feeds tan(0.5 x): the
+    // vertical field of view in radians. [TRACED source; the value is the ribbon camera's fovy.]
+    setV("_FocusCurves",QVector4D(l.nearFocusPow,l.farFocusPow,fovy,0));
+    setV("_NearControl",QVector4D(l.sizeAlign,l.nearFuzziness,l.nearAlign,0));
+    setV("_Darkness",QVector4D(l.nearDarkness,l.farDarkness,0,0));
+    setV("_FrontFacingQuaternion",QVector4D(0,0,0,1));
+    // The life box is a constant world box (0x940b0 / 0x940c0: -10,-10,-12 .. 10,10,7), but the world-to-camera
+    // transform it sits in is not traced, so it is left open here rather than placed in camera space. [OPEN]
+    setV("_LifeBoundsMin",QVector4D(-1e4f,-1e4f,-1e4f,0));
+    setV("_LifeBoundsMax",QVector4D(1e4f,1e4f,1e4f,0));
+    QVector<QVector4D> fc=firmwareFragment_.constants;
+    const auto setF=[&](const char* name,const QVector4D& v){for(int slot:firmwareFragment_.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=v;};
+    for(int r=0;r<4;++r)setF(QStringLiteral("_LightPack[%1]").arg(r).toLatin1().constData(),pack[r]);
+    setF("_NearControl",QVector4D(l.sizeAlign,l.nearFuzziness,l.nearAlign,0));
+    setF("_IridescentExp",QVector4D(l.iridescentExp,l.iridescentExp,l.iridescentExp,l.iridescentExp));
+    // _Color (renderer+0x1340, initialised to 1,1,1 at 0x60c80) and _Gamma (renderer+0x1350, initialised to 1.0 at
+    // 0x60c98, a fade: FUN_00060660 skips the draw at 0) are animated scalars whose resting values are their
+    // initialisers. [TRACED source; resting value inferred.]
+    // _Color is one grey (g, g, g, 0): the shell pushes it through FUN_0001afdc from a message float the state machine
+    // sends, never from a preset, and the steady-state message is not traced. g = 0.2 is measured: it puts the speck
+    // contrast histogram in the UI-free strips on the console still's (24-48 bins 108/147/23 against 128/140/26).
+    // [MEASURED - replace with fc[34] from an XMB_FP_SERIES capture of the particle draw.]
+    setF("_Color",QVector4D(kParticleColorGrey,kParticleColorGrey,kParticleColorGrey,0));
+    setF("_Gamma",QVector4D(1,1,1,1));
+    gl.glViewport(0,0,pixelWidth,pixelHeight);
+    gl.glDisable(GL_DEPTH_TEST);
+    gl.glDisable(GL_CULL_FACE);
+    gl.glEnable(GL_BLEND);
+    gl.glBlendFunc(GL_ONE,GL_ONE); // the fpo's colour already carries the vertex alpha; additive into the HDR scene
+    gl.glBindVertexArray(vao_);
+    if(iridescent_)iridescent_->bind(0);
+    firmwareProgram_.bind();
+    firmwareProgram_.setUniformValue("flatToView_",float(std::tan(fovy*.5f)/kHalfHeight));
+    firmwareProgram_.setUniformValueArray("vc",vc.data(),int(vc.size()));
+    firmwareProgram_.setUniformValueArray("fc",fc.constData(),fc.size());
+    firmwareProgram_.setUniformValue("tex0",0);
+    gl.glDrawElements(GL_TRIANGLES,GLsizei(size_t(live_)*6),GL_UNSIGNED_INT,reinterpret_cast<const void*>(indexOffset_));
+    firmwareProgram_.release();
+    if(iridescent_)iridescent_->release(0);
+    gl.glBindVertexArray(0);
+    gl.glDisable(GL_BLEND);
+}
+
 void Particles::drawQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) {
     if(live_<=0)return;
+    if(firmwareQuads_){drawFirmwareQuads(gl,pixelWidth,pixelHeight);return;}
     gl.glViewport(0,0,pixelWidth,pixelHeight);
     gl.glDisable(GL_DEPTH_TEST);
     gl.glDisable(GL_CULL_FACE);

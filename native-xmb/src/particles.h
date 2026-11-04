@@ -4,6 +4,7 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
 #include <QVector3D>
+#include "rsx_program.h"
 #include <memory>
 #include <vector>
 
@@ -156,7 +157,22 @@ private:
         float exposure=0.0390458f;    // fallback: exposure
         float fresnel=1.33319f;       // fallback: fresnel
         float iridescentExp=1.f;      // fallback: iridescent exp
+        // The depth-of-field and alpha keys the firmware vpo reads (FUN_0005c254, see drawQuads).
+        float sizeNear=0.0772033f;    // fallback: size near
+        float nearFocusDist=1.3193f;  // fallback: near focus_dist
+        float nearFocusPow=2.47206f;  // fallback: near focus_pow
+        float nearDarkness=6.24028f;  // fallback: near darkness
+        float nearFuzziness=3.79f;    // fallback: near fuzziness
+        float farFocusDist=3.54129f;  // fallback: far focus_dist
+        float farFocusPow=1.83324f;   // fallback: far focus_pow
+        float farDarkness=13.9f;      // fallback: far darkness
+        float nearAlign=0.722f;       // fallback: near align
+        float sizeAlign=13.19f;       // fallback: size align
+        float colorControl=1.f;       // fallback: color_control
+        float globalAlpha=1.f;        // fallback: global alpha
     };
+    // Every Look key with its PARTICLES.mnu name: one table drives the base read, the theme reads and the blend.
+    static const std::vector<std::pair<const char*,float Look::*>>& lookKeys();
     bool initPrograms();
     bool initResources(QOpenGLFunctions_3_3_Core& gl);
     bool loadIridescent(const QString& flashRoot);
@@ -181,6 +197,14 @@ private:
     bool ready_=false;
     QOpenGLShaderProgram program_;      // particles_quads
     QOpenGLShaderProgram glareProgram_; // particles_second
+    // Pass 1 on the firmware's own programs (lib/particles/particles_quads.vpo/.fpo out of lines.qrc). The hand-written
+    // program_ stays as the fallback for a tree without the qrc.
+    CgProgram firmwareVertex_,firmwareFragment_;
+    QOpenGLShaderProgram firmwareProgram_;
+    bool firmwareQuads_=false;
+    QVector3D spotAttenuation_=QVector3D(1,0,0); // fallback: PARTICLES.mnu spot attn x/y/z
+    void initFirmwareQuads(Assets& assets);
+    void drawFirmwareQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight);
     std::unique_ptr<QOpenGLTexture> iridescent_;
     bool iridescentFromFirmware_=false;
     bool materialsLoaded_=false;
