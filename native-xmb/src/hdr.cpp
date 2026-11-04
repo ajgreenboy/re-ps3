@@ -3,6 +3,8 @@
 #include "rco_objects.h"
 #include <QElapsedTimer>
 #include <cmath>
+#include <array>
+#include <algorithm>
 #include <QDebug>
 
 namespace xmb {
@@ -47,11 +49,31 @@ bool Hdr::load(Assets& assets,Pass& pass,const char* fragment,const char* vertex
             fragmentGlsl.replace(sceneFetch,"(vec4(clamp((128.0*texture(tex0, (v_tc[0]).xy).rgb-8.0)/127.0,0.0,16.0),texture(tex0, (v_tc[0]).xy).a))");
             fragmentGlsl.replace(emitBody,
                 "uniform vec3 uGlareTable; // EXPOSURE, 1/WHITE LEVEL^2, GLARE THRESH\n"
+                "uniform sampler2D uNoise; // preexpose_Noise, unit 13\n"
                 "void emit_() {\n  fragColor = r[0];\n"
                 "  vec3 c=clamp((128.0*texture(tex0, (v_tc[0]).xy).rgb-8.0)/127.0,0.0,16.0);\n"
                 "  float x=max(c.r,c.g)*uGlareTable.x, t=x*(1.0+uGlareTable.y*x)/(1.0+x);\n"
-                "  fragColor.a=clamp(max(1.0,t)*(t-uGlareTable.z)*0.125,0.0,1.0);\n}");
+                "  fragColor.a=clamp(max(1.0,t)*(t-uGlareTable.z)*0.125,0.0,1.0);\n"
+                // LinesController adds preexpose_Noise * 0.125 to its rgb and writes the A8R8G8B8 screen, which
+                // rounds to nearest even (a texel of 4/255 lands exactly on half a level). The noise texel is
+                // [v,v,v,0], so the alpha (the glare weight) takes none of it.
+                "  vec3 n=texelFetch(uNoise,ivec2(gl_FragCoord.xy)&31,0).rgb*0.125;\n"
+                "  fragColor=vec4(roundEven(clamp(fragColor.rgb+n,0.0,1.0)*255.0),roundEven(fragColor.a*255.0))/255.0;\n}");
         } else qWarning()<<"hdr:"<<fragment<<"scene fetch or emit not found; the pre-expose tables are not applied";
+    } else if(name=="ApplyGlare.fpo") {
+        // The console composites with ToneApplyDisplay over the screen, blend ONE/ONE (HDR::tone_apply_display
+        // FUN_00077398): it adds glare x weight - preexpose_Noise * 0.125, and the fixed-point target clamps that
+        // source at 0 before blending, so the dither LinesController added stays wherever the glare is below it.
+        // ApplyGlare's own sum (screen x _Weight1.x + glare x _Weight1.y) is kept; only the glare term takes the clamp.
+        const QString emitBody="void emit_() {\n  fragColor = r[0];\n}";
+        if(fragmentGlsl.count(emitBody)==1 && fragmentGlsl.count(sceneFetch)==1)
+            fragmentGlsl.replace(emitBody,
+                "uniform sampler2D uNoise; // preexpose_Noise, unit 13\n"
+                "void emit_() {\n  fragColor = r[0];\n"
+                "  vec3 screen=texture(tex0, (v_tc[0]).xy).rgb*fc[2].x;\n"
+                "  vec3 n=texelFetch(uNoise,ivec2(gl_FragCoord.xy)&31,0).rgb*0.125;\n"
+                "  fragColor.rgb=screen+max(r[0].xyz-screen-n,vec3(0.0));\n}");
+        else qWarning()<<"hdr:"<<fragment<<"emit not found; the display dither subtraction is not applied";
     } else if(name=="GlareSourcePre.fpo") {
         // GlareSourcePre reads the console's A8R8G8B8 screen: colour and weight clamped and quantised to 8 bits.
         if(fragmentGlsl.count(sceneFetch)==1)
@@ -153,7 +175,36 @@ GLuint Hdr::begin(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) 
     return scene_->handle();
 }
 
+// preexpose_Noise (FUN_00071794's last loop): per texel, c = ++counter; n = c ^ (c << 13);
+// r = (n (n^2 15731 + 789221) + 1376312589) & 0x7fffffff; x = (1 - r / 2^30) * 0.5 + 0.5, in (0, 1]; x * DITHER * 8
+// clamped to 1; byte = trunc(x * 255). DITHER is the HDR parameter registered at 1/255 (DAT_000921a4) that no
+// HDR.mnu sets, so a texel is trunc(8 u): 0..7, 8 at u = 1. Shaders read it x 0.125: up to 7/8 of a level.
+void Hdr::fillNoise(QOpenGLFunctions_3_3_Core& gl) {
+    constexpr float dither=1.f/255.f;
+    std::array<quint8,32*32*4> texels{};
+    for(int i=0;i<32*32;++i) {
+        const quint32 c=++noiseCounter_;
+        const quint32 n=c^(c<<13);
+        const quint32 r=(n*(n*n*15731u+789221u)+1376312589u)&0x7fffffffu;
+        float x=float(qint32(r))*-9.313225746154785e-10f+1.f;
+        x=x*.5f+.5f;x=x*dither;x=x*8.f;x=std::clamp(x,-1.f,1.f);
+        const quint8 v=quint8(int(x*255.f));
+        texels[size_t(i)*4]=v;texels[size_t(i)*4+1]=v;texels[size_t(i)*4+2]=v;texels[size_t(i)*4+3]=0;
+    }
+    if(!noiseTexture_) {
+        gl.glGenTextures(1,&noiseTexture_);gl.glBindTexture(GL_TEXTURE_2D,noiseTexture_);
+        gl.glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,32,32,0,GL_RGBA,GL_UNSIGNED_BYTE,texels.data());
+        gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+        gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+    } else {
+        gl.glBindTexture(GL_TEXTURE_2D,noiseTexture_);
+        gl.glTexSubImage2D(GL_TEXTURE_2D,0,0,0,32,32,GL_RGBA,GL_UNSIGNED_BYTE,texels.data());
+    }
+    gl.glBindTexture(GL_TEXTURE_2D,0);
+}
+
 void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint targetFbo,const std::function<void(int,int)>& extraGlare) {
+    fillNoise(gl);
     // The clock's night/day blend, reached from the boot presets (coldboot1 -> coldboot2 = day -> clock).
     const auto mix=[&](float boot1,float n,float d){
         const float boot=boot1+(d-boot1)*toColdboot2_;
@@ -177,7 +228,8 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
         toned_->bind();gl.glViewport(0,0,width_,height_);
         toneMap_.program.bind();toneMap_.program.setUniformValue("tex0",0);bindTexture(0,scene_->texture());
         toneMap_.program.setUniformValue("uGlareTable",QVector3D(exposure,1.f/(white*white),threshold));
-        fullscreen(toneMap_.program,fc);toneMap_.program.release();
+        toneMap_.program.setUniformValue("uNoise",13);bindTexture(13,noiseTexture_);
+        fullscreen(toneMap_.program,fc);toneMap_.program.release();bindTexture(13,0);
     }
     // 2. Glare source: GlareSourcePre on the encoded screen, colour x weight x 8 = the tone-mapped colour times
     //    max(1,t)(t - GLARE THRESH) in display units (its alpha, the scene luminance, is not read). Then its mips.
@@ -241,8 +293,9 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
         gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.glViewport(0,0,width_,height_);
         applyGlare_.program.bind();applyGlare_.program.setUniformValue("tex0",0);applyGlare_.program.setUniformValue("tex1",1);
         bindTexture(0,toned_->texture());bindTexture(1,accumulated_->texture());
+        applyGlare_.program.setUniformValue("uNoise",13);bindTexture(13,noiseTexture_);
         fullscreen(applyGlare_.program,fc);applyGlare_.program.release();
-        bindTexture(1,0);bindTexture(0,0);
+        bindTexture(13,0);bindTexture(1,0);bindTexture(0,0);
     }
 }
 }

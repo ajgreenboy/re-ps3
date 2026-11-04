@@ -475,6 +475,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         particles_.setEmitter(std::move(sheet),side);
         glBindFramebuffer(GL_FRAMEBUFFER,GLuint(scene)); particles_.render(*this,seconds,pixelWidth,pixelHeight);
     }
+    if(hdr)hdr_.setNoiseClock(seconds);
     if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),[this,seconds,originalParticles](int width,int height){
         // Second firmware pass: the same dust drawn into the glare source so the mip blur blooms it
         // (particles_second). Re-running the sim for the same `seconds` advances no steps.
