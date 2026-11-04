@@ -3625,6 +3625,38 @@ QString Shell::mediaQueueSummary() const {
     if(!status_.isEmpty())result+=QStringLiteral("  ")+QChar(0x00B7)+QStringLiteral("  ")+status_;
     return result;
 }
+bool Shell::mediaSeekable() const { return mediaOpen_ && !photoOpen() && player_->isSeekable(); }
+void Shell::openMediaOption(const QString& key) {
+    if(!videoOpen() || busy() || !message_.isEmpty() || psMenu_)return;
+    if(key!="audio" && key!="subtitle" && key!="repeat")return;
+    touch();buildPlayerOptions();optionsOpen_=true;optionsSelection_=0;
+    const auto command=key=="audio"?OptionCommand::AudioTrack:key=="repeat"?OptionCommand::RepeatMode:OptionCommand::SubtitlesOff;
+    for(int i=0;i<options_.size();++i)if(options_[i].command==command){optionsSelection_=i;break;}
+    interactionAudio_.play(InteractionAudio::Cue::Options);emit changed();
+}
+void Shell::openMediaInformation() {
+    if(!mediaOpen_ || busy())return;
+    QStringList rows;
+    rows<<tr("Source: %1").arg(mediaProvider());
+    if(!photoOpen()) {
+        rows<<tr("Position: %1").arg(MediaControls::formatTime(mediaPosition()));
+        if(mediaDuration()>0)rows<<tr("Duration: %1").arg(MediaControls::formatTime(mediaDuration()));
+    } else if(!photo_.isNull())rows<<tr("Dimensions: %1 × %2").arg(photo_.width()).arg(photo_.height());
+    showMessage(mediaTitle_,rows.join('\n'),MessageKind::Page);emit changed();
+}
+void Shell::togglePhotoFill() {
+    if(!photoOpen() || busy())return;
+    touch();
+    if(preferences_.setValue("photo/fit",photoFill()?0:1)){showPhoto();emit changed();}
+}
+void Shell::cyclePhotoInterval() {
+    if(!photoOpen() || busy())return;
+    touch();
+    static const QVector<int> intervals{1000,3000,5000,10000,30000};
+    const int index=intervals.indexOf(photoInterval());
+    preferences_.setValue("photo/interval",intervals[(index+1)%intervals.size()]);
+    emit changed();
+}
 void Shell::rotatePhoto(int delta) {
     touch();
     touch();
