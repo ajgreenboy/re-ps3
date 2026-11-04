@@ -262,6 +262,12 @@ public:
     qint64 mediaDuration() const;
     bool mediaPaused() const;
     bool videoOpen() const;
+    bool mediaSeekable() const;
+    void openMediaOption(const QString& key); // audio, subtitle or repeat: existing playback selector
+    void openMediaInformation();
+    void togglePhotoFill();
+    void cyclePhotoInterval();
+    int photoInterval() const { return preferences_.value("photo/interval").toInt(); }
     void seekMedia(qint64 delta);
     QString appRegistryPath() const;
     void noteActivity() { touch(); }
