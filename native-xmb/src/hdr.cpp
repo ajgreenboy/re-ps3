@@ -277,7 +277,10 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
         }
         gaussian_.program.release();
         QVector<QVector4D> fc=accGlare_.cg.constants;
-        setFc(accGlare_,fc,"_Weight",QVector4D(1,1,1,1)*(std::pow(sumPow,float(level))/levelSum));
+        // The firmware's per-level weight (custom_render_all.c ~55005 and ~55852) multiplies GLARE LEVEL in twice:
+        // arr[l] = SUM POW^l / sum x GLARE LEVEL, then _Weight = arr[l] x GLARE LEVEL (renderer +0x2a4, set from the
+        // HDR menu's GLARE LEVEL record). So the accumulated glare already carries GLARE LEVEL^2.
+        setFc(accGlare_,fc,"_Weight",QVector4D(1,1,1,1)*(std::pow(sumPow,float(level))/levelSum*glareLevel*glareLevel));
         accumulated_->bind();gl.glViewport(0,0,accumulated_->width(),accumulated_->height());
         gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_ONE,GL_ONE);
         accGlare_.program.bind();accGlare_.program.setUniformValue("tex0",0);bindTexture(0,blurY_[level]->texture());
@@ -286,10 +289,11 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
     }
     bindTexture(0,source_->texture());
     gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_BASE_LEVEL,0);gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAX_LEVEL,1000);
-    // 4. ApplyGlare: tone-mapped screen x 1 + glare x GLARE LEVEL, into the caller's target.
+    // 4. ApplyGlare: tone-mapped screen x 1 + glare x 1. ToneApplyDisplay's _GlareWeight is bound to the constant
+    //    1.0 (DAT_00093250, record +0xc0 of the 0x150-byte ToneApplyDisplay class): the level is in the accumulation.
     {
         QVector<QVector4D> fc=applyGlare_.cg.constants;
-        setFc(applyGlare_,fc,"_Weight1",QVector4D(1,glareLevel,0,0));
+        setFc(applyGlare_,fc,"_Weight1",QVector4D(1,1,0,0));
         gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.glViewport(0,0,width_,height_);
         applyGlare_.program.bind();applyGlare_.program.setUniformValue("tex0",0);applyGlare_.program.setUniformValue("tex1",1);
         bindTexture(0,toned_->texture());bindTexture(1,accumulated_->texture());
