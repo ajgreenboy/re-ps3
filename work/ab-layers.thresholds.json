@@ -1,6 +1,7 @@
 {
   "schema": "xmb-per-layer-thresholds/1",
   "updated": "2026-11-02",
+  "revisionNote20261103e": "2026-11-03 day curve: _DayTime is the traced Hermite curve (FUN_00052a28, tangents = DAYSPREAD), not a cosine fit, and capture.backgroundClock moves from 2026-10-28T10:00 (the pin of a different still, root__original__day__1080p) to the reference frame's own clock 2026-10-25T12:32. Frame 19.41, top background 23.50, category icon row 23.52, item label row 13.28 (contentDiffers), clock 11.47, info bar 15.18. Named states re-saved deliberately. No budget or floor moved.",
   "revisionNote20261103d": "2026-11-03 glare: GlareSourcePre on the 8-bit tone-mapped screen and its pre-expose weight alpha replaces GlareSourceNoTone on the float scene; AccGlare drops the EXPOSURE factor. Frame 19.19, top background 23.69, category icon row 23.28, item label row 13.17 (contentDiffers), clock 11.36, info bar 14.98. Named states pass unchanged (57..61 dB), none re-saved. No budget or floor moved.",
   "revisionNote20261103c": "2026-11-03 background: the console's pre-expose table sampling ((128c - 8)/127 into the tone curve and glare, FUN_00071794) ported into Hdr::load, and the fitted lower-field veil removed. Top background 23.69, category icon row 23.28, frame 19.21, item label row 13.17 (contentDiffers; the loss is the ribbon at a different instant, no longer veiled). Named states re-saved deliberately. No budget or floor moved.",
   "revisionNote20261103b": "2026-11-03 particles: traced kernel integration (pos += vel*dt), the spot as a point light, the fitted depth fade removed, dust born on the ribbon sheet with perspective size. Canonical frame 19.64 / 0.8569 (-0.21 against the ribbon run, the cost of more randomly placed flecks), icon row 22.11, label row 14.49 (contentDiffers); named states re-saved deliberately. No budget or floor moved.",
@@ -28,11 +29,11 @@
     "vshModules": "C:/dev/xmb/fw493/vsh_module",
     "tokens": "full,wait,wait,wait",
     "renderClock": 30,
-    "backgroundClock": "2026-10-28T10:00:00",
+    "backgroundClock": "2026-10-25T12:32:00",
     "uiClock": "2026-10-25T12:32:00",
     "focusTimeMs": 2000,
     "timeoutMs": 120000,
-    "note": "Canonical capture recipe. All animation clocks are pinned, so two runs are pixel-identical. XMB_STEAM_ROOT points at an empty directory: the stored RPCS3 reference frame's Game column predates this PC's Steam library and shows the dev_flash XMBML entries only. backgroundClock 10:00 is the traced daytime mapping used by the stored baseline; uiClock matches the reference frame's 25/10 12:32. The default exe is the integration build this file's named-state references were last saved from; pass --exe when the integration build moves."
+    "note": "Canonical capture recipe. All animation clocks are pinned, so two runs are pixel-identical. XMB_STEAM_ROOT points at an empty directory: the stored RPCS3 reference frame's Game column predates this PC's Steam library and shows the dev_flash XMBML entries only. backgroundClock and uiClock both match the reference frame's own clock, 25/10 12:32 (the background runs the traced _DayTime curve, so the time of day matters; the 10/28 10:00 pin belonged to root__original__day__1080p, a different still). The default exe is the integration build this file's named-state references were last saved from; pass --exe when the integration build moves."
   },
   "layers": [
     {

@@ -419,10 +419,19 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         // Fixed colours select a background palette, not a different calendar for
         // amb.bmp. Icon material retains the real/diagnostic date set above.
         BackgroundTime time=backgroundTime(when);
+        // Measurement instrument: XMB_DAYTIME overrides the clock-derived _DayTime (audit/PIPELINE.md "The day curve").
+        if(qEnvironmentVariableIsSet("XMB_DAYTIME"))time.day=qEnvironmentVariable("XMB_DAYTIME").toFloat();
         time.alpha=backgroundAlpha_;
         constexpr float coldboot1NightBias=.513834f; // BACKGROUND.mnu NIGHT WHIT BIAS, override/coldboot1 (coldboot2 = day)
         const float bootBias=coldboot1NightBias+(time.nightBrightness-coldboot1NightBias)*backgroundToColdboot2_;
         time.nightBrightness=bootBias+(time.nightBrightness-bootBias)*backgroundToClock_;
+        constexpr double coldboot1DaySpread=2.73593; // BACKGROUND.mnu DAYSPREAD, override/coldboot1
+        if(!qEnvironmentVariableIsSet("XMB_DAYTIME")) {
+            const double bootSpread=coldboot1DaySpread+(kDaySpread-coldboot1DaySpread)*backgroundToColdboot2_;
+            const QTime clock=when.time();
+            const double t=(clock.hour()+clock.minute()/60.+clock.second()/3600.)/24.;
+            time.day=float(dayCurve(t,bootSpread+(kDaySpread-bootSpread)*backgroundToClock_));
+        }
         presetBlend=float(std::clamp((time.nightDayBlend-(1.-kNightBlend))/kNightBlend,0.,1.));
         renderOriginalBackground(time,pixelWidth,pixelHeight);
         if(originalRibbon)ribbon_.render(*this,seconds,when.time().msecsSinceStartOfDay()/86400000.,pixelWidth,pixelHeight,scene);
@@ -487,21 +496,20 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
 // Inputs of qgl/lines back_colours0.fpo, as custom_render_plugin's setter (FUN_00052ad8) derives them from the clock
 // as a day fraction t in [0,1] and the month as a float in [0,12] (constants at 0x92e54..0x92e6c, preset hours / 24
 // at 0x91f6c), with the override/day BACKGROUND.mnu values.
+double View::dayCurve(double t,double k) {
+    t=std::clamp(t,0.,1.);
+    const double t2=t*t,t3=t2*t;
+    return 2400.*((3.*t2-2.*t3)+k*(2.*t3-3.*t2+t));
+}
 View::BackgroundTime View::backgroundTime(const QDateTime& when) {
     const auto clock=when.time();const double hour=clock.hour()+clock.minute()/60.+clock.second()/3600.,t=hour/24.;
     const auto date=when.date();
     BackgroundTime b;
-    // _DayTime: a day-curve of t (FUN_00052a28 -> FUN_0004584c, whose arguments the decompile lost) x 2400. Only the
-    // day half of the shader reads it (dark below ~400 and above ~2000, peak at 1200). Fitted: DAYSPREAD (2.68038) was
-    // a linear spread 1200+(h-12)*100/DAYSPREAD, but that is too steep near noon — the firmware sets _DayTime 1168.77 at
-    // 10:00 (RPCS3 XMB_FP_DUMP), not the linear 1125. Fit a cosine 1200*cos(k*(h-12)) through that point
-    // (k = acos(1168.77/1200)/2), which also lands 06:00/18:00 at ~930 (~77% of midday, the reference's 75-85%).
-    constexpr double daySpread=2.68038;
-    const auto spread=[&](double h){return 1200.*std::cos(.114216*(h-12.));};
-    static const double keys[][2]={{0,0},{3,380},{4.5,800},{6,spread(6)},{18,spread(18)},{19.5,1650},{21,2030},{24,2400}};
-    double day=spread(hour);
-    if(hour<6 || hour>18)for(size_t i=1;i<std::size(keys);++i)if(hour<=keys[i][0]){day=keys[i-1][1]+(keys[i][1]-keys[i-1][1])*(hour-keys[i-1][0])/(keys[i][0]-keys[i-1][0]);break;}
-    b.day=float(day);
+    // _DayTime (traced, custom_render_plugin FUN_00052ad8 -> FUN_00052a28 -> FUN_0004584c): a cubic Hermite from 0 to 1
+    // with both tangents k = the preset's DAYSPREAD, times 2400 (0x92e60). Monotonic over the day and point-symmetric
+    // about noon, f(1-t) = 2400 - f(t); the console's 1168.77 at 10:00 is the coldboot1 preset's k (audit/PIPELINE.md
+    // "The day curve"). The clock presets day/yoake/higure share k = 2.68038; the boot blend is applied in paintGL.
+    b.day=float(dayCurve(t,kDaySpread));
     // _NightTime: (t - 0.5, wrapped) x 2400, i.e. the night palette's own clock peaks at midnight.
     b.night=float(std::fmod(t+.5,1.)*2400.);
     // _MonthTime: frac(month) x 30; the integer part picks this/next month's textures (loadMonthTextures).
