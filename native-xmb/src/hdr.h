@@ -4,6 +4,8 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include <algorithm>
+#include <cmath>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
@@ -57,6 +59,15 @@ private:
     std::unique_ptr<QOpenGLFramebufferObject> scene_,toned_,source_,accumulated_;
     std::vector<std::unique_ptr<QOpenGLFramebufferObject>> blurX_,blurY_; // one pair per mip level
     GLuint emptyVao_=0,gaussianVao_=0,gaussianVbo_=0;
+    // preexpose_Noise: 32x32, refilled every frame from a Hugo-Elias hash on a counter that only ever advances,
+    // 1024 per frame (custom_render_plugin FUN_00071794). Its initial value is not traced; here it is 1024 per
+    // 60 Hz frame of render time (setNoiseClock), so a pinned --render-clock gives the same tile every run.
+    GLuint noiseTexture_=0;
+    quint32 noiseCounter_=0;
+public:
+    void setNoiseClock(double seconds) { noiseCounter_=quint32(qint64(std::floor(std::max(0.,seconds)*60.))*1024); }
+private:
+    void fillNoise(QOpenGLFunctions_3_3_Core& gl);
     int width_=0,height_=0;
 };
 }

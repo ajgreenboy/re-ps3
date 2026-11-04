@@ -1435,3 +1435,37 @@ Gate, with the background pin moved to the reference's own clock (2026-10-25T12:
 category icon row 23.28 -> **23.52**, item label row 13.17 -> 13.28 (contentDiffers), clock 11.36 -> 11.47, info
 bar 14.98 -> 15.18, top background 23.69 -> 23.50. All PASS. The 12 named states were re-saved deliberately: their
 backgrounds follow the curve, so the old references scored about 37 dB. Re-run 12/12.
+
+## The pre-expose dither, 2026-11-03
+
+The console frame carries a pre-expose dither that the native had left out. The "night bottom-right blue gap"
+(-13.6) that started this pass was not a background error: the night reference has its Options button inside that
+measuring window (x 1655..1815, y 950..995). With the button excluded, the night lower field is within ~1 level.
+- **Measured (console stills):** in pure black, 36..40% of pixels read 1,1,1 and the rest 0. The pattern is exactly
+  32x32-periodic (pixel agreement 1.000 at shifts of 32 and 64, ~0.5 elsewhere) and is a different tile in every
+  still (no shift relates two of them). The day still carries the same period in its smooth field (high-pass
+  autocorrelation 0.57 at 32 px, about 0 at 31). This reverses the earlier audit note that the frame has no
+  30-px pattern, which tested day energy only.
+- **Traced (custom_render_plugin, Sonnet trace of FUN_00071794 / FUN_00077398):** `preexpose_Noise` is 32x32,
+  wrap REPEAT, sampled in texel coordinates at gl_FragCoord, and refilled every frame from a Hugo-Elias hash on a
+  counter that advances 1024 per frame: n = c ^ (c << 13), r = (n(n^2 15731 + 789221) + 1376312589) & 0x7fffffff,
+  x = (1 - r/2^30)/2 + 1/2, byte = trunc(255 clamp(8 DITHER x)), stored [v,v,v,0]. DITHER is the HDR parameter
+  registered at 1/255 (DAT_000921a4) that no HDR.mnu sets, so a texel is trunc(8u), 0..7.
+  LinesController adds noise/8 to the screen. ToneApplyDisplay draws ONE/ONE and adds glare x weight - noise/8, which
+  the fixed-point target clamps at 0, so where the glare is below it the dither stays.
+- **Prediction:** a black pixel is 1 when round-half-even(v/8) = 1, i.e. v >= 5: 3/8 = 37.5% (measured 36..40%).
+- **Change (`hdr.cpp`):** `Hdr::fillNoise` builds the tile with the firmware's arithmetic. The ToneMap emit adds
+  noise/8 and quantises the screen to 8 bits (round half even). The ApplyGlare emit takes the clamped glare-minus-noise
+  term. The counter's initial value is not traced, so it is 1024 per 60 Hz frame of render time
+  (`Hdr::setNoiseClock`), which keeps pinned captures byte-stable.
+
+Result: native black field 37.0% ones, exactly 32-periodic, mean 0.4/0.4/0.4 (console 0.4/0.4/0.4, previously 0).
+Day high-pass grain rms 0.42 (console 0.40, previously 0.28). Canonical gate: frame 19.42, top background 23.56,
+category icon row 23.56, item label row 13.30 (contentDiffers), clock 11.47, info bar 15.18, all at or above the
+previous pass. Named states re-saved deliberately (the dither is new in every state). Byte-stable.
+
+Still open: `_GlareWeight` (ToneApplyDisplay slot 0) is one of the ToneApplyDisplay uniform writes `this[0x29c]`,
+`this[0x2dc]` and `this[0x2e0]`, but the name table that maps slots was not found. The AccGlare per-level weight
+traced as pow(SUM POW, l) / sum x `this[0x2a4]`, applied twice (FUN at line 55005 / 55852 of custom_render_all.c),
+and `this[0x2a4]` is unidentified. The noise texel's channel remap (format 0x8018) is inferred from the measured
+achromatic 1,1,1.
