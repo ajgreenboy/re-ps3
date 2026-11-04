@@ -55,6 +55,29 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-04: particle camera and life box (BackgroundView lookAt, the constant world box)
+
+The particle programs now run in the camera's own world, and the life box is applied.
+- **Camera (traced).** The particle draw calls `FUN_000255a4(layer+0xb0, 1)` (0x2b78c): `glFrustum` from the camera's
+  fov (+0x20), near (+0x18), far (+0x1c), then a lookAt from the camera's set B (+0x60/+0x70/+0x80). The camera is a
+  BackgroundView built by `FUN_00024a68`: fov 0.9250245 rad (53 deg), near 0.1, far 1000, eye (0, 0, 2), centre
+  (0, 0, -7), up (0, 1, 0) (data 0x93730..0x93750), set B copied from set A. The ribbon's draw uses the same field
+  layout with set A, identical at construction; that it is one object is inferred, not proved.
+- **Change.** The vpo patch now moves the rebuilt camera-space position into that world (+2 in z), `_Modelview` is the
+  lookAt, `_ModelviewProjection` projection x lookAt, and the light pack's eye is (0, 0, 2). SPOT POS is a world point,
+  so it now lights from 9.6 units in front of the eye instead of 7.6.
+- **Life box (traced).** (-10, -10, -12) .. (10, 10, 7) in that world (0x940b0/0x940c0 via renderer+0x900/+0x910): the vpo
+  fades a particle over the last 0.2 units inside each face, so dust past x = +/-10 or deeper than 14 units disappears.
+- **Emitter (evidence, not applied).** The per-frame tick computes the frustum's full width and height at depth 9
+  (`tan(fov/2) x 9`, `DAT_00092458`, doubled, x aspect) and builds the emit commands from the camera transform, so the
+  firmware emitter is likely a camera-attached rectangle 9 units out, not the ribbon sheet. The aspect field (+0x14) and
+  the type 0/3 command pushers are not traced, so the sheet emitter stays.
+
+Result: speck histogram 24..48 bins 142/150/13 (console 128/140/26), count 456. Gate: frame 19.61 -> **19.62**, other
+layers unchanged, 6/6; byte-stable. Named states not settled: another session rebuilt the shared exe with its own
+in-progress Steam/shell/view changes during the re-save, so the state baselines mix two builds (6..9/12); re-save them
+once that work lands.
+
 ## 2026-11-04: particle glare pass on the firmware programs (particles_second, drawn into the scene)
 
 Pass 2 now runs the firmware's own `lib/particles/particles_second.vpo/.fpo` through the same path as pass 1

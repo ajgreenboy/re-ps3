@@ -97,6 +97,7 @@ constexpr float kEmitXMargin=1.25f;  // fit: emit past the viewport edges so the
 // random quaternion, so E[|N.V|] = 0.5 and E[T] = 1 - 1/(1 + FRESNEL/2) = 1 - 1/2.333 = 0.571.
 // 1.05 / 0.571 = 1.84 keeps the same average exposure with the evidenced alpha chain in place.
 constexpr float kColorGammaGain=1.84f;     // fit: _Color * _Gamma (audit 6-B2, still untraced)
+const QVector3D kCameraEye(0,0,2); // captured: BackgroundView eye (data 0x93730), the particle camera's lookAt
 constexpr float kParticleColorGrey=0.2f; // measured: the firmware pass 1 _Color grey (drawFirmwarePass, both passes)
 // --- pass 1: particles_quads ---------------------------------------------------------------------
 const char* vertexSource=R"(#version 330 core
@@ -752,9 +753,11 @@ void Particles::logState(const char* pass,int width,int height) const {
 // The simulation keeps its positions as (x, y) in flat viewport units (kScreenHeight tall at every depth) and z as
 // the camera depth, the space the sheet emitter and the fallback programs work in. The firmware vpo wants camera space
 // under the ribbon camera (fovy 53, ribbon.cpp): the same screen point at depth d sits at x = flat x * tan(26.5 deg) *
-// d / kHalfHeight. The patch below rebuilds in_0 that way before the program runs, so the projection lands every
-// particle where the fallback drew it; _Modelview is then the identity, the eye the origin and
-// _FrontFacingQuaternion the identity rotation (a quad in the camera's xy plane).
+// d / kHalfHeight. The patch below rebuilds in_0 that way and moves it into the camera's world before the program
+// runs, so the projection lands every particle where the fallback drew it. The camera is the BackgroundView the
+// particle draw passes to FUN_000255a4 (mode 1, lookAt set B): constructed (FUN_00024a68) with eye (0, 0, 2), centre
+// (0, 0, -7), up (0, 1, 0), fovy 0.9250245 rad, near 0.1, far 1000 - so world = camera space + (0, 0, 2), _Modelview is
+// that lookAt (a translation by -2 in z), and _FrontFacingQuaternion the identity rotation.
 void Particles::initFirmwarePass(Assets& assets,int pass) {
     const QString name=pass==0?"particles_quads":"particles_second";
     CgProgram& vertexCg=firmwareVertex_[pass];
@@ -775,8 +778,8 @@ void Particles::initFirmwarePass(Assets& assets,int pass) {
         qWarning().noquote()<<"particles:"<<name<<".vpo translation has an unexpected shape; pass"<<pass+1<<"uses the fallback program";
         return;
     }
-    vertex.replace(attribute,"layout(location=0) in vec4 flatPos_;\nuniform float flatToView_;\nvec4 in_0;");
-    vertex.replace("void main() {","void main() {\n  in_0=vec4(flatPos_.xy*(flatToView_*-flatPos_.z),flatPos_.z,flatPos_.w);");
+    vertex.replace(attribute,"layout(location=0) in vec4 flatPos_;\nuniform float flatToView_;\nuniform float cameraEyeZ_;\nvec4 in_0;");
+    vertex.replace("void main() {","void main() {\n  in_0=vec4(flatPos_.xy*(flatToView_*-flatPos_.z),flatPos_.z+cameraEyeZ_,flatPos_.w);");
     if(!program.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) ||
        !program.addShaderFromSourceCode(QOpenGLShader::Fragment,fragmentCg.glsl) || !program.link()) {
         qWarning().noquote()<<"particles: firmware"<<name<<"link failed:"<<program.log();
@@ -799,9 +802,11 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     constexpr float fovy=53.f*3.14159265f/180.f; // the ribbon camera (ribbon.cpp, captured)
     const float aspect=float(pixelWidth)/float(pixelHeight);
     QMatrix4x4 projection;projection.perspective(53.f,aspect,.1f,1000.f);
+    QMatrix4x4 modelview;modelview.lookAt(kCameraEye,QVector3D(0,0,-7),QVector3D(0,1,0)); // BackgroundView set B (0x93730..)
+    projection*=modelview;
     for(int r=0;r<4;++r) {
         setV(QStringLiteral("_ModelviewProjection[%1]").arg(r).toLatin1().constData(),projection.row(r));
-        setV(QStringLiteral("_Modelview[%1]").arg(r).toLatin1().constData(),QMatrix4x4().row(r));
+        setV(QStringLiteral("_Modelview[%1]").arg(r).toLatin1().constData(),modelview.row(r));
     }
     // _LightPack: rows (eye), (spot pos, specular power), (spot attn), (specular coeff, lambert, exposure, color_control),
     // stored as columns - the vpo reads the eye from vc[264..266].x, and the fpo's slot table (fc 1/10/3 the eye,
@@ -809,9 +814,9 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     // only resolves with that transpose.
     const Look& l=look_;
     const QVector4D pack[4]={
-        QVector4D(0,spotPosition_.x(),spotAttenuation_.x(),l.specularCoeff),
-        QVector4D(0,spotPosition_.y(),spotAttenuation_.y(),l.lambertCoeff),
-        QVector4D(0,spotPosition_.z(),spotAttenuation_.z(),l.exposure),
+        QVector4D(kCameraEye.x(),spotPosition_.x(),spotAttenuation_.x(),l.specularCoeff),
+        QVector4D(kCameraEye.y(),spotPosition_.y(),spotAttenuation_.y(),l.lambertCoeff),
+        QVector4D(kCameraEye.z(),spotPosition_.z(),spotAttenuation_.z(),l.exposure),
         QVector4D(1,l.specularPower,0,l.colorControl)};
     for(int r=0;r<4;++r)setV(QStringLiteral("_LightPack[%1]").arg(r).toLatin1().constData(),pack[r]);
     setV("_ParticleSize",QVector4D(l.sizeMiddle,l.sizeNear,l.sizeFar,0));
@@ -823,10 +828,10 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     setV("_NearControl",QVector4D(l.sizeAlign,l.nearFuzziness,l.nearAlign,0));
     setV("_Darkness",QVector4D(l.nearDarkness,l.farDarkness,0,0));
     setV("_FrontFacingQuaternion",QVector4D(0,0,0,1));
-    // The life box is a constant world box (0x940b0 / 0x940c0: -10,-10,-12 .. 10,10,7), but the world-to-camera
-    // transform it sits in is not traced, so it is left open here rather than placed in camera space. [OPEN]
-    setV("_LifeBoundsMin",QVector4D(-1e4f,-1e4f,-1e4f,0));
-    setV("_LifeBoundsMax",QVector4D(1e4f,1e4f,1e4f,0));
+    // The life box: a constant world box (FUN_00031494 stores 0x940b0 / 0x940c0 at renderer+0x900/+0x910), in the same
+    // world as the camera above; the vpo fades a particle over the last 0.2 units inside each face.
+    setV("_LifeBoundsMin",QVector4D(-10,-10,-12,0));
+    setV("_LifeBoundsMax",QVector4D(10,10,7,0));
     QVector<QVector4D> fc=fragmentCg.constants;
     const auto setF=[&](const char* name,const QVector4D& v){for(int slot:fragmentCg.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=v;};
     for(int r=0;r<4;++r)setF(QStringLiteral("_LightPack[%1]").arg(r).toLatin1().constData(),pack[r]);
@@ -855,6 +860,7 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     if(iridescent_)iridescent_->bind(0);
     program.bind();
     program.setUniformValue("flatToView_",float(std::tan(fovy*.5f)/kHalfHeight));
+    program.setUniformValue("cameraEyeZ_",kCameraEye.z());
     program.setUniformValueArray("vc",vc.data(),int(vc.size()));
     program.setUniformValueArray("fc",fc.constData(),fc.size());
     program.setUniformValue("tex0",0);
