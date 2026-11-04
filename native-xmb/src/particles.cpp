@@ -97,7 +97,7 @@ constexpr float kEmitXMargin=1.25f;  // fit: emit past the viewport edges so the
 // random quaternion, so E[|N.V|] = 0.5 and E[T] = 1 - 1/(1 + FRESNEL/2) = 1 - 1/2.333 = 0.571.
 // 1.05 / 0.571 = 1.84 keeps the same average exposure with the evidenced alpha chain in place.
 constexpr float kColorGammaGain=1.84f;     // fit: _Color * _Gamma (audit 6-B2, still untraced)
-constexpr float kParticleColorGrey=0.2f; // measured: the firmware pass 1 _Color grey (drawFirmwareQuads)
+constexpr float kParticleColorGrey=0.2f; // measured: the firmware pass 1 _Color grey (drawFirmwarePass, both passes)
 // --- pass 1: particles_quads ---------------------------------------------------------------------
 const char* vertexSource=R"(#version 330 core
 // particles_quads vertex contract (audit/PARTICLES.md 2.2): float4 position with the per-vertex life
@@ -676,14 +676,15 @@ bool Particles::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
         createTexture(white);
     }
     if(!initResources(gl))return false;
-    initFirmwareQuads(assets);
+    initFirmwarePass(assets,0);
+    initFirmwarePass(assets,1);
     qInfo()<<"particles: firmware pool"<<kCapacity<<"records, DELTA TIME"<<physics_.deltaTime<<"s,"
            <<"EMIT"<<physics_.emitPerFrame<<"x"<<physics_.emitProb<<"(60 Hz), cone"<<physics_.emitConeDegrees<<"deg"
            <<"("<<physics_.emitNegProb<<" mirrored), AGING"<<physics_.agingSpeed<<"+/-"<<physics_.agingVariance
            <<", FRICTION"<<physics_.friction<<", GRAVITY"<<physics_.gravity<<", BROWNIAN"<<physics_.brownian
            <<", SPIN"<<physics_.spinTimeScale<<"rad/s, seed"<<kSeed
            <<(materialsLoaded_?"(PARTICLES.mnu)":"(fallback)")
-           <<"; pass 1"<<(firmwareQuads_?"on the firmware particles_quads programs":"on the fallback program");
+           <<"; firmware programs: particles_quads"<<(firmwareReady_[0]?"yes":"no (fallback)")<<", particles_second"<<(firmwareReady_[1]?"yes":"no (fallback)");
     qInfo()<<"particles: spot at"<<spotPosition_<<"SIZE"<<look_.sizeMiddle<<"->"<<look_.sizeFar
            <<"NEAR/FAR FOCUS"<<look_.nearFocus<<"/"<<look_.farFocus
            <<"GLARE"<<look_.glare<<"P1"<<look_.glareP1<<"P2"<<look_.glareP2<<"SCALE"<<look_.glareScale
@@ -754,40 +755,47 @@ void Particles::logState(const char* pass,int width,int height) const {
 // d / kHalfHeight. The patch below rebuilds in_0 that way before the program runs, so the projection lands every
 // particle where the fallback drew it; _Modelview is then the identity, the eye the origin and
 // _FrontFacingQuaternion the identity rotation (a quad in the camera's xy plane).
-void Particles::initFirmwareQuads(Assets& assets) {
+void Particles::initFirmwarePass(Assets& assets,int pass) {
+    const QString name=pass==0?"particles_quads":"particles_second";
+    CgProgram& vertexCg=firmwareVertex_[pass];
+    CgProgram& fragmentCg=firmwareFragment_[pass];
+    QOpenGLShaderProgram& program=firmwareProgram_[pass];
     QString error;
     try {
-        firmwareVertex_=CgProgram::load(assets.qglFile("lines","lib/particles/particles_quads.vpo"),&error);
-        if(firmwareVertex_.valid())firmwareFragment_=CgProgram::load(assets.qglFile("lines","lib/particles/particles_quads.fpo"),&error);
+        vertexCg=CgProgram::load(assets.qglFile("lines","lib/particles/"+name+".vpo"),&error);
+        if(vertexCg.valid())fragmentCg=CgProgram::load(assets.qglFile("lines","lib/particles/"+name+".fpo"),&error);
     } catch(const std::exception& e) { error=e.what(); }
-    if(!firmwareVertex_.valid() || !firmwareFragment_.valid()) {
-        qWarning().noquote()<<"particles: firmware particles_quads unavailable ("<<error<<"); pass 1 uses the fallback program";
+    if(!vertexCg.valid() || !fragmentCg.valid()) {
+        qWarning().noquote()<<"particles: firmware"<<name<<"unavailable ("<<error<<"); pass"<<pass+1<<"uses the fallback program";
         return;
     }
-    QString vertex=firmwareVertex_.glsl;
+    QString vertex=vertexCg.glsl;
     const QString attribute="layout(location=0) in vec4 in_0;";
     if(vertex.count(attribute)!=1 || vertex.count("void main() {")!=1) {
-        qWarning()<<"particles: particles_quads.vpo translation has an unexpected shape; pass 1 uses the fallback program";
+        qWarning().noquote()<<"particles:"<<name<<".vpo translation has an unexpected shape; pass"<<pass+1<<"uses the fallback program";
         return;
     }
     vertex.replace(attribute,"layout(location=0) in vec4 flatPos_;\nuniform float flatToView_;\nvec4 in_0;");
     vertex.replace("void main() {","void main() {\n  in_0=vec4(flatPos_.xy*(flatToView_*-flatPos_.z),flatPos_.z,flatPos_.w);");
-    if(!firmwareProgram_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) ||
-       !firmwareProgram_.addShaderFromSourceCode(QOpenGLShader::Fragment,firmwareFragment_.glsl) || !firmwareProgram_.link()) {
-        qWarning().noquote()<<"particles: firmware particles_quads link failed:"<<firmwareProgram_.log();
+    if(!program.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) ||
+       !program.addShaderFromSourceCode(QOpenGLShader::Fragment,fragmentCg.glsl) || !program.link()) {
+        qWarning().noquote()<<"particles: firmware"<<name<<"link failed:"<<program.log();
         return;
     }
-    firmwareQuads_=!qEnvironmentVariableIsSet("XMB_PARTICLES_FALLBACK");
+    firmwareReady_[pass]=!qEnvironmentVariableIsSet("XMB_PARTICLES_FALLBACK");
 }
 
-void Particles::drawFirmwareQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) {
+void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixelWidth,int pixelHeight) {
+    const CgProgram& vertexCg=firmwareVertex_[pass];
+    const CgProgram& fragmentCg=firmwareFragment_[pass];
+    QOpenGLShaderProgram& program=firmwareProgram_[pass];
     // Vertex constants exactly as FUN_0005c254 (custom_render_plugin 0x5c254) packs them from the renderer's PARTICLES.mnu
     // fields (audit/PARTICLES.md "The firmware particle programs"); both passes get the same values.
     std::vector<QVector4D> vc(468);
-    for(const auto& p:firmwareVertex_.parameters)
+    for(const auto& p:vertexCg.parameters)
         if(p.resourceIndex>=0 && p.resourceIndex<468 && !p.defaults.isEmpty())
             vc[size_t(p.resourceIndex)]=QVector4D(p.defaults.value(0),p.defaults.value(1),p.defaults.value(2),p.defaults.value(3));
-    const auto setV=[&](const char* name,const QVector4D& v){const int i=firmwareVertex_.parameters.value(name).resourceIndex;if(i>=0&&i<468)vc[size_t(i)]=v;};
+    const auto setV=[&](const char* name,const QVector4D& v){const int i=vertexCg.parameters.value(name).resourceIndex;if(i>=0&&i<468)vc[size_t(i)]=v;};
     constexpr float fovy=53.f*3.14159265f/180.f; // the ribbon camera (ribbon.cpp, captured)
     const float aspect=float(pixelWidth)/float(pixelHeight);
     QMatrix4x4 projection;projection.perspective(53.f,aspect,.1f,1000.f);
@@ -819,34 +827,39 @@ void Particles::drawFirmwareQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,i
     // transform it sits in is not traced, so it is left open here rather than placed in camera space. [OPEN]
     setV("_LifeBoundsMin",QVector4D(-1e4f,-1e4f,-1e4f,0));
     setV("_LifeBoundsMax",QVector4D(1e4f,1e4f,1e4f,0));
-    QVector<QVector4D> fc=firmwareFragment_.constants;
-    const auto setF=[&](const char* name,const QVector4D& v){for(int slot:firmwareFragment_.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=v;};
+    QVector<QVector4D> fc=fragmentCg.constants;
+    const auto setF=[&](const char* name,const QVector4D& v){for(int slot:fragmentCg.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=v;};
     for(int r=0;r<4;++r)setF(QStringLiteral("_LightPack[%1]").arg(r).toLatin1().constData(),pack[r]);
     setF("_NearControl",QVector4D(l.sizeAlign,l.nearFuzziness,l.nearAlign,0));
     setF("_IridescentExp",QVector4D(l.iridescentExp,l.iridescentExp,l.iridescentExp,l.iridescentExp));
-    // _Color (renderer+0x1340, initialised to 1,1,1 at 0x60c80) and _Gamma (renderer+0x1350, initialised to 1.0 at
-    // 0x60c98, a fade: FUN_00060660 skips the draw at 0) are animated scalars whose resting values are their
-    // initialisers. [TRACED source; resting value inferred.]
     // _Color is one grey (g, g, g, 0): the shell pushes it through FUN_0001afdc from a message float the state machine
     // sends, never from a preset, and the steady-state message is not traced. g = 0.2 is measured: it puts the speck
     // contrast histogram in the UI-free strips on the console still's (24-48 bins 108/147/23 against 128/140/26).
     // [MEASURED - replace with fc[34] from an XMB_FP_SERIES capture of the particle draw.]
     setF("_Color",QVector4D(kParticleColorGrey,kParticleColorGrey,kParticleColorGrey,0));
+    // _Gamma (renderer+0x1350) is 1.0 from construction (0x60c98) until the shell sends one; FUN_00060660 skips the draw
+    // at 0, so it acts as a fade. [TRACED initialiser.]
     setF("_Gamma",QVector4D(1,1,1,1));
+    // _Glare, particles_second only (vpo slot 459, fpo slots 27/16/13): (GLARE, GLARE SCALE, GLARE P1, GLARE P2). The vpo
+    // scales the quad by .y; the fpo's halo is .x * exp(-.w * r^.z) on the centred uv radius. [TRACED x, y at
+    // 0x5c5a8-0x5c5d4 (renderer+0x1438..0x1444 in key order); z, w by the fpo's use of them.]
+    const QVector4D glare(l.glare,l.glareScale,l.glareP1,l.glareP2);
+    setV("_Glare",glare);
+    setF("_Glare",glare);
     gl.glViewport(0,0,pixelWidth,pixelHeight);
     gl.glDisable(GL_DEPTH_TEST);
     gl.glDisable(GL_CULL_FACE);
     gl.glEnable(GL_BLEND);
-    gl.glBlendFunc(GL_ONE,GL_ONE); // the fpo's colour already carries the vertex alpha; additive into the HDR scene
+    gl.glBlendFunc(GL_ONE,GL_ONE); // FUN_00060660: ONE/ONE, FUNC_ADD for both passes; the fpo's colour carries the alpha
     gl.glBindVertexArray(vao_);
     if(iridescent_)iridescent_->bind(0);
-    firmwareProgram_.bind();
-    firmwareProgram_.setUniformValue("flatToView_",float(std::tan(fovy*.5f)/kHalfHeight));
-    firmwareProgram_.setUniformValueArray("vc",vc.data(),int(vc.size()));
-    firmwareProgram_.setUniformValueArray("fc",fc.constData(),fc.size());
-    firmwareProgram_.setUniformValue("tex0",0);
+    program.bind();
+    program.setUniformValue("flatToView_",float(std::tan(fovy*.5f)/kHalfHeight));
+    program.setUniformValueArray("vc",vc.data(),int(vc.size()));
+    program.setUniformValueArray("fc",fc.constData(),fc.size());
+    program.setUniformValue("tex0",0);
     gl.glDrawElements(GL_TRIANGLES,GLsizei(size_t(live_)*6),GL_UNSIGNED_INT,reinterpret_cast<const void*>(indexOffset_));
-    firmwareProgram_.release();
+    program.release();
     if(iridescent_)iridescent_->release(0);
     gl.glBindVertexArray(0);
     gl.glDisable(GL_BLEND);
@@ -854,7 +867,12 @@ void Particles::drawFirmwareQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,i
 
 void Particles::drawQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) {
     if(live_<=0)return;
-    if(firmwareQuads_){drawFirmwareQuads(gl,pixelWidth,pixelHeight);return;}
+    if(firmwareReady_[0]) {
+        // FUN_00060660: pass 1 then pass 2 (holder field 0x75 = 2 draws both), same target, ONE/ONE.
+        drawFirmwarePass(gl,0,pixelWidth,pixelHeight);
+        if(firmwareReady_[1])drawFirmwarePass(gl,1,pixelWidth,pixelHeight);
+        return;
+    }
     gl.glViewport(0,0,pixelWidth,pixelHeight);
     gl.glDisable(GL_DEPTH_TEST);
     gl.glDisable(GL_CULL_FACE);
@@ -888,6 +906,10 @@ void Particles::drawQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixel
 
 void Particles::drawGlare(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) {
     if(live_<=0)return;
+    // With the firmware programs, pass 2 was already drawn into the scene by drawQuads: FUN_00060660 draws both passes
+    // back to back into the one bound target (no framebuffer bind between them), so the glare source gets the dust only
+    // through the scene, like everything else.
+    if(firmwareReady_[1])return;
     gl.glViewport(0,0,pixelWidth,pixelHeight);
     gl.glDisable(GL_DEPTH_TEST);
     gl.glDisable(GL_CULL_FACE);
