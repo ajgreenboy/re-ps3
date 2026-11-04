@@ -1406,3 +1406,32 @@ captures byte-identical (day 674EEA18F3C0, night B95EFEEE50AC).
 
 So at the shipped presets the old and new sources nearly coincide: the cap only bites on clipped highlights. The
 port removes a known divergence rather than a visible error. What remains of the glare is the two untraced weights.
+
+## The day curve, 2026-11-03
+
+The background's time of day now runs the firmware's `_DayTime` curve, which replaces the cosine fitted through one point.
+The background "residue" left after the pre-expose fix was mostly the gate scoring a 12:32 still against a 10:00 pin.
+- **Traced (custom_render_plugin, Ghidra disassembly; a Sonnet subagent read it):** `FUN_00052ad8` clamps the day
+  fraction t to 0..1. It builds the control vector (0, 1, k, k), with k = `obj+0x2ec`. `FUN_00052a28` multiplies
+  (t^3, t^2, t, 1) by the cubic Hermite basis at 0x94840..0x9487f, and `FUN_0004584c` dots the result with that
+  vector. So `_DayTime = 2400 x [(3t^2 - 2t^3) + k (2t^3 - 3t^2 + t)]` (2400 at 0x92e60). The curve is monotonic and
+  point-symmetric about noon: f(1-t) = 2400 - f(t). The old cosine was mirror-symmetric, so 14:00 rendered exactly like
+  10:00 and the hump could never sit right of centre.
+- **k is the preset's DAYSPREAD** (inferred: the store into `obj+0x2ec` was not found). The one console constant,
+  1168.77 at 10:00, solves to k = 2.73592. That is override/coldboot1's DAYSPREAD, 2.73593, and that capture's
+  `_NightBrightness` 0.513834 is coldboot1's NIGHT WHIT BIAS. So that capture ran in the cold-boot preset. The clock
+  presets day, yoake and higure share k = 2.68038. `View::dayCurve` uses that, blended from coldboot1 by the boot
+  weights the same way NIGHT WHIT BIAS already is.
+- **The two console stills.** `root__original__day__1080p` (console 10/28 10:00 AM, recorded provenance) against a
+  native render at 10-28 10:00 is within 0.0..1.1 levels in every ribbon- and UI-free window (top, y150..230, bottom).
+  The gate's `ab-rpcs3-root.png` shows 25/10 12:32 on its own clock. The 10-28 10:00 pin the gate had used belonged
+  to the other still. At 25/10 12:32 the native now reads -0.7..-3.2 in the top windows (was -6.5..-13.7 at the old
+  pin) and -0.9..-2.0 at y150..230 (was up to -8.9). A `_DayTime` sweep on that still (1168..1350, `XMB_DAYTIME`,
+  kept as an instrument) put its hump at 1200..1230, and the traced curve gives 1208.6, worked out independently.
+- **Night (console 10/27 21:53):** bottom-left goes from -3.5/-2.8 to +0.6/0.0, bottom-right R/G from -8.0/-11.8 to
+  -4.7/-9.7. Blue is unchanged.
+
+Gate, with the background pin moved to the reference's own clock (2026-10-25T12:32): frame 19.19 -> **19.41**,
+category icon row 23.28 -> **23.52**, item label row 13.17 -> 13.28 (contentDiffers), clock 11.36 -> 11.47, info
+bar 14.98 -> 15.18, top background 23.69 -> 23.50. All PASS. The 12 named states were re-saved deliberately: their
+backgrounds follow the curve, so the old references scored about 37 dB. Re-run 12/12.

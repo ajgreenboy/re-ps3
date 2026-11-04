@@ -353,6 +353,8 @@ private:
     // Original firmware background: qgl/lines back_colours0.fpo with this/next month's day and night palettes.
     struct BackgroundTime { float day=0,month=0,night=0,nightBrightness=0,nightDayBlend=1,alpha=1; };
     static constexpr double kNightBlend=.499947;
+    static constexpr double kDaySpread=2.68038; // BACKGROUND.mnu DAYSPREAD, override/day (= yoake, higure)
+    static double dayCurve(double t,double k);
     static BackgroundTime backgroundTime(const QDateTime& when);
     void initOriginalBackground();
     bool loadMonthTextures(int month);
