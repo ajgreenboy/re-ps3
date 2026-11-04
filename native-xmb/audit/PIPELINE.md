@@ -19,7 +19,7 @@ CATEGORY-ICON-FIX.md for the evidence and fidelity limits.
 | Background gradient | `lines.qrc` moyou/background, back_colours0 + month_bg textures, BACKGROUND.mnu; custom_render_plugin clock mapping | **Ported**: firmware Cg translated RSX???GLSL, inputs traced |
 | Ribbon (wave sheet) | `lines.qrc` lines1 / ffd_shader1 / LinesController, LINE1.mnu; cloth in custom_render_plugin; geometry from the SPU spurs/moyou/spline/spline.elf | **Ported** (`ribbon.cpp`): PPU cloth, ffd_shader1 deformation lattice, spline.elf FFD + camera + bicubic sheet, each stage checked against RPCS3 captures (see "Ribbon port"); LINE1 presets follow the plugin's clock keyframes and boot schedule (see "Ribbon presets") |
 | Particles | `lines.qrc` particles_quads / particles_second, PARTICLES*.mnu; simulation runs on SPU particles.elf | **Ported (2026-10-26)**: firmware-shaped pool in `src/particles.cpp` (1536 cap, 48-byte stride, fixed 0.0088883 s step, PARTICLES.mnu physics, Park-Miller seed), one indexed draw into the HDR scene before the tone map and a second draw into the glare source (`src/view.cpp:370-376`). Superseded reading (accurate before 2026-10-26): this layer was linkev/PlayStation-3-XMB's additive point sprites, not a firmware port. Still open: the real `particles_second` program (the glare draw reuses the same geometry with a fitted 0.045 halo), `proc_iridescent.tga`, and the `_Color`/`_Gamma`/spot packing (`audit/PARTICLES.md`) |
-| HDR tone map + glare | `lines.qrc` glutils ToneMap, GlareSource*, Gaussian, AccGlare, ApplyGlare, HDR.mnu | **Ported** |
+| HDR tone map + glare | `lines.qrc` glutils ToneMap, GlareSource*, Gaussian, AccGlare, ApplyGlare, HDR.mnu | **Ported**: pre-expose table offset and GlareSourcePre on the 8-bit screen (2026-11-03); `_GlareWeight` and the AccGlare per-level weights untraced |
 | Category icons | `icons.qrc` lib/icons/quad.vpo + icons_{full,cheap,no}_ss[_no_shad].fpo + mask.fpo; ICONS.mnu with day/night/yoake/higure/boot overrides; widgets/other/texenv.dds (env map), amb.bmp; `icontex.qrc` 1n???70n normal maps + dif | **Geometry ported; material is a stand-in** (`icons.cpp`): firmware quad.vpo + icons_no_ss_no_shad.fpo (the variant the firmware runs at 1080p) and ICONS.mnu uniforms from an RPCS3 capture. The visible surface is the opaque native normal-map material for every built-in colour (`src/icons.cpp:110-130`); the firmware glass program runs only behind the diagnostics. Side-by-side frame parity is not claimed. |
 | Item icons, labels, dialogs, info bar | explore_plugin / system_plugin via paf (RCO layouts and textures) | **Reconstructed** (item icons ported, labels moved to the GL atlas): `icontex` item icons and settings bullets draw through `IconRenderer` (firmware vertex program plus the opaque normal-map material, `src/icons.cpp:110-130,164-166`), with captured sizes 77.616/184.800 (items) and 35.721/85.050 (bullets), row pitch 80, brightness 1.0 in the open column and 0.247/0.698 behind an open page, all confirmed in `ITEM-ICONS.md`. Labels, dialogs, the info bar, the OSK, the options panel, the notification pop-up, subtitle cues and the volume HUD draw through the GL glyph atlas (`src/text_renderer.cpp`, called from `View::paintGL`); RCO, artwork and theme icons still use QPainter. Three corner/overlay composites were added on that path on 2026-10-26/27 - the notification plaque (`View::drawNineSlice` / `View::drawNotification`, audit/NOTIFICATIONS.md), the volume HUD (`View::drawVolumeHud`, audit/HTPC-IDEAS.md section 6) and the subtitle band (`View::drawSubtitle`, audit/SUBTITLES.md); none of them is a firmware layer, so they have no row here. |
 | Text | paf font renderer with the RD-R/B (SCE-PS3 Rodin) faces from dev_flash/data/font | **Partial**: native-resolution GL glyph atlas with FreeType coverage (firmware load flags 10) and Qt shaping only; PAF coverage/style trace in TEXT-RENDERER.md; PAF metric authority, per-style weight/slant and glow parity open. Per-phase coverage landed 2026-10-26 as a fit (TEXT-RASTER.md 2.4) |
@@ -1376,3 +1376,33 @@ frame and label losses sit in bands 4..8, where the native and console ribbons a
 Still open: the top 70 rows read 4..8 levels dark and the bottom-left corner 6..9 dark, which is about the size of
 the month-phase `+t` term (B2) and the half-float/8-bit quantisation of the tables; the glare path still differs
 (GlareSourcePre on the encoded buffer, not ported).
+
+## The glare stage, 2026-11-03
+
+The glare source is now the console's: `GlareSourcePre.fpo` on the tone-mapped 8-bit screen, in place of
+`GlareSourceNoTone.fpo` on the float scene (the divergence the third pass filed in "The glare term").
+- **Traced (the firmware's own programs):** `GlareSourcePre` (17 instructions, `_WhiteSqrRcp` fc1..4, `_Exposure`
+  fc6) writes rgb = screen.rgb x screen.a x 8 and puts the inverted-tone-map scene luminance (0.27/0.67/0.06) in
+  alpha, which the chain does not read. The screen's alpha is the weight LinesController takes from
+  preexpose_ExposeTex1 .w: G = max(1,t)(t - GLARE THRESH)/8, t the tone curve at max(R,G) (`FUN_00071794`). The
+  captured call list draws it 4 times, each followed by the 64/48/640-byte Gaussian and AccGlare draws.
+- **Change (`src/hdr.cpp`):** ToneMap.fpo's emit now also writes G into the toned target's alpha (same pre-expose
+  lookup, `uGlareTable` = EXPOSURE, 1/WHITE^2, GLARE THRESH). GlareSourcePre reads that target with colour and
+  weight clamped to 0..1 and rounded to 8 bits, as the A8R8G8B8 screen holds them. So the source is bounded: at most
+  8 x the clipped colour, where the old feed was unbounded (scene 2.0 gave an excess of 1.30). The source is in
+  display units, so AccGlare's per-level weight drops its EXPOSURE factor.
+- **Not traced (unchanged):** `_GlareWeight` of ToneApplyDisplay and AccGlare's per-level `_Weight`. Those stay
+  GLARE LEVEL and SUM POW^level normalised. The composite stays ApplyGlare (the same sum, without the noise dither
+  that cancels).
+
+Measured. Paired before/after captures at 12 render clocks with the cloth advanced (`XMB_RIBBON_ADVANCE`), same
+cloth in both: max change 3.7..8.2 levels, at the ribbon's highlights. 0.04..0.59% of pixels move by 2 or more,
+and the mean change is under 0.05. Ribbon cross-profile around each frame's own crest (column bands x 40..240 and
+1680..1880): before and after agree within 0.8 levels at every offset, and both sit within the combined standard error of the console's
+83-frame mean from the crest down (sem 1.6 console, 5..6 native); above the crest both run 2..4.5 high at d -80..-30. Canonical gate:
+frame 19.19 (19.21 before), top background 23.69, category icon row 23.28, item label row 13.17, clock 11.36, info
+bar 14.98, all PASS. 12/12 named states PASS against the existing references, none re-saved (57..61 dB). Two
+captures byte-identical (day 674EEA18F3C0, night B95EFEEE50AC).
+
+So at the shipped presets the old and new sources nearly coincide: the cap only bites on clipped highlights. The
+port removes a known divergence rather than a visible error. What remains of the glare is the two untraced weights.

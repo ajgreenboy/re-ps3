@@ -37,10 +37,26 @@ bool Hdr::load(Assets& assets,Pass& pass,const char* fragment,const char* vertex
     // (audit/PIPELINE.md "The pre-expose tables"). Both programs that read the scene take it through that lookup.
     QString fragmentGlsl=pass.cg.glsl;
     const QString sceneFetch="texture(tex0, (v_tc[0]).xy)";
-    if(QByteArray(fragment)=="ToneMap.fpo" || QByteArray(fragment)=="GlareSourceNoTone.fpo") {
-        if(fragmentGlsl.count(sceneFetch)==1)
+    const QByteArray name(fragment);
+    if(name=="ToneMap.fpo") {
+        // The same composite also writes the glare weight into the screen's alpha: preexpose_ExposeTex1 .w holds
+        // G = max(1,t)(t - GLARE THRESH)/8 with t the tone curve at max(R,G) (FUN_00071794), and the 8-bit screen
+        // clamps it to 0..1. ToneMap.fpo keeps the scene's alpha, so emit_() adds that weight from the same lookup.
+        const QString emitBody="void emit_() {\n  fragColor = r[0];\n}";
+        if(fragmentGlsl.count(sceneFetch)==1 && fragmentGlsl.count(emitBody)==1) {
             fragmentGlsl.replace(sceneFetch,"(vec4(clamp((128.0*texture(tex0, (v_tc[0]).xy).rgb-8.0)/127.0,0.0,16.0),texture(tex0, (v_tc[0]).xy).a))");
-        else qWarning()<<"hdr:"<<fragment<<"scene fetch not found; the pre-expose table offset is not applied";
+            fragmentGlsl.replace(emitBody,
+                "uniform vec3 uGlareTable; // EXPOSURE, 1/WHITE LEVEL^2, GLARE THRESH\n"
+                "void emit_() {\n  fragColor = r[0];\n"
+                "  vec3 c=clamp((128.0*texture(tex0, (v_tc[0]).xy).rgb-8.0)/127.0,0.0,16.0);\n"
+                "  float x=max(c.r,c.g)*uGlareTable.x, t=x*(1.0+uGlareTable.y*x)/(1.0+x);\n"
+                "  fragColor.a=clamp(max(1.0,t)*(t-uGlareTable.z)*0.125,0.0,1.0);\n}");
+        } else qWarning()<<"hdr:"<<fragment<<"scene fetch or emit not found; the pre-expose tables are not applied";
+    } else if(name=="GlareSourcePre.fpo") {
+        // GlareSourcePre reads the console's A8R8G8B8 screen: colour and weight clamped and quantised to 8 bits.
+        if(fragmentGlsl.count(sceneFetch)==1)
+            fragmentGlsl.replace(sceneFetch,"(floor(clamp(texture(tex0, (v_tc[0]).xy),0.0,1.0)*255.0+0.5)/255.0)");
+        else qWarning()<<"hdr:"<<fragment<<"screen fetch not found; the 8-bit screen is not emulated";
     }
     if(!pass.program.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexName?vertexCg.glsl:QString(fullscreenVertex)) ||
        !pass.program.addShaderFromSourceCode(QOpenGLShader::Fragment,fragmentGlsl) || !pass.program.link()) {
@@ -53,7 +69,7 @@ void Hdr::setFc(Pass& pass,QVector<QVector4D>& fc,const char* name,const QVector
 }
 
 bool Hdr::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
-    if(!load(assets,toneMap_,"ToneMap.fpo") || !load(assets,glareSource_,"GlareSourceNoTone.fpo") || !load(assets,gaussian_,"Gaussian.fpo","Gaussian.vpo") ||
+    if(!load(assets,toneMap_,"ToneMap.fpo") || !load(assets,glareSource_,"GlareSourcePre.fpo") || !load(assets,gaussian_,"Gaussian.fpo","Gaussian.vpo") ||
        !load(assets,accGlare_,"AccGlare.fpo") || !load(assets,applyGlare_,"ApplyGlare.fpo"))return false;
     // P1: the three presets are read from HDR.mnu at run time (override/night, override/day,
     // override/coldboot1) through the scene's shared Materials reader. The struct initializers stay as
@@ -107,7 +123,7 @@ bool Hdr::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     gl.glEnableVertexAttribArray(8);gl.glVertexAttribPointer(8,4,GL_FLOAT,GL_FALSE,8*sizeof(float),reinterpret_cast<void*>(4*sizeof(float)));
     gl.glBindVertexArray(0);
     ready_=true;
-    qInfo()<<"hdr: ToneMap, GlareSourceNoTone, Gaussian, AccGlare, ApplyGlare translated";
+    qInfo()<<"hdr: ToneMap, GlareSourcePre, Gaussian, AccGlare, ApplyGlare translated";
     return true;
 }
 
@@ -160,14 +176,16 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
         setFc(toneMap_,fc,"_Exposure",QVector4D(1,1,1,1)*exposure);setFc(toneMap_,fc,"_WhiteSqrRcp",QVector4D(1,1,1,1)/(white*white));
         toned_->bind();gl.glViewport(0,0,width_,height_);
         toneMap_.program.bind();toneMap_.program.setUniformValue("tex0",0);bindTexture(0,scene_->texture());
+        toneMap_.program.setUniformValue("uGlareTable",QVector3D(exposure,1.f/(white*white),threshold));
         fullscreen(toneMap_.program,fc);toneMap_.program.release();
     }
-    // 2. Glare source: exposed colour above GLARE THRESH (threshold given in scene units), then its mip chain.
+    // 2. Glare source: GlareSourcePre on the encoded screen, colour x weight x 8 = the tone-mapped colour times
+    //    max(1,t)(t - GLARE THRESH) in display units (its alpha, the scene luminance, is not read). Then its mips.
     {
         QVector<QVector4D> fc=glareSource_.cg.constants;
-        setFc(glareSource_,fc,"_Threshold",QVector4D(1,1,1,1)*(threshold/exposure));
+        setFc(glareSource_,fc,"_Exposure",QVector4D(1,1,1,1)*exposure);setFc(glareSource_,fc,"_WhiteSqrRcp",QVector4D(1,1,1,1)/(white*white));
         source_->bind();gl.glViewport(0,0,source_->width(),source_->height());
-        glareSource_.program.bind();glareSource_.program.setUniformValue("tex0",0);bindTexture(0,scene_->texture());
+        glareSource_.program.bind();glareSource_.program.setUniformValue("tex0",0);bindTexture(0,toned_->texture());
         fullscreen(glareSource_.program,fc);glareSource_.program.release();
         if(extraGlare) {
             source_->bind();gl.glViewport(0,0,source_->width(),source_->height());
@@ -178,7 +196,7 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
     }
     // 3. Per level: 15-tap Gaussian across then down (captured: k = -7..7, weights 0..7), each channel with its own
     //    radius (in texels of that level), then AccGlare adds the level with weight SUM POW^level (normalised):
-    //    narrow levels dominate, wide ones haze.
+    //    narrow levels dominate, wide ones haze. The source is already in display units, so no EXPOSURE factor.
     QVector<QVector4D> weights(8);
     for(int c=0;c<3;++c) {
         float sum=0;for(int k=-7;k<=7;++k)sum+=std::exp(-float(k*k)/(2*radius[c]*radius[c]));
@@ -207,7 +225,7 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
         }
         gaussian_.program.release();
         QVector<QVector4D> fc=accGlare_.cg.constants;
-        setFc(accGlare_,fc,"_Weight",QVector4D(1,1,1,1)*(std::pow(sumPow,float(level))/levelSum*exposure));
+        setFc(accGlare_,fc,"_Weight",QVector4D(1,1,1,1)*(std::pow(sumPow,float(level))/levelSum));
         accumulated_->bind();gl.glViewport(0,0,accumulated_->width(),accumulated_->height());
         gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_ONE,GL_ONE);
         accGlare_.program.bind();accGlare_.program.setUniformValue("tex0",0);bindTexture(0,blurY_[level]->texture());

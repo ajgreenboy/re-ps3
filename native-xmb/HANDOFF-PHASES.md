@@ -55,6 +55,36 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-03: the glare stage ported (GlareSourcePre on the encoded screen)
+
+The glare source is now the console's: `GlareSourcePre.fpo` on the tone-mapped 8-bit screen, in place of
+`GlareSourceNoTone.fpo` on the float scene (the divergence the third pass filed in "The glare term").
+- **Traced (the firmware's own programs):** `GlareSourcePre` (17 instructions, `_WhiteSqrRcp` fc1..4, `_Exposure`
+  fc6) writes rgb = screen.rgb x screen.a x 8 and puts the inverted-tone-map scene luminance (0.27/0.67/0.06) in
+  alpha, which the chain does not read. The screen's alpha is the weight LinesController takes from
+  preexpose_ExposeTex1 .w: G = max(1,t)(t - GLARE THRESH)/8, t the tone curve at max(R,G) (`FUN_00071794`). The
+  captured call list draws it 4 times, each followed by the 64/48/640-byte Gaussian and AccGlare draws.
+- **Change (`src/hdr.cpp`):** ToneMap.fpo's emit now also writes G into the toned target's alpha (same pre-expose
+  lookup, `uGlareTable` = EXPOSURE, 1/WHITE^2, GLARE THRESH). GlareSourcePre reads that target with colour and
+  weight clamped to 0..1 and rounded to 8 bits, as the A8R8G8B8 screen holds them. So the source is bounded: at most
+  8 x the clipped colour, where the old feed was unbounded (scene 2.0 gave an excess of 1.30). The source is in
+  display units, so AccGlare's per-level weight drops its EXPOSURE factor.
+- **Not traced (unchanged):** `_GlareWeight` of ToneApplyDisplay and AccGlare's per-level `_Weight`. Those stay
+  GLARE LEVEL and SUM POW^level normalised. The composite stays ApplyGlare (the same sum, without the noise dither
+  that cancels).
+
+Measured. Paired before/after captures at 12 render clocks with the cloth advanced (`XMB_RIBBON_ADVANCE`), same
+cloth in both: max change 3.7..8.2 levels, at the ribbon's highlights. 0.04..0.59% of pixels move by 2 or more,
+and the mean change is under 0.05. Ribbon cross-profile around each frame's own crest (column bands x 40..240 and
+1680..1880): before and after agree within 0.8 levels at every offset, and both sit within the combined standard error of the console's
+83-frame mean from the crest down (sem 1.6 console, 5..6 native); above the crest both run 2..4.5 high at d -80..-30. Canonical gate:
+frame 19.19 (19.21 before), top background 23.69, category icon row 23.28, item label row 13.17, clock 11.36, info
+bar 14.98, all PASS. 12/12 named states PASS against the existing references, none re-saved (57..61 dB). Two
+captures byte-identical (day 674EEA18F3C0, night B95EFEEE50AC).
+
+So at the shipped presets the old and new sources nearly coincide: the cap only bites on clipped highlights. The
+port removes a known divergence rather than a visible error. What remains of the glare is the two untraced weights.
+
 ## 2026-11-03: background field fixed (the console's pre-expose tables)
 
 The background field's day excess (FIDELITY-ROOT-BAR B3/B4/B6, the "pedestal" four passes chased) is the console's

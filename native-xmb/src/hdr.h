@@ -11,13 +11,14 @@
 
 namespace xmb {
 // HDR pass of the original background (qgl/lines.qrc HDR.mnu), with the firmware's glutils programs:
-//   ToneMap.fpo            extended Reinhard: L(1 + L/white^2) / (1 + L), L = colour x EXPOSURE
-//   GlareSourceNoTone.fpo  max(colour - GLARE THRESH, 0) into a 2^TEX SIZE wide glare source with mips
+//   ToneMap.fpo            extended Reinhard: L(1 + L/white^2) / (1 + L), L = colour x EXPOSURE, read through the
+//                          pre-expose table offset; alpha = the glare weight max(1,t)(t - GLARE THRESH)/8
+//   GlareSourcePre.fpo     8-bit screen colour x weight x 8 into a 2^TEX SIZE wide glare source with mips
 //   Gaussian.vpo/.fpo      15-tap separable blur per mip level, per-channel radius (GAUSSIAN RAD R/G/B)
 //   AccGlare.fpo           weighted sum of the blurred levels
 //   ApplyGlare.fpo         tone-mapped screen + glare x GLARE LEVEL
-// The plugin stores its frame tone-mapped and recovers HDR with GlareSourcePre (the exact inverse of ToneMap);
-// keeping the scene in a float target gives the same values without the round trip.
+// As on the console, the glare is taken from the tone-mapped 8-bit screen and its weight channel, not from the
+// float scene (audit/PIPELINE.md "The glare stage").
 //
 // Every number comes from HDR.mnu at run time (P1): override/night, override/day and override/coldboot1
 // through the shared Materials reader, TEX SIZE / TEX MAX MIP from the base file. The compiled values are
