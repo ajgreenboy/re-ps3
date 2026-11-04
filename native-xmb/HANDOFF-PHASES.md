@@ -55,6 +55,27 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-03: the glare weights traced (GLARE LEVEL squared, _GlareWeight = 1)
+
+The two glare weights the glare port left as reconstructions are now traced. The field map comes from a hand
+disassembly of HDRMenu vtable slot 2 (0x25c0c), the per-frame apply that Ghidra left unsplit. It copies each menu
+record's value (+0x38) into the renderer: 0x29c EXPOSURE, 0x2a0 WHITE LEVEL, 0x2a4 GLARE LEVEL, 0x2a8 GLARE THRESH,
+0x2b0 GAUSSIAN RAD R/G/B, 0x2c0 GLARE SUM POW, 0x2d0..0x2d4 GLARE / GLARE_ONLY / TONEBEFORE / BLUR / ENABLED,
+0x2dc DITHER. 0x2e0 is not a menu parameter: it feeds ToneApplyDisplay's Gamma and is set from another object
+(FUN_00070bf8, through FUN_0001b128).
+- **AccGlare `_Weight`:** GLARE LEVEL enters twice (custom_render_all.c ~55005 and ~55852):
+  _Weight_l = GLARE LEVEL^2 x SUM POW^l / sum_k SUM POW^k.
+- **`_GlareWeight`:** the ToneApplyDisplay class (vtable 0x9ea48, name binding at 0x76b38) binds GlareWeight to the
+  constant 1.0 (DAT_00093250). Its other records are NoiseJitter, Exposure, WhiteSqrRcp, Threshold, BlurRangeRcp,
+  Dither and Gamma, and they match the values the code writes. The composite adds the glare x 1.
+- **Change (`hdr.cpp`):** the AccGlare weight takes GLARE LEVEL^2, and ApplyGlare's `_Weight1` is (1, 1). The
+  native glare was previously short by a factor of GLARE LEVEL (1.10 day, 1.33 night).
+
+Effect: at most 2.3 levels, all at the ribbon highlights (pixels moving by 2 or more: under 0.01%).
+
+Not traced: the level count this[0x1c4] (the native uses its mip count), the Gaussian weight function
+FUN_00070b20, and what sets this[0x2e0].
+
 ## 2026-11-03: the pre-expose dither ported (preexpose_Noise)
 
 The console frame carries a pre-expose dither that the native had left out. The "night bottom-right blue gap"
