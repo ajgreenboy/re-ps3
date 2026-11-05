@@ -55,7 +55,7 @@ Requirements: Windows 10/11 x64, Visual Studio 2022 with the C++ workload, a Qt 
 `--vsh-modules` for you; `native-xmb/build.ps1 -OutputDirectory <dir>` builds anywhere. The XMB reads
 `<exe dir>\data` unless `--data-dir` is passed, which is the same default the manager uses.
 
-First run of the manager: **Emulators → Detect installed** (it finds portable installs such as
+First run of the manager: **Emulators > Detect installed** (it finds portable installs such as
 `C:\dev\rpcs3`), check the **Platform map**, then **Import** ROMs/ISOs/folders. Imports become
 `<data>\pkg\<id>\` virtual packages plus an `apps.json` entry; press F5 in the XMB to refresh the
 Game column.
