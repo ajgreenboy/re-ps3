@@ -1209,3 +1209,27 @@ open with every idle force ruled out.
 
 Histogram (dusk, 20 frames): 282/135/130/58/22/18/43 against the console's 344/157/127/33/18/10/20, total 689 vs
 710. Gate: frame 19.58 -> 19.59, 6/6; byte-stable. Named states not re-saved (shared tree).
+
+## Particle speed measured, 2026-11-04
+
+Measured, not fitted: the native's dust moves at the console's speed, so the vertical gap is not the step size.
+- **Console.** The navfeel bursts (`C:devout
+avfeel
+avmove`, RPCS3, 1:1 crop at screen y 180, ~83 fps, clock
+  28/10 17:03 = the dusk preset), frames before the key (< 530 ms). Specks (>= 24 over a 15 x 15 mean, UI-free strips)
+  matched by mutual nearest neighbour across 200 / 400 ms: speed p50 11..20, p75 20..29, p90 31..35 px/s; mean vertical
+  drift +1.5 (right1) and -8.4 px/s (right2step). `left1` is a frozen burst (every speck still) and is excluded.
+- **Native, live.** Two unpinned runs, 12..15 s after launch at `--background-clock 17:14`, `burst=` 45 frames at
+  12 ms: p50 11..13, p75 16..19, p90 26..34 px/s, drift +-0.4. Within the console's burst-to-burst range: DELTA TIME
+  per tick is the console's speed (the 1/60 reading would be ~1.9x faster).
+- **Pinned pairs are not usable for motion.** Captures at render clocks 50 ms apart read p50 50..60 px/s: each pinned
+  run replays all births on its own render-time sheet, so the sheet's move between the two clocks enters every
+  speck. Motion measurements need one live process (`burst=`).
+- **Ribbon band.** The bright band around the crest has the same extent in both (25%-of-peak half widths up/down,
+  console 34/26 and 23/20 px, native 38/31 and 26/33).
+
+So the console's specks 80..240 px above the crest (107 dim / 45 bright against the native's 38 / 19) cannot be
+dust that drifted there (~13 px/s over a ~6 s life is ~80 px): they are born there, or live there longer. Open
+leads: where on the sheet the console's grid cells land (the faint upper fold of the sheet above the bright band;
+the native's birth footprint per cell is uniform in (u, v) of the 128 x 128 grid), and the type 3 birth command,
+which writes the +0x10 quad and is not ported. No code change.
