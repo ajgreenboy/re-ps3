@@ -33,8 +33,9 @@ public:
     static double dayLight(double hour);
     // The XMB's moves are paf animations: 200 ms in accel mode 5 (vsh.elf PhXmBar focus moves FUN_003ad3bc /
     // FUN_003ad728; paf animation setup FUN_003981ec and evaluator FUN_00398748). Mode 5 closes a fixed fraction
-    // k of the remaining distance every 60 Hz frame, k from a table by the duration in frames, and lands on the
-    // target when the frame-snapped duration ends. A new target restarts the curve from the current value.
+    // k of the remaining distance every 60 Hz frame, k from a table by the duration in frames, and ends only when the
+    // stepped value reaches 1 (no landing at the duration; FUN_00398540, 0x3988f0). A new target restarts the curve
+    // from the current value.
     // Mode 4 is the same per-frame form with its own k table (the page content channel, PAGE-MOVE 4c).
     // `delayMilliseconds` holds the value at `from_` for that long before the curve starts: paf has no delay
     // parameter, so this is the options panel's measured start offset expressed locally (UI-ELEMENT O6).
@@ -44,7 +45,7 @@ public:
         void advance(double seconds);
         bool running() const { return running_; }
     private:
-        double from_=0,to_=0,progress_=1,elapsed_=0,duration_=0,delay_=0,k_=0,growth_=1.000001;
+        double from_=0,to_=0,progress_=1,elapsed_=0,delay_=0,k_=0,growth_=1.000001;
         bool started_=false,running_=false;
     };
     static constexpr double moveMilliseconds=200;
