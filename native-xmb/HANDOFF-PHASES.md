@@ -65,8 +65,9 @@ Both registered (RIGHT auto-repeated to Friends, LEFT came back), and the dust d
 The native port gave p50 54 / vx -33 for the same hold. So on the console a navigating d-pad hold does not drive
 layer+0x1c0; what does is unknown. `View` no longer feeds the pad into the wind (the two feed calls are removed;
 the traced rotation and Brownian boost stay in particles.cpp, idle); a native 400 ms RIGHT hold now reads p50 10 /
-vx -2.8, like the console. Open: what sets layer+0x1c0 (a candidate is an un-navigable press at the end of a row,
-not tested). Gate unchanged (pinned captures take no input).
+vx -2.8, like the console. An edge burst (RIGHT held 400 and 1000 ms on Friends, the
+last category, so the press cannot navigate) shows no gust either (vx -1.5..+1.7 px/s, idle-like), so no d-pad
+hold reaches layer+0x1c0. Open: its writer (icon/focus events or another plugin call, not the pad). Gate unchanged (pinned captures take no input).
 
 ## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
 
