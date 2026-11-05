@@ -1322,3 +1322,26 @@ so the native's axis or basis is wrong, not only a sign; the flip is reverted. T
 latches on sparser moves, its latched gust is ~4x faster, and it rotates about the vertical axis where the console
 swirls in the screen plane. Next: trace how M92 is built from v10 (axis component order, the view-basis multiply)
 and which DPAD ROT MAX value is applied (file 1.1665e-4 vs default 2e-4, or another).
+
+Axis and sign, same day. Traced (read-only subagent): `FUN_00024228` (called at 0x2d5f8) builds M92 as
+cI + s[u]x + (1-c)uu^T about u = v10/|v10|, angle |v10|, stored column-major and applied P' = R P (PPU helper
+`FUN_0002b4f4`; the kernel's 0x3bf0 helper reads the same four quads, INFERRED). The input vector is
+A = (-dy, dx, 0) from the table at 0x93ea0 (0: (-1, 0), 1: (+1, 0), 2: (0, +1), 3: (0, -1)), multiplied by the lookAt
+of the layer camera (ctor eye (0, 0, 2), centre (0, 0, -7), up (0, 1, 0)), which leaves (0, +-1, 0): the axis is Y, as
+the port had it. A Y rotation shifts dust in front of the pivot sideways and moves the strips in depth, which reads as
+the console's screen-plane swirl. The smoother runs once per BackgroundView update, not scaled by time (rate not
+confirmed as 60 Hz).
+
+Sign. Per-side drift early in the latch (50 ms gap, while the native's specks still match >50%):
+| run (last move LEFT) | left strip vx | right strip vx |
+|---|---|---|
+| console alt150, 2.9..4.2 s | +14.1 .. +21.0 | +5.5 .. +6.8 |
+| native, column-rises = state 0, 2.8..3.3 s | -57.7 | -49.2 |
+| native, column-falls = state 0 (now), 2.8..3.3 s | +53.3 | +55.0 |
+The traced maths gives leftward drift for state 1 (dust in front of the pivot), so the console's LEFT move arrives as
+state 0: xmb_plugin's cell x must run opposite to the native's column index. `trackCursor` maps a move to a lower
+column index to state 0. (The earlier "a flip does not fix it" reading came from late windows where the native's
+specks outran the matcher.) Still open: the native latches on 8 moves 300 ms apart where the console does not, and
+its latched gust is ~3-4x faster. The applied DPAD ROT MAX is not settled (file 1.1665e-4 or default 2e-4; the menu
+apply's caller is not found), nor is the update rate; a ROT MAX low enough for the console's threshold (5.9e-5..1.07e-4
+at 60 Hz) would not by itself give a 3-4x slower gust, so nothing is fitted.
