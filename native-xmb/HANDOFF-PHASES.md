@@ -36,7 +36,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 |---|---|
 | Background, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs |
 | Ribbon | Ported end to end (2026-10-25): plugin cloth, ffd_shader1 lattice, spline.elf FFD/camera/bicubic sheet, each stage matched to RPCS3 captures; LINE1 presets follow the plugin's clock keyframes and boot schedule (audit/PIPELINE.md "Ribbon port", "Ribbon presets") |
-| Particles | Firmware programs and simulation (2026-11-04): particles_quads/particles_second with traced uniforms, the SPU kernel stepped once per 60 Hz tick by DELTA TIME into a 2048-record pool, births on the ribbon's 128 x 128 sheet (traced PPU emitter), life-box deaths, the PARTICLES_UI d-pad wind ported but not fed (a console d-pad hold shows no gust); deterministic from `--render-clock`. Open: the dust's vertical placement, shake/icon wind (audit/PARTICLES.md) |
+| Particles | Firmware programs and simulation (2026-11-04): particles_quads/particles_second with traced uniforms, the SPU kernel stepped once per 60 Hz tick by DELTA TIME into a 2048-record pool, births on the ribbon's 128 x 128 sheet (traced PPU emitter), life-box deaths, the PARTICLES_UI wind driven by XMB cursor moves (traced; only rapid moves latch a gust); deterministic from `--render-clock`. Open: the dust's vertical placement, shake/icon wind (audit/PARTICLES.md) |
 | Category icons | All built-in colours use an opaque normal-map material; Original follows the firmware monthly palette. Six day/night pairs verified; firmware shader remains diagnostic. See audit/CATEGORY-ICON-FIX.md; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | `icontex` item icons and settings bullets draw through `IconRenderer` (firmware vertex program, opaque normal-map material) - sizes 77.616/184.800 and 35.721/85.050, pitch 80, brightness 1.0/0.247/0.698 confirmed against decoded RSX captures (audit/ITEM-ICONS.md); labels, dialogs, the info bar, the options panel and the OSK draw through the GL glyph atlas with Qt shaping, and only RCO/artwork/theme icons remain QPainter |
 | Text | Original font faces rasterized with FreeType and recovered load flags 10 into the 2x GL atlas; label glow/idle fade are MaXMB observations; PAF metrics, per-style weight/slant and full parity remain open (audit/FONT-MATCHING.md). Per-phase glyph coverage landed 2026-10-26 as a labelled fit (audit/TEXT-RASTER.md 2.4) |
@@ -67,7 +67,14 @@ layer+0x1c0; what does is unknown. `View` no longer feeds the pad into the wind 
 the traced rotation and Brownian boost stay in particles.cpp, idle); a native 400 ms RIGHT hold now reads p50 10 /
 vx -2.8, like the console. An edge burst (RIGHT held 400 and 1000 ms on Friends, the
 last category, so the press cannot navigate) shows no gust either (vx -1.5..+1.7 px/s, idle-like), so no d-pad
-hold reaches layer+0x1c0. Open: its writer (icon/focus events or another plugin call, not the pad). Gate unchanged (pinned captures take no input).
+hold reaches layer+0x1c0. Traced since (same day): the writer is xmb_plugin's cursor-move handler (FUN_0000a3e8 -> custom_render_plugin
+command group 0 id 9 -> FUN_0002b548), once per move: category move 0 (index rises) / 1, item move 2 / 3. The
+state stays set while the rotation is >= 1e-5 rad and resets to idle otherwise, so one move resets on its first tick
+(0.03 x DPAD ROT MAX = 3.5e-6) and only moves close enough together (g past ~0.086) latch a gust, which then holds.
+`Particles::trackCursor` (called per frame with the shell's category/depth/selection) now feeds it. Native: a 400 ms
+RIGHT hold stays calm (p50 10, vx -3.5); eight alternating moves 300 ms apart latch at ~2.4 s (p50 29 -> 46, p90 ~95
+px/s). The console has not been driven fast enough to latch yet (its bursts: 3 and 4 moves), so the latch is
+traced, not observed. explore_plugin's list scroll / view open-close sends (MEDIUM) are not ported. Gate unchanged (pinned captures take no input).
 
 ## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
 

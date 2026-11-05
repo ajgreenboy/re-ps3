@@ -474,6 +474,8 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         // The emitter grid: the ribbon's 128 x 128 sheet in the particle world with each point's velocity (FUN_0002b288).
         int side=0;std::vector<QVector3D> sheet,motion;ribbon_.sheetMotion(sheet,motion,side);
         particles_.setEmitter(std::move(sheet),std::move(motion),side);
+        // xmb_plugin's cursor-move event drives the wind's direction state (FUN_0000a3e8, audit/PARTICLES.md).
+        particles_.trackCursor(shell_.category(),shell_.depth(),shell_.selection());
         glBindFramebuffer(GL_FRAMEBUFFER,GLuint(scene)); particles_.render(*this,seconds,pixelWidth,pixelHeight);
     }
     if(hdr)hdr_.setNoiseClock(seconds);
@@ -3331,7 +3333,7 @@ void View::focusOutEvent(QFocusEvent* e) {
 }
 void View::pollController() {
 #ifdef Q_OS_WIN
-    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;triggerHeld_=false;particles_.setPadDirection(4);return;}
+    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;triggerHeld_=false;return;}
     // A --script run is the script's own input: every scripted key goes through replayKeyTap, which dispatches the
     // same handlers the pad drives. A physical controller is therefore not read at all, so a capture cannot depend
     // on a pad lying on its d-pad (which used to walk the keyboard focus off the default key between two grabs).

@@ -1284,3 +1284,26 @@ Mean vx -1.5 / -1.5 / -1.5 px/s (400 ms hold: before / during / after) and -0.1 
 hold, 0..480 / 560..900 / 900..1500 / 1500..2600); p50 10..19, which is within the idle bursts' own range (p50
 10..19, vy up to -5.9). No d-pad hold, navigating or blocked, produces the gust, so layer+0x1c0 is written by
 something other than the pad; the feed stays removed.
+
+## The wind's writer: XMB cursor moves, 2026-11-05
+
+Traced (read-only subagent, addresses in the named module):
+- **Writer.** `FUN_0002b548` (custom_render_plugin, 0x2b550) copies a command payload's int into layer+0x1c0; it is
+  command group 0 id 9 of the plugin's entry `FUN_00015330` (0x15cf8-0x15d34), interface slot +8. The ctor writes 4
+  (0x32558) and FUN_0002d02c writes 4 when the rotation is under 1e-5 (0x2d500). No other store.
+- **Sender.** xmb_plugin's cursor-move handler `FUN_0000a3e8` (call at 0xa490) compares from/to cells: x differs ->
+  0 if from.x < to.x else 1; same x -> 2 if from.y < to.y else 3. explore_plugin also sends (list scroll 2/3, and
+  1/0 at what reads as view open/close, MEDIUM); not ported.
+- **Release.** While the state is not 4 each tick adds 0.03 to the gust smoother (0x2d35c-0x2d368). A single move's
+  first tick gives 0.03 x 1.1665e-4 = 3.5e-6 rad, so the state resets at once. Only when moves come close enough
+  together for g to pass ~0.086 does the rotation cross 1e-5; then the state holds and g climbs to 1 until a later
+  move. No other gate (layer+0x1003 is 1 from the ctor, the entry's guard byte 0xa03b5 is 0 at rest).
+- **Values.** DPAD ROT MAX / SCALE X / SCALE Y / UI BROWNIAN live in the parameter struct (sim+0x1450/54/58/48),
+  refreshed every tick from sim+0x1490, which PARTICLES_UI.mnu's menu (loaded at boot in the BackgroundView ctor)
+  writes; no override set carries PARTICLES_UI.mnu.
+
+This explains the console bursts: a held RIGHT produced 3 auto-repeat moves and the edge holds produced none, and
+neither latches. Native: `Particles::trackCursor(category, depth, selection)` turns each change at the same page
+depth into one move event; the held-pad feed stays removed. Native 400 ms RIGHT hold: p50 10, vx -3.5 (calm, as the
+console). Eight alternating RIGHT/LEFT moves 300 ms apart: calm to ~2.4 s, then latched (p50 29 -> 46, p90 ~95 px/s
+at 2.4..4.9 s). The latch has not been seen on the console (no console burst has had enough fast moves yet).
