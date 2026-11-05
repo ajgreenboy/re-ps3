@@ -55,6 +55,23 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-04: ribbon offset closed (time-of-day matched, autocorrelation-aware)
+
+The left-end gap the 11-03 note left at ~2.5 standard errors (native 613 against console 546) was a comparison at the
+wrong time of day, plus autocorrelated samples; nothing in the ribbon changes.
+- **Preset.** The console `col-*` frames were saved at 17:12:51..17:16:22 (boot 2 at 17:09), inside the clock table's
+  higure hold (17:00..19:00), whose LINE1 differs from the day preset (FFD SCALE2 Y 1.2 / Z 3.0 against 1.276 / 2.888,
+  FFD PARAM 1 -1.834 against -1.335). The 11-03 native series ran at a 10:00 background clock.
+- **Matched series.** 40 native frames at `--background-clock 17:14`, cloth advanced to 230..1010 s
+  (`XMB_RIBBON_ADVANCE=1`), crest in the same UI-free bands: left **597 +/- 99**, right **559 +/- 94**, against the
+  console's 83 frames, left **546 +/- 110**, right **560 +/- 106**. The right end is identical.
+- **Significance.** Both series are strongly autocorrelated (lag-1 r 0.68 console, 0.61 native), so the effective
+  sample sizes are ~16 and ~9 and the effective standard errors ~28 and ~32 px. The 51 px left difference is ~1.3
+  combined standard errors: no evidence of a geometry offset.
+
+The pinned canonical capture stays at the boot-instant rest table (its crest 493/722 is one instant of the swell, see
+"the ribbon offset is timing"). The item is closed; fitting a render time to the reference still remains refused.
+
 ## 2026-11-04: particle emitter traced (PPU births on the ribbon's 128 x 128 sheet)
 
 New dust is now born where and how the shell births it, traced through custom_render_plugin (the SPU kernel never
