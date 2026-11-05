@@ -73,7 +73,6 @@ constexpr int kMaxCatchUpSteps=4096;       // derived: 4096 ticks ~= 68 s of sim
                                            // stall cannot freeze the app for more than that.
 constexpr float kLifeBoxMin[3]={-10.f,-10.f,-12.f}; // traced: data 0x940b0, stored at renderer+0x900
 constexpr float kLifeBoxMax[3]={10.f,10.f,7.f};      // traced: data 0x940c0, stored at renderer+0x910
-constexpr float kStepSeconds=1.f/60;             // traced: data 0x93038, the kernel's per-step vector at +0x8b0
 constexpr float kAgeLimit=0.99999f;                  // traced: DAT_00092fe8, the kernel's age test 0x3f7fff58
 constexpr unsigned int kSeed=0x5053u;      // fit: fixed seed so --render-clock captures reproduce;
                                            // the firmware's own seed is not traced (Park-Miller itself is)
@@ -528,11 +527,12 @@ void Particles::step() {
     }
     // particles.elf 0x06f64-0x07098, semi-implicit Euler: vel += (gravity + BROWNIAN x R - FRICTION x vel) x k, then
     // pos += vel x k (R in [-1, 1)^3 from the Park-Miller call at 0x06fe4). Both updates multiply by the same physics
-    // vector at +0x8b0 (lqd 2224($87) at 0x7080 and 0x7090), which FUN_0005d510 builds from data 0x93038 = 1/60; no
-    // runtime writer of it was found, so k is that initialiser, not the menu's DELTA TIME. [TRACED multiply and
-    // initialiser; the absence of an overwrite is a search result.] The flow field, wind and the 1/k velocity term
-    // (0x7064) of the same bracket are not ported: WIND SCALE is 0 and the 32x16 field is untraced.
-    const float dt=kStepSeconds;
+    // vector at +0x8b0 (lqd 2224($87) at 0x7080 and 0x7090). FUN_0005d510 initialises it to 1/60, but the PPU tick
+    // FUN_00031494 splats the parameter struct's DELTA TIME (sim+0x1360 +0x38, the mnu key order) into it every tick
+    // (stvx at 0x319ac), with w = 1 so age adds a bare AGING. [TRACED] The idle kernel's other terms are zero: the pad
+    // pivot impulse (0x7064, M92 identity without pad input), the constant acceleration V890 (layer+0x680, never
+    // written) and the flow field (gated by WIND SCALE 0).
+    const float dt=float(physics_.deltaTime);
     const float drag=1.f-physics_.friction*dt;
     const float kick=physics_.brownian*dt;
     // Quaternion spin: q = spinStep * q, SPIN TIME SCALE radians per second.

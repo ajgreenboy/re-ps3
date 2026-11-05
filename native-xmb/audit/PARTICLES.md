@@ -1185,3 +1185,27 @@ Total 707 against 710. Still open: the bright tail is now ~1.7x (48+ and 128+), 
 the vertical distribution of the dust, not its count. The 1/k velocity term at 0x7064 and the flow field are not ported.
 
 Gate: frame 19.60 -> 19.58, other layers unchanged, 6/6; byte-stable. Named states not re-saved (shared tree).
+
+## The particle step and the vertical gap, 2026-11-04
+
+Corrects the clock-and-pool entry below: the per-tick step is DELTA TIME, not 1/60, and the dust's vertical gap is
+open with every idle force ruled out.
+- **Step (traced).** The +0x8b0 vector starts at 1/60 (FUN_0005d510), but the PPU tick FUN_00031494 splats the
+  particle parameter struct's DELTA TIME (sim+0x1360, field +0x38 in the PARTICLES.mnu key order; the native's
+  "holder+0x1398") into it every tick (stvx at 0x319ac), w = 1. The same tick copies GRAVITY (+0x3c) and FRICTION
+  (+0x30, one scalar for all axes) into the kernel block. The struct's default is 0.03; the mnu value is inferred to
+  replace it (the loader that fills the struct is not traced).
+- **Idle forces (traced): all zero or negligible.** The kernel's 0x7064 term is vel += (V96 + M92 (P - V96) - P) / dt,
+  a pad-driven rotation about a camera pivot (M92 written only by FUN_0002d02c, identity at rest). The constant
+  acceleration V890 copies layer+0x680, zeroed by the layer constructor and never written. The 32 x 16 flow field
+  is gated by WIND SCALE. Births are symmetric: 50..53% of birth velocities point up, mean speed 0.20 (the 0.15 floor
+  dominates).
+- **The vertical gap.** Relative to each frame's crest, the console has 107 dim / 45 bright specks 80..240 px above
+  it, the native 38 / 19 (with 1/60: 46 / 24); below the crest the native has more bright specks (86 vs 59). Not the
+  emitter footprint (births in the left strip span 240 px above the crest down to 80 px below), not the pinned
+  capture's catch-up (12 live, unpinned captures: 36 / 26 above) and not a camera mismatch (the sheet is moved into
+  the particle world by the particle camera's eye). The only lever that moved dust upward was a larger step, so the
+  next measurement is the console's speck speed (frame pairs), not a fitted value.
+
+Histogram (dusk, 20 frames): 282/135/130/58/22/18/43 against the console's 344/157/127/33/18/10/20, total 689 vs
+710. Gate: frame 19.58 -> 19.59, 6/6; byte-stable. Named states not re-saved (shared tree).
