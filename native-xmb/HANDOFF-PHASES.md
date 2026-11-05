@@ -77,8 +77,14 @@ px/s). Console latch burst (same day, rig): 8 alternating moves 300 ms apart do 
 16 moves 150 ms apart do (gust from ~3 s, still building after the last key; p50 22..29, p90 ~50 px/s). So the
 latch is real, but the native latches too easily, runs ~4x faster, and turns about the wrong axis: the console's
 latched dust swirls in the screen plane (left strip vx +17, right strip vy -21 px/s after a last LEFT), the native's
-rotates about the vertical axis (right strip moves down). A sign flip alone does not fix it (tried, reverted). Open:
-trace the M92 axis/basis convention and DPAD ROT MAX's applied value before changing more. explore_plugin's list scroll / view open-close sends (MEDIUM) are not ported. Gate unchanged (pinned captures take no input).
+rotates about the vertical axis (right strip moves down). Axis traced since: M92 is a right-handed Rodrigues matrix about
+v/|v| (FUN_00024228), P' = R P, and with the default camera the view step leaves (0, +-1, 0) so the axis is Y, as
+ported; the screen-plane look is perspective. Measured early in the latch (before the native outruns the matcher),
+the native drifted the wrong way (-57 px/s after a last LEFT, console +14..+21), so trackCursor now maps a move to a
+lower column index to state 0 (the from/to cell direction is the one untraced link); native after a last LEFT: +53..
++55. Open: the native latches on sparser moves and its latched gust is ~3-4x faster; the applied DPAD ROT MAX (file
+1.1665e-4 vs default 2e-4; the menu apply's caller is not found) and the BackgroundView update rate are untraced,
+and no single ROT MAX fits both, so neither is fitted. explore_plugin's list scroll / view open-close sends (MEDIUM) are not ported. Gate unchanged (pinned captures take no input).
 
 ## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
 

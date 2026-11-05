@@ -308,7 +308,10 @@ unsigned Particles::stateChecksum() const {
 
 void Particles::trackCursor(int category,int depth,int selection) {
     if(cursorCategory_>=0 && depth==cursorDepth_) {
-        if(category!=cursorCategory_)padState_=cursorCategory_<category?0:1;
+        // FUN_0000a3e8 sends 0 when from.x < to.x [TRACED]; which way its cell x runs is not traced. The console's latch
+        // burst (audit/PARTICLES.md, 2026-11-05) drifts the dust right after a LEFT move, which the traced rotation
+        // (state 1 -> axis +Y, Rodrigues, P' = R P) gives for state 0: so a move to a lower column index is state 0.
+        if(category!=cursorCategory_)padState_=category<cursorCategory_?0:1;
         else if(selection!=cursorSelection_)padState_=cursorSelection_<selection?2:3;
     }
     cursorCategory_=category;cursorDepth_=depth;cursorSelection_=selection;

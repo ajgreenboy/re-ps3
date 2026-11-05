@@ -102,8 +102,8 @@ public:
     }
     // The XMB cursor as the plugin's direction state (layer+0x1c0). xmb_plugin's cursor-move handler (FUN_0000a3e8)
     // sends custom_render_plugin command (group 0, id 9) once per move, which FUN_0002b548 copies into the state: a
-    // category move gives 0 when the column index rises, 1 when it falls; an item move in the same column gives 2 when
-    // the selection rises, 3 when it falls [TRACED]. Called every frame with the shell's cursor; a change at the same
+    // category move gives 0 when the column index falls, 1 when it rises (sign set by a console burst, particles.cpp); an
+    // item move gives 2 when the selection rises, 3 when it falls. Called every frame with the shell's cursor; a change at the same
     // page depth is one move event. Not the held pad: the console's held d-pad shows no gust (audit/PARTICLES.md).
     // Pinned captures take no steps after their first frame, so it never reaches a --render-clock capture.
     void trackCursor(int category,int depth,int selection);
