@@ -34,7 +34,7 @@ void logSceneReader(const char* where);
 // SPU task (particles.elf) actually does:
 //
 //  - a capped pool of 2048 particles (FUN_00060b14's li r5,0x800; a birth into a full pool is
-//    dropped), stepped once per 60 Hz tick with the kernel's 1/60 step vector (+0x8b0), deaths at
+//    dropped), stepped once per 60 Hz tick by DELTA TIME (the tick's +0x8b0 splat), deaths at
 //    age 0.99999 or outside the life box;
 //  - emission in a 51.8695 deg cone, 17.4% of spawns mirrored, speed EMIT VEL MIN +
 //    EMIT VEL MUL * (1 +/- EMIT VEL VAR) and no z velocity (EMIT VEL ZSCALE 0), accepted with
@@ -107,7 +107,7 @@ private:
     // (0, 0, 2) looking down -z, fovy 53).
     struct Particle {
         float px,py,pz;       // centre position (world units; z is negative, away from the camera)
-        float vx,vy,vz;       // velocity, world units per second (the kernel adds vel x 1/60 per tick)
+        float vx,vy,vz;       // velocity, world units per second (the kernel adds vel x DELTA TIME per tick)
         float age;            // life fraction, 0..1
         float ageRate;        // age increment per step = AGING SPEED * (1 +/- AGING VARIANCE)
         float qx,qy,qz,qw;    // orientation quaternion

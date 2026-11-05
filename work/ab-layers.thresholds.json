@@ -1,6 +1,7 @@
 {
   "schema": "xmb-per-layer-thresholds/1",
   "updated": "2026-11-02",
+  "revisionNote20261104g": "2026-11-04 particles: per-tick step back to DELTA TIME (the tick splats it into the kernel's +0x8b0 vector). Frame 19.58 -> 19.59. Named states not re-saved (shared tree). No budget or floor moved.",
   "revisionNote20261104f": "2026-11-04 particles: one kernel step per 60 Hz tick with the traced 1/60 step vector, 2048-record pool (births dropped when full), life-box deaths in the kernel. Frame 19.60 -> 19.58. Named states not re-saved (shared tree). No budget or floor moved.",
   "revisionNote20261104e": "2026-11-04 particles: LAMBERT/SPECULAR COEFF on the fpo's diffuse/tinted-specular terms (light pack rows 0/1 swapped), _Color back to its initialiser 1; the console's glint tail now matches. Frame 19.62 -> 19.60. Named states not re-saved (shared tree). No budget or floor moved.",
   "revisionNote20261104d": "2026-11-04 particles: the traced PPU emitter (FUN_0002dde4/FUN_00030b84) on the ribbon's 128x128 sheet, simulation in the particle camera world. Frame 19.62 unchanged. Named states not re-saved (shared tree carries another session's uncommitted work). No budget or floor moved.",
