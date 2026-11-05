@@ -55,6 +55,34 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-04: particle emitter traced (PPU births on the ribbon's 128 x 128 sheet)
+
+New dust is now born where and how the shell births it, traced through custom_render_plugin (the SPU kernel never
+spawns; `PARTICLES.md` 2026-10 notes assumed otherwise).
+- **Births (traced, `FUN_0002dde4`).** Once per 60 Hz frame one EMIT PROB draw gates the frame; a passing frame queues
+  int(EMIT PER FRAME) = 16 random cells (int(u (dimX - 1)), int(u (dimY - 1))) of the ribbon's 128 x 128 mesh
+  (`FUN_0002b288` hands ParticlesLayer the grid; the 0x80 x 0x80 constructor at 0x570c8). The truncation of 16.6539 is
+  inferred.
+- **Spawn (traced, `FUN_00030b84`).** At the cell's sheet point P, with V = frame displacement / DELTA TIME: nothing if
+  |V| < 1e-4; axis V/|V|, negated with EMIT NEG PROB; polar angle uniform in [0, EMIT CONE ANGLE] (not per solid angle)
+  in the frame (T, a x T), T the longest of a x the unit axes; the component along the camera axis scaled by EMIT VEL
+  ZSCALE (0) without renormalising; speed max(EMIT VEL MIN, sqrt(|V| EMIT VEL MUL (1 + r EMIT VEL VAR))); aging rate
+  max(0.001, AGING SPEED (1 + r AGING VARIANCE)). Imports resolved through the NID table: the PRNG returns (-1, 1],
+  `powf`(x, 0.5) is the square root, `_FSin` sel 0/1 sin/cos.
+- **World.** The simulation now runs in the particle camera's world (eye (0, 0, 2)): `Ribbon::sheetMotion` gives every
+  sheet point there (the spline of the camera-space lattice + (0, 0, 2)) and its velocity per second; the firmware vpo
+  reads the records directly, and the hand-written fallbacks map them back to their flat units.
+- **Not traced / approximated.** The sheet velocity is the move over the next cloth step of a copy of the cloth, not
+  the previous frame's displacement: a pinned first frame is the unstepped rest table (prev == pos), which would read
+  every point as still and birth nothing, while the console's sheet is always moving. Inside one catch-up all births
+  use the render-time sheet. The type 3 orientation command's pusher is not found, so a new particle keeps a random
+  quaternion. The pad-interaction producer (`FUN_0002dbf4`) is not ported.
+
+Result: 1531 live; speck histogram 24..64 bins 136/125/34 (console 128/140/26), the closest so far; the dust hugs and
+streams along the sheet. Gate: frame 19.62 (unchanged), other layers unchanged, 6/6; byte-stable. Named states not
+re-saved: the shared tree still carries another session's uncommitted view/shell/Steam work, which any build here
+includes.
+
 ## 2026-11-04: particle camera and life box (BackgroundView lookAt, the constant world box)
 
 The particle programs now run in the camera's own world, and the life box is applied.

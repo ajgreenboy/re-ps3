@@ -472,6 +472,60 @@ void Ribbon::advancePresets(double dt,double dayFraction) {
     current_=coldboot1_.mix(coldboot2_,w.toColdboot2).mix(clockPreset(dayFraction),w.toClock);
 }
 
+void Ribbon::sheetMotion(std::vector<QVector3D>& world,std::vector<QVector3D>& velocity,int& side) const {
+    side=0;world.clear();velocity.clear();
+    if(!ready_ || lastSeconds_<0)return;
+    const Preset& p=current_;
+    // Cloth::swell of a cloth state at the drawn blend.
+    const auto swellAt=[&](const Cloth& cloth,float acc){
+        std::array<QVector4D,points_> drawn{};
+        for(int i=0;i<points_;++i) {
+            const QVector4D l=cloth.prev[size_t(i)]*(1-acc)+cloth.pos[size_t(i)]*acc;
+            const float d=l.x()-p.ffdParam,s=std::clamp(d/5,0.f,1.f);
+            const float scale=1.3f-(d<0?1.f:std::cos(d*pi/2))*(1-s)*(1-s)*(1+2*s);
+            drawn[size_t(i)]=QVector4D(l.x(),l.y()*scale,l.z()*scale,1);
+        }
+        return drawn;
+    };
+    // splineSheet's FFD + camera + bicubic sheet, kept in camera space (the projection is linear in it, so the sheet of
+    // the camera-space lattice is the sheet splineSheet projects), then moved into the world.
+    QMatrix4x4 rotation;rotation.rotate(p.angle,p.axis);
+    const QVector3D eye=p.pos+QVector3D(0,0,-2),toWorld(0,0,2);
+    std::array<int,grid_> segment{};std::array<std::array<float,4>,grid_> value{};
+    for(int k=0;k<grid_;++k){segment[size_t(k)]=k/8;value[size_t(k)]=basis(float(k%8)*16/127.f);}
+    const auto sheet=[&](const std::array<QVector4D,points_>& drawn,std::vector<QVector3D>& out){
+        std::array<QVector3D,points_> view{};
+        for(int i=0;i<points_;++i) {
+            const QVector3D n=(drawn[size_t(i)].toVector3D()-p.offset)/p.scale1;
+            int cell[3];std::array<float,4> w[3];
+            for(int a=0;a<3;++a){const float s=std::clamp(n[a],0.f,.999f)*(a==0?8.f:4.f);cell[a]=int(s);w[a]=basis(s-float(cell[a]));}
+            QVector3D sum;
+            for(int a=0;a<4;++a)for(int b=0;b<4;++b)for(int c=0;c<4;++c)
+                sum+=deform_[size_t((cell[0]+a)+11*(cell[1]+b)+77*(cell[2]+c))].toVector3D()*(w[0][size_t(a)]*w[1][size_t(b)]*w[2][size_t(c)]);
+            view[size_t(i)]=rotation.map((n+sum)*p.scale2)+eye;
+        }
+        out.assign(size_t(grid_)*grid_,QVector3D());
+        for(int r=0;r<grid_;++r)for(int c=0;c<grid_;++c) {
+            QVector3D position;
+            const auto &bv=value[size_t(r)],&bu=value[size_t(c)];
+            for(int a=0;a<4;++a)for(int b=0;b<4;++b)
+                position+=view[size_t((segment[size_t(r)]+a)*side_+segment[size_t(c)]+b)]*(bv[size_t(a)]*bu[size_t(b)]);
+            out[size_t(r)*grid_+c]=position+toWorld;
+        }
+    };
+    // The velocity is the sheet's move over the next cloth step: a copy of the cloth is stepped once and drawn at the same
+    // blend. A finite difference against the previous step would read zero on a pinned first frame, where the cloth is
+    // still the rest table and has not stepped (prev == pos), while the console's sheet is always moving.
+    Cloth next=cloth_;
+    next.step(p);
+    std::vector<QVector3D> ahead;
+    sheet(swellAt(cloth_,cloth_.acc),world);
+    sheet(swellAt(next,cloth_.acc),ahead);
+    velocity.resize(world.size());
+    for(size_t i=0;i<world.size();++i)velocity[i]=(ahead[i]-world[i])*60.f; // one cloth step is 1/60 s
+    side=grid_;
+}
+
 std::vector<QVector3D> Ribbon::sheetSample(int stride,int& side) const {
     side=0;
     if(!ready_ || stride<1 || lastSeconds_<0)return {};

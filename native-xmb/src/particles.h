@@ -93,20 +93,21 @@ public:
     // PARTICLES.mnu GLOBAL ALPHA (_Transparency.y) during the cold boot: 0 until NormalBG2, then to 1.
     // The value is driven by View from the boot weights (RPCS3 capture), not read from the preset.
     void setGlobalAlpha(float alpha) { globalAlpha_=alpha; }
-    // The emitter: points on the ribbon sheet as (ndc x, ndc y, camera depth), side x side, row-major
-    // (Ribbon::sheetSample). New dust is born on the sheet between four neighbouring points. Empty = the
-    // fitted box below (no ribbon).
-    void setEmitter(std::vector<QVector3D> points,int side) { emitter_=std::move(points);emitterSide_=side; }
+    // The emitter grid (Ribbon::sheetMotion): side x side sheet points in the particle camera's world and their
+    // velocities in world units per second, row-major. Dust is born at grid points as the plugin's FUN_0002dde4 /
+    // FUN_00030b84 do (see spawnFromGrid). Empty = the fitted box (no ribbon).
+    void setEmitter(std::vector<QVector3D> points,std::vector<QVector3D> velocities,int side) {
+        emitter_=std::move(points);emitterVelocity_=std::move(velocities);emitterSide_=side;
+    }
     // Simulation state, for determinism logging (XMB_PARTICLE_LOG) and the audit's parity table.
     int liveCount() const { return live_; }
     long long stepIndex() const { return step_; }
 private:
-    // One SPU record: position, velocity, life, orientation. Units are world units, where the
-    // viewport is kScreenHeight tall (PARTICLES.mnu's SIZE MIDDLE then lands at ~2.6 px at 1080p
-    // before the fitted size gain, matching the reference captures).
+    // One SPU record: position, velocity, life, orientation, in the particle camera's world (BackgroundView: eye
+    // (0, 0, 2) looking down -z, fovy 53).
     struct Particle {
         float px,py,pz;       // centre position (world units; z is negative, away from the camera)
-        float vx,vy,vz;       // velocity, world units per DELTA TIME step
+        float vx,vy,vz;       // velocity, world units per second (the kernel adds vel x DELTA TIME per step)
         float age;            // life fraction, 0..1
         float ageRate;        // age increment per step = AGING SPEED * (1 +/- AGING VARIANCE)
         float qx,qy,qz,qw;    // orientation quaternion
@@ -186,7 +187,9 @@ private:
     double dayFraction() const;
     void resetSimulation();
     void step();
-    void spawnParticle();
+    void spawnFromGrid(int column,int row);
+    void spawnInBox();
+    void orientParticle(Particle& p);
     float random(); // Park-Miller 16807 mod 2^31-1, the firmware's RNG
     unsigned stateChecksum() const;
     // Steps up to `seconds` and refreshes the VBO when the state changed. Both passes share it.
@@ -219,7 +222,7 @@ private:
     float spawnAccumulator_=0;
     float aspect_=16.f/9.f;
     float globalAlpha_=1;
-    std::vector<QVector3D> emitter_;
+    std::vector<QVector3D> emitter_,emitterVelocity_;
     int emitterSide_=0;
     // The reader's values: the base physics block, the base look, the four theme looks and the
     // blended look the shaders get.

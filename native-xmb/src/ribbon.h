@@ -40,6 +40,11 @@ public:
     // The drawn sheet after the last render, every stride-th vertex of the 128x128 grid in both directions:
     // (ndc x, ndc y, camera depth w), row-major, side x side points. Empty before the first render.
     std::vector<QVector3D> sheetSample(int stride,int& side) const;
+    // The particle emitter's grid (custom_render_plugin FUN_0002b288 hands ParticlesLayer the 128 x 128 mesh): every
+    // sheet point in the particle camera's world (camera space + (0, 0, 2), the BackgroundView eye) and its velocity
+    // in world units per second, over the cloth's next step (one step = 1/60 s). side = 0 before the
+    // first render.
+    void sheetMotion(std::vector<QVector3D>& world,std::vector<QVector3D>& velocity,int& side) const;
     // LINE1.mnu, the values the cloth and the spline task read.
     struct Preset {
         float damping=.0001f,length=.306001f,tension=.25f,timestep=2,perturbation=.0998587f,endY=.4f,endZ=.2f,ffdParam=-1.33509f;
