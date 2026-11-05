@@ -1233,3 +1233,31 @@ dust that drifted there (~13 px/s over a ~6 s life is ~80 px): they are born the
 leads: where on the sheet the console's grid cells land (the faint upper fold of the sheet above the bright band;
 the native's birth footprint per cell is uniform in (u, v) of the 128 x 128 grid), and the type 3 birth command,
 which writes the +0x10 quad and is not ported. No code change.
+
+## The d-pad wind, 2026-11-04
+
+PARTICLES_UI.mnu's d-pad wind is ported (traced through custom_render_plugin by a read-only subagent); the shake and
+icon-wind halves are not, because this build has no input for them.
+- **D-pad rotation (traced, FUN_0002d02c).** The plugin's direction state (layer+0x1c0: 0 left, 1 right, 2 up, 3
+  down, 4 idle) sets R = (DPAD SCALE Y x -dy, DPAD SCALE X x dx, 0) in the camera's view basis and adds 0.03 per tick
+  to a smoother v' = 0.98 v + input, gain g = clamp(v', 0, 1). The kernel rotates every particle about the pivot
+  eye - 2 normalize(eye - centre) = (0, 0, 0) by DPAD ROT MAX x g x |R| (below 1e-5 rad: identity) and adds the
+  rotated point's offset / DELTA TIME to its velocity (particles.elf 0x7040-0x7064). With DPAD SCALE Y 0, up/down do
+  nothing. The direction table's signs (data 0x93ea0) and "release sets idle" (the external writer of layer+0x1c0
+  is not found) are inferred.
+- **Brownian boost (traced, FUN_00031494).** Kernel Brownian = BROWNIAN SCALE + PARTICLES_UI BROWNIAN (0.60) x a
+  damped excitation level (v' = 0.6 v - 0.004 x + input, x' = x + v', clamp 0..1) that the d-pad drives by
+  0.04 |Rx + Ry + Rz| per active tick. RSHAKE BRW x the sixaxis history step is not ported (no sensor data in pad.cpp).
+- **Not ported.** The dshake/rshake trackers (sixaxis), the icon wind (FUN_0002f90c writes ICON WIND x the delta of an
+  unidentified normalised-screen vector into the 32 x 16 flow field, which otherwise stays 0 and decays x 0.98 per
+  tick), and the M94/M95 flow-field transforms.
+- **Native input.** `View::pollController` passes the held D-pad (pad, keyboard arrows, left stick) every frame;
+  a scripted arrow tap is one active tick. New script verb `hold=<KEY>@<ms>` (main.cpp) presses a key through the
+  real held path and releases it after ms.
+- **Measured.** A 25 ms tap is below the rotation threshold on both sides: the console's right1 burst (RIGHT at
+  540 ms, 25 ms hold) shows no drift change (mean vx 1.0 before, -0.6..1.4 px/s after), and neither does a native
+  scripted tap (-2.3 vs -2.4..-2.9). A native 400 ms RIGHT hold moves the dust: speck speed p50 54 px/s and mean vx
+  -33 px/s at 560..840 ms, decaying after the release. The direction (dust left on RIGHT) is not yet checked
+  against a console hold; that needs an RPCS3 burst with a held key (the global input map swap needs approval).
+
+Gate: unchanged (pinned captures take no input), 6/6, byte-stable.

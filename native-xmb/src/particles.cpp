@@ -8,6 +8,7 @@
 #include <QElapsedTimer>
 #include <QImage>
 #include <QMatrix4x4>
+#include <QtMath>
 #include <QStringList>
 #include <algorithm>
 #include <cmath>
@@ -309,6 +310,9 @@ void Particles::resetSimulation() {
     live_=0;
     step_=0;
     seed_=kSeed;
+    padRotation_=QVector3D();
+    padGustVelocity_=padGain_=0;
+    excitePosition_=exciteVelocity_=exciteLevel_=0;
     std::fill(pool_.begin(),pool_.end(),Particle{});
 }
 
@@ -387,6 +391,19 @@ void Particles::loadMaterials(Assets& assets) {
             qWarning()<<"particles: EMIT VEL ZSCALE"<<physics_.emitVelZScale<<"is not ported; the cone stays flat";
         for(const auto& [key,member]:lookKeys())lookBase_.*member=float(base.number(QString::fromLatin1(key),lookBase_.*member));
         materialsLoaded_=true;
+    }
+    // PARTICLES_UI.mnu: the input wind's keys (the d-pad rotation and the brownian boost it excites).
+    if(const Materials::Mnu& ui=materials.particlesUi();ui.ok) {
+        ++files;
+        const auto key=[&](const char* name,float& out){out=float(ui.number(QString::fromLatin1(name),out));};
+        key("brownian",physics_.uiBrownian);
+        key("dpad rot max",physics_.dpadRotMax);
+        key("dpad scale x",physics_.dpadScaleX);
+        key("dpad scale y",physics_.dpadScaleY);
+    } else {
+        qWarning().noquote()<<"particles: PARTICLES_UI.mnu unavailable; the d-pad wind uses the 4.93 fallbacks";
+    }
+    if(base.ok) {
     } else {
         qWarning().noquote()<<"particles: PARTICLES.mnu unavailable ("<<base.source()<<base.error
                            <<"); using the compiled fallbacks from PARTICLES.mnu 4.93";
@@ -533,13 +550,49 @@ void Particles::step() {
     // pivot impulse (0x7064, M92 identity without pad input), the constant acceleration V890 (layer+0x680, never
     // written) and the flow field (gated by WIND SCALE 0).
     const float dt=float(physics_.deltaTime);
+    // The input wind, once per tick before the kernel (FUN_0002d02c, FUN_00031494). [TRACED unless marked]
+    // A pressed direction (dx, dy) sets the rotation vector R = (SCALE Y * -dy, SCALE X * dx, 0) - in the particle
+    // camera's view basis, which is the world basis here (the lookAt runs down -z with y up) - and adds 0.03 to the
+    // gust smoother and 0.04 |Rx + Ry + Rz| to the brownian excitation. The direction table's signs (data 0x93ea0)
+    // are read as left (-1, 0), right (1, 0), up (0, 1), down (0, -1). [INFERRED signs]
+    const int pad=padHeld_!=4?padHeld_:padTap_;
+    padTap_=4;
+    float gustInput=0.f,exciteInput=0.f;
+    if(pad>=0 && pad<4) {
+        static constexpr float kDirection[4][2]={{-1.f,0.f},{1.f,0.f},{0.f,1.f},{0.f,-1.f}};
+        const float dx=kDirection[pad][0],dy=kDirection[pad][1];
+        padRotation_=QVector3D(physics_.dpadScaleY*-dy,physics_.dpadScaleX*dx,0.f);
+        gustInput=0.03f;
+        exciteInput=0.04f*std::abs(padRotation_.x()+padRotation_.y()+padRotation_.z());
+    }
+    padGustVelocity_=0.98f*padGustVelocity_+gustInput;
+    padGain_=std::clamp(padGustVelocity_,0.f,1.f);
+    // Brownian excitation: v' = 0.6 v - 0.004 x + input, x' = x + v' (data 0x92444 / 0x92448), level clamp(x', 0, 1);
+    // the kernel's Brownian scale is BROWNIAN SCALE + PARTICLES_UI BROWNIAN x level (+ RSHAKE BRW x the sixaxis
+    // history step, which this build has no sensor for).
+    exciteVelocity_=0.6f*exciteVelocity_-0.004f*excitePosition_+exciteInput;
+    excitePosition_+=exciteVelocity_;
+    exciteLevel_=std::clamp(excitePosition_,0.f,1.f);
+    // The rotation M92 = rot(v / |v|, |v|) with v = DPAD ROT MAX x g x R, about the pivot eye - 2 normalize(eye -
+    // centre) = (0, 0, 0); below 1e-5 it is the identity. The kernel adds the rotated point's offset / dt to each
+    // velocity (particles.elf 0x7040-0x7064).
+    const QVector3D spin=physics_.dpadRotMax*padGain_*padRotation_;
+    const float angle=spin.length();
+    const bool rotating=angle>=1e-5f;
+    const QVector3D pivot=kCameraEye-2.f*(kCameraEye-QVector3D(0,0,-7)).normalized();
+    QMatrix4x4 rotation;
+    if(rotating)rotation.rotate(qRadiansToDegrees(angle),spin/angle);
     const float drag=1.f-physics_.friction*dt;
-    const float kick=physics_.brownian*dt;
+    const float kick=(physics_.brownian+physics_.uiBrownian*exciteLevel_)*dt;
     // Quaternion spin: q = spinStep * q, SPIN TIME SCALE radians per second.
     const float halfSpin=.5f*physics_.spinTimeScale*kSpinStep;
     const float spinC=std::cos(halfSpin),spinS=std::sin(halfSpin);
     for(int i=live_-1;i>=0;--i) {
         Particle& p=pool_[size_t(i)];
+        if(rotating) {
+            const QVector3D P(p.px,p.py,p.pz),turned=pivot+rotation.map(P-pivot),impulse=(turned-P)/dt;
+            p.vx+=impulse.x();p.vy+=impulse.y();p.vz+=impulse.z();
+        }
         // Brownian velocity kick, one RNG draw per axis (audit 3.3), gravity and friction, all scaled by dt.
         p.vx+=kick*(2.f*random()-1.f);
         p.vy+=kick*(2.f*random()-1.f)+physics_.gravity*dt;

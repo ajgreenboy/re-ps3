@@ -36,7 +36,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 |---|---|
 | Background, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs |
 | Ribbon | Ported end to end (2026-10-25): plugin cloth, ffd_shader1 lattice, spline.elf FFD/camera/bicubic sheet, each stage matched to RPCS3 captures; LINE1 presets follow the plugin's clock keyframes and boot schedule (audit/PIPELINE.md "Ribbon port", "Ribbon presets") |
-| Particles | Firmware pool port (2026-10-26): the SPU `particles.elf` simulation with PARTICLES.mnu physics at the 8.8883 ms step, a 1536-record pool and the 48-byte vertex format, drawn additively into the HDR scene before the tone map plus a second draw into the glare source; deterministic from `--render-clock` (audit/PARTICLES.md) |
+| Particles | Firmware programs and simulation (2026-11-04): particles_quads/particles_second with traced uniforms, the SPU kernel stepped once per 60 Hz tick by DELTA TIME into a 2048-record pool, births on the ribbon's 128 x 128 sheet (traced PPU emitter), life-box deaths, the PARTICLES_UI d-pad wind; deterministic from `--render-clock`. Open: the dust's vertical placement, shake/icon wind (audit/PARTICLES.md) |
 | Category icons | All built-in colours use an opaque normal-map material; Original follows the firmware monthly palette. Six day/night pairs verified; firmware shader remains diagnostic. See audit/CATEGORY-ICON-FIX.md; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | `icontex` item icons and settings bullets draw through `IconRenderer` (firmware vertex program, opaque normal-map material) - sizes 77.616/184.800 and 35.721/85.050, pitch 80, brightness 1.0/0.247/0.698 confirmed against decoded RSX captures (audit/ITEM-ICONS.md); labels, dialogs, the info bar, the options panel and the OSK draw through the GL glyph atlas with Qt shaping, and only RCO/artwork/theme icons remain QPainter |
 | Text | Original font faces rasterized with FreeType and recovered load flags 10 into the 2x GL atlas; label glow/idle fade are MaXMB observations; PAF metrics, per-style weight/slant and full parity remain open (audit/FONT-MATCHING.md). Per-phase glyph coverage landed 2026-10-26 as a labelled fit (audit/TEXT-RASTER.md 2.4) |
@@ -54,6 +54,34 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - Third-party code (MaXMB, DeckyXMB, linkev/PlayStation-3-XMB) is credited in `THIRD-PARTY.md`.
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
+
+## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
+
+PARTICLES_UI.mnu's d-pad wind is ported (traced through custom_render_plugin by a read-only subagent); the shake and
+icon-wind halves are not, because this build has no input for them.
+- **D-pad rotation (traced, FUN_0002d02c).** The plugin's direction state (layer+0x1c0: 0 left, 1 right, 2 up, 3
+  down, 4 idle) sets R = (DPAD SCALE Y x -dy, DPAD SCALE X x dx, 0) in the camera's view basis and adds 0.03 per tick
+  to a smoother v' = 0.98 v + input, gain g = clamp(v', 0, 1). The kernel rotates every particle about the pivot
+  eye - 2 normalize(eye - centre) = (0, 0, 0) by DPAD ROT MAX x g x |R| (below 1e-5 rad: identity) and adds the
+  rotated point's offset / DELTA TIME to its velocity (particles.elf 0x7040-0x7064). With DPAD SCALE Y 0, up/down do
+  nothing. The direction table's signs (data 0x93ea0) and "release sets idle" (the external writer of layer+0x1c0
+  is not found) are inferred.
+- **Brownian boost (traced, FUN_00031494).** Kernel Brownian = BROWNIAN SCALE + PARTICLES_UI BROWNIAN (0.60) x a
+  damped excitation level (v' = 0.6 v - 0.004 x + input, x' = x + v', clamp 0..1) that the d-pad drives by
+  0.04 |Rx + Ry + Rz| per active tick. RSHAKE BRW x the sixaxis history step is not ported (no sensor data in pad.cpp).
+- **Not ported.** The dshake/rshake trackers (sixaxis), the icon wind (FUN_0002f90c writes ICON WIND x the delta of an
+  unidentified normalised-screen vector into the 32 x 16 flow field, which otherwise stays 0 and decays x 0.98 per
+  tick), and the M94/M95 flow-field transforms.
+- **Native input.** `View::pollController` passes the held D-pad (pad, keyboard arrows, left stick) every frame;
+  a scripted arrow tap is one active tick. New script verb `hold=<KEY>@<ms>` (main.cpp) presses a key through the
+  real held path and releases it after ms.
+- **Measured.** A 25 ms tap is below the rotation threshold on both sides: the console's right1 burst (RIGHT at
+  540 ms, 25 ms hold) shows no drift change (mean vx 1.0 before, -0.6..1.4 px/s after), and neither does a native
+  scripted tap (-2.3 vs -2.4..-2.9). A native 400 ms RIGHT hold moves the dust: speck speed p50 54 px/s and mean vx
+  -33 px/s at 560..840 ms, decaying after the release. The direction (dust left on RIGHT) is not yet checked
+  against a console hold; that needs an RPCS3 burst with a held key (the global input map swap needs approval).
+
+Gate: unchanged (pinned captures take no input), 6/6, byte-stable.
 
 ## 2026-11-04: particle speed measured (console bursts vs native live bursts)
 

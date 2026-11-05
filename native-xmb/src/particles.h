@@ -55,9 +55,9 @@ void logSceneReader(const char* where);
 // firmware's own data, never a copied table). The look keys (SIZE MIDDLE/FAR, NEAR/FAR FOCUS, GLARE,
 // GLARE SCALE/P1/P2) are read from the theme override the background clock schedules - night, yoake,
 // day and higure, blended on the plugin's own keyframe table (FUN_00011600) - because those four are
-// the only presets this build ever schedules. PARTICLES_SPE.mnu (the playback variant) and
-// PARTICLES_UI.mnu (input gusts) are documented but not applied; audit/PARTICLES.md says exactly when
-// they apply and why this build never reaches them.
+// the only presets this build ever schedules. PARTICLES_SPE.mnu (the playback variant) is documented but
+// not applied (audit/PARTICLES.md). PARTICLES_UI.mnu's d-pad wind is applied (setPadDirection); its sixaxis
+// shake terms and the icon wind into the flow field have no input in this build and are not.
 //
 // Determinism: every random number comes from the firmware's Park-Miller generator seeded with
 // kSeed, and the simulation state is a pure function of the elapsed seconds passed to render(). No
@@ -99,6 +99,12 @@ public:
     void setEmitter(std::vector<QVector3D> points,std::vector<QVector3D> velocities,int side) {
         emitter_=std::move(points);emitterVelocity_=std::move(velocities);emitterSide_=side;
     }
+    // The d-pad as the plugin's direction state (layer+0x1c0): 0 left, 1 right, 2 up, 3 down, 4 idle. setPadDirection
+    // is the held state, polled every frame; tapPadDirection latches one active tick for a press that is released
+    // before the next tick (a scripted key tap). Pinned captures take no steps after their first frame, so neither
+    // reaches a --render-clock capture.
+    void setPadDirection(int state) { padHeld_=state; }
+    void tapPadDirection(int state) { padTap_=state; }
     // Simulation state, for determinism logging (XMB_PARTICLE_LOG) and the audit's parity table.
     int liveCount() const { return live_; }
     long long stepIndex() const { return step_; }
@@ -140,6 +146,11 @@ private:
         float gravity=-6.8e-5f;         // fallback: gravity
         float brownian=0.225311f;       // fallback: brownian scale
         float spinTimeScale=2.74f;      // fallback: spin time scale
+        // PARTICLES_UI.mnu, the input wind (sim+0x1360 +0xe8.. in the menu's key order).
+        float uiBrownian=0.60f;         // fallback: PARTICLES_UI brownian
+        float dpadRotMax=0.000116654f;  // fallback: PARTICLES_UI dpad rot max
+        float dpadScaleX=1.f;           // fallback: PARTICLES_UI dpad scale x
+        float dpadScaleY=0.f;           // fallback: PARTICLES_UI dpad scale y
     };
     // PARTICLES.mnu's look block. These are the base-file values; the four theme overrides replace
     // them per key (day/night/yoake/higure) and the plugin's clock keyframes blend the result.
@@ -221,6 +232,13 @@ private:
     unsigned int seed_=0;
     float aspect_=16.f/9.f;
     float globalAlpha_=1;
+    // Input wind state (FUN_0002d02c / FUN_00031494): the held and tapped d-pad, the last direction's rotation
+    // vector (layer+0x1b0), the gust smoother (layer+0x19c, g = layer+0x194) and the brownian excitation
+    // oscillator (layer+0x1d8 / +0x1dc, level layer+0x1d4).
+    int padHeld_=4,padTap_=4;
+    QVector3D padRotation_;
+    float padGustVelocity_=0,padGain_=0;
+    float excitePosition_=0,exciteVelocity_=0,exciteLevel_=0;
     std::vector<QVector3D> emitter_,emitterVelocity_;
     int emitterSide_=0;
     // The reader's values: the base physics block, the base look, the four theme looks and the
