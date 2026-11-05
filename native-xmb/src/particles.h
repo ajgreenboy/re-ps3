@@ -56,8 +56,9 @@ void logSceneReader(const char* where);
 // GLARE SCALE/P1/P2) are read from the theme override the background clock schedules - night, yoake,
 // day and higure, blended on the plugin's own keyframe table (FUN_00011600) - because those four are
 // the only presets this build ever schedules. PARTICLES_SPE.mnu (the playback variant) is documented but
-// not applied (audit/PARTICLES.md). PARTICLES_UI.mnu's d-pad wind is applied (setPadDirection); its sixaxis
-// shake terms and the icon wind into the flow field have no input in this build and are not.
+// not applied (audit/PARTICLES.md). PARTICLES_UI.mnu's d-pad wind is ported but not fed: a console burst with a
+// held, navigating d-pad shows no gust (audit/PARTICLES.md), so what sets layer+0x1c0 is unknown. Its sixaxis
+// shake terms and the icon wind into the flow field have no input in this build and are not applied.
 //
 // Determinism: every random number comes from the firmware's Park-Miller generator seeded with
 // kSeed, and the simulation state is a pure function of the elapsed seconds passed to render(). No
@@ -102,7 +103,7 @@ public:
     // The d-pad as the plugin's direction state (layer+0x1c0): 0 left, 1 right, 2 up, 3 down, 4 idle. setPadDirection
     // is the held state, polled every frame; tapPadDirection latches one active tick for a press that is released
     // before the next tick (a scripted key tap). Pinned captures take no steps after their first frame, so neither
-    // reaches a --render-clock capture.
+    // reaches a --render-clock capture. Nothing calls them: the console does not gust on a navigating d-pad hold.
     void setPadDirection(int state) { padHeld_=state; }
     void tapPadDirection(int state) { padTap_=state; }
     // Simulation state, for determinism logging (XMB_PARTICLE_LOG) and the audit's parity table.

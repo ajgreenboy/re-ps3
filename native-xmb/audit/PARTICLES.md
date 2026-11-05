@@ -1261,3 +1261,20 @@ icon-wind halves are not, because this build has no input for them.
   against a console hold; that needs an RPCS3 burst with a held key (the global input map swap needs approval).
 
 Gate: unchanged (pinned captures take no input), 6/6, byte-stable.
+
+## Console held d-pad, 2026-11-05
+
+The direction check above was run and found no wind at all on the console. RPCS3 capture rig, held RIGHT then LEFT
+for 400 ms each (key down at ~500 ms) from the Game column, burst crop y 180..860 at 89 fps, `speed.ts --gap 100`:
+
+| window (ms) | RIGHT hold p50 / vx | LEFT hold p50 / vx | idle p50 / vx | native (old feed) RIGHT p50 / vx |
+|---|---|---|---|---|
+| 0..480 | 10 / -0.6 | 10 / +1.8 | 19 / +0.7 | 9 / -3.1 |
+| 560..900 | 10 / +1.3 | 10 / +1.6 | 19 / +0.2 | 50 / -31.2 |
+| 900..1300 | 13 / +0.4 | 10 / +1.2 | 14 / -0.2 | decaying |
+
+Both holds navigated (RIGHT auto-repeated Game -> Friends, LEFT returned), so the pad reached the vsh; the dust
+did not move. A navigating d-pad hold therefore does not set the plugin's direction state (layer+0x1c0), and the
+inferred "View's held d-pad = direction state" link was wrong. The feed calls in `View` are removed; the traced
+kernel path (rotation impulse, Brownian boost) is kept and stays idle (state 4). Native after the change, same
+400 ms RIGHT hold: p50 10 px/s, vx -2.8 at 560..840 ms. Open: the writer of layer+0x1c0.
