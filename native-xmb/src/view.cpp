@@ -211,30 +211,30 @@ void View::PafEase::retarget(double target,double milliseconds,int mode,double d
         static constexpr double shortK[4]={.9615385,.78125,.6369426,.5291005};
         k_=frames<=4?shortK[frames-1]:1./((frames-5)*.333333+2.2);growth_=1.000001;
     }
-    duration_=frames/60.*.999999;
     // paf has no start delay; the options panel's entrance is measured with one (UI-ELEMENT O6), so the ease
     // holds its start value for delayMilliseconds and then runs the same 60 Hz curve. 0 everywhere else.
-    // duration_ and elapsed_ are in seconds, so the delay is converted here once.
+    // elapsed_ is in seconds, so the delay is converted here once.
     delay_=std::max(0.,delayMilliseconds)*.001;
     from_=value;to_=target;progress_=0;elapsed_=0;running_=true;
 }
 void View::PafEase::advance(double seconds) {
     if(!running_)return;
-    // FUN_00398748 modes 4/5: each canonical frame steps v = ((1-v) k + v) x growth.
+    // FUN_00398748 modes 4/5 -> FUN_00398540: each canonical frame steps v = ((1-v) k + v) x growth from the stored
+    // progress (FUN_003984f8), ignoring the elapsed-time argument. The animation ends only when v >= 1.0 (the float
+    // test at 0x3988f0): there is no landing at the duration, which only chose k. A 200 ms mode-5 move is 95% done at
+    // its 12th frame and reaches 1 at about frame 50; its last pixels decay instead of snapping (PAGE-MOVE, 2026-11-05).
     const auto step=[&](double v){return std::min(1.,((1.-v)*k_+v)*growth_);};
     // Sample the canonical 60 Hz curve at total elapsed time. Mutating the state with each fractional host tick
     // changes the curve at 120/240 Hz. Interpolation preserves its integer-frame values while allowing smooth
-    // host refresh rates; the firmware's duration-end landing and retarget-from-current-value are retained.
+    // host refresh rates; retarget-from-current-value is retained.
     elapsed_+=std::max(0.,seconds);
     const double active=elapsed_-delay_;   // negative while the measured start offset is still running
     if(active<=0.){value=from_;return;}
-    if(active>=duration_){progress_=1;running_=false;}
-    else {
-        const double frames=active*60;const int whole=int(frames);const double fraction=frames-whole;
-        progress_=0;
-        for(int i=0;i<whole;++i)progress_=step(progress_);
-        progress_+=(step(progress_)-progress_)*fraction;
-    }
+    const double frames=active*60;const int whole=int(frames);const double fraction=frames-whole;
+    progress_=0;
+    for(int i=0;i<whole && progress_<1.;++i)progress_=step(progress_);
+    if(progress_>=1.){progress_=1;running_=false;}
+    else progress_+=(step(progress_)-progress_)*fraction;
     value=from_+(to_-from_)*progress_;
 }
 void View::syncColumns() {

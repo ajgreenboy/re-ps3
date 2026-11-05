@@ -1988,3 +1988,45 @@ page-open,page-close}\` (the final captures), `cat-right|cat-left|page-open|page
 `optclose-final\`, `os-{0,1,2}-final\`, `base-cat\`, `pclose-before\`, `cr10-{1,2,3}\` (the burst
 captures), `gate-certified.log`, `certdet1\`, `certdet2\`.
 
+---
+
+# Phase 2026-11-05: paf's ease has no duration landing; the open hop is closed
+
+## 1. Traced (read-only Sonnet subagent, checked here by listing vsh.elf)
+
+- **No landing at the duration.** `FUN_00398748` dispatches mode-1 through a 5-entry table; modes 4 and 5 both go to
+  `FUN_00398540`, which ignores the elapsed-time argument: it reads the stored progress (`state+0x10`), applies
+  `FUN_003984f8` - p' = (p + (1-p) k) x growth (1.0001 mode 4 / 1.000001 mode 5, data 0x68eb70/0x68eb74) - once per
+  call (count from the global at 0x6fb1f4 = 1.0, with a fractional extra step only above 0.05), and returns it. The
+  advance routine stores the result and ends the animation only when p >= 1.0 (`fcmpu` at 0x3988f8, data 0x68eb9c).
+  The duration enters only through k. Listed here: 0x398748..0x3987dc, 0x3984f8..0x398600, 0x3987dc..0x398960.
+- **The open hop of section 9 is closed: 5 is the mode.** 0x63D40C is an entry in a 973-entry OPD array, not a
+  vtable. PhXmBar's vtable (0x6C7B88) slot +0x13C is 0x3AF900, which routes by property id into 0x39F2F0 / 0x3EE86C;
+  both pass the wrapper's `li r7,5` on as r7 of 0x399E08, which reaches the ease setup 0x3981EC as r4 (= mode, into
+  state+0x20) via 0x3766A0 `or r4,r6,r6`.
+- **Mode 4 calls do exist** (the "no mode-4 call" of 14.1 held only for vsh.elf): xmb_plugin `FUN_00002838`
+  0x3098 (mode 4, 360 ms, 24 ms delay, property 0x100000C), explore_plugin's page controller (vtable 0x27B500,
+  0x5B044 / 0x5B0A4 / 0x5B5D4 mode 4 at f1 or 1.2 f1, f1 = 200 or 160), and explore_plugin 0x30A8C (mode 4 at
+  300 ms + a stagger). Which one moves the page's own icon (the 262 px slide) is not resolved: the branch bits at
+  this+0x54 and f29 at 0x30DC8 need a runtime trace (log r4/f1/f2 at 0x3981EC during one Cross press).
+
+## 2. What changed
+
+`View::PafEase::advance` no longer snaps to the target when the frame-snapped duration ends; it steps the curve until
+the value reaches 1 (`src/view.cpp`, `src/view.h`). The duration still picks k. `--motion-report` at 60 Hz:
+mode 5 / 200 ms is 0.950 at 200 ms and 0.989 at 300 ms (was 1.000 at 200 ms); mode 4 / 300 ms is 0.954 / 0.991.
+
+Category move (RIGHT), category-row shift against the settled frame (column-luma cross-correlation, px):
+
+| ms after key | console `navmove/right1` | native now | native before |
+|---:|---:|---:|---:|
+| ~200 | -8.0 | -9.4 | 0 (snapped from about -9) |
+| ~300 | -1.6 | -2.2 | 0 |
+| ~350 | -0.7 | -1.1 | 0 |
+| ~450 | -0.1 | -0.2 | 0 |
+
+The departing column's cross-fade likewise keeps a faint ghost past 200 ms, as the console's frame at +214 ms shows
+(its "www" glyph left of the entering icon). This also answers 14.1's open question: the burst's 18 distinct steps
+at 0.762/frame with no snap at 200 ms are the mode-5 tail itself, so they no longer argue for a second, slower
+channel. Without the snap, 200 ms mode 5 and 300 ms mode 4 are within 0.5% at every time, so the page content's
+pair stays as it is (`pageMilliseconds` 300, mode 4) until the call above is pinned. Gate 19.59, 6/6, unchanged.
