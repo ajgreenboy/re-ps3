@@ -50,6 +50,51 @@ if(MSVC)
     target_link_libraries(re-ps3-native PRIVATE dbghelp)
 endif()
 
+# XMB Manager: the standalone companion tool (CLI + Qt UI). It shares the
+# output directory with re-ps3-native, so windeployqt's Qt runtime deployment
+# for the main executable also serves xmb-manager.exe. The manager never
+# depends on firmware and writes only to its own data directory.
+qt_add_executable(xmb-manager
+    manager/manager_main.cpp
+    manager/manager_core.cpp manager/manager_core.h
+    manager/manager_emulators.cpp manager/manager_emulators.h
+    manager/manager_scanner.cpp manager/manager_scanner.h
+    manager/manager_package.cpp manager/manager_package.h
+    manager/manager_cli.cpp manager/manager_cli.h
+    manager/manager_ui.cpp manager/manager_ui.h
+    src/content_registry.cpp src/content_registry.h
+)
+target_include_directories(xmb-manager PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/manager)
+target_link_libraries(xmb-manager PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
+if(MSVC)
+    target_compile_options(xmb-manager PRIVATE /W4 /permissive- /utf-8 /Zi)
+    target_link_options(xmb-manager PRIVATE /DEBUG /OPT:REF /OPT:ICF)
+    target_link_libraries(xmb-manager PRIVATE dbghelp)
+endif()
+
+# Optional headless test runner for the manager core (fixtures + CLI verbs).
+# Off by default so a normal build stays exactly the shipped targets.
+option(XMB_MANAGER_BUILD_TESTS "Build the XMB Manager test runner" OFF)
+if(XMB_MANAGER_BUILD_TESTS)
+    qt_add_executable(xmb-manager-tests
+        manager/tests/manager_tests.cpp
+        manager/manager_core.cpp manager/manager_core.h
+        manager/manager_emulators.cpp manager/manager_emulators.h
+        manager/manager_scanner.cpp manager/manager_scanner.h
+        manager/manager_package.cpp manager/manager_package.h
+        src/content_registry.cpp src/content_registry.h
+    )
+    target_include_directories(xmb-manager-tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/manager)
+    target_link_libraries(xmb-manager-tests PRIVATE Qt6::Gui Qt6::Core)
+    if(MSVC)
+        target_compile_options(xmb-manager-tests PRIVATE /W4 /permissive- /utf-8)
+    endif()
+endif()
+
 # Optional logged-in Steam client helper. SDK headers stay external; no Steam DLL is redistributed.
 set(XMB_STEAMWORKS_HEADERS "" CACHE PATH "Steamworks public header directory containing isteamclient.h")
 if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND XMB_STEAMWORKS_HEADERS)
