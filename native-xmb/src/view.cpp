@@ -3049,6 +3049,8 @@ quint16 arrowBit(int key) {
 }
 void View::replayKeyTap(int key) {
     QScopedValueRollback<bool> replay(replayingInput_,true);
+    // A scripted arrow tap is pressed and released inside one frame: it reaches the particles' d-pad wind as one tick.
+    if(const auto bit=arrowBit(key))particles_.tapPadDirection(bit==0x0004?0:bit==0x0008?1:bit==0x0001?2:3);
     QKeyEvent press(QEvent::KeyPress,key,Qt::NoModifier);keyPressEvent(&press);
     QKeyEvent release(QEvent::KeyRelease,key,Qt::NoModifier);keyReleaseEvent(&release);
 }
@@ -3330,7 +3332,7 @@ void View::focusOutEvent(QFocusEvent* e) {
 }
 void View::pollController() {
 #ifdef Q_OS_WIN
-    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;triggerHeld_=false;return;}
+    if(!xmbOwnsForeground() || QApplication::activeModalWidget()){buttons_=keyHeld_=keyPressed_=0;triggerHeld_=false;particles_.setPadDirection(4);return;}
     // A --script run is the script's own input: every scripted key goes through replayKeyTap, which dispatches the
     // same handlers the pad drives. A physical controller is therefore not read at all, so a capture cannot depend
     // on a pad lying on its d-pad (which used to walk the keyboard focus off the default key between two grabs).
@@ -3342,6 +3344,8 @@ void View::pollController() {
     // PS is consumed by the global watcher (ps_watcher.cpp), which also covers a focused game; it must
     // never reach the XMB navigation bits below.
     buttons=quint16(buttons&~0x400);
+    // The particles' d-pad wind reads the held direction (the plugin's layer+0x1c0 state), whatever owns navigation.
+    particles_.setPadDirection(buttons&0x0004?0:buttons&0x0008?1:buttons&0x0001?2:buttons&0x0002?3:4);
     // L2/R2 are analog triggers rather than D-pad bits: they are read here and never merged into `buttons`,
     // so a held trigger cannot move the XMB, cannot press Cross, and cannot disturb repeatAt_. Both the pad's
     // own report (pad.cpp l2/r2) and an XInput pad's triggers feed the same ramp; whichever is pressed harder

@@ -1214,6 +1214,17 @@ int main(int argc,char** argv) {
                     });
                     burst->start();
                 }
+            } else if(token.startsWith("hold=")) {
+                // hold=<KEY>@<ms>: a real (non-replayed) press and a timed release, so the key goes through the held
+                // path a physical key takes (arrows: pollController's D-pad bits and the firmware's repeat), unlike a
+                // tap, which is pressed and released inside one frame. Default 500 ms.
+                const auto parts=token.mid(5).split('@');
+                const int key=keys.value(parts[0],0);
+                const int ms=parts.size()>1 && parts[1].toInt()>0?std::clamp(parts[1].toInt(),1,10000):500;
+                if(key) {
+                    QKeyEvent press(QEvent::KeyPress,key,Qt::NoModifier);QCoreApplication::sendEvent(view,&press);
+                    QTimer::singleShot(ms,view,[view,key]{QKeyEvent release(QEvent::KeyRelease,key,Qt::NoModifier);QCoreApplication::sendEvent(view,&release);});
+                } else qWarning()<<"script: invalid hold"<<token;
             } else if(token.startsWith("type=")) {
                 for(const QChar c:token.mid(5)){QKeyEvent event(QEvent::KeyPress,0,Qt::NoModifier,QString(c));QCoreApplication::sendEvent(view,&event);}
             } else if(keys.contains(token)) {
