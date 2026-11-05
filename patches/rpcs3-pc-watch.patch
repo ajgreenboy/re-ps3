@@ -1,0 +1,105 @@
+# XMB entry-point watch for the capture RPCS3 (local, not upstream). Applies on top of rpcs3-xmb-trace.patch.
+# XMB_PC_TRACE=<file> XMB_PC_WATCH=<hex,...> logs r3..r8, f1..f4, lr and the stack back chain at taken b/bl/bcctr to
+# the watched guest addresses. PPU interpreter only (PPU Decoder: Interpreter (static)). Used by audit/PAGE-MOVE.md 2026-11-05.
+diff --git a/rpcs3/Emu/Cell/PPUInterpreter.cpp b/rpcs3/Emu/Cell/PPUInterpreter.cpp
+index 4aed434..837f96f 100644
+--- a/rpcs3/Emu/Cell/PPUInterpreter.cpp
++++ b/rpcs3/Emu/Cell/PPUInterpreter.cpp
+@@ -598,6 +598,8 @@ extern void ppu_trap(ppu_thread& ppu, u64 addr);
+ extern bool g_xmb_trace;
+ extern void xmb_trace_bcctr(ppu_thread& ppu, u32 source, u32 target);
+ extern void xmb_trace_bclr(ppu_thread& ppu, u32 target);
++extern bool g_xmb_pc_trace;
++extern void xmb_pc_trace_branch(ppu_thread& ppu, u32 source, u32 target);
+ 
+ // NaNs production precedence: NaN from Va, Vb, Vc
+ // and lastly the result of the operation in case none of the operands is a NaN
+@@ -3304,6 +3306,7 @@ auto B()
+ 	ppu_record_call<Flags...>(ppu, ppu.cia, op);
+ 
+ 	ppu.cia = (op.aa ? 0 : ppu.cia) + op.bt24;
++	if (g_xmb_pc_trace) [[unlikely]] xmb_pc_trace_branch(ppu, link - 4, ppu.cia);
+ 	if (op.lk) ppu.lr = link;
+ 	ppu.exec_bytes += link - old_cia;
+ 	};
+@@ -3489,6 +3492,7 @@ auto BCCTR()
+ 	{
+ 		const u32 target = static_cast<u32>(ppu.ctr) & ~3;
+ 		if (g_xmb_trace) [[unlikely]] xmb_trace_bcctr(ppu, vm::get_addr(this_op), target);
++		if (g_xmb_pc_trace) [[unlikely]] xmb_pc_trace_branch(ppu, vm::get_addr(this_op), target);
+ 		ppu_record_call<Flags...>(ppu, target, op, true);
+ 		ppu.cia = target;
+ 	}
+diff --git a/rpcs3/Emu/Cell/PPUModule.cpp b/rpcs3/Emu/Cell/PPUModule.cpp
+index 4a8351c..8cf8e03 100644
+--- a/rpcs3/Emu/Cell/PPUModule.cpp
++++ b/rpcs3/Emu/Cell/PPUModule.cpp
+@@ -239,6 +239,68 @@ void xmb_trace_bclr(ppu_thread& ppu, u32 target)
+ 	t_calls.pop_back();
+ }
+ 
++// XMB entry-point watch (C:\dev\xmb, page-move trace 2026-11-05; local change, not upstream).
++// XMB_PC_TRACE=<out file> and XMB_PC_WATCH=<hex,...> (raw guest addresses): every taken b/bl/bcctr to a watched
++// address logs r3..r8, f1..f4, lr and up to 8 saved return addresses from the stack back chain. Interpreter only.
++namespace xmb_pc_trace
++{
++	u32 g_watch[16]{};
++	u32 g_count = 0;
++	FILE* g_file = nullptr;
++	std::mutex g_mutex;
++	atomic_t<u64> g_seq = 0;
++	u64 g_max = 50000;
++
++	bool init()
++	{
++		const char* out = std::getenv("XMB_PC_TRACE");
++		const char* watch = std::getenv("XMB_PC_WATCH");
++		if (!out || !*out || !watch || !*watch) return false;
++		for (const char* p = watch; *p && g_count < 16;)
++		{
++			char* end = nullptr;
++			const unsigned long v = std::strtoul(p, &end, 16);
++			if (end == p) break;
++			g_watch[g_count++] = static_cast<u32>(v);
++			p = *end == ',' ? end + 1 : end;
++		}
++		if (const char* max = std::getenv("XMB_PC_TRACE_MAX"); max && *max) g_max = std::strtoull(max, nullptr, 0);
++		if (!g_count || !(g_file = std::fopen(out, "w"))) return false;
++		std::fprintf(g_file, "# xmb pc watch: %u addresses, max %llu hits\n", g_count, static_cast<unsigned long long>(g_max));
++		std::fflush(g_file);
++		return true;
++	}
++}
++
++bool g_xmb_pc_trace = xmb_pc_trace::init();
++
++void xmb_pc_trace_branch(ppu_thread& ppu, u32 source, u32 target)
++{
++	using namespace xmb_pc_trace;
++	bool hit = false;
++	for (u32 i = 0; i < g_count; i++) hit |= g_watch[i] == target;
++	if (!hit) return;
++	const u64 seq = ++g_seq;
++	if (seq > g_max) return;
++	char buf[768];
++	int n = std::snprintf(buf, sizeof(buf), "%llu T%08X tgt=%08X src=%08X lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX r7=%llX r8=%llX f1=%g f2=%g f3=%g f4=%g bt=",
++		static_cast<unsigned long long>(seq), ppu.id, target, source, static_cast<u32>(ppu.lr), ppu.gpr[3], ppu.gpr[4], ppu.gpr[5],
++		ppu.gpr[6], ppu.gpr[7], ppu.gpr[8], ppu.fpr[1], ppu.fpr[2], ppu.fpr[3], ppu.fpr[4]);
++	u32 sp = static_cast<u32>(ppu.gpr[1]);
++	for (int k = 0; k < 8 && n > 0 && n < static_cast<int>(sizeof(buf)) - 16; k++)
++	{
++		if (!vm::check_addr(sp, vm::page_readable, 8)) break;
++		const u32 back = static_cast<u32>(vm::read64(sp));
++		if (!back || back <= sp || !vm::check_addr(back, vm::page_readable, 24)) break;
++		n += std::snprintf(buf + n, sizeof(buf) - n, "%08X,", static_cast<u32>(vm::read64(back + 16)));
++		sp = back;
++	}
++	std::lock_guard lock(g_mutex);
++	std::fputs(buf, g_file);
++	std::fputc('\n', g_file);
++	std::fflush(g_file);
++}
++
+ void xmb_trace_syscall(ppu_thread& ppu, u64 code, bool after)
+ {
+ 	using namespace xmb_trace;
