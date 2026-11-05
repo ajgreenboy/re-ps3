@@ -347,10 +347,10 @@ try {
     $docs = @(
         'native-xmb/README.md',
         'native-xmb/audit/README.md',
-        'native-xmb/HANDOFF-2026-10-28.md',
-        'native-xmb/HANDOFF-2026-10-27.md',
+        'native-xmb/archive/HANDOFF-2026-10-28.md',
+        'native-xmb/archive/HANDOFF-2026-10-27.md',
         'native-xmb/INSTALL.md',
-        'native-xmb/PHASES-2026-10-28.md',
+        'native-xmb/archive/PHASES-2026-10-28.md',
         'native-xmb/ISA.md',
         'native-xmb/audit/DIAGNOSE.md'
     )

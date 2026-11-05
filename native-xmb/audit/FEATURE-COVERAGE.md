@@ -14,7 +14,7 @@ as observations made here.
 > ISC-15, ISC-16 and ISC-17 are unchanged. Corrected in place with date stamps: ISC-17's closing verdict
 > (subtitles are no longer "absent"), ISC-14's screensaver and preference-key counts, and ISC-13's
 > "preferences are global" statement (the module is profile-scoped now; the shell still is not). The
-> completion ledger is [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1 and the fidelity
+> completion ledger is [PHASES-2026-10-28.md](../archive/PHASES-2026-10-28.md) section 1 and the fidelity
 > instrument is [PARITY-SCORECARD.md](PARITY-SCORECARD.md); this audit's verdicts are scoped to the six
 > ISC criteria it names, not to the ledger.
 
@@ -627,10 +627,10 @@ obsolete on landing).
   Steam sources are `src/steam_*.cpp`.
 - **2026-10-28 pass.** `audit/FUNCTIONS.md`, `audit/MEDIA-CONTINUATION.md` and
   `audit/PHASE-CONTINUATION.md` presented their gap tables as current state; they now open with a
-  historical banner and a pointer to this register and to `PHASES-2026-10-28.md`. FUNCTIONS' two
+  historical banner and a pointer to this register and to `../archive/PHASES-2026-10-28.md`. FUNCTIONS' two
   findings above (photo zoom/pan, three-mode repeat) are therefore read as historical, not live.
   `audit/FEATURE-CATALOG.md` XMB-275/XMB-284/XMB-005/XMB-289 were corrected with dated wording, and
-  `HANDOFF-2026-10-27.md` was superseded by `HANDOFF-2026-10-28.md`. `native-xmb/README.md` still
+  `../archive/HANDOFF-2026-10-27.md` was superseded by `../archive/HANDOFF-2026-10-28.md`. `native-xmb/README.md` still
   points at the 2026-10-27 handoff; it is outside that pass's write fence and needs its own edit.
 
 ## What a demo would not survive

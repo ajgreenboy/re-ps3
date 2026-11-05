@@ -1,7 +1,7 @@
 # PARITY SCORECARD
 
 Method, threshold policy and the first measured scorecard for the 1:1 fidelity track
-([PARITY-PHASES.md](../PARITY-PHASES.md), P0.1-P0.5). Written 2026-10-27.
+([PARITY-PHASES.md](../archive/PARITY-PHASES.md), P0.1-P0.5). Written 2026-10-27.
 
 **Status: infrastructure complete, no screen at parity.** The catalogue covers 35 capturable states and
 3 honestly-uncapturable ones (38 in all, 5 of them native-only with no firmware counterpart): ten states
@@ -20,7 +20,7 @@ they are measured in 11.4. **22 of the 30** firmware-referenced states now have 
 anywhere. That is the honest state of the corpus, and it is what P0 exists to make visible.
 
 Nothing here is a visual-parity claim. A screen is 1:1 only when Tier A, Tier B and Tier C all pass for
-it ([PARITY-PHASES.md](../PARITY-PHASES.md), "What 1:1 means here").
+it ([PARITY-PHASES.md](../archive/PARITY-PHASES.md), "What 1:1 means here").
 
 ## 1. Method
 

@@ -16,7 +16,7 @@ XMB-165 and XMB-201 were re-read against the source and now name the implemented
 
 Status revision 2026-10-28: **the statuses below are as of HEAD `9545047`** for the rows this revision
 touched, and as of their own dated revision for the rest. The completion ledger is
-[PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1 (88 items: 15 done / 44 partly / 28 not
+[PHASES-2026-10-28.md](../archive/PHASES-2026-10-28.md) section 1 (88 items: 15 done / 44 partly / 28 not
 started / 1 obsolete) and the fidelity instrument is [PARITY-SCORECARD.md](PARITY-SCORECARD.md); this
 catalogue indexes *features*, so a `Partial` here is not a parity score and a `Not implemented` is not a
 statement that no code exists. Corrected rows: XMB-005 (local profiles exist), XMB-047 (theme selection

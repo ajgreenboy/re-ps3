@@ -260,14 +260,14 @@ The main category/menu catalog is currently curated from the reference. A comple
 XMBML/resource-driven catalog and localization are required before fidelity can
 be claimed.
 
-See the [forward phase plan](PHASES-2026-10-28.md), the [full feature/presentation audit and handoff](audit/README.md),
+See the [forward phase plan](archive/PHASES-2026-10-28.md), the [full feature/presentation audit and handoff](audit/README.md),
 [handoff](HANDOFF.md) and [completion criteria](ISA.md).
 
-**Current handoff (2026-10-28):** [HANDOFF-2026-10-28.md](HANDOFF-2026-10-28.md) - supersedes [HANDOFF-2026-10-27.md](HANDOFF-2026-10-27.md) (the tree at `0c8faee`),
+**Current handoff (2026-10-28):** [HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md) - supersedes [HANDOFF-2026-10-27.md](archive/HANDOFF-2026-10-27.md) (the tree at `0c8faee`),
 with build/run/verify, today's gate result, the known gaps by surface, the config migration policy, the
 diagnostics design and the release checklist. Read it first; the install guide is [INSTALL.md](INSTALL.md).
 
-**Previous handoff snapshot (2026-10-26, historical):** [HANDOFF-2026-10-26.md](HANDOFF-2026-10-26.md) - the tree at
+**Previous handoff snapshot (2026-10-26, historical):** [HANDOFF-2026-10-26.md](archive/HANDOFF-2026-10-26.md) - the tree at
 `937227d`, with what was verified then, the drift it found and its open work. It is no longer the current state; for
 current state read the current handoff, [ISA.md](ISA.md), [the feature catalogue](audit/FEATURE-CATALOG.md),
 [the verification harness](audit/VERIFICATION-HARNESS.md) and [the parity register](audit/FIRMWARE-PARITY-GAPS.md).

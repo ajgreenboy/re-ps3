@@ -7,7 +7,7 @@
 > below is the 2026-10-26 behaviour), and Jellyfin is no longer a POC service but a native browser/player
 > with DPAPI remembered sign-in and playback reporting (`3e5bcdf`, `audit/JELLYFIN-NATIVE.md`). The
 > screensaver dimming it describes still exists and is unchanged. Current status: the ledger in
-> [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1; plan of record: the same document.
+> [PHASES-2026-10-28.md](../archive/PHASES-2026-10-28.md) section 1; plan of record: the same document.
 
 ## Scope and status
 

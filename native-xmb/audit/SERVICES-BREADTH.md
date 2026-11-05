@@ -1,6 +1,6 @@
 # Services breadth: Steam account switch, launch/quit, avatars, trophies and honest rows
 
-Status: Phase 6 of [PHASES-2026-10-27.md](../PHASES-2026-10-27.md), implemented 2026-10-27. This document is
+Status: Phase 6 of [PHASES-2026-10-27.md](../archive/PHASES-2026-10-27.md), implemented 2026-10-27. This document is
 the evidence and the handoff for the parts that need `shell.cpp`/`shell.h` (owned by the Phase 1 work):
 every shell edit is given as an exact hunk below and was not applied by this pass.
 

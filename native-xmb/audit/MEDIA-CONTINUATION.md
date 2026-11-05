@@ -9,7 +9,7 @@
 > affordance the firmware does not have (no numeric zoom exists - MEDIA-PANELS-FIRMWARE 7.4); the
 > "original panel" gap it implies is now specified rather than unknown; and background playback, which
 > this pass left absent, is still absent (ledger rows A3/8.2). Current status: the ledger in
-> [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1; scored gap: [FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md).
+> [PHASES-2026-10-28.md](../archive/PHASES-2026-10-28.md) section 1; scored gap: [FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md).
 
 ## Implemented
 

@@ -504,7 +504,7 @@ row/icon/pitch/quads/brightness (captured vertex constants), the 110/152 parent 
 the 505/80/95/305 rows (capture), the label 113/57 (capture), the text sizes (P3), the tile sizes
 (one frame), the info-bar rect (capture).
 
-The rule from `PARITY-PHASES.md` applies: an RCO value is read at run time or generated from a
+The rule from `../archive/PARITY-PHASES.md` applies: an RCO value is read at run time or generated from a
 documented extraction; a fitted constant is labelled `fit` with the measurement that bounds it.
 Numbers 8, 13, 19, 27 (the missing entry scale), 30, 31, 32, 35, 37, 38, 39, 41 and 42 above are
 `fit`/`missing` and must be labelled as such in the source comment today.

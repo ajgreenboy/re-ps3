@@ -13,9 +13,11 @@ reference. Full XMB feature and visual parity are still in progress.
 - [PoC, current checkpoint and phase handoffs](docs/README.md)
 - [Run and build instructions](docs/POC.md)
 - [Native boot screenshots](docs/SCREENSHOTS.md)
+- [XMB Manager (companion tooling app)](native-xmb/MANAGER.md)
 - [Detailed investigation handoff](HANDOFF.md), newest section 3a first
 - [Project criteria](ISA.md)
 - [Dependency versions and patches](docs/DEPENDENCIES.md)
+- [Archived dated handoffs and phase plans](native-xmb/archive/README.md)
 
 The native foundation renders the main categories, uses the original firmware
 font and RCO/GIM icons, loads original Settings text, and provides independent
@@ -43,3 +45,16 @@ firmware and analysis inputs and follow the detailed handoff before rebuilding.
 
 No redistribution license is assigned by this upload. Refer to dependency
 licenses for third-party components and patches.
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `native-xmb/` | the native XMB application: `src/` (94 files), `manager/` (the XMB Manager), `audit/` (fidelity and firmware audits), `CMakeLists.txt`, and the current documents (`README`, `INSTALL`, `MANAGER`, `HANDOFF`, `HANDOFF-PHASES`, `ISA`, `WORKSPACES`) |
+| `native-xmb/archive/` | superseded dated handoffs and phase plans (see the README there) |
+| `tools/` | build and capture scripts (`build-*.bat`, `capture-rpcs3.ps1`, `rebuild.sh`, `iterate-errors.sh`) |
+| `patches/` | RPCS3 patches the capture pipeline needs |
+| `docs/` | earlier-track documentation, phase notes, screenshots, dated reports |
+| `out/` | local build and capture output (gitignored; `out/integration` is the current build) |
+| `work/` | local verification tools and probe output (`.gitignore` whitelists the tooling) |
+| `fw493/`, `boot/`, `boot_extra/`, `rea/`, `xenon/`, `recomp/`, `xmbrt/` | firmware assets and the earlier recompilation track |
+| `run-native-xmb.ps1`, `run-xmb.ps1`, `status.ps1` | entry points kept at the root because they resolve their own paths from `$PSScriptRoot` |

@@ -1,8 +1,8 @@
 #!/bin/sh
 # Full pipeline: relink image, iterate jump-table extension, translate, compile, build runtime.
-# usage (git bash, from anywhere): sh /c/dev/xmb/rebuild.sh
+# usage (git bash, from anywhere): sh /c/dev/xmb/tools/rebuild.sh
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 BUN=~/.bun/bin/bun.exe
 XENON_RECOMP=$(cd ../deps/XenonRecomp && pwd)
 mkdir -p work

@@ -5,14 +5,14 @@ RPCS3 VSH recording. Project goal: a complete native C++ recreation.
 
 ## Read this set
 
-Current handoff (2026-10-28): [HANDOFF-2026-10-28.md](../HANDOFF-2026-10-28.md) - the tree at `49acac6`,
+Current handoff (2026-10-28): [HANDOFF-2026-10-28.md](../archive/HANDOFF-2026-10-28.md) - the tree at `49acac6`,
 what ships after the firmware-recovery week and the layout/text/Theme/composite waves, the four gate
 instruments with their last recorded numbers, the 2026-10-28 baselines correction and the canonical pin
 correction, and where the work goes next. The plan of record is
-[PHASES-2026-10-28.md](../PHASES-2026-10-28.md) (phases 8-16, with the 88-item completion ledger:
+[PHASES-2026-10-28.md](../archive/PHASES-2026-10-28.md) (phases 8-16, with the 88-item completion ledger:
 16 done / 49 partly / 22 not started / 1 obsolete); ownership and write fences are in
 [WORKSPACES.md](../WORKSPACES.md). The previous handoff,
-[HANDOFF-2026-10-27.md](../HANDOFF-2026-10-27.md), is a dated snapshot of `0c8faee` and still carries the
+[HANDOFF-2026-10-27.md](../archive/HANDOFF-2026-10-27.md), is a dated snapshot of `0c8faee` and still carries the
 operational reference (build/run, config migration, crash reporting, release checklist, ground rules).
 
 Companion tool (2026-11-04): [MANAGER.md](../MANAGER.md) - the XMB Manager, the desktop tool that
