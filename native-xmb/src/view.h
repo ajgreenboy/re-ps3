@@ -49,15 +49,16 @@ public:
         bool started_=false,running_=false;
     };
     static constexpr double moveMilliseconds=200;
-    // The page (depth) move, split because two evidence sets disagree on its timing and each drives a
-    // different channel (audit/PAGE-MOVE.md 14.1 vs 4c; the measurements are in section 15 of that file):
-    //   pageMilliseconds, mode 4 - FIT: the console's visible page content (the icon's 262 px travel and the
-    //     item column's entry) is 18 rendered frames = 300 ms at 0.7741/frame. The burst does not snap at
-    //     200 ms, so this channel keeps the frame-count fit.
+    // The page (depth) move's two channels (audit/PAGE-MOVE.md 14.1, 15, and the 2026-11-05 runtime trace):
+    //   pageMilliseconds, mode 5 - the page content (the icon's 262 px travel and the item column's entry).
+    //     An RPCS3 run with every paf ease setup logged (FUN_003981ec) shows no mode-4 call during a page open or
+    //     close: all are mode 5, 200 ms for the bar nodes (a few 300). The burst's 0.762/frame (0.775 after the
+    //     tracker bias) is mode 5 at 200 ms (0.7794), not 300 (0.847); its 18 visible frames are the ease's own
+    //     tail (no landing at the duration). This was 300 ms mode 4, a fit to the frame count.
     //   barMilliseconds, mode 5 - TRACED: the firmware's own bar re-layout on a page change is 200 ms, mode 5
     //     (xmb_plugin state+0x520 = 200.0, every bar animator passes 5; PAGE-MOVE 14.1). It drives the bar
     //     layer: the recede distance/projection, the bar's own focus row and the neighbours' brightness.
-    static constexpr double pageMilliseconds=300;
+    static constexpr double pageMilliseconds=200;
     static constexpr double barMilliseconds=200;
     // The page move's two channels also carry the console's measured CLOSE hold. Measured frame by frame on the
     // 642-frame burst (C:\dev\out\rpcs3-xmb-cap\burst-png; PgUp at 2706.9 ms, 60 Hz renders): the page icon is
@@ -68,7 +69,7 @@ public:
     // +57 (measured: 41 puts it 22 px ahead, 57 lags 36 px behind). The audit's "first motion +57" is the frame
     // the console's first step is seen on, not the hold's length. The close's per-frame retention is 0.762, the
     // open's own shape within the tracker's -0.014 bias, so the curve is NOT re-fit: the close is the same
-    // 300 ms mode-4 content ease with this hold in front of it.
+    // content ease as the open with this hold in front of it.
     static constexpr double pageCloseDelayMs=49;
     // The item-level Triangle options panel's entrance (UI-ELEMENT-GAP-AUDIT O6, measured [M]): the open
     // starts 115..150 ms after the key and ramps 245..255 ms (at rest 360..410 ms); the close starts 9 ms
@@ -206,9 +207,9 @@ private:
     qint64 focusTime() const { return focusTimeOverride_>=0?focusTimeOverride_:(focusClock_.isValid()?focusClock_.elapsed():0); }
     qint64 focusKey_=-1;
     double depthPosition_=0;
-    // The bar layer's own depth progress (barMilliseconds/mode 5, traced) next to the page content's
-    // (pageMilliseconds/mode 4, fitted). At rest both equal shell_.depth(), so nothing at the canonical
-    // rest frame moves; mid-transition the bar recede lands ~100 ms before the page content does.
+    // The bar layer's own depth progress (barMilliseconds/mode 5) next to the page content's (pageMilliseconds/
+    // mode 5). Both are 200 ms mode 5 since the 2026-11-05 trace; they stay separate eases because they are
+    // separate firmware animations. At rest both equal shell_.depth(), so nothing at the canonical rest frame moves.
     double barDepthPosition_=0;
     int previousDepth_=0;
     // The depth the previous painted frame reported, so the eases can tell an opening page from a closing one

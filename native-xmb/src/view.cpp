@@ -728,7 +728,7 @@ void View::paintGL() {
     const bool pageClosing=depthSeen_>=0 && depthNow<depthSeen_;
     depthSeen_=depthNow;
     const double depthDelay=pageClosing?pageCloseDelayMs:0.;
-    depthEase_.retarget(shell_.depth(),pageMilliseconds,4,depthDelay);depthEase_.advance(dt);depthPosition_=depthEase_.value;
+    depthEase_.retarget(shell_.depth(),pageMilliseconds,5,depthDelay);depthEase_.advance(dt);depthPosition_=depthEase_.value;
     barEase_.retarget(shell_.depth(),barMilliseconds,5,depthDelay);barEase_.advance(dt);barDepthPosition_=barEase_.value;
     // Capture-only switch: XMB_DEPTH_PIN=<0..2> holds the depth progress at that value, so a deterministic
     // --render-clock grab can measure one intermediate frame of the page move (the easing itself runs on the
