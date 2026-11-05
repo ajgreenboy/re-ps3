@@ -97,6 +97,7 @@ constexpr float kEmitXMargin=1.25f;  // fit: emit past the viewport edges so the
 // random quaternion, so E[|N.V|] = 0.5 and E[T] = 1 - 1/(1 + FRESNEL/2) = 1 - 1/2.333 = 0.571.
 // 1.05 / 0.571 = 1.84 keeps the same average exposure with the evidenced alpha chain in place.
 constexpr float kColorGammaGain=1.84f;     // fit: _Color * _Gamma (audit 6-B2, still untraced)
+const float kTanHalfFovy=0.4985816f; // derived: tan(26.5 deg), the particle camera's fovy 53
 const QVector3D kCameraEye(0,0,2); // captured: BackgroundView eye (data 0x93730), the particle camera's lookAt
 constexpr float kParticleColorGrey=0.2f; // measured: the firmware pass 1 _Color grey (drawFirmwarePass, both passes)
 // --- pass 1: particles_quads ---------------------------------------------------------------------
@@ -433,30 +434,52 @@ void Particles::loadMaterials(Assets& assets) {
         qWarning()<<"particles: theme looks also unavailable; the base fallbacks drive the dust";
 }
 
-void Particles::spawnParticle() {
-    Particle& p=pool_[size_t(live_++)];
-    if(emitterSide_>1 && emitter_.size()==size_t(emitterSide_)*emitterSide_) {
-        // On the ribbon sheet: a random cell of the sampled grid, bilinear inside it. The console's dust hugs the
-        // sheet and follows its curve in every reference frame, and its NEAR/FAR FOCUS (6.1 / 12.8) and SPOT POS
-        // depth (7.6) bracket the sheet's camera depth (6.6..11), so it is born there. fit: the firmware's emit
-        // command producer is not decompiled (audit/PARTICLES.md 6-A2), the surface is the evidence.
-        const int n=emitterSide_-1;
-        const int r=std::min(n-1,int(random()*n)),c=std::min(n-1,int(random()*n));
-        const float u=random(),v=random();
-        const auto at=[&](int rr,int cc){return emitter_[size_t(rr*emitterSide_+cc)];};
-        const QVector3D e=(at(r,c)*(1-u)+at(r,c+1)*u)*(1-v)+(at(r+1,c)*(1-u)+at(r+1,c+1)*u)*v;
-        p.px=e.x()*kHalfHeight*aspect_;
-        p.py=e.y()*kHalfHeight;
-        p.pz=-e.z();
-    } else { // no ribbon: the emission volume (see kEmit* above)
-        p.px=(2.f*random()-1.f)*kHalfHeight*aspect_*kEmitXMargin;
-        p.py=kEmitYCentre+(random()+random()-1.f)*kEmitYSpread;
-        p.pz=kEmitZNear+random()*(kEmitZFar-kEmitZNear);
+// FUN_00030b84, one queued cell: the particle is born exactly at the sheet point P and sent along a cone around the
+// point's own motion. V = frame displacement / DELTA TIME (the plugin divides the 60 Hz step by holder+0x1398); a
+// still point (|V| < 1e-4) spawns nothing. The axis a = V/|V| is negated with EMIT NEG PROB; the cone's polar angle is
+// uniform in [0, EMIT CONE ANGLE] (not per solid angle) around a, in the frame (T, a x T) with T the longest of a x the
+// unit axes; the component along the camera's view axis is scaled by EMIT VEL ZSCALE (0: removed) and the vector is
+// not renormalised; speed = max(EMIT VEL MIN, sqrt(|V| EMIT VEL MUL (1 + r EMIT VEL VAR))), r in (-1, 1]; aging rate
+// max(0.001, AGING SPEED (1 + r AGING VARIANCE)). [TRACED 0x30b84-0x31494; the frame displacement uses the sheet's
+// velocity at render time, since the native has no sheet history inside one catch-up.]
+void Particles::spawnFromGrid(int column,int row) {
+    const size_t at=size_t(row)*size_t(emitterSide_)+size_t(column);
+    const QVector3D V=emitterVelocity_[at]*float((1./kReferenceFrameRate)/physics_.deltaTime);
+    const float speedOfPoint=V.length();
+    if(speedOfPoint<1e-4f || live_>=kCapacity)return;
+    QVector3D axis=V/speedOfPoint;
+    if(random()<physics_.emitNegProb)axis=-axis;
+    QVector3D tangent;
+    for(const QVector3D& unit:{QVector3D(1,0,0),QVector3D(0,1,0),QVector3D(0,0,1)}) {
+        const QVector3D t=QVector3D::crossProduct(axis,unit);
+        if(t.lengthSquared()>tangent.lengthSquared())tangent=t;
     }
-    // Velocity: speed EMIT VEL MIN + MUL*(1 +/- VAR), in a cone around +x in the screen plane, z
-    // flattened by EMIT VEL ZSCALE (0 in every XMB preset this build schedules), with EMIT NEG PROB
-    // of the spawns mirrored. The z axis of the cone is not traced, so the read zscale only has to
-    // be zero for the port to match the firmware; a non-zero one is logged in init.
+    tangent.normalize();
+    const QVector3D bitangent=QVector3D::crossProduct(axis,tangent);
+    const float theta=random()*physics_.emitConeDegrees*(3.14159265f/180.f),phi=random()*6.2831853f;
+    QVector3D direction=tangent*(std::sin(theta)*std::cos(phi))+bitangent*(std::sin(theta)*std::sin(phi))+axis*std::cos(theta);
+    direction.setZ(direction.z()*physics_.emitVelZScale); // the camera looks down -z in this world
+    const float speed=std::max(physics_.emitVelMin,
+        std::sqrt(std::max(0.f,speedOfPoint*physics_.emitVelMul*(1.f+(2.f*random()-1.f)*physics_.emitVelVar))));
+    Particle& p=pool_[size_t(live_++)];
+    const QVector3D& P=emitter_[at];
+    p.px=P.x();p.py=P.y();p.pz=P.z();
+    p.vx=direction.x()*speed;p.vy=direction.y()*speed;p.vz=direction.z()*speed;
+    p.age=0.f;
+    p.ageRate=std::max(0.001f,physics_.agingSpeed*(1.f+(2.f*random()-1.f)*physics_.agingVariance));
+    orientParticle(p);
+}
+
+// No ribbon: the fitted emission volume (kEmit*, flat viewport units at a camera depth) moved into the world, with the
+// earlier screen-plane cone. Only reached without a ribbon sheet.
+void Particles::spawnInBox() {
+    if(live_>=kCapacity)return;
+    Particle& p=pool_[size_t(live_++)];
+    const float depth=-(kEmitZNear+random()*(kEmitZFar-kEmitZNear));
+    const float toView=kTanHalfFovy*depth/kHalfHeight;
+    p.px=(2.f*random()-1.f)*kHalfHeight*aspect_*kEmitXMargin*toView;
+    p.py=(kEmitYCentre+(random()+random()-1.f)*kEmitYSpread)*toView;
+    p.pz=kCameraEye.z()-depth;
     const float speed=physics_.emitVelMin+physics_.emitVelMul*(1.f+physics_.emitVelVar*(2.f*random()-1.f));
     const float angle=(2.f*random()-1.f)*physics_.emitConeDegrees*(3.14159265f/180.f);
     const float mirror=random()<physics_.emitNegProb?-1.f:1.f;
@@ -465,7 +488,12 @@ void Particles::spawnParticle() {
     p.vz=0.f;
     p.age=0.f;
     p.ageRate=physics_.agingSpeed*(1.f+physics_.agingVariance*(2.f*random()-1.f));
-    // Orientation: a random unit quaternion; the same axis carries the spin (SPIN TIME SCALE rad/s).
+    orientParticle(p);
+}
+
+// The orientation the type 3 command would set is not traced (its pusher is not in FUN_00030b84), so a fresh particle
+// gets a random unit quaternion whose axis also carries the spin.
+void Particles::orientParticle(Particle& p) {
     const float z=2.f*random()-1.f, phi=6.2831853f*random(), radial=std::sqrt(std::max(0.f,1.f-z*z));
     p.ax=radial*std::cos(phi);
     p.ay=radial*std::sin(phi);
@@ -479,16 +507,22 @@ void Particles::spawnParticle() {
 }
 
 void Particles::step() {
-    // Emission: EMIT PER FRAME x EMIT PROB is a 60 Hz frame budget, converted to the DELTA TIME step
-    // (the SPU integrates at 112.5 Hz while the PPU queues spawn commands per rendered frame). The
-    // steady state then lands just under the cap: 1529 live of 1536 measured, against the audit's
-    // central estimate of 1492, the difference being the 1/(1 +/- AGING VARIANCE) lifetime averaging
-    // above its centre.
-    spawnAccumulator_+=physics_.emitPerFrame*(float(physics_.deltaTime)*kReferenceFrameRate);
+    // Emission is the PPU's, once per 60 Hz frame (custom_render_plugin FUN_0002dde4): one EMIT PROB draw gates the
+    // frame, and a passing frame queues int(EMIT PER FRAME) random grid cells, (int(u (dimX - 1)), int(u (dimY - 1))),
+    // that FUN_00030b84 turns into particles (spawnFromGrid). The SPU kernel never spawns. [TRACED; the int conversion
+    // of 16.6539 as truncation is inferred.]
+    spawnAccumulator_+=float(physics_.deltaTime)*kReferenceFrameRate;
     while(spawnAccumulator_>=1.f) {
         spawnAccumulator_-=1.f;
-        const bool accepted=random()<physics_.emitProb; // always drawn, so the sequence depends only on time
-        if(accepted && live_<kCapacity)spawnParticle();
+        if(!(random()<physics_.emitProb))continue;
+        const int candidates=int(physics_.emitPerFrame);
+        const bool grid=emitterSide_>1 && emitter_.size()==size_t(emitterSide_)*emitterSide_ && emitterVelocity_.size()==emitter_.size();
+        for(int k=0;k<candidates;++k) {
+            if(grid) {
+                const int column=int(random()*float(emitterSide_-1)),row=int(random()*float(emitterSide_-1));
+                spawnFromGrid(column,row);
+            } else spawnInBox();
+        }
     }
     // particles.elf 0x06f64-0x07098, semi-implicit Euler with dt = DELTA TIME: vel += (gravity + BROWNIAN x R -
     // FRICTION x vel) x dt, then pos += vel x dt (R in [-1, 1)^3 from the Park-Miller call at 0x06fe4). The flow
@@ -531,13 +565,23 @@ void Particles::step() {
     ++step_;
 }
 
+// The hand-written fallback programs were written for flat viewport units (kScreenHeight tall at every depth, z = -camera
+// depth); the records are now world positions, so their vertex input is mapped back at the top of main().
+static QString fallbackVertex(const char* source) {
+    QString s=QString::fromLatin1(source);
+    s.replace("layout(location=0) in vec4 aPos;","layout(location=0) in vec4 aPosWorld_;\nvec4 aPos;");
+    s.replace("void main(){",QStringLiteral("void main(){\n    { float d=%1-aPosWorld_.z; aPos=vec4(aPosWorld_.xy*(%2/(%3*max(d,1e-3))),-d,aPosWorld_.w); }")
+        .arg(double(kCameraEye.z())).arg(double(kHalfHeight)).arg(double(kTanHalfFovy),0,'g',9));
+    return s;
+}
+
 bool Particles::initPrograms() {
-    if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexSource) ||
+    if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,fallbackVertex(vertexSource)) ||
        !program_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragmentSource) || !program_.link()) {
         qWarning().noquote()<<"particles: particles_quads link failed:"<<program_.log();
         return false;
     }
-    if(!glareProgram_.addShaderFromSourceCode(QOpenGLShader::Vertex,glareVertexSource) ||
+    if(!glareProgram_.addShaderFromSourceCode(QOpenGLShader::Vertex,fallbackVertex(glareVertexSource)) ||
        !glareProgram_.addShaderFromSourceCode(QOpenGLShader::Fragment,glareFragmentSource) || !glareProgram_.link()) {
         qWarning().noquote()<<"particles: particles_second link failed:"<<glareProgram_.log();
         return false;
@@ -750,11 +794,8 @@ void Particles::logState(const char* pass,int width,int height) const {
         <<"target"<<width<<"x"<<height<<"lut"<<(iridescentFromFirmware_?"tga":"fallback");
 }
 
-// The simulation keeps its positions as (x, y) in flat viewport units (kScreenHeight tall at every depth) and z as
-// the camera depth, the space the sheet emitter and the fallback programs work in. The firmware vpo wants camera space
-// under the ribbon camera (fovy 53, ribbon.cpp): the same screen point at depth d sits at x = flat x * tan(26.5 deg) *
-// d / kHalfHeight. The patch below rebuilds in_0 that way and moves it into the camera's world before the program
-// runs, so the projection lands every particle where the fallback drew it. The camera is the BackgroundView the
+// The simulation runs in the particle camera's world, so the firmware vpo reads the records as they are. The camera is
+// the BackgroundView the
 // particle draw passes to FUN_000255a4 (mode 1, lookAt set B): constructed (FUN_00024a68) with eye (0, 0, 2), centre
 // (0, 0, -7), up (0, 1, 0), fovy 0.9250245 rad, near 0.1, far 1000 - so world = camera space + (0, 0, 2), _Modelview is
 // that lookAt (a translation by -2 in z), and _FrontFacingQuaternion the identity rotation.
@@ -772,15 +813,7 @@ void Particles::initFirmwarePass(Assets& assets,int pass) {
         qWarning().noquote()<<"particles: firmware"<<name<<"unavailable ("<<error<<"); pass"<<pass+1<<"uses the fallback program";
         return;
     }
-    QString vertex=vertexCg.glsl;
-    const QString attribute="layout(location=0) in vec4 in_0;";
-    if(vertex.count(attribute)!=1 || vertex.count("void main() {")!=1) {
-        qWarning().noquote()<<"particles:"<<name<<".vpo translation has an unexpected shape; pass"<<pass+1<<"uses the fallback program";
-        return;
-    }
-    vertex.replace(attribute,"layout(location=0) in vec4 flatPos_;\nuniform float flatToView_;\nuniform float cameraEyeZ_;\nvec4 in_0;");
-    vertex.replace("void main() {","void main() {\n  in_0=vec4(flatPos_.xy*(flatToView_*-flatPos_.z),flatPos_.z+cameraEyeZ_,flatPos_.w);");
-    if(!program.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) ||
+    if(!program.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg.glsl) ||
        !program.addShaderFromSourceCode(QOpenGLShader::Fragment,fragmentCg.glsl) || !program.link()) {
         qWarning().noquote()<<"particles: firmware"<<name<<"link failed:"<<program.log();
         return;
@@ -859,8 +892,6 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     gl.glBindVertexArray(vao_);
     if(iridescent_)iridescent_->bind(0);
     program.bind();
-    program.setUniformValue("flatToView_",float(std::tan(fovy*.5f)/kHalfHeight));
-    program.setUniformValue("cameraEyeZ_",kCameraEye.z());
     program.setUniformValueArray("vc",vc.data(),int(vc.size()));
     program.setUniformValueArray("fc",fc.constData(),fc.size());
     program.setUniformValue("tex0",0);

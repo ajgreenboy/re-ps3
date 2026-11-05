@@ -471,8 +471,9 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     // Particles belong to the HDR scene: the firmware draws particles_quads before the tone map and its
     // radial halo into the glare source (audit/PARTICLES.md), so dust picks up the tone map and the glare.
     if(originalParticles) {
-        int side=0;auto sheet=ribbon_.sheetSample(8,side); // the dust is born on the ribbon sheet (Particles::setEmitter)
-        particles_.setEmitter(std::move(sheet),side);
+        // The emitter grid: the ribbon's 128 x 128 sheet in the particle world with each point's velocity (FUN_0002b288).
+        int side=0;std::vector<QVector3D> sheet,motion;ribbon_.sheetMotion(sheet,motion,side);
+        particles_.setEmitter(std::move(sheet),std::move(motion),side);
         glBindFramebuffer(GL_FRAMEBUFFER,GLuint(scene)); particles_.render(*this,seconds,pixelWidth,pixelHeight);
     }
     if(hdr)hdr_.setNoiseClock(seconds);
