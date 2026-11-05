@@ -49,16 +49,19 @@ cd C:\dev\xmb
 & .\native-xmb\build.ps1
 ```
 
-The default output directory is `out\native-xmb` (relative to the repository root). The script
-configures CMake, builds with Ninja, then runs `windeployqt` on
-`out\native-xmb\re-ps3-native.exe`, so the Qt DLLs and plugins are copied next to the executable in
-the same folder. The folder is the portable release shape: copy it, and keep the firmware outside it.
+The script's default output directory is `out\integration` (relative to the repository root; it was
+`out\native-xmb` before 2026-11-03, and `run-native-xmb.ps1` keeps `out\native-xmb\data` as the
+default data folder). The script configures CMake, builds with Ninja, then runs `windeployqt` on
+the output folder's `re-ps3-native.exe`, so the Qt DLLs and plugins are copied next to the
+executables in the same folder. The folder is the portable release shape: copy it, and keep the
+firmware outside it.
 
 Products in the output folder:
 
 | File | What it is |
 |---|---|
 | `re-ps3-native.exe` | The application, plus the deployed Qt runtime. `/DEBUG` is on and `re-ps3-native.pdb` sits beside it for the crash handler's symbolized stack. |
+| `xmb-manager.exe` | The XMB Manager, the companion tool that detects emulators and imports ROMs/ISOs/folders as virtual packages into the XMB data folder (section 2.1 and [MANAGER.md](MANAGER.md)). Shares the Qt runtime deployed above. |
 | `xmb-reference-frames.exe` | Helper that samples timestamped frames and a contact sheet from a recording you already have (`xmb-reference-frames recording.mp4 <out-dir> [interval-ms] [start-ms] [end-ms]`). Local evidence only; it is not part of the app. |
 | `xmb-steam-client.exe` | Only with `-SteamworksHeaders`. The signed-in friends helper the app launches; no Steam DLL is redistributed. |
 
@@ -75,13 +78,56 @@ Useful parameters:
 & .\native-xmb\build.ps1 -SteamworksHeaders C:\path\to\steamworks\public\steam
 ```
 
-Output-folder convention, in one line: **one build, one folder** - `out\native-xmb` for the main
-build, any absolute or relative path passed to `-OutputDirectory` for a side build, and the Qt
-runtime, the data directory and the per-session logs all live under that folder. Do not mix a side
-build's executable with the main folder's Qt DLLs.
+Output-folder convention, in one line: **one build, one folder** - the script's own default output
+folder for the main build, any absolute or relative path passed to `-OutputDirectory` for a side
+build, and the Qt runtime, the data directory and the per-session logs all live under that folder.
+Do not mix a side build's executable with the main folder's Qt DLLs.
 
 A build needs the CMake and C++ pieces above; it does not need `dev_flash` (that is a runtime
 requirement) and it does not need Bun.
+
+### 2.1 The XMB Manager
+
+`xmb-manager.exe` is a second executable from the same CMake project, built into the same output
+folder by the same `build.ps1` run. It is a desktop tool (Qt Widgets) plus a scriptable CLI that
+detects emulators, scans ROMs/ISOs/game folders, and imports them into the XMB's own app library
+"as if they were PKGs": one `<data>\pkg\<id>\` virtual package (`ICON0.PNG`, `PARAM.SFO`,
+`pkg.json`) and one `apps.json` row that the XMB draws as a Game-column ICON0 tile and launches
+through the chosen emulator. Every field, the CLI verbs and the schema are in
+[MANAGER.md](MANAGER.md); in short:
+
+```powershell
+# Window, from the output folder (it shares the Qt runtime deployed for re-ps3-native.exe)
+& .\out\integration\xmb-manager.exe
+
+# Headless: point it at the XMB's data folder, look around, import
+& .\out\integration\xmb-manager.exe --data-dir C:\path\to\xmb-data --detect-emulators
+& .\out\integration\xmb-manager.exe --data-dir C:\path\to\xmb-data --list-emulators
+& .\out\integration\xmb-manager.exe --data-dir C:\path\to\xmb-data --list-mappings
+& .\out\integration\xmb-manager.exe --data-dir C:\path\to\xmb-data --scan C:\Games
+& .\out\integration\xmb-manager.exe --data-dir C:\path\to\xmb-data --import C:\Games\MyGame.iso --emulator pcsx2
+# --emulator is optional: without it the platform map resolves the emulator
+```
+
+First run in the window: set the data folder, press **Detect installed** on the Emulators tab, add
+a profile by hand for an emulator detection missed, then drop ROMs on the Import tab and press
+**Import selected**. Both executables need no separate deployment: the manager uses `Qt6Core`,
+`Qt6Gui` and `Qt6Widgets` from the folder `windeployqt` filled in this build. It needs no
+`dev_flash`, no OpenGL and no Multimedia, and it never writes to the firmware or to a ROM.
+
+Beyond import, the CLI (not the window) covers tags and collections, a transactional bulk edit, ROM
+hash verification and relinking, an argv/launch check against the registered emulator, and a
+portable backup/restore bundle; [MANAGER.md](MANAGER.md) sections 10-13 document each with the exact
+output.
+
+Where the data directory is: the manager defaults to `<manager exe folder>\data` - the same folder
+`re-ps3-native.exe` uses when it is run directly from that folder - and remembers a chosen folder
+in `<manager exe folder>\manager.ini`. That is **not** the folder `run-native-xmb.ps1` uses: the
+launcher starts the app with `--data-dir out\native-xmb\data` while a manager launched from
+`out\integration` would write `out\integration\data`. Point the manager at the launcher's data
+folder (Browse, or `--data-dir`) before importing, or the XMB will not see the new tiles. After an
+import, press **F5** in the XMB: it loads `apps.json` on startup and refresh, not on file change.
+
 
 ## 3. Run
 
@@ -266,7 +312,12 @@ the shell sees.
 | `<data>\preferences.json` | Versioned settings, **document version 2**: `{"version":2,"active":"<profile id>","values":{...}}`. Per-user keys are stored under `profile/<id>/`; console-wide keys stay bare. A version-1 file is migrated once, in memory, to the reserved legacy profile and rewritten as version 2. Written atomically (`QSaveFile`). |
 | `<data>\profiles.json` | Local users, version 1: `{"version":1,"profiles":[{"id","name"}],"activeId":"..."}`. Ids are lower-case UUIDs without braces, names are unique and at most 16 characters, and at most 16 profiles can store settings. Preferences are per profile; the app reports rather than repairs a corrupt file. |
 | `<data>\settings.ini` | Two jobs. The window geometry (`window/geometry`) is written here on exit unless `--kiosk` is running. The first native foundation's preference keys (`appearance/colour`, `library/photo`, `library/music`, `library/video`) are read from it once, into `preferences.json`; the file itself is deliberately left on disk. |
-| `<data>\apps.json` | The imported app/service registry written by `--import-apps` (version 1). |
+| `<data>\apps.json` | The imported app/service registry written by `--import-apps` (version 1), and by the XMB Manager's imports. |
+| `<data>\pkg\<id>\` | One virtual package per manager import: `ICON0.PNG`, `PARAM.SFO` and `pkg.json`. The XMB itself reads only the matching `apps.json` row. See [MANAGER.md](MANAGER.md). |
+| `<data>\emulators.json` | The XMB Manager's emulator profiles (version 1). Ignored by the XMB. |
+| `<data>\platform-map.json` | The XMB Manager's platform -> emulator map (seeded defaults when absent). Ignored by the XMB. |
+| `<data>\collections.json` | The XMB Manager's collection membership. Not read by the XMB yet. |
+| `<exe folder>\manager.ini` | The XMB Manager's data-directory setting (`[manager] dataDirectory=<path>`), next to `xmb-manager.exe`; it is the one manager file outside the data directory. |
 | `<data>\family-shared.json` | Hand-written list of Steam Family titles to add to the library (`{"apps":[{"id":620,"title":"Portal 2"}]}`). |
 | `<data>\artwork\` | Per-game artwork overrides: `<appid>.png` (wide row), `<appid>_icon.png`, `<appid>_bg.png`; `.jpg`, `.jpeg` and `.webp` also work. |
 | `<data>\cache\steam\` | Cached Steam header images (`<appid>.image`). Safe to delete; it is refetched. |
@@ -459,6 +510,9 @@ There is no remapping screen yet.
 | **LNK1104: cannot open `re-ps3-native.exe`** | A previous instance is still running. Stop `re-ps3-native.exe` (Task Manager or `Stop-Process -Name re-ps3-native`) and build again. For parallel sessions use a separate `-OutputDirectory`; antivirus can also briefly hold a just-written executable. |
 | **`--dev-flash` exits with code 2** | The option is required for anything that opens a window or reads firmware. Pass the local firmware directory, or use one of the options section 4.7 lists as not needing it. |
 | **`--kiosk` exits with code 2** | `--display` needs `--kiosk`, the index must be a real screen, and `--kiosk` and `--start-windowed` cannot be combined. The console message names which rule failed. |
+| **The manager's imports do not appear in the XMB** | Two causes, both silent. The manager writes to its own data folder (default `<manager exe folder>\data`, remembered in `manager.ini`), which is not the folder `run-native-xmb.ps1` passes as `--data-dir`; compare the two and point the manager at the XMB's folder. Second, the XMB reads `apps.json` only on startup and on refresh: press F5. |
+| **The manager refuses a `.pkg` as encrypted** | A retail NPDRM package: its metadata cannot be read without keys the manager does not have, so nothing is imported and nothing is modified. Use an unencrypted/debug package or import the game's ROM with an emulator profile. [MANAGER.md](MANAGER.md) section 8 has the policy and the workarounds. |
+| **The manager cannot find an installed emulator** | Detection scans the usual install folders and the uninstall registry only; a portable install elsewhere is skipped. Set the executable in the Emulators tab or `emulators.json` by hand. |
 | **Build cannot find Qt** | Pass `-QtRoot` to a Qt 6.12 `msvc2022_64` kit that has Widgets, OpenGLWidgets, Multimedia, Concurrent and Network. |
 | **Build cannot find Visual Studio** | Install Visual Studio 2022 with the Desktop C++ workload; `vswhere` must find the x64 VC tools. |
 | **Jellyfin will not sign in** | The base URL must be reachable from this machine and contain no credentials, query or fragment. Check the server URL, account, certificate and server version; errors are shown on the sign-in page. A remembered session the server no longer accepts is dropped and the page returns. |

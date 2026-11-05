@@ -15,6 +15,13 @@ correction, and where the work goes next. The plan of record is
 [HANDOFF-2026-10-27.md](../HANDOFF-2026-10-27.md), is a dated snapshot of `0c8faee` and still carries the
 operational reference (build/run, config migration, crash reporting, release checklist, ground rules).
 
+Companion tool (2026-11-04): [MANAGER.md](../MANAGER.md) - the XMB Manager, the desktop tool that
+detects emulators and imports ROMs, ISOs and game folders as virtual packages (`xmb-virtual-pkg/1`)
+into the XMB's `apps.json`: the data layout, the emulator profile schema and placeholders, the CLI
+verbs and exit codes, the real-`.pkg` policy, how `refreshContent()` turns an import into a Game
+column tile, and the end-to-end verification (CLI transcript, `ContentRegistry::load` proof and a
+Game-column capture).
+
 Fidelity instrument and register (2026-10-28): [PARITY-SCORECARD.md](PARITY-SCORECARD.md) - the
 three-tier method, the catalogue and its 720-cell matrix, and the consolidated text-bearing scorecard
 (`49acac6`, section 18: 0 of 35 capturable states at A+B+C; Tier A 35, Tier B 0 pass / 2 informative /
