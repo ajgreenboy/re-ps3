@@ -56,8 +56,8 @@ void logSceneReader(const char* where);
 // GLARE SCALE/P1/P2) are read from the theme override the background clock schedules - night, yoake,
 // day and higure, blended on the plugin's own keyframe table (FUN_00011600) - because those four are
 // the only presets this build ever schedules. PARTICLES_SPE.mnu (the playback variant) is documented but
-// not applied (audit/PARTICLES.md). PARTICLES_UI.mnu's d-pad wind is ported but not fed: a console burst with a
-// held, navigating d-pad shows no gust (audit/PARTICLES.md), so what sets layer+0x1c0 is unknown. Its sixaxis
+// not applied (audit/PARTICLES.md). PARTICLES_UI.mnu's d-pad wind is applied, driven by XMB cursor moves (trackCursor;
+// not the held pad, which shows no gust on the console), so only rapid moves latch a gust. Its sixaxis
 // shake terms and the icon wind into the flow field have no input in this build and are not applied.
 //
 // Determinism: every random number comes from the firmware's Park-Miller generator seeded with
@@ -100,12 +100,13 @@ public:
     void setEmitter(std::vector<QVector3D> points,std::vector<QVector3D> velocities,int side) {
         emitter_=std::move(points);emitterVelocity_=std::move(velocities);emitterSide_=side;
     }
-    // The d-pad as the plugin's direction state (layer+0x1c0): 0 left, 1 right, 2 up, 3 down, 4 idle. setPadDirection
-    // is the held state, polled every frame; tapPadDirection latches one active tick for a press that is released
-    // before the next tick (a scripted key tap). Pinned captures take no steps after their first frame, so neither
-    // reaches a --render-clock capture. Nothing calls them: the console does not gust on a navigating d-pad hold.
-    void setPadDirection(int state) { padHeld_=state; }
-    void tapPadDirection(int state) { padTap_=state; }
+    // The XMB cursor as the plugin's direction state (layer+0x1c0). xmb_plugin's cursor-move handler (FUN_0000a3e8)
+    // sends custom_render_plugin command (group 0, id 9) once per move, which FUN_0002b548 copies into the state: a
+    // category move gives 0 when the column index rises, 1 when it falls; an item move in the same column gives 2 when
+    // the selection rises, 3 when it falls [TRACED]. Called every frame with the shell's cursor; a change at the same
+    // page depth is one move event. Not the held pad: the console's held d-pad shows no gust (audit/PARTICLES.md).
+    // Pinned captures take no steps after their first frame, so it never reaches a --render-clock capture.
+    void trackCursor(int category,int depth,int selection);
     // Simulation state, for determinism logging (XMB_PARTICLE_LOG) and the audit's parity table.
     int liveCount() const { return live_; }
     long long stepIndex() const { return step_; }
@@ -233,10 +234,11 @@ private:
     unsigned int seed_=0;
     float aspect_=16.f/9.f;
     float globalAlpha_=1;
-    // Input wind state (FUN_0002d02c / FUN_00031494): the held and tapped d-pad, the last direction's rotation
-    // vector (layer+0x1b0), the gust smoother (layer+0x19c, g = layer+0x194) and the brownian excitation
-    // oscillator (layer+0x1d8 / +0x1dc, level layer+0x1d4).
-    int padHeld_=4,padTap_=4;
+    // Input wind state (FUN_0002d02c / FUN_00031494): the direction state (layer+0x1c0, 4 idle), the last direction's
+    // rotation vector (layer+0x1b0), the gust smoother (layer+0x19c, g = layer+0x194) and the brownian excitation
+    // oscillator (layer+0x1d8 / +0x1dc, level layer+0x1d4). The cursor fields are the last trackCursor() input.
+    int padState_=4;
+    int cursorCategory_=-1,cursorDepth_=-1,cursorSelection_=-1;
     QVector3D padRotation_;
     float padGustVelocity_=0,padGain_=0;
     float excitePosition_=0,exciteVelocity_=0,exciteLevel_=0;
