@@ -73,8 +73,12 @@ state stays set while the rotation is >= 1e-5 rad and resets to idle otherwise, 
 (0.03 x DPAD ROT MAX = 3.5e-6) and only moves close enough together (g past ~0.086) latch a gust, which then holds.
 `Particles::trackCursor` (called per frame with the shell's category/depth/selection) now feeds it. Native: a 400 ms
 RIGHT hold stays calm (p50 10, vx -3.5); eight alternating moves 300 ms apart latch at ~2.4 s (p50 29 -> 46, p90 ~95
-px/s). The console has not been driven fast enough to latch yet (its bursts: 3 and 4 moves), so the latch is
-traced, not observed. explore_plugin's list scroll / view open-close sends (MEDIUM) are not ported. Gate unchanged (pinned captures take no input).
+px/s). Console latch burst (same day, rig): 8 alternating moves 300 ms apart do not latch;
+16 moves 150 ms apart do (gust from ~3 s, still building after the last key; p50 22..29, p90 ~50 px/s). So the
+latch is real, but the native latches too easily, runs ~4x faster, and turns about the wrong axis: the console's
+latched dust swirls in the screen plane (left strip vx +17, right strip vy -21 px/s after a last LEFT), the native's
+rotates about the vertical axis (right strip moves down). A sign flip alone does not fix it (tried, reverted). Open:
+trace the M92 axis/basis convention and DPAD ROT MAX's applied value before changing more. explore_plugin's list scroll / view open-close sends (MEDIUM) are not ported. Gate unchanged (pinned captures take no input).
 
 ## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
 

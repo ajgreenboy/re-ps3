@@ -1307,3 +1307,18 @@ neither latches. Native: `Particles::trackCursor(category, depth, selection)` tu
 depth into one move event; the held-pad feed stays removed. Native 400 ms RIGHT hold: p50 10, vx -3.5 (calm, as the
 console). Eight alternating RIGHT/LEFT moves 300 ms apart: calm to ~2.4 s, then latched (p50 29 -> 46, p90 ~95 px/s
 at 2.4..4.9 s). The latch has not been seen on the console (no console burst has had enough fast moves yet).
+
+Console latch check, same day (rig, keyboard map swapped and restored as before; `latch/` bursts from Game):
+| burst | before keys | latched window | notes |
+|---|---|---|---|
+| 8 alternating moves, 300 ms apart (500..2600 ms) | p50 10, vx +1.0 | none: p50 13..19, vx +2.9..+4.5 to 6 s | the native latches on this |
+| 16 alternating moves, 150 ms apart (500..2750 ms) | p50 14, vx -0.2 | from ~3.0 s: p50 22..29, p90 46..50, vx +8..+15, vy -9..-14 | still building after the last key |
+
+All 16 moves registered (the cursor ends on Game, last move LEFT, state 1). Per screen side at 4.2..6 s (50 ms gap):
+console left strip vx +16.7 / vy +0.4, right strip vx +3.1 / vy -21.3 (p50 22 / 26) - a swirl in the screen plane.
+Native after 8 moves 300 ms apart (last LEFT), 3.2..4.9 s: left vx -19 / right vy +15 (p50 110 / 41, poorly
+matched - too fast). Flipping the horizontal direction signs turned the left strip (+8) but not the right (vy +8),
+so the native's axis or basis is wrong, not only a sign; the flip is reverted. Three mismatches stay open: the native
+latches on sparser moves, its latched gust is ~4x faster, and it rotates about the vertical axis where the console
+swirls in the screen plane. Next: trace how M92 is built from v10 (axis component order, the view-basis multiply)
+and which DPAD ROT MAX value is applied (file 1.1665e-4 vs default 2e-4, or another).
