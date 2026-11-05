@@ -505,7 +505,7 @@ only the glint strength and DoF, never the motion.
 
 1. **Simulation parity**: a unit test that replays a fixed seed for 600 steps and compares live count, mean
    age, mean speed and mean position against a table captured from RPCS3 (`XMB_VTX_DUMP` of the particle draw
-   - the existing `rpcs3-rsx-capture.patch` captures vertex arrays per draw; target the 2160-byte vpo ucode).
+   - the existing `../../patches/rpcs3-rsx-capture.patch` captures vertex arrays per draw; target the 2160-byte vpo ucode).
 2. **Vertex-format parity**: the captured particle vertex buffer decoded with the 48-byte/3-attribute layout
    must reproduce the captured draw; if the stride is 40, the capture shows it immediately.
 3. **Frame parity**: render the same camera/time and compare region luma plus a difference image against an

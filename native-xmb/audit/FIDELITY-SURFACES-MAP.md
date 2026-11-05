@@ -241,7 +241,7 @@ behind it are absent.**
 | Sign Up / account creation | `#seg_regist` (`sel://localhost/fnregist`); `regcam_plugin`, `auth_plugin` (4), `np_eula_plugin` (2), `eula_net/hcopy/cddb` | uncaptured | **A** | The 24 `seg_cam_*` condition variants are this one surface. |
 | Sign In / account management | `npsignin_plugin` (6 pages: netcheck, goldcheck, signin, signing-in, wait, background) | uncaptured | **A** | The build's `Sign In` row answers `Action::Unavailable`; the catalogue scores this state `message-only` and `REFERENCE-GAPS.md` §7 item 5 files it do-not-chase. |
 | What's New | `#seg_welcome` (`sel://localhost/welcome?type=psn`); `hknw_plugin` (**24 pages**) | uncaptured | **A** | Nothing in `src\` mentions What's New. A 24-page plugin with a library/playlist/comment/busy model, absent entirely. |
-| Trophy Collection | `#seg_trophy`; `np_trophy_plugin` (9) + `np_trophy_ingame` (4) + `friendtrophy_plugin` (10) | uncaptured | **A** | The row exists and answers a message; `PHASES-2026-10-28.md` 6.3 records the verdict (no backend, `TROPUSR.DAT` encrypted) and that the honest-wording hunk is unapplied. |
+| Trophy Collection | `#seg_trophy`; `np_trophy_plugin` (9) + `np_trophy_ingame` (4) + `friendtrophy_plugin` (10) | uncaptured | **A** | The row exists and answers a message; `../archive/PHASES-2026-10-28.md` 6.3 records the verdict (no backend, `TROPUSR.DAT` encrypted) and that the honest-wording hunk is unapplied. |
 | PlayStation(R)Plus | `sel://localhost/nogold` → `#seg_plus`, `#seg_plus_shop` | uncaptured | **A** | No row in the build at all. |
 | PlayStation(R)Store | `#seg_commerce_new`, `#seg_commerce`, `#seg_commerce_shop`; `newstore_plugin` (4) + `newstore_effect` | uncaptured | **A** | |
 | PSN download list | `download_list.xml` (19 views), `videodownloader_list.xml` (4), `upload_list.xml` (8) | uncaptured | **A** | The PSN download queue and its upload lists (photo/music/video to network storage). |
@@ -473,7 +473,7 @@ later pass must not quote uncritically.
    row - not drawing it. This is why §2.6 marks it `partial` rather than native-only.
 
 3. **`MENUS-XMBML.md` 3.1-3.4 present the eight columns as firmware-resolved, but the runtime does not
-   use those tables.** `PHASES-2026-10-28.md` 1.2 (item 3.1) says it plainly - "The shell policy hunk
+   use those tables.** `../archive/PHASES-2026-10-28.md` 1.2 (item 3.1) says it plainly - "The shell policy hunk
    (MENUS-XMBML 7.1-7.4, `resolveCategoryColumns`) is not in `src`; only Network and the old Settings
    projection run at runtime" - and `src\shell.cpp:1013-1059` confirms it. **The consequence is never
    stated anywhere:** the Photo, Music, Video, Game, PSN, Friends and Users columns in the shipped build
@@ -484,7 +484,7 @@ later pass must not quote uncritically.
    other six columns say `native` - which is honest, but no document reconciles the *labels*, and three
    columns (Photo, Music, Video) share **zero** row labels with their frames.
 
-4. **`PHASES-2026-10-28.md` 1.2 P2.2: "Screen by screen is 30 firmware states, 5 of which still have no
+4. **`../archive/PHASES-2026-10-28.md` 1.2 P2.2: "Screen by screen is 30 firmware states, 5 of which still have no
    reference", against `REFERENCE-GAPS.md` §0's "8 states with no reference anywhere".** The 8 is the
    accurate figure at `6a735e8`/`61d4e8c` and the 5 is the older count before `column-tv`,
    `page-download-management` and `notification` were re-examined. The two numbers appear three sections

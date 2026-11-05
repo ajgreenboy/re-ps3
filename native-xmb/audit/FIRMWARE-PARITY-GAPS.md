@@ -26,7 +26,7 @@ audio, and what this C++/Qt recreation still lacks.
 > Two numbers a reader needs before quoting anything in this file: the scorecard is
 > [PARITY-SCORECARD.md](PARITY-SCORECARD.md) (`49acac6`, section 18: Tier A 35 of 35 capturable states,
 > Tier B 0 pass / 2 informative / 23 gating, Tier C 9, 25 of 30 firmware states referenced, **0 states
-> 1:1**), and the completion ledger is [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1 (16
+> 1:1**), and the completion ledger is [PHASES-2026-10-28.md](../archive/PHASES-2026-10-28.md) section 1 (16
 > done / 49 partly / 22 not started / 1 obsolete). A percentage in sections 1.1-1.4 is a judgement with
 > stated components; the tier counts are the measurement.
 
@@ -387,7 +387,7 @@ this list:
 
 ## 3. Ranked next ten: smallest honest slice, and the evidence it produces
 
-> **Superseded 2026-10-27 as an order.** The forward plan is [PHASES-2026-10-28.md](../PHASES-2026-10-28.md)
+> **Superseded 2026-10-27 as an order.** The forward plan is [PHASES-2026-10-28.md](../archive/PHASES-2026-10-28.md)
 > sections 2-3. Four of these ten are done or overtaken: item 1 (`GL_MAX` coverage union, `37776ae`),
 > 4 (options panel exists), 5 (notifications exist), 6 (the page-move disassembly landed and contradicted
 > mode 4), 7 (`GEOMETRY-ROOT`), 8 (the Network column is generated from XMBML), 9 (the Settings spec
@@ -584,9 +584,9 @@ brightness-on-alpha experiment), `audit/CATEGORY-ICON-FIX.md`, `audit/PS-BUTTON.
 The items above are the 2026-10-26 findings. This pass corrected a further set, each against the code
 or a commit, not against another document:
 
-- **HANDOFF-2026-10-27.md** said its tree (`0c8faee`, 177 commits, 33/66 ISA) was current and that
+- **../archive/HANDOFF-2026-10-27.md** said its tree (`0c8faee`, 177 commits, 33/66 ISA) was current and that
   PHASES-2026-10-27 was the plan of record. Corrected: it is now labelled a dated snapshot and points at
-  `HANDOFF-2026-10-28.md` (HEAD `9545047`, 200 commits) and PHASES-2026-10-28 (15/44/28/1 ledger).
+  `../archive/HANDOFF-2026-10-28.md` (HEAD `9545047`, 200 commits) and PHASES-2026-10-28 (15/44/28/1 ledger).
   `HANDOFF.md` (the October 23/24 landing page) carries the same banner.
 - **`ISA.md` 33/66** claimed two icon-material ticks whose probe predates the glass-material change.
   Corrected: 31/66, ISC-42/42.1 re-opened with the re-run recipe, and every tick annotated where its
@@ -620,7 +620,7 @@ or a commit, not against another document:
 
 Still stale and **not** fixed here, because they are outside this pass's write fence:
 
-- **`native-xmb/README.md`** still says "Current handoff (2026-10-27): HANDOFF-2026-10-27.md - the tree
+- **`native-xmb/README.md`** still says "Current handoff (2026-10-27): ../archive/HANDOFF-2026-10-27.md - the tree
   at `0c8faee`". It must point at HANDOFF-2026-10-28 and PHASES-2026-10-28.
 - **`audit/PIPELINE.md`, `audit/VISUAL-BEHAVIOR.md`, `audit/TEXT-RASTER.md`** carry drifted line numbers
   and a few statuses this pass did not re-read; the analysis stands, the citations need an owning pass.

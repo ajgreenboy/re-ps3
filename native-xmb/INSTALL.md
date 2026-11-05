@@ -10,7 +10,7 @@ sections 4 and 5 were checked against `src/main.cpp` and the modules named in ea
 in section 6 against `src/preferences.cpp`, `src/profiles.cpp`, `src/jellyfin_client.cpp` and
 `src/steam_owned.cpp`. Re-read the source before trusting a row in a later session.
 
-Current handoff and gate state: [HANDOFF-2026-10-28.md](HANDOFF-2026-10-28.md).
+Current handoff and gate state: [HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md).
 
 The application is a Windows x64 desktop program built with Qt 6, OpenGL 3.3 core and the MSVC
 toolchain. It is not a firmware replacement and it ships no Sony assets: it reads a local PS3 4.93
@@ -516,8 +516,8 @@ There is no remapping screen yet.
 | **Build cannot find Qt** | Pass `-QtRoot` to a Qt 6.12 `msvc2022_64` kit that has Widgets, OpenGLWidgets, Multimedia, Concurrent and Network. |
 | **Build cannot find Visual Studio** | Install Visual Studio 2022 with the Desktop C++ workload; `vswhere` must find the x64 VC tools. |
 | **Jellyfin will not sign in** | The base URL must be reachable from this machine and contain no credentials, query or fragment. Check the server URL, account, certificate and server version; errors are shown on the sign-in page. A remembered session the server no longer accepts is dropped and the page returns. |
-| **Settings stopped saving** | A newer-version or corrupt `preferences.json`/`profiles.json` is preserved read-only instead of being overwritten. Read the message, back up the file, and follow the migration policy in [HANDOFF-2026-10-27.md](HANDOFF-2026-10-27.md) section 6 (still the reference; the code is `src/preferences.cpp` and `src/profiles.cpp`). |
-| **The gate cannot find references** | `out\native-reference\` is local, gitignored evidence and is absent on a clean clone. The gate needs the stored RPCS3 frames, the named-state references and a build the thresholds file points at; see [HANDOFF-2026-10-27.md](HANDOFF-2026-10-27.md) section 8 and [HANDOFF-2026-10-28.md](HANDOFF-2026-10-28.md) section 4. |
+| **Settings stopped saving** | A newer-version or corrupt `preferences.json`/`profiles.json` is preserved read-only instead of being overwritten. Read the message, back up the file, and follow the migration policy in [HANDOFF-2026-10-27.md](archive/HANDOFF-2026-10-27.md) section 6 (still the reference; the code is `src/preferences.cpp` and `src/profiles.cpp`). |
+| **The gate cannot find references** | `out\native-reference\` is local, gitignored evidence and is absent on a clean clone. The gate needs the stored RPCS3 frames, the named-state references and a build the thresholds file points at; see [HANDOFF-2026-10-27.md](archive/HANDOFF-2026-10-27.md) section 8 and [HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md) section 4. |
 | **Only one screen or the wrong screen in kiosk** | `--display 0` is the first screen in Qt's own order, which can differ from the Windows numbering when a display is cloned or disabled. `--kiosk` logs the chosen display and its size. |
 
 ## 12. Verify the install
@@ -544,5 +544,5 @@ reference frames and `dev_flash`:
 `parity.ts --references-missing` as a report that never fails the run, and fails on any credential,
 firmware-data, dump, broken-link or dead-commit finding. `-WhatIf` prints the plan and the exact
 harness commands without running them. A clean clone without the local artifacts can still build and
-run, but it cannot reproduce the gate. [HANDOFF-2026-10-28.md](HANDOFF-2026-10-28.md) section 9 is the
+run, but it cannot reproduce the gate. [HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md) section 9 is the
 release and tagging checklist.

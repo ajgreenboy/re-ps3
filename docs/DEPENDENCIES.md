@@ -16,7 +16,7 @@ contains no SDK/runtime binaries. Assets load read-only from local firmware.
 | Dependency | Base revision | Local modifications |
 |---|---|---|
 | XenonRecomp (`hedge-dev/XenonRecomp`) | `ddd128bcca99fe8bfbb99bea583c972351fa6ace` | `xenon/xenonrecomp-current.patch` |
-| RPCS3 (`RPCS3/rpcs3`) | `0b0fa082ae552ab77a70de4fc1f70110d165116b` | `rpcs3-current.patch` |
+| RPCS3 (`RPCS3/rpcs3`) | `0b0fa082ae552ab77a70de4fc1f70110d165116b` | `../patches/rpcs3-current.patch` |
 
 The current patches are complete tracked-file diffs against these revisions.
 Apply each to a clean checkout of its matching base using `git apply`, then build

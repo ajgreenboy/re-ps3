@@ -84,7 +84,7 @@ Next: set a Web API key to exercise the owned/collections path end to end, run a
 
 ## 2026-10-27: services breadth (account switch, launch/quit, avatars, trophies)
 
-Phase 6 of [PHASES-2026-10-27.md](../PHASES-2026-10-27.md), in the Steam modules only. All evidence and the
+Phase 6 of [PHASES-2026-10-27.md](../archive/PHASES-2026-10-27.md), in the Steam modules only. All evidence and the
 exact `shell.cpp`/`shell.h` hunks are in [SERVICES-BREADTH.md](SERVICES-BREADTH.md); nothing in `shell.*`,
 `view.*`, `main.cpp`, `CMakeLists.txt` or the harness was edited by this pass.
 

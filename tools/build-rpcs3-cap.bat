@@ -1,5 +1,5 @@
 @echo off
-rem RPCS3 Release build with the capture patch (rpcs3-rsx-capture.patch) into C:\dev\rpcs3-cap\, a separate tree, so a
+rem RPCS3 Release build with the capture patch (../patches/rpcs3-rsx-capture.patch) into C:\dev\rpcs3-cap\, a separate tree, so a
 rem running bin\rpcs3.exe is untouched. The rpcs3 project links build\lib\Release-x64\emucore.lib rather than the OutDir
 rem copy, so the fresh emucore.lib is swapped in for the link and the original put back afterwards.
 setlocal

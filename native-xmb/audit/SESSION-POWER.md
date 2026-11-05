@@ -1,6 +1,6 @@
 # Session and power behaviour (HTPC)
 
-Phase 4 of [PHASES-2026-10-27.md](../PHASES-2026-10-27.md). This document records what was implemented in
+Phase 4 of [PHASES-2026-10-27.md](../archive/PHASES-2026-10-27.md). This document records what was implemented in
 this pass, what the OS actually did under test, and - for files this pass did not own - the exact hunks that
 are still required.
 

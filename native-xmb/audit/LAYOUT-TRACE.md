@@ -320,7 +320,7 @@ category icons at all.
 
 ## 1. Capture and provenance
 
-- RPCS3 capture build `C:\dev\rpcs3-cap\rpcs3.exe` (the tree built from `rpcs3-rsx-capture.patch`), booted as
+- RPCS3 capture build `C:\dev\rpcs3-cap\rpcs3.exe` (the tree built from `../../patches/rpcs3-rsx-capture.patch`), booted as
   `rpcs3.exe --no-gui --config C:\dev\out\rpcs3-xmb-cap\capture.yml --fullscreen <dev_flash>\vsh\module\vsh.self`.
 - Scratch config (outside the repo and outside the RPCS3 folder): Vulkan, 1920x1080, 60 Hz, exclusive
   fullscreen disabled. The global input config was temporarily replaced with a Keyboard handler (PS Button

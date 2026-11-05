@@ -33,14 +33,14 @@ semantic. Live view: `powershell -ExecutionPolicy Bypass -File C:\dev\xmb\status
 | Native runtime | Phase 4 in progress | 40-module firmware-SPURS build visibly renders PS3 startup dialog (14,969 draws in 45 s). Adding OS services and five firmware components in a 45-module rebuild. Full menu/navigation still pending. See §3a. |
 | Wider image | Done | 39 modules (13 boot plugins + 25 vsh/sys modules vsh loads at boot), 71,328 functions, 857 PS3 jump tables, 280 objects |
 | Link + first boot | Done | `out\xmbrt\xmbrt.exe` enters vsh at 0x10230; first call `sys_mutex_create` from vsh's TLS init |
-| Reference trace (phase 2) | Done | `out\trace\rpcs3_trace.txt` (200,000 calls with args and returns), normalised `out\trace\rpcs3.norm`; RPCS3 patch `rpcs3-xmb-trace.patch` |
+| Reference trace (phase 2) | Done | `out\trace\rpcs3_trace.txt` (200,000 calls with args and returns), normalised `out\trace\rpcs3.norm`; RPCS3 patch `patches/rpcs3-xmb-trace.patch` |
 | Module inventory | Done | `out\trace\modules_loaded.txt`: 46 modules load before the XMB is up, most of them outside the 13-plugin set |
 
 ## 2. Folder map
 
 | Path | Contents |
 |---|---|
-| `C:\dev\xmb` | Project repo (local git, no remote): tooling, scripts, REPORT.md, this file |
+| `C:\dev\xmb` | Project repo (local git, no remote): tooling, scripts, docs/reports/REPORT-2026-10-22.md, this file |
 | `C:\dev\xmb\recomp` | `xmbld.c`, `elf_be.c/.h`, `build.bat`, `runtime\ppu.h` (unused by the XenonRecomp path) |
 | `C:\dev\xmb\ghidra_scripts` | Ps3ResolveImports, Ps3Exports, Ps3Functions, Ps3Census, DumpStats |
 | `C:\dev\xmb\xenon` | `xmb_boot.toml`, `compile-recomp.ps1`, `xenonrecomp-pdata-only.patch` (14 lines), `xenonrecomp-xmb.patch` (full working tree, 450 lines), `unrecognized_boot493.csv` |
@@ -496,7 +496,7 @@ Latest boot evidence with the new services (before the final switch rebuild):
   over generated fragments when finding a switch owner, and extend every fragment containing the same
   bctr through its later cases. Static audit then found 76 switch tail targets without function entries.
   `xenon/scan-switch-targets.ts` now detects these; the rebuild adds entries and repeats discovery before
-  compiling. This is wired into both `rebuild.sh` and `work/rebuild-components.ps1`.
+  compiling. This is wired into both `tools/rebuild.sh` and `work/rebuild-components.ps1`.
 
 ### Previous checkpoint: execute firmware SPURS (40 modules)
 
@@ -673,7 +673,7 @@ rsxaudio ring to WASAPI).
 
 ### Phase 2 as built: reference traces
 
-- RPCS3 carries a local tracer (`rpcs3-xmb-trace.patch`: `PPUModule.cpp`, `PPUInterpreter.cpp`, `lv2.cpp`). It logs
+- RPCS3 carries a local tracer (`patches/rpcs3-xmb-trace.patch`: `PPUModule.cpp`, `PPUInterpreter.cpp`, `lv2.cpp`). It logs
   syscalls whose `cia` is in vsh or a boot plugin, and import calls (a taken `bcctr` leaving those modules, with
   the return matched at `bclr`). Addresses are translated to xmbld's layout; every module load/unload is logged.
 - Capture: set PPU Decoder to "Interpreter (static)" (the tracer needs it), then run RPCS3 with
@@ -740,8 +740,8 @@ rsxaudio ring to WASAPI).
     reports 0. The first pass found 6,887 entries in 7 rounds, with no translation round trips.
   - `gen-opd-functions.ts` (OPD mode): the last module's bound was wrong (it skipped x3_mdimp9). OPDs that land
     inside a merged Ghidra body are now accepted when the target begins with `stdu r1`/`mflr r0`.
-  - `iterate-errors.sh` (XenonRecomp `// ERROR` targets, one translation per round) is the slow fallback.
-  - `rebuild.sh` does relink, switch-table iteration, translate, compile and runtime build in one step.
+  - `tools/iterate-errors.sh` (XenonRecomp `// ERROR` targets, one translation per round) is the slow fallback.
+  - `tools/rebuild.sh` does relink, switch-table iteration, translate, compile and runtime build in one step.
 - **PRX variable imports.** xmbld now binds `num_var` imports (vnids/vstubs) and attribute-0x2000 function
   refs with RPCS3's `ppu_patch_refs` rules. Before this, code like `lis r6,0; lwz r0,28(r6)` read address 0x1C.
   222/228 bind; the 6 unbound ones come from vmclib, libvideoSubsystem and mintx_client (not in the image).
@@ -802,7 +802,7 @@ rsxaudio ring to WASAPI).
     (capture them with RPCS3's RSX capture while it runs the XMB).
 - Must cover the fragment/vertex programs used by PAF (the wave background, icon effects, text), and texture formats.
 - **Done when:** the XMB frame renders pixel-comparable to RPCS3's output (screenshot diff against
-  `capture-rpcs3.ps1` captures).
+  `tools/capture-rpcs3.ps1` captures).
 
 ### 4.7 SPU usage on the boot path
 
@@ -828,14 +828,14 @@ rsxaudio ring to WASAPI).
 ## 6. Known issues and gotchas
 
 - Any xmbld change that alters image bytes (relocations, import binding, variable refs) needs a full
-  `rebuild.sh`. XenonRecomp bakes `lis`/`addi` immediates into the C++, so a relink alone leaves the
+  `tools/rebuild.sh`. XenonRecomp bakes `lis`/`addi` immediates into the C++, so a relink alone leaves the
   translated code pointing at the old addresses (a run showed `lis r9,0; lwz r4,0(r9)` after the image was fixed).
 
 - REA (reverse-engineer-anything) rejects PPC64 ELFs, so drive Ghidra headless directly.
 - Child processes of the Claude desktop app get AppData redirected (MSIX), which breaks Ghidra's OSGi cache. That's
   why `launch.properties` is edited.
 - Use forward slashes in CMake `-D` paths. Ninja paths need `$:` for drive letters.
-- RPCS3's prebuilt LLVM needs VS 2026's STL. With VS 2022, build LLVM from source (`build-llvm.bat`).
+- RPCS3's prebuilt LLVM needs VS 2026's STL. With VS 2022, build LLVM from source (`tools/build-llvm.bat`).
 - `rpcs3.exe --headless --installfw` crashes on exit (0xC0000409) after a completed install.
 - XenonRecomp named functions without a symbol `sub_<decimal>` while the mapping uses hex, which left 15
   functions unresolved at link time. Fixed in the patch (`recompiler.cpp`, fallback name now `sub_{:X}`).

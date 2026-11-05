@@ -3,7 +3,7 @@
 > **Historical snapshot - 2026-10-24, corrected 2026-10-28.** This document enumerates the firmware's
 > behavioural requirement families and what the native build lacked at the time. The requirement
 > families are still the right checklist; the **"Current native gap" column is not today's state**.
-> The current state is the completion ledger in [PHASES-2026-10-28.md](../PHASES-2026-10-28.md) section 1
+> The current state is the completion ledger in [PHASES-2026-10-28.md](../archive/PHASES-2026-10-28.md) section 1
 > (15 done / 44 partly / 28 not started / 1 obsolete), the per-feature status is
 > [FEATURE-CATALOG.md](FEATURE-CATALOG.md), and the scored presentation gap is
 > [FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md). Cells this pass could prove changed are marked
