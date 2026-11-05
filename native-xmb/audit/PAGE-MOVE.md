@@ -2030,3 +2030,43 @@ The departing column's cross-fade likewise keeps a faint ghost past 200 ms, as t
 at 0.762/frame with no snap at 200 ms are the mode-5 tail itself, so they no longer argue for a second, slower
 channel. Without the snap, 200 ms mode 5 and 300 ms mode 4 are within 0.5% at every time, so the page content's
 pair stays as it is (`pageMilliseconds` 300, mode 4) until the call above is pinned. Gate 19.59, 6/6, unchanged.
+
+## 3. Runtime trace of the page move (same day): the content channel is mode 5, 200 ms
+
+**Instrument.** A local RPCS3 hook (`patches/rpcs3-pc-watch.patch`, on top of `rpcs3-xmb-trace.patch`, built
+into `C:/dev/rpcs3-cap` with `tools/build-rpcs3-cap.bat`): with `XMB_PC_TRACE`/`XMB_PC_WATCH` set, every
+taken b/bl/bcctr to a watched address logs r3..r8, f1..f4, lr and eight saved return addresses. Watched: the ease
+setup `0x3981EC` (r4 = flags | mode in the low byte, f1 = duration ms, f2 = delay ms) and the animate wrapper
+`0x399E08` (r4 = property id, r7 = mode, f1 = duration). PPU Decoder Interpreter (static) in a scratch copy of
+the rig config; keyboard map swapped into the rig's own input config and restored (E624DA0D... before and after).
+Run: Settings -> Game Settings, Cross (page open, PS-Upscaler page), Circle (close); call log 11,207 lines,
+page-open window 632, close window 306 (C:/dev/out/padwind-2026-11-05/pctrace, local only).
+
+**Result (TRACED, runtime).** Every ease set up during the open and the close is mode 5 or mode 0; **no mode 4**.
+Open: mode 5 at 200 ms is the bulk (100 calls via 0x004008BC/0x003BA6C8, 21 via 0x003EEE00), with 13 at 300 ms,
+13 at 30 ms, a staggered set at 770..790 ms with 330..390 ms delays, flags-0x400 600 ms calls on property
+0x1000014, and a 750 ms ease from a plugin (0x00A40254) that also runs while idle. The bar-node properties
+0x100002C / 0x100002E are animated at 200 ms (0x100002E also at 300 ms) through 0x3BA6C8 -> 0x3AF14C. Close: mode 5
+at 200 and 240 ms, the same 750 ms ease, nothing in mode 4. So the static mode-4 sites of the 2026-11-05 trace
+(xmb_plugin 0x3098, explore_plugin's page controller and 0x30A8C) do not run on this move.
+
+**Which duration.** Mode 5 at 300 ms retains 0.847 per frame against the burst's 0.762 (0.775 with the tracker's
+bias), so it cannot be the visible slide; mode 5 at 200 ms retains 0.7794. The 18 visible frames that made 300 ms
+look right are the ease's own tail (section 2 of this phase). `pageMilliseconds` is now **200** and the depth
+ease **mode 5** (`src/view.h`, `src/view.cpp`); the bar channel was already 200 ms mode 5.
+
+**Measured** (focused-icon template track, SAD, px from rest; console = the 642-frame burst, PgUp at 2706 ms):
+
+| ms after Circle | console | native 300 ms mode 4 | native 200 ms mode 5 (now) |
+|---:|---:|---:|---:|
+| ~80 | -151.9 | -145.1 | -154.9 |
+| ~155 | -45.1 | -45.9 | -48.1 |
+| ~204 | -17.2 | -21.1 | -24.2 |
+| ~255 | -7.2 | -9.9 | -11.2 |
+| ~305 | -3.1 | -4.8 | -5.8 |
+| ~350 | -1.9 | -2.1 | -2.8 |
+
+The two native curves differ by ~0.5% per frame, so the track cannot choose between them; the trace does. Both
+trail the console's tail by a few px; the console burst drops a frame at 96..113 ms and then decays faster
+(~0.73/frame), which fits paf's frame-count step (the global at 0x6FB1F4) catching up after a slow frame rather
+than a different ease. The 49 ms close hold is unchanged. Gate 19.59, 6/6, unchanged.
