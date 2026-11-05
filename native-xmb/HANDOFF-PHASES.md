@@ -36,7 +36,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 |---|---|
 | Background, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs |
 | Ribbon | Ported end to end (2026-10-25): plugin cloth, ffd_shader1 lattice, spline.elf FFD/camera/bicubic sheet, each stage matched to RPCS3 captures; LINE1 presets follow the plugin's clock keyframes and boot schedule (audit/PIPELINE.md "Ribbon port", "Ribbon presets") |
-| Particles | Firmware programs and simulation (2026-11-04): particles_quads/particles_second with traced uniforms, the SPU kernel stepped once per 60 Hz tick by DELTA TIME into a 2048-record pool, births on the ribbon's 128 x 128 sheet (traced PPU emitter), life-box deaths, the PARTICLES_UI d-pad wind; deterministic from `--render-clock`. Open: the dust's vertical placement, shake/icon wind (audit/PARTICLES.md) |
+| Particles | Firmware programs and simulation (2026-11-04): particles_quads/particles_second with traced uniforms, the SPU kernel stepped once per 60 Hz tick by DELTA TIME into a 2048-record pool, births on the ribbon's 128 x 128 sheet (traced PPU emitter), life-box deaths, the PARTICLES_UI d-pad wind ported but not fed (a console d-pad hold shows no gust); deterministic from `--render-clock`. Open: the dust's vertical placement, shake/icon wind (audit/PARTICLES.md) |
 | Category icons | All built-in colours use an opaque normal-map material; Original follows the firmware monthly palette. Six day/night pairs verified; firmware shader remains diagnostic. See audit/CATEGORY-ICON-FIX.md; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | `icontex` item icons and settings bullets draw through `IconRenderer` (firmware vertex program, opaque normal-map material) - sizes 77.616/184.800 and 35.721/85.050, pitch 80, brightness 1.0/0.247/0.698 confirmed against decoded RSX captures (audit/ITEM-ICONS.md); labels, dialogs, the info bar, the options panel and the OSK draw through the GL glyph atlas with Qt shaping, and only RCO/artwork/theme icons remain QPainter |
 | Text | Original font faces rasterized with FreeType and recovered load flags 10 into the 2x GL atlas; label glow/idle fade are MaXMB observations; PAF metrics, per-style weight/slant and full parity remain open (audit/FONT-MATCHING.md). Per-phase glyph coverage landed 2026-10-26 as a labelled fit (audit/TEXT-RASTER.md 2.4) |
@@ -54,6 +54,19 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - Third-party code (MaXMB, DeckyXMB, linkev/PlayStation-3-XMB) is credited in `THIRD-PARTY.md`.
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
+
+## 2026-11-05: console held d-pad shows no gust; pad feed removed
+
+An RPCS3 burst with held keys (capture rig only: its own `config\input_configs\global\Default.yml` swapped to the
+keyboard map 40200e9c... and restored to e624da0d...; 1920 x 680 crop at y 180, 89 fps; `refcap3.ps1`, a scratch
+copy of refcap2 whose burst keys take `ms:KEY:holdMs`) held RIGHT and then LEFT for 400 ms from the Game column.
+Both registered (RIGHT auto-repeated to Friends, LEFT came back), and the dust did not respond: speck speed p50
+10 px/s and mean vx -0.6..+1.8 px/s before, during (560..900 ms) and after either hold, the same as an idle burst.
+The native port gave p50 54 / vx -33 for the same hold. So on the console a navigating d-pad hold does not drive
+layer+0x1c0; what does is unknown. `View` no longer feeds the pad into the wind (the two feed calls are removed;
+the traced rotation and Brownian boost stay in particles.cpp, idle); a native 400 ms RIGHT hold now reads p50 10 /
+vx -2.8, like the console. Open: what sets layer+0x1c0 (a candidate is an un-navigable press at the end of a row,
+not tested). Gate unchanged (pinned captures take no input).
 
 ## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
 
