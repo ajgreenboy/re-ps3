@@ -1278,3 +1278,9 @@ did not move. A navigating d-pad hold therefore does not set the plugin's direct
 inferred "View's held d-pad = direction state" link was wrong. The feed calls in `View` are removed; the traced
 kernel path (rotation impulse, Brownian boost) is kept and stays idle (state 4). Native after the change, same
 400 ms RIGHT hold: p50 10 px/s, vx -2.8 at 560..840 ms. Open: the writer of layer+0x1c0.
+
+Edge check, same day: from Friends (the last category; a held RIGHT cannot navigate) RIGHT held 400 ms and 1000 ms.
+Mean vx -1.5 / -1.5 / -1.5 px/s (400 ms hold: before / during / after) and -0.1 / +0.5 / +1.4 / +1.7 (1000 ms
+hold, 0..480 / 560..900 / 900..1500 / 1500..2600); p50 10..19, which is within the idle bursts' own range (p50
+10..19, vy up to -5.9). No d-pad hold, navigating or blocked, produces the gust, so layer+0x1c0 is written by
+something other than the pad; the feed stays removed.
