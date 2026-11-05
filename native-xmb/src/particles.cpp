@@ -99,7 +99,6 @@ constexpr float kEmitXMargin=1.25f;  // fit: emit past the viewport edges so the
 constexpr float kColorGammaGain=1.84f;     // fit: _Color * _Gamma (audit 6-B2, still untraced)
 const float kTanHalfFovy=0.4985816f; // derived: tan(26.5 deg), the particle camera's fovy 53
 const QVector3D kCameraEye(0,0,2); // captured: BackgroundView eye (data 0x93730), the particle camera's lookAt
-constexpr float kParticleColorGrey=0.2f; // measured: the firmware pass 1 _Color grey (drawFirmwarePass, both passes)
 // --- pass 1: particles_quads ---------------------------------------------------------------------
 const char* vertexSource=R"(#version 330 core
 // particles_quads vertex contract (audit/PARTICLES.md 2.2): float4 position with the per-vertex life
@@ -841,14 +840,18 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
         setV(QStringLiteral("_ModelviewProjection[%1]").arg(r).toLatin1().constData(),projection.row(r));
         setV(QStringLiteral("_Modelview[%1]").arg(r).toLatin1().constData(),modelview.row(r));
     }
-    // _LightPack: rows (eye), (spot pos, specular power), (spot attn), (specular coeff, lambert, exposure, color_control),
+    // _LightPack: rows (eye), (spot pos, specular power), (spot attn), (lambert, specular coeff, exposure, color_control),
     // stored as columns - the vpo reads the eye from vc[264..266].x, and the fpo's slot table (fc 1/10/3 the eye,
     // 2/4/0 the spot, 28/26/25 the attenuation, 29/24/30 the coefficients, 16.y specular power, 6.w color_control)
-    // only resolves with that transpose.
+    // only resolves with that transpose. The fpo lights a flake as |N.L| x fc29.w + (N.H)^power x fc24.w x iridescent,
+    // so fc29 (row 0 .w) carries LAMBERT COEFF and fc24 (row 1 .w) the iridescent-tinted SPECULAR COEFF. The setter's
+    // registration-index reading had the two names the other way round; that order lit every flake evenly with no
+    // glints, while this one reproduces the console's coloured glint tail with _Color at its initialiser
+    // (audit/PARTICLES.md "The particle glints").
     const Look& l=look_;
     const QVector4D pack[4]={
-        QVector4D(kCameraEye.x(),spotPosition_.x(),spotAttenuation_.x(),l.specularCoeff),
-        QVector4D(kCameraEye.y(),spotPosition_.y(),spotAttenuation_.y(),l.lambertCoeff),
+        QVector4D(kCameraEye.x(),spotPosition_.x(),spotAttenuation_.x(),l.lambertCoeff),
+        QVector4D(kCameraEye.y(),spotPosition_.y(),spotAttenuation_.y(),l.specularCoeff),
         QVector4D(kCameraEye.z(),spotPosition_.z(),spotAttenuation_.z(),l.exposure),
         QVector4D(1,l.specularPower,0,l.colorControl)};
     for(int r=0;r<4;++r)setV(QStringLiteral("_LightPack[%1]").arg(r).toLatin1().constData(),pack[r]);
@@ -870,11 +873,10 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     for(int r=0;r<4;++r)setF(QStringLiteral("_LightPack[%1]").arg(r).toLatin1().constData(),pack[r]);
     setF("_NearControl",QVector4D(l.sizeAlign,l.nearFuzziness,l.nearAlign,0));
     setF("_IridescentExp",QVector4D(l.iridescentExp,l.iridescentExp,l.iridescentExp,l.iridescentExp));
-    // _Color is one grey (g, g, g, 0): the shell pushes it through FUN_0001afdc from a message float the state machine
-    // sends, never from a preset, and the steady-state message is not traced. g = 0.2 is measured: it puts the speck
-    // contrast histogram in the UI-free strips on the console still's (24-48 bins 108/147/23 against 128/140/26).
-    // [MEASURED - replace with fc[34] from an XMB_FP_SERIES capture of the particle draw.]
-    setF("_Color",QVector4D(kParticleColorGrey,kParticleColorGrey,kParticleColorGrey,0));
+    // _Color is one grey (g, g, g, 0) the shell can push through FUN_0001afdc from a state-machine message; the steady-state
+    // message is not traced, so it keeps its initialiser (1, 1, 1 at 0x60c80). With the light pack above that reproduces
+    // the console's glint tail (48+..128+ contrast bins 37/16/10/22 against 33/18/10/20). [TRACED initialiser.]
+    setF("_Color",QVector4D(1,1,1,0));
     // _Gamma (renderer+0x1350) is 1.0 from construction (0x60c98) until the shell sends one; FUN_00060660 skips the draw
     // at 0, so it acts as a fade. [TRACED initialiser.]
     setF("_Gamma",QVector4D(1,1,1,1));

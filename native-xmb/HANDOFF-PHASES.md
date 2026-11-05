@@ -55,6 +55,28 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-04: particle glints (the light pack's two coefficients, _Color back to its initialiser)
+
+The console's bright coloured specks are the particles' specular glints, and the native had none because two light
+coefficients were packed the wrong way round. The measured `_Color` grey (0.2) is gone with it.
+- **Measured.** Speck contrast histogram in the UI-free side strips, mean over the 73 console `col-*` frames without UI
+  in the strips (17:13..17:16, the higure preset) against 20..40 native frames at the same clock with the cloth advanced
+  (`XMB_RIBBON_ADVANCE=1`, 230..1010 s). Console bins 16/24/32/48/64/96/128+: 344/157/127/33/18/10/20. Native before:
+  250/122/152/25/2/0/0 - no glint tail at all. The console's 128+ specks are saturated and tinted (255,226,239;
+  255,247,178; 246,192,130), 1..3 px.
+- **Cause (from the fpo).** particles_quads.fpo lights a flake as |N.L| x fc29.w + (N.H)^SPECULAR POWER x fc24.w x the
+  iridescent tint: only the specular term is coloured, so the glints need the large coefficient there. fc29 is
+  `_LightPack[0]`.w and fc24 `_LightPack[1]`.w. The setter's registration-index reading put SPECULAR COEFF (74.74) in
+  row 0 and LAMBERT COEFF (8) in row 1, which lit every flake evenly through a broad |N.L| x 74.74 and needed the 0.2
+  grey to bring it down. With the two swapped (LAMBERT on the diffuse term, SPECULAR COEFF on the tinted highlight) and
+  `_Color` at its initialiser (1, 1, 1 at 0x60c80): native 253/94/88/37/16/10/22 - the 48+..128+ tail now matches the
+  console's 33/18/10/20 within a few specks, with no fitted value.
+- **Open.** The dim and middle specks (16..32 bins) are short by ~90/60/40 per frame in both readings, so they are a
+  separate gap (count or depth of the dim flakes), not lighting.
+
+Gate: frame 19.62 -> 19.60 (the glints sit at random spots against one still), other layers unchanged, 6/6;
+byte-stable. Named states not re-saved (the shared tree still carries another session's uncommitted work).
+
 ## 2026-11-04: ribbon offset closed (time-of-day matched, autocorrelation-aware)
 
 The left-end gap the 11-03 note left at ~2.5 standard errors (native 613 against console 546) was a comparison at the
