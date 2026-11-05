@@ -33,9 +33,9 @@ void logSceneReader(const char* where);
 // "Particles"). It replaces linkev/PlayStation-3-XMB's closed-form sparkle layer with what the 4.93
 // SPU task (particles.elf) actually does:
 //
-//  - a capped pool of 1536 particles (the 0x600-element reserve in FUN_0005cd14), 1529 live at
-//    measured steady state (the audit's central estimate is 1492), stepped at PARTICLES.mnu's fixed
-//    DELTA TIME (0.0088883 s);
+//  - a capped pool of 2048 particles (FUN_00060b14's li r5,0x800; a birth into a full pool is
+//    dropped), stepped once per 60 Hz tick with the kernel's 1/60 step vector (+0x8b0), deaths at
+//    age 0.99999 or outside the life box;
 //  - emission in a 51.8695 deg cone, 17.4% of spawns mirrored, speed EMIT VEL MIN +
 //    EMIT VEL MUL * (1 +/- EMIT VEL VAR) and no z velocity (EMIT VEL ZSCALE 0), accepted with
 //    EMIT PROB from an EMIT PER FRAME (60 Hz) candidate budget;
@@ -68,7 +68,7 @@ void logSceneReader(const char* where);
 // touches the simulation state, so a particle-state checksum is stable for a given render clock.
 class Particles {
 public:
-    static constexpr int kCapacity = 1536; // FUN_0005cd14's 0x600-element pool
+    static constexpr int kCapacity = 2048; // FUN_00060b14's li r5,0x800 (0x2e0ec), rounded to 512s: 4 SPU blocks of 0x6000
 
     // Loads both programs, the MNU values and the iridescent texture. This overload resolves the
     // firmware flash root from the process command line (--dev-flash), which main.cpp always passes,
@@ -107,7 +107,7 @@ private:
     // (0, 0, 2) looking down -z, fovy 53).
     struct Particle {
         float px,py,pz;       // centre position (world units; z is negative, away from the camera)
-        float vx,vy,vz;       // velocity, world units per second (the kernel adds vel x DELTA TIME per step)
+        float vx,vy,vz;       // velocity, world units per second (the kernel adds vel x 1/60 per tick)
         float age;            // life fraction, 0..1
         float ageRate;        // age increment per step = AGING SPEED * (1 +/- AGING VARIANCE)
         float qx,qy,qz,qw;    // orientation quaternion
@@ -219,7 +219,6 @@ private:
     int live_=0;
     long long step_=0;         // simulation steps completed since the seed
     unsigned int seed_=0;
-    float spawnAccumulator_=0;
     float aspect_=16.f/9.f;
     float globalAlpha_=1;
     std::vector<QVector3D> emitter_,emitterVelocity_;

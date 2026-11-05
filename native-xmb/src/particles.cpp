@@ -68,9 +68,13 @@ constexpr float kLifeIn=0.02f;             // captured: ... and the matching cla
 constexpr float kReferenceFrameRate=60.f;  // captured: EMIT PER FRAME is a 60 Hz budget (audit 3.3/3.5)
 constexpr float kSpinStep=1.f/60;          // captured: the kernel advances the spin by SPIN TIME SCALE x 1/60 per
                                            // step (constant 0x3c888888 at 0x070e8), not by DELTA TIME
-constexpr int kMaxCatchUpSteps=4096;       // derived: 4096 * 0.0088883 s ~= 36 s of sim, so
+constexpr int kMaxCatchUpSteps=4096;       // derived: 4096 ticks ~= 68 s of sim, so
                                            // --render-clock 30 reaches t=30 in one call while a long
                                            // stall cannot freeze the app for more than that.
+constexpr float kLifeBoxMin[3]={-10.f,-10.f,-12.f}; // traced: data 0x940b0, stored at renderer+0x900
+constexpr float kLifeBoxMax[3]={10.f,10.f,7.f};      // traced: data 0x940c0, stored at renderer+0x910
+constexpr float kStepSeconds=1.f/60;             // traced: data 0x93038, the kernel's per-step vector at +0x8b0
+constexpr float kAgeLimit=0.99999f;                  // traced: DAT_00092fe8, the kernel's age test 0x3f7fff58
 constexpr unsigned int kSeed=0x5053u;      // fit: fixed seed so --render-clock captures reproduce;
                                            // the firmware's own seed is not traced (Park-Miller itself is)
 // --- look / geometry ----------------------------------------------------------------------------
@@ -305,7 +309,6 @@ unsigned Particles::stateChecksum() const {
 void Particles::resetSimulation() {
     live_=0;
     step_=0;
-    spawnAccumulator_=0;
     seed_=kSeed;
     std::fill(pool_.begin(),pool_.end(),Particle{});
 }
@@ -510,10 +513,10 @@ void Particles::step() {
     // frame, and a passing frame queues int(EMIT PER FRAME) random grid cells, (int(u (dimX - 1)), int(u (dimY - 1))),
     // that FUN_00030b84 turns into particles (spawnFromGrid). The SPU kernel never spawns. [TRACED; the int conversion
     // of 16.6539 as truncation is inferred.]
-    spawnAccumulator_+=float(physics_.deltaTime)*kReferenceFrameRate;
-    while(spawnAccumulator_>=1.f) {
-        spawnAccumulator_-=1.f;
-        if(!(random()<physics_.emitProb))continue;
+    // One step is one 60 Hz tick: FUN_00062464 flushes the command ring and dispatches the kernel once, and the kernel
+    // has no sub-step loop. [TRACED] A birth into a full pool is dropped (FUN_00059228 pops the free list or returns -1,
+    // FUN_0005b6bc writes nothing). [TRACED]
+    if(random()<physics_.emitProb) {
         const int candidates=int(physics_.emitPerFrame);
         const bool grid=emitterSide_>1 && emitter_.size()==size_t(emitterSide_)*emitterSide_ && emitterVelocity_.size()==emitter_.size();
         for(int k=0;k<candidates;++k) {
@@ -523,10 +526,13 @@ void Particles::step() {
             } else spawnInBox();
         }
     }
-    // particles.elf 0x06f64-0x07098, semi-implicit Euler with dt = DELTA TIME: vel += (gravity + BROWNIAN x R -
-    // FRICTION x vel) x dt, then pos += vel x dt (R in [-1, 1)^3 from the Park-Miller call at 0x06fe4). The flow
-    // field and wind terms of the same bracket are not ported: WIND SCALE is 0 and the 32x16 field is untraced.
-    const float dt=float(physics_.deltaTime);
+    // particles.elf 0x06f64-0x07098, semi-implicit Euler: vel += (gravity + BROWNIAN x R - FRICTION x vel) x k, then
+    // pos += vel x k (R in [-1, 1)^3 from the Park-Miller call at 0x06fe4). Both updates multiply by the same physics
+    // vector at +0x8b0 (lqd 2224($87) at 0x7080 and 0x7090), which FUN_0005d510 builds from data 0x93038 = 1/60; no
+    // runtime writer of it was found, so k is that initialiser, not the menu's DELTA TIME. [TRACED multiply and
+    // initialiser; the absence of an overwrite is a search result.] The flow field, wind and the 1/k velocity term
+    // (0x7064) of the same bracket are not ported: WIND SCALE is 0 and the 32x16 field is untraced.
+    const float dt=kStepSeconds;
     const float drag=1.f-physics_.friction*dt;
     const float kick=physics_.brownian*dt;
     // Quaternion spin: q = spinStep * q, SPIN TIME SCALE radians per second.
@@ -545,7 +551,11 @@ void Particles::step() {
         p.py+=p.vy*dt;
         p.pz+=p.vz*dt;
         p.age+=p.ageRate;
-        if(p.age>=1.f) { // life over: swap the last live particle in, it was already stepped this frame
+        // The kernel recycles a record past age 0.99999 or outside the life box (particles.elf 0x7178-0x719c: the age
+        // test, then a clamp-equals-point box test; the box is renderer+0x900, the same one the vpo fades against).
+        const bool outside=p.px<kLifeBoxMin[0]||p.py<kLifeBoxMin[1]||p.pz<kLifeBoxMin[2]||
+                           p.px>kLifeBoxMax[0]||p.py>kLifeBoxMax[1]||p.pz>kLifeBoxMax[2];
+        if(p.age>=kAgeLimit||outside) { // dead: swap the last live particle in, it was already stepped this tick
             pool_[size_t(i)]=pool_[size_t(--live_)];
             continue;
         }
@@ -742,7 +752,7 @@ void Particles::sync(QOpenGLFunctions_3_3_Core& gl,double seconds) {
     // what makes --render-clock captures reproducible. A long stall catches up a bounded number of
     // steps per call instead of spawning a burst or blocking the frame.
     refreshLook(); // theme look only; never touches the simulation state
-    const long long target=seconds>0.0?static_cast<long long>(std::floor(seconds/physics_.deltaTime)):0;
+    const long long target=seconds>0.0?static_cast<long long>(std::floor(seconds*kReferenceFrameRate)):0;
     if(target<step_)resetSimulation(); // the clock went backwards: replay from the seed
     for(int n=0;step_<target && n<kMaxCatchUpSteps;++n)step();
     // Per-vertex life alpha: the SPU envelope, full until 0.94 then linear to 0 at 1.0, with the
@@ -866,8 +876,8 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     setV("_FrontFacingQuaternion",QVector4D(0,0,0,1));
     // The life box: a constant world box (FUN_00031494 stores 0x940b0 / 0x940c0 at renderer+0x900/+0x910), in the same
     // world as the camera above; the vpo fades a particle over the last 0.2 units inside each face.
-    setV("_LifeBoundsMin",QVector4D(-10,-10,-12,0));
-    setV("_LifeBoundsMax",QVector4D(10,10,7,0));
+    setV("_LifeBoundsMin",QVector4D(kLifeBoxMin[0],kLifeBoxMin[1],kLifeBoxMin[2],0));
+    setV("_LifeBoundsMax",QVector4D(kLifeBoxMax[0],kLifeBoxMax[1],kLifeBoxMax[2],0));
     QVector<QVector4D> fc=fragmentCg.constants;
     const auto setF=[&](const char* name,const QVector4D& v){for(int slot:fragmentCg.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=v;};
     for(int r=0;r<4;++r)setF(QStringLiteral("_LightPack[%1]").arg(r).toLatin1().constData(),pack[r]);

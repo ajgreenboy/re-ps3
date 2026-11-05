@@ -55,6 +55,33 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - `src/icons.cpp` had an uncommitted change from another agent during the 2026-10-25 session. `git status` was clean
   at the 2026-10-26 snapshot, so that warning applies only to the earlier session.
 
+## 2026-11-04: particle clock and pool (60 Hz tick, 2048 records, life-box deaths)
+
+The dim-speck shortfall was the simulation clock and the pool, not lighting: the kernel steps once per 60 Hz tick
+into a 2048-record pool, and the native stepped at 1 / DELTA TIME (112.5 Hz) into 1536. All from the firmware:
+- **Pool (traced).** FUN_00060b14 is called at 0x2e0ec with `li r5,0x800` (the decompile drops the call), rounded to
+  512s and stored at +0x54: two 2048 x 0x30 state buffers, the free list, 32 B/particle vertex buffers. The SPU main
+  splits it cap >> 9 = 4 blocks of 0x6000 (= 512 x 48 B). The old 0x600 vector (FUN_0005cd14) is the debug HUD's text
+  buffer, not the pool; "12 items x 128" was wrong.
+- **Full pool (traced).** A birth pops the LIFO free list (FUN_00059228) or gets -1, and FUN_0005b6bc writes nothing:
+  dropped, no replace-oldest.
+- **Tick (traced).** FUN_00062464 flushes the command ring and dispatches the kernel once per frame; the kernel has no
+  sub-step loop. Both the velocity and the position update multiply by the physics vector at +0x8b0 (0x7080 / 0x7090),
+  built by FUN_0005d510 from data 0x93038 = 1/60, with w = 1 (age += AGING per tick). No runtime writer of +0x8b0
+  was found, so the step is 1/60, not the menu's DELTA TIME; that overwrite stays the open question (a captured A/B
+  of the two readings differed by ~5% in total specks).
+- **Death (traced).** The kernel recycles a record past age 0.99999 (DAT_00092fe8) or outside the life box
+  (-10, -10, -12)..(10, 10, 7) (particles.elf 0x7178-0x719c), not only the vpo's fade.
+
+Effect: twice the lifetime, half the per-second drag, so the dust drifts further off the sheet and the pool runs
+near 2048. Speck histogram (UI-free strips, dusk, 20 native frames vs the 73 clean console frames), bins
+16/24/32/48/64/96/128+: native 305/143/133/55/20/13/38, console 344/157/127/33/18/10/20, before 253/94/88/37/16/10/22.
+Total 707 against 710. Still open: the bright tail is now ~1.7x (48+ and 128+), and the top band under the bar row
+(y 360..420) has 19+12 specks against the console's 69+22, while y 540..720 has more bright specks than the console:
+the vertical distribution of the dust, not its count. The 1/k velocity term at 0x7064 and the flow field are not ported.
+
+Gate: frame 19.60 -> 19.58, other layers unchanged, 6/6; byte-stable. Named states not re-saved (shared tree).
+
 ## 2026-11-04: particle glints (the light pack's two coefficients, _Color back to its initialiser)
 
 The console's bright coloured specks are the particles' specular glints, and the native had none because two light
