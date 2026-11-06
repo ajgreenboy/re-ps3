@@ -1377,3 +1377,48 @@ too hard. `Particles::step` now consumes the state every tick. Native after the 
 Per side in the 150 ms latch: native left vx +17.8, right vx +22.8; console left +14.1..+21.0, right +5.5..+6.8
 (and vy -21 later). The left strip and the overall speed match; the right strip's direction does not, and is left
 open (not fitted).
+
+## The right strip, the pool and the kernel's Brownian draw, 2026-11-05
+
+Open from the runtime trace above: in the 150 ms latch the native's right strip drifted sideways (+22.8 px/s) where
+the console's barely did (+5.5..+6.8). Traced with the PC watch's new pointer-chain dumps and raw bulk dumps
+(`XMB_PC_DUMP=<reg>:<off>:...:<count>`, `XMB_PC_BULK`), which read the console's live particle pool
+(*(sim+0x60/+0x80), two 2048 x 48 B state buffers: pos, life, vel, age rate, quaternion; dead w = -666):
+- **Not the wind.** The console's M92 during a gust is a pure Y rotation (col0 (1, 0, +1.1e-5), col2.x -1.1e-5 after a
+  LEFT), the native's axis and convention. The console and native pools agree in x and z (x p5..p95 -9.6..+7.0 vs
+  -9.5..+7.6, z -7.9..-4.3 vs -8.4..-4.2), so the rotation's impulse is the same per speck. The native's own latch
+  drifts both sides equally (screen dX/dt 0.050 / 0.050). With no input the console's mean flow per side already swings
+  by about 0.09 (right strip vx +0.09 / vy -0.088 in one window, vy +0.085 seconds later), the native's about 0.01: the
+  console burst's right strip measured that idle flow.
+- **The idle flow is the Brownian draw.** Velocities match at birth (vx sd 0.151 vs 0.156, vz 0.005 vs 0.003), but over
+  life the console gains ~0.11 per axis (older vz sd 0.114) and the native 0.014. Following one record across dumps
+  10 / 20 / 40 ticks apart, its friction-corrected kick correlates 0.53 / 0.63 / 0.76 with its next one: a persistent
+  random acceleration per record plus per-tick noise, where the native drew a fresh `random()` every tick.
+- **Kernel (read-only subagent, particles.elf).** R is three LCG streams s' = s x 16807 mod 2^32, each component
+  float(0x40000000 | s' >> 9) - 3, uniform [-1, 1) (func_30e8, func_33d8). The streams are reseeded from the constants
+  0x98756161 / 0x21324889 / 0x82181158 (func_4978 0x49a8-0x49dc, stored to LS 0xBB20 at 0x8224) once per job, the
+  records are walked in slot order and a draw is taken only for a live one (0x6f6c), so a slot keeps its R until a slot
+  before it is born or dies. The kick is BROWNIAN (block +0x8a4, sim+0x9a4 = 0.22545 at runtime) x R x dt. The kernel
+  block mirrors sim from sim+0x100 (dt at sim+0x9b0 = block +0x8b0).
+- **Corrections to the kernel formula above.** The acceleration also has a flow-field term s_a0 x M94 . bilinear(grid,
+  (M95 . [p, 1]).xy x (32, 16) - 0.5), the grid 32 x 16 signed-byte XYZ / 127 at sim+0x180 (block +0x80); s_a0
+  (sim+0x9a0) is 1.0 at runtime, but the grid is all zero at idle (one dump near the boot-time moves had 10 cells,
+  max 0.28), so the term stays off without icon wind. The spring term's constant (LS 0xBB10) is 1/dt (func_4978),
+  as ported. Friction is a per-component quad (all 0.030551). Not ported: the flow-field term (no icon-wind input).
+- **Slots.** The console's first births take slot 2047 and fill downward (878 live: 1163..2047; 1968: 80..2047), so the
+  free list holds 0..2047 pushed in order and pops LIFO (FUN_00059228).
+
+Native: `Particles` keeps 2048 fixed slots with a LIFO free list (births pop, deaths push), walks them in slot order,
+and draws R from the kernel's reseeded LCG; births keep their own RNG. Native pool after the change (slot-indexed dumps,
+`XMB_PARTICLE_POOL_DUMP` / `XMB_PARTICLE_POOL_EVERY`):
+
+| | console | native before | native now |
+|---|---|---|---|
+| kick corr 10 / 40 ticks (x, y, z) | 0.53/0.76, 0.46/0.72, 0.60/0.76 | ~0 (fresh draws) | 0.58/0.77, 0.56/0.76, 0.57/0.77 |
+| kick sd over 40 ticks | 0.0233, 0.0240, 0.0228 | - | 0.0209, 0.0203, 0.0206 |
+| older vx / vy / vz sd | 0.183 / 0.201 / 0.114 | 0.156 / 0.101 / 0.014 | 0.174 / 0.134 / 0.095 |
+
+150 ms latch burst, 3.0..4.2 s: p50 26, p90 52, vx +15.1 (console 22..29, 46..50, +8..+15); per side left +13.1, right
++19.4. The right strip now carries an idle flow like the console's, and the console's single-burst value depends on
+that flow at the moment, so it is not matched. Still open: vy is already narrow at birth (0.106 vs 0.178), which is
+the emitter, not the kernel.

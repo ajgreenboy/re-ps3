@@ -95,6 +95,13 @@ tick. Native after the fix: 8 moves 300 ms apart stay calm (p50 8, vx +0.4..+0.7
 150 ms apart latch from ~3 s at p50 24 / p90 43 / vx +19.5 (console p50 22..29 / p90 46..50 / vx +8..+15). Open:
 the right strip's direction (native vx +22.8, console vx +5.5..+6.8 then vy -21), not fitted.
 
+Right strip, same day: not the wind. The console's pool (bulk dumps through the PC watch) shows the same x/z
+spread as the native's, and a Brownian draw from three LCG streams reseeded every tick and walked in slot order, so
+each slot keeps a persistent random acceleration (kick correlation 0.53 / 0.76 at 10 / 40 ticks). That makes the
+console's idle per-side flow ~10x the native's, which is what the burst's right strip measured. The native now keeps
+2048 slots with the console's LIFO free list and draws the kernel's LCG (kick correlation 0.58 / 0.77, older vz sd
+0.095 vs 0.114, was 0.014). Open: birth vy spread (0.106 vs 0.178, the emitter); the flow-field term (grid zero at idle).
+
 ## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
 
 PARTICLES_UI.mnu's d-pad wind is ported (traced through custom_render_plugin by a read-only subagent); the shake and

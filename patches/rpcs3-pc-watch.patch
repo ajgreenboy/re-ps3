@@ -1,8 +1,10 @@
 # XMB entry-point watch for the capture RPCS3 (local, not upstream). Applies on top of rpcs3-xmb-trace.patch.
 # XMB_PC_TRACE=<file> XMB_PC_WATCH=<hex,...> logs r3..r8, f1..f4, lr, the stack back chain and the RSX flip/vblank
 # counters at taken b/bl/bcctr to the watched guest addresses. XMB_PC_WATCH_PRX=<module name> makes the watch values
-# offsets from that PRX's first segment (rebased when it loads; PRX bases move between runs). XMB_PC_DUMP=
-# <reg>,<deref|->,<off>,<count>;... (hex) logs count words at gpr[reg] (+deref read as a pointer) + off per hit.
+# offsets from that PRX's first segment (rebased when it loads; PRX bases move between runs).
+# XMB_PC_DUMP=<reg>:<off>:...:<count>;... (hex) logs count words per hit at a pointer chain: addr = gpr[reg], then
+# addr = read32(addr + off) for every offset but the last, plus the last. XMB_PC_BULK=<every N hits of the first
+# watch>;<reg>:<off>:...:<bytes> with XMB_PC_BULK_OUT=<path prefix> writes that many raw bytes to <prefix>_<seq>.bin.
 # PPU interpreter only (PPU Decoder: Interpreter (static)). Used by audit/PAGE-MOVE.md and audit/PARTICLES.md 2026-11-05.
 diff --git a/rpcs3/Emu/Cell/PPUInterpreter.cpp b/rpcs3/Emu/Cell/PPUInterpreter.cpp
 index 4aed434..837f96f 100644
@@ -34,7 +36,7 @@ index 4aed434..837f96f 100644
  		ppu.cia = target;
  	}
 diff --git a/rpcs3/Emu/Cell/PPUModule.cpp b/rpcs3/Emu/Cell/PPUModule.cpp
-index 4a8351c..a91434a 100644
+index 4a8351c..cee51b5 100644
 --- a/rpcs3/Emu/Cell/PPUModule.cpp
 +++ b/rpcs3/Emu/Cell/PPUModule.cpp
 @@ -16,6 +16,7 @@
@@ -45,7 +47,7 @@ index 4a8351c..a91434a 100644
  
  #include "Emu/Cell/lv2/sys_process.h"
  #include "Emu/Cell/lv2/sys_prx.h"
-@@ -239,6 +240,125 @@ void xmb_trace_bclr(ppu_thread& ppu, u32 target)
+@@ -239,6 +240,174 @@ void xmb_trace_bclr(ppu_thread& ppu, u32 target)
  	t_calls.pop_back();
  }
  
@@ -62,9 +64,48 @@ index 4a8351c..a91434a 100644
 +	u64 g_max = 50000;
 +	std::string g_prx; // XMB_PC_WATCH_PRX: watch values are offsets from this module's first segment
 +	atomic_t<bool> g_ready = true;
-+	struct dump_spec { u32 reg, deref, off, count; };
++	// A pointer chain: addr = gpr[reg]; addr = read32(addr + off[i]) for every offset but the last; addr += last.
++	struct dump_spec { u32 reg, nofs, count; u32 ofs[6]; };
 +	dump_spec g_dumps[8]{};
 +	u32 g_dump_count = 0;
++	dump_spec g_bulk{}; // XMB_PC_BULK: count = bytes, written to <XMB_PC_BULK_OUT>_<seq>.bin every g_bulk_every hits of watch 0
++	u64 g_bulk_every = 0, g_bulk_hits = 0;
++	std::string g_bulk_out;
++
++	// Parses "<reg>:<off>:...:<count>" (hex) up to the end or a ';'.
++	bool parse_chain(const char*& p, dump_spec& d)
++	{
++		char* end = nullptr;
++		u32 v[8]{};
++		u32 nv = 0;
++		while (nv < 8)
++		{
++			v[nv++] = static_cast<u32>(std::strtoul(p, &end, 16));
++			if (end == p) return false;
++			p = end;
++			if (*p != ':') break;
++			p++;
++		}
++		if (nv < 3) return false;
++		d.reg = v[0] & 31;
++		d.count = v[nv - 1];
++		d.nofs = nv - 2;
++		for (u32 i = 0; i < d.nofs; i++) d.ofs[i] = v[1 + i];
++		if (*p == ';') p++;
++		return true;
++	}
++
++	bool resolve(const ppu_thread& ppu, const dump_spec& d, u32& addr)
++	{
++		addr = static_cast<u32>(ppu.gpr[d.reg]);
++		for (u32 i = 0; i + 1 < d.nofs; i++)
++		{
++			if (!vm::check_addr(addr + d.ofs[i], vm::page_readable, 4)) return false;
++			addr = vm::read32(addr + d.ofs[i]);
++		}
++		addr += d.ofs[d.nofs - 1];
++		return true;
++	}
 +
 +	bool init()
 +	{
@@ -81,25 +122,25 @@ index 4a8351c..a91434a 100644
 +		}
 +		if (const char* max = std::getenv("XMB_PC_TRACE_MAX"); max && *max) g_max = std::strtoull(max, nullptr, 0);
 +		if (const char* prx = std::getenv("XMB_PC_WATCH_PRX"); prx && *prx) { g_prx = prx; g_ready = false; }
-+		// XMB_PC_DUMP=<reg>,<deref|->,<off>,<count>;... (hex): log count words at gpr[reg] (+deref, read as a pointer) + off.
++		// XMB_PC_DUMP=<reg>:<off>:...:<count>;... (hex): log count words at the chain's address (see dump_spec).
 +		if (const char* dump = std::getenv("XMB_PC_DUMP"); dump && *dump)
 +		{
 +			for (const char* p = dump; *p && g_dump_count < 8;)
 +			{
 +				dump_spec d{};
-+				char* end = nullptr;
-+				d.reg = static_cast<u32>(std::strtoul(p, &end, 16));
-+				if (*end != ',') break;
-+				p = end + 1;
-+				if (*p == '-') { d.deref = umax; p++; }
-+				else { d.deref = static_cast<u32>(std::strtoul(p, &end, 16)); p = end; }
-+				if (*p != ',') break;
-+				d.off = static_cast<u32>(std::strtoul(p + 1, &end, 16));
-+				if (*end != ',') break;
-+				d.count = std::min<u32>(64, static_cast<u32>(std::strtoul(end + 1, &end, 16)));
++				if (!parse_chain(p, d)) break;
++				d.count = std::min<u32>(64, d.count);
 +				g_dumps[g_dump_count++] = d;
-+				p = *end == ';' ? end + 1 : end;
 +			}
++		}
++		// XMB_PC_BULK=<every N hits of the first watch, decimal>;<reg>:<off>:...:<bytes> and XMB_PC_BULK_OUT=<path prefix>.
++		if (const char* bulk = std::getenv("XMB_PC_BULK"), *bout = std::getenv("XMB_PC_BULK_OUT"); bulk && *bulk && bout && *bout)
++		{
++			char* end = nullptr;
++			g_bulk_every = std::strtoull(bulk, &end, 10);
++			const char* p = *end == ';' ? end + 1 : end;
++			if (g_bulk_every && parse_chain(p, g_bulk)) g_bulk_out = bout;
++			else g_bulk_every = 0;
 +		}
 +		if (!g_count || !(g_file = std::fopen(out, "w"))) return false;
 +		std::fprintf(g_file, "# xmb pc watch: %u addresses, max %llu hits\n", g_count, static_cast<unsigned long long>(g_max));
@@ -150,17 +191,27 @@ index 4a8351c..a91434a 100644
 +	for (u32 i = 0; i < g_dump_count && n > 0 && n < static_cast<int>(sizeof(buf)) - 32; i++)
 +	{
 +		const dump_spec& d = g_dumps[i];
-+		u32 addr = static_cast<u32>(ppu.gpr[d.reg & 31]);
-+		if (d.deref != umax)
-+		{
-+			if (!vm::check_addr(addr + d.deref, vm::page_readable, 4)) continue;
-+			addr = vm::read32(addr + d.deref);
-+		}
-+		addr += d.off;
++		u32 addr = 0;
++		if (!resolve(ppu, d, addr)) continue;
 +		n += std::snprintf(buf + n, sizeof(buf) - n, " d%u@%08X=", i, addr);
 +		for (u32 k = 0; k < d.count && n > 0 && n < static_cast<int>(sizeof(buf)) - 12; k++)
 +			n += std::snprintf(buf + n, sizeof(buf) - n, vm::check_addr(addr + k * 4, vm::page_readable, 4) ? "%08X," : "--------,",
 +				vm::check_addr(addr + k * 4, vm::page_readable, 4) ? static_cast<u32>(vm::read32(addr + k * 4)) : 0u);
++	}
++	if (g_bulk_every && target == g_watch[0] && ++g_bulk_hits % g_bulk_every == 0)
++	{
++		u32 addr = 0;
++		if (resolve(ppu, g_bulk, addr) && g_bulk.count && vm::check_addr(addr, vm::page_readable, g_bulk.count))
++		{
++			const std::string path = fmt::format("%s_%llu.bin", g_bulk_out, seq);
++			if (FILE* f = std::fopen(path.c_str(), "wb"))
++			{
++				std::fwrite(vm::base(addr), 1, g_bulk.count, f);
++				std::fclose(f);
++			}
++			if (n > 0 && n < static_cast<int>(sizeof(buf)) - 40)
++				n += std::snprintf(buf + n, sizeof(buf) - n, " bulk@%08X=%s", addr, path.c_str());
++		}
 +	}
 +	std::lock_guard lock(g_mutex);
 +	std::fputs(buf, g_file);

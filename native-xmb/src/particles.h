@@ -121,6 +121,7 @@ private:
         float ageRate;        // age increment per step = AGING SPEED * (1 +/- AGING VARIANCE)
         float qx,qy,qz,qw;    // orientation quaternion
         float ax,ay,az;       // spin axis (unit)
+        bool alive=false;     // the record's slot is in use (the kernel's dead marker is w = -666)
     };
     // particles_quads vertex contract, 48 bytes: float4 pos (w = per-vertex life alpha), float2 uv0
     // (billboard corner), 8 bytes pad, float4 orientation quaternion.
@@ -204,7 +205,8 @@ private:
     void spawnFromGrid(int column,int row);
     void spawnInBox();
     void orientParticle(Particle& p);
-    float random(); // Park-Miller 16807 mod 2^31-1, the firmware's RNG
+    float random(); // Park-Miller 16807 mod 2^31-1, the native's spawn RNG (the PPU emitter's own RNG is not traced)
+    int takeSlot();  // pops a free slot, -1 when the pool is full
     unsigned stateChecksum() const;
     // Steps up to `seconds` and refreshes the VBO when the state changed. Both passes share it.
     void sync(QOpenGLFunctions_3_3_Core& gl,double seconds);
@@ -228,7 +230,8 @@ private:
     bool materialsLoaded_=false;
     GLuint vao_=0,vbo_=0;      // vbo_ holds the vertex records, then the static index list
     GLintptr indexOffset_=0;
-    std::vector<Particle> pool_;
+    std::vector<Particle> pool_;   // kCapacity fixed slots, walked in slot order like the SPU kernel's records
+    std::vector<int> free_;        // LIFO free list of slots (FUN_00059228); births pop, deaths push
     std::vector<Vertex> vertices_;
     int live_=0;
     long long step_=0;         // simulation steps completed since the seed

@@ -6,12 +6,15 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QTextStream>
 #include <QImage>
 #include <QMatrix4x4>
 #include <QtMath>
 #include <QStringList>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iterator>
 #include <QDebug>
 
@@ -286,9 +289,17 @@ constexpr float kCornerV[4]={0.f,0.f,1.f,1.f};
 }
 
 float Particles::random() {
-    // The firmware's RNG wrapper (particles.elf 0x33d8): Park-Miller, seed = seed * 16807 mod (2^31-1).
+    // Park-Miller, seed = seed * 16807 mod (2^31-1). Used for births only; the kernel's Brownian draw is its own
+    // per-tick reseeded LCG (kernelRandom in step()).
     seed_=unsigned((static_cast<unsigned long long>(seed_)*16807ull)%2147483647ull);
     return float(seed_)*(1.f/2147483647.f);
+}
+
+int Particles::takeSlot() {
+    if(free_.empty())return -1;
+    const int slot=free_.back();free_.pop_back();
+    pool_[size_t(slot)].alive=true;++live_;
+    return slot;
 }
 
 unsigned Particles::stateChecksum() const {
@@ -298,8 +309,8 @@ unsigned Particles::stateChecksum() const {
         const unsigned char* p=static_cast<const unsigned char*>(data);
         for(size_t i=0;i<bytes;++i){hash^=p[i];hash*=16777619u;}
     };
-    for(int i=0;i<live_;++i) {
-        const Particle& p=pool_[size_t(i)];
+    for(const Particle& p:pool_) {
+        if(!p.alive)continue;
         mix(&p.px,8*sizeof(float)); // px,py,pz,vx,vy,vz,age,ageRate
         mix(&p.qx,7*sizeof(float)); // quaternion + spin axis
     }
@@ -326,6 +337,10 @@ void Particles::resetSimulation() {
     padGustVelocity_=padGain_=0;
     excitePosition_=exciteVelocity_=exciteLevel_=0;
     std::fill(pool_.begin(),pool_.end(),Particle{});
+    // The console's first births take slot 2047 and fill downward (pool dumps, audit/PARTICLES.md): the free list
+    // holds 0..2047 pushed in order and pops LIFO.
+    free_.clear();
+    for(int slot=0;slot<int(pool_.size());++slot)free_.push_back(slot);
 }
 
 double Particles::dayFraction() const {
@@ -476,7 +491,7 @@ void Particles::spawnFromGrid(int column,int row) {
     const size_t at=size_t(row)*size_t(emitterSide_)+size_t(column);
     const QVector3D V=emitterVelocity_[at]*float((1./kReferenceFrameRate)/physics_.deltaTime);
     const float speedOfPoint=V.length();
-    if(speedOfPoint<1e-4f || live_>=kCapacity)return;
+    if(speedOfPoint<1e-4f || free_.empty())return;
     QVector3D axis=V/speedOfPoint;
     if(random()<physics_.emitNegProb)axis=-axis;
     QVector3D tangent;
@@ -491,7 +506,7 @@ void Particles::spawnFromGrid(int column,int row) {
     direction.setZ(direction.z()*physics_.emitVelZScale); // the camera looks down -z in this world
     const float speed=std::max(physics_.emitVelMin,
         std::sqrt(std::max(0.f,speedOfPoint*physics_.emitVelMul*(1.f+(2.f*random()-1.f)*physics_.emitVelVar))));
-    Particle& p=pool_[size_t(live_++)];
+    Particle& p=pool_[size_t(takeSlot())];
     const QVector3D& P=emitter_[at];
     p.px=P.x();p.py=P.y();p.pz=P.z();
     p.vx=direction.x()*speed;p.vy=direction.y()*speed;p.vz=direction.z()*speed;
@@ -503,8 +518,8 @@ void Particles::spawnFromGrid(int column,int row) {
 // No ribbon: the fitted emission volume (kEmit*, flat viewport units at a camera depth) moved into the world, with the
 // earlier screen-plane cone. Only reached without a ribbon sheet.
 void Particles::spawnInBox() {
-    if(live_>=kCapacity)return;
-    Particle& p=pool_[size_t(live_++)];
+    if(free_.empty())return;
+    Particle& p=pool_[size_t(takeSlot())];
     const float depth=-(kEmitZNear+random()*(kEmitZFar-kEmitZNear));
     const float toView=kTanHalfFovy*depth/kHalfHeight;
     p.px=(2.f*random()-1.f)*kHalfHeight*aspect_*kEmitXMargin*toView;
@@ -601,16 +616,30 @@ void Particles::step() {
     // Quaternion spin: q = spinStep * q, SPIN TIME SCALE radians per second.
     const float halfSpin=.5f*physics_.spinTimeScale*kSpinStep;
     const float spinC=std::cos(halfSpin),spinS=std::sin(halfSpin);
-    for(int i=live_-1;i>=0;--i) {
+    // The kernel's Brownian R (particles.elf func_33d8 / func_30e8): three LCG streams s' = s * 16807 mod 2^32, each
+    // component (0x40000000 | s' >> 9) as a float minus 3, uniform in [-1, 1). The streams are reseeded every tick from
+    // the constants 0x98756161 / 0x21324889 / 0x82181158 (func_4978 0x49a8-0x49dc, stored at 0x8224) and a draw is
+    // taken only for a live record (0x6f6c), walking the slots in order, so a slot keeps its R from tick to tick until
+    // a slot before it is born or dies. [TRACED; the x/y/z lane order of the three streams is inferred]
+    unsigned int stream[3]={0x98756161u,0x21324889u,0x82181158u};
+    const auto kernelRandom=[&stream](int k){
+        stream[k]*=16807u;
+        const unsigned int bits=0x40000000u|(stream[k]>>9);
+        float value;std::memcpy(&value,&bits,sizeof(value));
+        return value-3.f;
+    };
+    for(int i=0;i<int(pool_.size());++i) {
         Particle& p=pool_[size_t(i)];
+        if(!p.alive)continue;
         if(rotating) {
             const QVector3D P(p.px,p.py,p.pz),turned=pivot+rotation.map(P-pivot),impulse=(turned-P)/dt;
             p.vx+=impulse.x();p.vy+=impulse.y();p.vz+=impulse.z();
         }
         // Brownian velocity kick, one RNG draw per axis (audit 3.3), gravity and friction, all scaled by dt.
-        p.vx+=kick*(2.f*random()-1.f);
-        p.vy+=kick*(2.f*random()-1.f)+physics_.gravity*dt;
-        p.vz+=kick*(2.f*random()-1.f);
+        const float rx=kernelRandom(0),ry=kernelRandom(1),rz=kernelRandom(2);
+        p.vx+=kick*rx;
+        p.vy+=kick*ry+physics_.gravity*dt;
+        p.vz+=kick*rz;
         p.vx*=drag;
         p.vy*=drag;
         p.vz*=drag;
@@ -622,8 +651,8 @@ void Particles::step() {
         // test, then a clamp-equals-point box test; the box is renderer+0x900, the same one the vpo fades against).
         const bool outside=p.px<kLifeBoxMin[0]||p.py<kLifeBoxMin[1]||p.pz<kLifeBoxMin[2]||
                            p.px>kLifeBoxMax[0]||p.py>kLifeBoxMax[1]||p.pz>kLifeBoxMax[2];
-        if(p.age>=kAgeLimit||outside) { // dead: swap the last live particle in, it was already stepped this tick
-            pool_[size_t(i)]=pool_[size_t(--live_)];
+        if(p.age>=kAgeLimit||outside) { // dead: the slot goes back on the free list
+            p.alive=false;--live_;free_.push_back(i);
             continue;
         }
         const float bx=p.ax*spinS,by=p.ay*spinS,bz=p.az*spinS,bw=spinC;
@@ -821,7 +850,23 @@ void Particles::sync(QOpenGLFunctions_3_3_Core& gl,double seconds) {
     refreshLook(); // theme look only; never touches the simulation state
     const long long target=seconds>0.0?static_cast<long long>(std::floor(seconds*kReferenceFrameRate)):0;
     if(target<step_)resetSimulation(); // the clock went backwards: replay from the seed
-    for(int n=0;step_<target && n<kMaxCatchUpSteps;++n)step();
+    for(int n=0;step_<target && n<kMaxCatchUpSteps;++n) {
+        step();
+        // XMB_PARTICLE_POOL_DUMP=<path prefix>: the live pool (x y z vx vy vz age slot) every XMB_PARTICLE_POOL_EVERY steps
+        // (default 120), for comparison with the console pool read by the RPCS3 PC watch's bulk dump (audit/PARTICLES.md).
+        static const QString poolDump=qEnvironmentVariable("XMB_PARTICLE_POOL_DUMP");
+        static const int poolEvery=std::max(1,qEnvironmentVariableIntValue("XMB_PARTICLE_POOL_EVERY")>0?qEnvironmentVariableIntValue("XMB_PARTICLE_POOL_EVERY"):120);
+        if(!poolDump.isEmpty() && step_%poolEvery==0) {
+            QFile file(QString("%1_%2.txt").arg(poolDump).arg(step_));
+            if(file.open(QIODevice::WriteOnly|QIODevice::Text)) {
+                QTextStream out(&file);
+                for(size_t s=0;s<pool_.size();++s) {
+                    const Particle& p=pool_[s];
+                    if(p.alive)out<<p.px<<' '<<p.py<<' '<<p.pz<<' '<<p.vx<<' '<<p.vy<<' '<<p.vz<<' '<<p.age<<' '<<s<<'\n';
+                }
+            }
+        }
+    }
     // Per-vertex life alpha: the SPU envelope, full until 0.94 then linear to 0 at 1.0, with the
     // kernel's 0.02 start clamp.
     const auto lifeEnvelope=[](float age){
@@ -830,8 +875,9 @@ void Particles::sync(QOpenGLFunctions_3_3_Core& gl,double seconds) {
         return std::clamp(in,0.f,1.f)*std::clamp(out,0.f,1.f);
     };
     Vertex* const out=vertices_.data();
-    for(int i=0;i<live_;++i) {
-        const Particle& p=pool_[size_t(i)];
+    int i=0;
+    for(const Particle& p:pool_) {
+        if(!p.alive)continue;
         const float life=lifeEnvelope(p.age);
         for(int corner=0;corner<4;++corner) {
             Vertex& v=out[size_t(i)*4+corner];
@@ -839,6 +885,7 @@ void Particles::sync(QOpenGLFunctions_3_3_Core& gl,double seconds) {
             v.u=kCornerU[corner];v.v=kCornerV[corner];v.pad0=0.f;v.pad1=0.f;
             v.qx=p.qx;v.qy=p.qy;v.qz=p.qz;v.qw=p.qw;
         }
+        ++i;
     }
     // Refresh the VBO only when something actually changed: the second pass of the same frame then
     // draws the buffer the first pass uploaded.
@@ -858,8 +905,8 @@ void Particles::logState(const char* pass,int width,int height) const {
     static const bool logState=qEnvironmentVariableIsSet("XMB_PARTICLE_LOG");
     if(!logState)return;
     int nonFinite=0;
-    for(int i=0;i<live_;++i) {
-        const Particle& p=pool_[size_t(i)];
+    for(const Particle& p:pool_) {
+        if(!p.alive)continue;
         if(!std::isfinite(p.px)||!std::isfinite(p.py)||!std::isfinite(p.pz)||
            !std::isfinite(p.vx)||!std::isfinite(p.vy)||!std::isfinite(p.vz)||
            !std::isfinite(p.age)||!std::isfinite(p.qx)||!std::isfinite(p.qy)||
