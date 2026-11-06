@@ -1345,3 +1345,35 @@ specks outran the matcher.) Still open: the native latches on 8 moves 300 ms apa
 its latched gust is ~3-4x faster. The applied DPAD ROT MAX is not settled (file 1.1665e-4 or default 2e-4; the menu
 apply's caller is not found), nor is the update rate; a ROT MAX low enough for the console's threshold (5.9e-5..1.07e-4
 at 60 Hz) would not by itself give a 3-4x slower gust, so nothing is fitted.
+
+## The wind's runtime trace, 2026-11-05
+
+The RPCS3 capture rig's PC watch (`patches/rpcs3-pc-watch.patch`) gained memory dumps (`XMB_PC_DUMP`), the RSX flip
+and vblank counters on each hit, and PRX-relative watches (`XMB_PC_WATCH_PRX`; custom_render_plugin loaded at
+0xA40000, 0xAA0000 and 0xBA0000 on different runs). Interpreter config, watch `FUN_0002d02c` (the wind tick) and
+`FUN_0002b548` (the writer), dumping layer+0x190..0x1dc, sim+0x1440..0x145c and sim+0x940..0x98c on entry.
+
+Read from the console:
+- DPAD ROT MAX (sim+0x1450) = 1.16654e-4 (the PARTICLES_UI.mnu value, not the 2e-4 default); DPAD SCALE X 1, SCALE Y 0;
+  UI BROWNIAN 0.6; the per-move input (layer+0x190) = 0.03; sim+0x980 is 0 at entry (FUN_00031494 clears it at
+  0x315a0 each tick; only the shake trackers at 0x2c504 add to it).
+- One wind tick per flip (3342 ticks / 3342 flips, 59 per guest second), so 60 Hz on a 60 fps console.
+- The state is a one-shot event. 0x2d4f0-0x2d500 is reached on both sides of the 1e-5 test (the >= side builds M92
+  at 0x2d5ac and branches back to 0x2d4f0), so every tick writes 4 to layer+0x1c0. Each cursor move gives exactly one
+  tick with v += 0.03 (v 0.0294 -> 0.0306 on a move after decay), R (layer+0x1b0) keeps the last move's direction
+  ((0, +1, 0) after RIGHT, (0, -1, 0) after LEFT), and v decays x0.98 per tick. Twelve moves ~19 ticks apart settle
+  at v 0.068..0.094, at the rotation threshold (g 0.0857 for 1e-5 rad).
+
+The earlier reading ("the state holds while the rotation is >= 1e-5") was wrong, and it was the native's whole wind
+mismatch: holding the state re-added 0.03 every tick, so the native latched on sparse moves and ran its gust 3-4x
+too hard. `Particles::step` now consumes the state every tick. Native after the fix (fullscreen bursts, `speed.ts
+--full --gap 100`; new script verb `seq=<KEY>@<ms>+...` for moves closer than the 300 ms token step):
+
+| burst | window | native p50 / p90 / vx | console p50 / p90 / vx |
+|---|---|---|---|
+| 8 alternating moves, 300 ms apart | 300..4000 ms | 8 / 18..24 / +0.4..+0.7 | 13..19 / - / +2.9..+4.5 (calm) |
+| 16 alternating moves, 150 ms apart | 3000..4200 ms | 24 / 43 / +19.5 | 22..29 / 46..50 / +8..+15 |
+
+Per side in the 150 ms latch: native left vx +17.8, right vx +22.8; console left +14.1..+21.0, right +5.5..+6.8
+(and vy -21 later). The left strip and the overall speed match; the right strip's direction does not, and is left
+open (not fitted).

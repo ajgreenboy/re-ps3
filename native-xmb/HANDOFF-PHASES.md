@@ -36,7 +36,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 |---|---|
 | Background, HDR glare | Firmware Cg programs (RSX→GLSL) with traced inputs |
 | Ribbon | Ported end to end (2026-10-25): plugin cloth, ffd_shader1 lattice, spline.elf FFD/camera/bicubic sheet, each stage matched to RPCS3 captures; LINE1 presets follow the plugin's clock keyframes and boot schedule (audit/PIPELINE.md "Ribbon port", "Ribbon presets") |
-| Particles | Firmware programs and simulation (2026-11-04): particles_quads/particles_second with traced uniforms, the SPU kernel stepped once per 60 Hz tick by DELTA TIME into a 2048-record pool, births on the ribbon's 128 x 128 sheet (traced PPU emitter), life-box deaths, the PARTICLES_UI wind driven by XMB cursor moves (traced; only rapid moves latch a gust); deterministic from `--render-clock`. Open: the dust's vertical placement, shake/icon wind (audit/PARTICLES.md) |
+| Particles | Firmware programs and simulation (2026-11-04): particles_quads/particles_second with traced uniforms, the SPU kernel stepped once per 60 Hz tick by DELTA TIME into a 2048-record pool, births on the ribbon's 128 x 128 sheet (traced PPU emitter), life-box deaths, the PARTICLES_UI wind driven by XMB cursor moves (runtime-traced: one 0.03 impulse per move, ROT MAX 1.16654e-4, one tick per flip; only rapid moves build a gust); deterministic from `--render-clock`. Open: the dust's vertical placement, shake/icon wind (audit/PARTICLES.md) |
 | Category icons | All built-in colours use an opaque normal-map material; Original follows the firmware monthly palette. Six day/night pairs verified; firmware shader remains diagnostic. See audit/CATEGORY-ICON-FIX.md; full parity open |
 | Item icons, labels, columns, dialogs, info bar, options panel, OSK | `icontex` item icons and settings bullets draw through `IconRenderer` (firmware vertex program, opaque normal-map material) - sizes 77.616/184.800 and 35.721/85.050, pitch 80, brightness 1.0/0.247/0.698 confirmed against decoded RSX captures (audit/ITEM-ICONS.md); labels, dialogs, the info bar, the options panel and the OSK draw through the GL glyph atlas with Qt shaping, and only RCO/artwork/theme icons remain QPainter |
 | Text | Original font faces rasterized with FreeType and recovered load flags 10 into the 2x GL atlas; label glow/idle fade are MaXMB observations; PAF metrics, per-style weight/slant and full parity remain open (audit/FONT-MATCHING.md). Per-phase glyph coverage landed 2026-10-26 as a labelled fit (audit/TEXT-RASTER.md 2.4) |
@@ -85,6 +85,15 @@ lower column index to state 0 (the from/to cell direction is the one untraced li
 +55. Open: the native latches on sparser moves and its latched gust is ~3-4x faster; the applied DPAD ROT MAX (file
 1.1665e-4 vs default 2e-4; the menu apply's caller is not found) and the BackgroundView update rate are untraced,
 and no single ROT MAX fits both, so neither is fitted. explore_plugin's list scroll / view open-close sends (MEDIUM) are not ported. Gate unchanged (pinned captures take no input).
+
+Runtime trace, 2026-11-05 (`patches/rpcs3-pc-watch.patch`, now with memory dumps, flip counters and PRX-relative
+watches): the console's applied DPAD ROT MAX is the file's 1.16654e-4, the per-move input (layer+0x190) is 0.03,
+and the wind ticks once per RSX flip. The state is a one-shot: 0x2d4f0 writes 4 on both sides of the 1e-5 test, so
+each move adds 0.03 once and R keeps the last direction while v decays x0.98 per tick. The native held the state
+and re-added 0.03 every tick, which was both the easy latch and the 3-4x gust; it now consumes the state each
+tick. Native after the fix: 8 moves 300 ms apart stay calm (p50 8, vx +0.4..+0.7; console calm too), 16 moves
+150 ms apart latch from ~3 s at p50 24 / p90 43 / vx +19.5 (console p50 22..29 / p90 46..50 / vx +8..+15). Open:
+the right strip's direction (native vx +22.8, console vx +5.5..+6.8 then vy -21), not fitted.
 
 ## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
 
