@@ -17,6 +17,8 @@
 #include <QLocale>
 #include <QTimeZone>
 #include <QThread>
+#include <QThreadPool>
+#include <memory>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMediaDevices>
@@ -722,7 +724,15 @@ QString dataDirectoryText(const QString& path) {
     }
     return files?bytesText(total)+QStringLiteral(" in %1 files").arg(files):QStringLiteral("empty");
 }
-Snapshot readSnapshot() {
+// `gui` false leaves out the two readers that belong to the GUI thread (QGuiApplication::screens and Qt
+// Multimedia's device list); readGuiParts() adds them there. Everything else is Win32/COM/QtCore and runs on a worker.
+void readGuiParts(Snapshot& state) {
+    state.displays=readDisplays();
+    state.cameras.clear();
+    for(const auto& camera:QMediaDevices::videoInputs())
+        state.cameras<<(camera.description().isEmpty()?QString::fromUtf8(camera.id()):camera.description());
+}
+Snapshot readSnapshot(bool gui=true) {
     Snapshot state;
     state.takenAtMs=QDateTime::currentMSecsSinceEpoch();
     state.hostName=QSysInfo::machineHostName();
@@ -737,7 +747,6 @@ Snapshot readSnapshot() {
     state.volumes=readVolumes();
     state.opticalDrive=opticalDrive();
     state.adapters=readAdapters();
-    state.displays=readDisplays();
     state.printers=readPrinters();
     state.pads=readPads();
     state.keyboard=readKeyboard();
@@ -757,8 +766,7 @@ Snapshot readSnapshot() {
     state.dlnaService=serviceState(L"WMPNetworkSvc");
     state.audioOutputs=readAudio(eRender);
     state.audioInputs=readAudio(eCapture);
-    for(const auto& camera:QMediaDevices::videoInputs())
-        state.cameras<<(camera.description().isEmpty()?QString::fromUtf8(camera.id()):camera.description());
+    if(gui)readGuiParts(state);
     state.windowsAdmin=elevated();
 #ifdef Q_OS_WIN
     for(const auto& printer:state.printers)if(printer.isDefault)state.defaultPrinter=printer.name;
@@ -843,16 +851,59 @@ Snapshot readSnapshot() {
 }
 }  // namespace
 
+// A full read costs ~45 ms here (adapters, printers, audio endpoints, volumes; the first adds ~95 ms for the
+// token check), and Settings rows read it from the paint path, so a synchronous refresh every 2 s dropped
+// three frames each time a Settings page was up (XMB_TEXT_COST, audit/PAGE-MOVE.md). The GUI thread now only
+// reads synchronously when there is no reading at all, or right after invalidateSnapshot() (a write this
+// layer made, whose result the next read must show). A stale reading is returned as it is while a worker
+// takes a new one; the GUI thread adds the GUI-only parts and swaps it in. A worker result that started
+// before an invalidation is dropped. Off the GUI thread the old synchronous rule still applies.
+std::atomic<bool> gRefreshing{false};
+std::atomic<int> gGeneration{0};
+bool onGuiThread() {
+    const auto* app=QCoreApplication::instance();
+    return app && QThread::currentThread()==app->thread();
+}
 const Snapshot& snapshot() {
     const qint64 now=QDateTime::currentMSecsSinceEpoch();
     const qint64 taken=gSnapshotAt.load();
-    if(taken==0 || now-taken>2000) {
+    if(taken==0 || (now-taken>2000 && !onGuiThread())) {
         gCached=readSnapshot();
         gSnapshotAt.store(now);
+        return gCached;
+    }
+    if(now-taken>2000 && !gRefreshing.exchange(true)) {
+        const int generation=gGeneration.load();
+        QThreadPool::globalInstance()->start([generation]{
+            auto fresh=std::make_shared<Snapshot>(readSnapshot(false));
+            QMetaObject::invokeMethod(QCoreApplication::instance(),[fresh,generation]{
+                if(generation==gGeneration.load() && gSnapshotAt.load()!=0) {
+                    readGuiParts(*fresh);
+                    gCached=std::move(*fresh);
+                    gSnapshotAt.store(QDateTime::currentMSecsSinceEpoch());
+                }
+                gRefreshing.store(false);
+            },Qt::QueuedConnection);
+        });
     }
     return gCached;
 }
-void invalidateSnapshot() { gSnapshotAt.store(0); }
+void invalidateSnapshot() { ++gGeneration;gSnapshotAt.store(0); }
+void prefetchSnapshot() {
+    if(gSnapshotAt.load()!=0 || gRefreshing.exchange(true))return;
+    const int generation=gGeneration.load();
+    QThreadPool::globalInstance()->start([generation]{
+        auto fresh=std::make_shared<Snapshot>(readSnapshot(false));
+        QMetaObject::invokeMethod(QCoreApplication::instance(),[fresh,generation]{
+            if(generation==gGeneration.load() && gSnapshotAt.load()==0) {
+                readGuiParts(*fresh);
+                gCached=std::move(*fresh);
+                gSnapshotAt.store(QDateTime::currentMSecsSinceEpoch());
+            }
+            gRefreshing.store(false);
+        },Qt::QueuedConnection);
+    });
+}
 void setDataDirectory(const QString& path) { gDataDirectory=path; }
 QStringList privilegeNotes() {
     return {(elevated()?QStringLiteral("elevated (administrator token): administrator reads run normally")

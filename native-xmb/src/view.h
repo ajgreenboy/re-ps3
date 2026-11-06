@@ -130,6 +130,7 @@ private:
     // Opt-in, bounded in-memory frame trace; written only on shutdown to avoid per-frame disk I/O.
     struct FrameSample { qint64 at,cpu; bool swap,rebuilt,moving; };
     QString frameTracePath_;
+    qint64 sceneNs_=0,iconNs_=0; // XMB_TEXT_COST: the last frame's drawScene and glass-icon pass, CPU ns
     QVector<FrameSample> frameTrace_;
     void saveFrameTrace();
     qint64 previousFrameNs_=0,reportAt_=0;

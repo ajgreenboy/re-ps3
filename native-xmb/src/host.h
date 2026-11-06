@@ -196,6 +196,7 @@ struct Snapshot {
 // syscall per row (the volume row alone would otherwise open a Core Audio endpoint sixty times a second).
 const Snapshot& snapshot();
 void invalidateSnapshot();           // after a write this layer or the shell performed
+void prefetchSnapshot();             // take the first reading on a worker (GUI thread, after QApplication exists)
 // The running app's data directory, so the backup row and the report can name (and size) the one piece of
 // state this build really keeps. Never written; the caller passes its own.
 void setDataDirectory(const QString& path);

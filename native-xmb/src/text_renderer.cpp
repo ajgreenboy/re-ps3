@@ -1,4 +1,5 @@
 #include "text_renderer.h"
+#include <QElapsedTimer>
 #include <QDir>
 #include <QGlyphRun>
 #include <QTextLayout>
@@ -386,6 +387,8 @@ const TextRenderer::Glyph& TextRenderer::glyph(QOpenGLFunctions_3_3_Core& gl,int
     const quint64 key=(quint64(index)<<4)|(quint64(phaseY&3)<<2)|quint64(phaseX&3);
     const auto found=f.glyphs.constFind(key);
     if(found!=f.glyphs.cend())return *found;
+    QElapsedTimer missClock;missClock.start();++misses_;
+    const struct MissCost { QElapsedTimer& clock;qint64& total; ~MissCost(){total+=clock.nsecsElapsed();} } missCost{missClock,missNs_};
     Glyph value;value.phaseX=phaseX;value.phaseY=phaseY;
     // libfontFT.prx cellFontFT_65E27CB3 @ 0x6aa4 loads outlines with flags 10, then uses
     // FT_Outline_Get_Bitmap. FT_RENDER_MODE_NORMAL uses FreeType's same grayscale outline rasterizer.

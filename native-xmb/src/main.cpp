@@ -1046,6 +1046,9 @@ int main(int argc,char** argv) {
     } else if(startWindowed)window.show();
     else if(shell.fullscreen())window.showFullScreen();else window.show();
     if(window.screen())qInfo()<<"native display refresh:"<<window.screen()->refreshRate()<<"Hz";
+    // The Settings rows read the host snapshot from the paint path; take the first reading on a worker now so the
+    // first Settings page does not pay for it (host::snapshot, ~145 ms cold).
+    xmb::host::prefetchSnapshot();
     if(parser.isSet("script")) {
         // Local verification: replay key presses and save framebuffer grabs at the window's real resolution, e.g.
         // --script "full,wait,LEFT,DOWN,grab=C:/tmp/a.png,quit". One token every 300 ms.
