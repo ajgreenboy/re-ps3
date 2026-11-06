@@ -2070,3 +2070,25 @@ The two native curves differ by ~0.5% per frame, so the track cannot choose betw
 trail the console's tail by a few px; the console burst drops a frame at 96..113 ms and then decays faster
 (~0.73/frame), which fits paf's frame-count step (the global at 0x6FB1F4) catching up after a slow frame rather
 than a different ease. The 49 ms close hold is unchanged. Gate 19.59, 6/6, unchanged.
+
+## The page-open wait is the page plugin's load, 2026-11-05
+
+Traced on the RPCS3 rig (interpreter, PC watch on the ease setup 0x3981ec, the animate wrapper 0x399e08 and the
+module-load wrapper 0x618944; RPCS3's own log for the loads, whose clock ran 3.53 s ahead of the guest timebase on
+both opens). Settings -> Game Settings, Cross, Circle, Cross:
+
+| event | open 1 (tb s) | open 2 (tb s) |
+|---|---|---|
+| press feedback eases (m0/10, m0/100 x5, m100/1) | 37.62 | 45.25 |
+| first ScePafJob thread of the open (log 41.40) | ~37.87 | |
+| `_sys_prx_load_module_on_memcontainer(sysconf_plugin.sprx)` | 37.97 | |
+| `Loaded module: sysconf_plugin.sprx` | 38.11 | 45.72 |
+| the page's eases (m5/200 x84, m400/600, m5/240 ...) | 38.11 | 45.72 |
+
+- The page starts moving the instant its plugin has loaded (before the plugin's .rco is even read, log 41.65..41.87);
+  the close unloads the plugin (log 45.82) and every open loads it again, so the second open waits as long as the first.
+- On this rig the wait is ~0.49 s (the earlier LLVM capture: 709 ms). The load itself is I/O and emulation speed
+  (0.14 s here), so a fixed native delay would be fitted to an emulator, not traced from the firmware. What starts the
+  job chain ~0.25 s after the press (a timer, or the end of the press feedback) is not traced yet.
+- The staggered 680..790 ms mode-5 set with two 800 ms mode-0 eases comes ~3.1 s after each open (41.21, 48.83), not
+  with the open itself; it is a later effect on the open page (not identified).
