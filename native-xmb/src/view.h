@@ -37,8 +37,9 @@ public:
     // stepped value reaches 1 (no landing at the duration; FUN_00398540, 0x3988f0). A new target restarts the curve
     // from the current value.
     // Mode 4 is the same per-frame form with its own k table (the page content channel, PAGE-MOVE 4c).
-    // `delayMilliseconds` holds the value at `from_` for that long before the curve starts: paf has no delay
-    // parameter, so this is the options panel's measured start offset expressed locally (UI-ELEMENT O6).
+    // `delayMilliseconds` holds the value at `from_` for that long before the curve starts. paf's own ease state
+    // has this phase too (FUN_003987dc state 0 waits until the clock passes state+0x18), and the animate wrapper's
+    // f2 is that delay (sysconf's idle stagger passes 60..390 ms); the options panel's start offset uses it as well.
     struct PafEase {
         double value=0;
         void retarget(double target,double milliseconds=200,int mode=5,double delayMilliseconds=0);
@@ -78,6 +79,10 @@ public:
     // 5 frames before the page can move. TRACED floor only: the fifth job's load and resource read (0.38 s on the
     // rig) is I/O and emulation speed, not a firmware constant, and is not added.
     static constexpr double pluginPageOpenFloorMs=5*1000./60;
+    // sysconf_plugin's idle timer (FUN_000a7948, DAT_0014bb78 = 3000.0) and the text level the other rows ease to
+    // when it fires (FUN_000a70e4, DAT_0014bb60 = 0.2; measured 0.197 of the label's ink on the console burst).
+    static constexpr double settingsIdleMs=3000;
+    static constexpr double settingsIdleDim=.2;
     // The item-level Triangle options panel's entrance (UI-ELEMENT-GAP-AUDIT O6, measured [M]): the open
     // starts 115..150 ms after the key and ramps 245..255 ms (at rest 360..410 ms); the close starts 9 ms
     // after the key and ramps 200 ms. The mid-points of the measured ranges are used. The exit used to be a

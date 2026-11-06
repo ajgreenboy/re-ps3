@@ -2113,7 +2113,24 @@ void View::drawScene(QPainter& p) {
                 const qint64 resting=focusTime();
                 const double idleFade=active && level==0 && idleCategories.contains(shell_.categories()[shell_.category()].id)?
                     std::clamp((resting-4000)/800.,0.,1.)*(1.-focus):0.;
-                p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus))*(1.-idleFade));
+                // A Settings page's idle dim (TRACED, sysconf_plugin; audit/PAGE-MOVE.md "The Settings idle dim"):
+                // FUN_000a7948 restarts a 3000 ms timer whenever a row takes focus. Its callback FUN_000a70e4 eases
+                // property 0x1000018 (the row's text colour; the icon is untouched on the console) of the rows at
+                // distance d = 1..13 to 0.2: mode 5, 800-10d ms below the focus and 800-20d above it, after
+                // (14-d)*30 ms, so the nearest row starts last. A focus move restores them over 30 ms and restarts
+                // the timer, which the focus clock already models. The curve runs from the focus time, sampled as a
+                // fresh ease so the value is a function of the rest time alone.
+                double settingsIdle=1.;
+                if(active && level==shell_.depth() && level>0 && !panelColumn && shell_.topPageLoadsPlugin()
+                   && i!=column.selection) {
+                    const int d=std::abs(i-column.selection);
+                    if(d<=13) {
+                        PafEase dim;dim.retarget(1.);
+                        dim.retarget(settingsIdleDim,(i>column.selection?800.-10*d:800.-20*d),5,settingsIdleMs+(14-d)*30.);
+                        dim.advance(resting*.001);settingsIdle=dim.value;
+                    }
+                }
+                p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus))*(1.-idleFade)*settingsIdle);
                 // An inline empty-state line stands in for the focused row's own label slot: the firmware's
                 // line sits where the list row would be (measured x 630, centre y 504), so the row keeps its
                 // icon and focus but not its title. No other row is affected.
