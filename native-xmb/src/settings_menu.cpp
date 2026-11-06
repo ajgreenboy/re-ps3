@@ -411,11 +411,7 @@ PageRows segmentRows(const QString& id,Assets& assets) {
         {"net_internet_setting",{Action::Information,nullptr,nullptr}},
         {"net_internet_test",{Action::Information,nullptr,nullptr}},
         {"net_media_server",{Action::Information,nullptr,nullptr}},
-        // Game: the PSP/PS2 emulation rows have no target on this computer; each says why on its page.
-        {"game_psp_emu_viewmode",{Action::Information,nullptr,nullptr}},
-        {"game_psp_emu_3d",{Action::Information,nullptr,nullptr}},
-        {"game_psp_emu_adhoc_ch",{Action::Information,nullptr,nullptr}},
-        {"game_psp_emu_adhoc_mode",{Action::Information,nullptr,nullptr}},
+        // Game: the PS emulation rows have no target on this computer; each says why on its page.
         {"game_ps_emu_upcon",{Action::Information,nullptr,nullptr}},
         {"game_ps_emu_smooth",{Action::Information,nullptr,nullptr}},
         // Accessory: the four Windows settings the console's own choice lists map onto, written for real.
@@ -437,9 +433,18 @@ PageRows segmentRows(const QString& id,Assets& assets) {
     // Rows the definition binds in a group this build cannot reach: the wireless-headset row only exists
     // when a Sony wireless stereo headset is connected, and the kana group's keybind row only exists for
     // Japanese input. Both would be permanently dead rows, so they are left out and the reason logged.
+    // The Game page's four PSP(TM) Remaster rows are the same kind of row: sysconf_plugin's page builder
+    // (FUN_000a68fc) adds Screen Mode and 3D Display only when xsetting 0x61, /setting/game/pspemu3dMenu, reads
+    // 1, and the two Ad Hoc rows only when FUN_000f2aa8 also agrees. A console that has never set the key (the
+    // RPCS3 capture's) shows PS - Upscaler and PS - Smoothing alone, and this build runs no PSP remaster that
+    // could set it (audit/SETTINGS-COVERAGE.md U-a).
+    static const QString pspRemasterRow=QStringLiteral(
+        "PSP(TM) Remaster row: added only when /setting/game/pspemu3dMenu is 1, which nothing on this build sets");
     static const QHash<QString,QString> skipped{
         {"pd_usbhdset_setting","the row only exists when a Sony wireless stereo headset is connected"},
-        {"pd_keybind","Japanese kana input only"}};
+        {"pd_keybind","Japanese kana input only"},
+        {"game_psp_emu_viewmode",pspRemasterRow},{"game_psp_emu_3d",pspRemasterRow},
+        {"game_psp_emu_adhoc_ch",pspRemasterRow},{"game_psp_emu_adhoc_mode",pspRemasterRow}};
     PageRows data;data.id=id;
     const auto title=assets.text("explore_category_sysconf",titles.value(id));
     data.title=title.isEmpty()?id:title;
