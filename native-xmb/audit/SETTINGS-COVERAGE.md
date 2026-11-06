@@ -1193,6 +1193,9 @@ captures (`rpcs3-ref-2026-10-28/settings/page-*-settings.png`) by a read-only su
     Internet Connection Test and Camera Device Settings (`noValueOnConsole`). Each reading stays on the row's page
     and in the report.
   - Long host values are elided before the screen edge at 560 px (a microphone name ran off the frame).
+  - Power Save now matches the console (SETTINGS-FIRMWARE 5.8). System Auto-Off draws no value: on the console it
+    opens the two-timer page, and here the choice band still marks the timer. Controller Auto-Off shows sysconf's
+    `msg_off`, which is true on this build because there is no controller idle timer.
 - **Help line.**
   - Video Output Settings now fills "%1" with the primary display's mode ("1080p"). It had shown a literal "%1".
   - The help line is 19 px on a 22 px pitch (TEXT-RENDERER 9). Its wrap width is bounded to 1181..1184 px by two
@@ -1208,6 +1211,3 @@ captures (`rpcs3-ref-2026-10-28/settings/page-*-settings.png`) by a read-only su
 - **Native-only rows.** Sound's Host Volume and Host Mute are this build's own. Chat's Audio/Camera Device
   Settings and Music's Repeat are not on the console's frames; those firmware rows are probably conditional
   (not traced).
-- **Power Save.** The console shows "Off" on Controller Auto-Off and nothing on System Auto-Off. The native is the
-  reverse, because its System Auto-Off is a working idle timer with a value. Left until that row's firmware page
-  is traced.
