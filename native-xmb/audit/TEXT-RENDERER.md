@@ -1267,7 +1267,8 @@ way section 8 read the label. `work/text-gaps.ts` lists the word gaps along line
 - **Pitch 22 (measured).** Cap tops are 528 and 550. The font's own line height at 19 px is 24, so the native
   breaks the lines with `QTextLayout` and draws each one on the 22 px pitch.
 - **Box width: bounded, not traced.** Line 1 ends after "...to an HD" (ink 1805) and "TV." does not fit, so the
-  console's wrap width is 1181..1219 px. The native uses 1200. No RCO object carries it: section 4 found no
+  console's wrap width is 1181..1219 px; Chat's line (where "the" does not fit after "...video from", ink 1809)
+  narrows it to 1181..1184, and the native uses 1182 (SETTINGS-COVERAGE, page sweep). No RCO object carries it: section 4 found no
   `label2_text` object in the plugins' RCOs, so the width is set at run time.
 
 The value column's "Off" on the two PS rows is the firmware's: sysconf reads `/setting/game/emuUpConvert` /
