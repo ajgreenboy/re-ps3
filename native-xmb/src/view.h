@@ -71,6 +71,13 @@ public:
     // open's own shape within the tracker's -0.014 bias, so the curve is NOT re-fit: the close is the same
     // content ease as the open with this hold in front of it.
     static constexpr double pageCloseDelayMs=49;
+    // A Settings page open (sysconf_plugin) holds still for the firmware's job chain (PAGE-MOVE "The page-open
+    // job chain", 2026-11-06, RPCS3 syscall trace): the press frame starts a ScePafJob thread and each later main
+    // loop frame joins the finished job and starts the next; the fifth job loads and starts sysconf_plugin and
+    // reads its resources, and the frame that joins it starts the page eases. At one job per 60 Hz frame that is
+    // 5 frames before the page can move. TRACED floor only: the fifth job's load and resource read (0.38 s on the
+    // rig) is I/O and emulation speed, not a firmware constant, and is not added.
+    static constexpr double pluginPageOpenFloorMs=5*1000./60;
     // The item-level Triangle options panel's entrance (UI-ELEMENT-GAP-AUDIT O6, measured [M]): the open
     // starts 115..150 ms after the key and ramps 245..255 ms (at rest 360..410 ms); the close starts 9 ms
     // after the key and ramps 200 ms. The mid-points of the measured ranges are used. The exit used to be a

@@ -32,14 +32,15 @@ diff --git a/rpcs3/Emu/Cell/PPUModule.cpp b/rpcs3/Emu/Cell/PPUModule.cpp
 index 22e8ff9b8..4a8351c39 100644
 --- a/rpcs3/Emu/Cell/PPUModule.cpp
 +++ b/rpcs3/Emu/Cell/PPUModule.cpp
-@@ -41,6 +41,224 @@ extern void ppu_register_function_at(u32 addr, u32 size, ppu_intrp_func_t ptr);
+@@ -41,6 +41,228 @@ extern void ppu_register_function_at(u32 addr, u32 size, ppu_intrp_func_t ptr);
  
  extern void sys_initialize_tls(ppu_thread&, u64, u32, u32, u32);
  
 +// XMB reference tracer (C:\dev\xmb, xmbrt phase 2; local change, not upstream).
 +// Logs syscalls and import calls made by vsh and the 13 XMB boot plugins, with addresses translated to
 +// xmbld's image layout, so the trace can be diffed against xmbrt's call log.
-+// XMB_TRACE=<out file> enables it; XMB_TRACE_MODULES=<xmbld modules.csv>; XMB_TRACE_MAX (default 10000).
++// XMB_TRACE=<out file> enables it; XMB_TRACE_MODULES=<xmbld modules.csv>; XMB_TRACE_MAX (default 10000);
++// XMB_TRACE_AFTER_S=<seconds> skips everything before that guest time; every line carries tb= (79.8 MHz timebase).
 +// Import calls are seen at bcctr/bclr, so it needs the PPU interpreter.
 +extern std::string ppu_get_syscall_name(u64 code);
 +
@@ -57,6 +58,7 @@ index 22e8ff9b8..4a8351c39 100644
 +	FILE* g_file = nullptr;
 +	atomic_t<u64> g_seq = 0;
 +	u64 g_max = 10000;
++	u64 g_after_tb = 0; // XMB_TRACE_AFTER_S: log nothing before this guest time (s)
 +	std::map<std::string, u32> g_bases; // module file stem -> xmbld base
 +
 +	struct pending
@@ -76,6 +78,7 @@ index 22e8ff9b8..4a8351c39 100644
 +		g_file = std::fopen(out, "w");
 +		if (!g_file) return false;
 +		if (const char* max = std::getenv("XMB_TRACE_MAX"); max && *max) g_max = std::strtoull(max, nullptr, 0);
++		if (const char* after = std::getenv("XMB_TRACE_AFTER_S"); after && *after) g_after_tb = static_cast<u64>(std::strtod(after, nullptr) * 79800000.);
 +		if (const char* csv = std::getenv("XMB_TRACE_MODULES"); csv && *csv)
 +		{
 +			if (FILE* f = std::fopen(csv, "r"))
@@ -155,6 +158,7 @@ index 22e8ff9b8..4a8351c39 100644
 +	// Counts a call; false once the limit is reached.
 +	bool next_seq(u64& seq)
 +	{
++		if (g_after_tb && get_timebased_time() < g_after_tb) return false;
 +		seq = ++g_seq;
 +		if (seq > g_max)
 +		{
@@ -219,9 +223,9 @@ index 22e8ff9b8..4a8351c39 100644
 +	u64 seq;
 +	if (!next_seq(seq)) return;
 +	const u32 slot = decode_stub_slot(source);
-+	write("%llu T%08X imp slot=%08X lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX depth=%zu src=%08X tgt=%08X",
++	write("%llu T%08X imp slot=%08X lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX depth=%zu src=%08X tgt=%08X tb=%llu",
 +		static_cast<unsigned long long>(seq), ppu.id, slot ? xmb_or_raw(slot) : 0, xmb_or_raw(static_cast<u32>(ppu.lr)),
-+		ppu.gpr[3], ppu.gpr[4], ppu.gpr[5], ppu.gpr[6], t_calls.size(), src, target);
++		ppu.gpr[3], ppu.gpr[4], ppu.gpr[5], ppu.gpr[6], t_calls.size(), src, target, static_cast<unsigned long long>(get_timebased_time()));
 +	t_calls.push_back({static_cast<u32>(ppu.lr), ppu.gpr[1], seq});
 +}
 +
@@ -249,15 +253,15 @@ index 22e8ff9b8..4a8351c39 100644
 +	u64 seq;
 +	if (!next_seq(seq)) return;
 +	t_syscall_seq = seq;
-+	write("%llu T%08X sys %llu %s cia=%08X lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX",
++	write("%llu T%08X sys %llu %s cia=%08X lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX tb=%llu",
 +		static_cast<unsigned long long>(seq), ppu.id, code, ppu_get_syscall_name(code).c_str(), cia,
-+		xmb_or_raw(static_cast<u32>(ppu.lr)), ppu.gpr[3], ppu.gpr[4], ppu.gpr[5], ppu.gpr[6]);
++		xmb_or_raw(static_cast<u32>(ppu.lr)), ppu.gpr[3], ppu.gpr[4], ppu.gpr[5], ppu.gpr[6], static_cast<unsigned long long>(get_timebased_time()));
 +}
 +
  std::unordered_map<std::string, ppu_static_module*>& ppu_module_manager::get()
  {
  	// In C++ the order of static initialization is undefined if it happens in
-@@ -1704,6 +1922,26 @@ shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, bool virtual_load, c
+@@ -1704,6 +1926,26 @@ shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, bool virtual_load, c
  		}
  	}
  
@@ -284,7 +288,7 @@ index 22e8ff9b8..4a8351c39 100644
  	for (const auto& s : elf.shdrs)
  	{
  		ppu_loader.notice("** Section: sh_type=0x%x, addr=0x%llx, size=0x%llx, flags=0x%x", std::bit_cast<u32>(s.sh_type), s.sh_addr, s.sh_size, s._sh_flags);
-@@ -2049,6 +2287,13 @@ void ppu_unload_prx(const lv2_prx& prx)
+@@ -2049,6 +2291,13 @@ void ppu_unload_prx(const lv2_prx& prx)
  		return;
  	}
  
@@ -298,7 +302,7 @@ index 22e8ff9b8..4a8351c39 100644
  	std::unique_lock lock(g_fxo->get<ppu_linkage_info>().mutex, std::defer_lock);
  
  	// Clean linkage info
-@@ -2401,6 +2646,10 @@ bool ppu_load_exec(const ppu_exec_object& elf, bool virtual_load, const std::str
+@@ -2401,6 +2650,10 @@ bool ppu_load_exec(const ppu_exec_object& elf, bool virtual_load, const std::str
  			_main.segs.emplace_back(_seg);
  			_main.addr_to_seg_index.emplace(addr, ::size32(_main.segs) - 1);
  

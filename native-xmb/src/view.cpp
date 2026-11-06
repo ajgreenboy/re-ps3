@@ -726,8 +726,9 @@ void View::paintGL() {
     // `previousDepth_` to the new value by the time this runs.
     const int depthNow=shell_.depth();
     const bool pageClosing=depthSeen_>=0 && depthNow<depthSeen_;
+    const bool pluginOpening=depthSeen_>=0 && depthNow>depthSeen_ && shell_.topPageLoadsPlugin();
     depthSeen_=depthNow;
-    const double depthDelay=pageClosing?pageCloseDelayMs:0.;
+    const double depthDelay=pageClosing?pageCloseDelayMs:pluginOpening?pluginPageOpenFloorMs:0.;
     depthEase_.retarget(shell_.depth(),pageMilliseconds,5,depthDelay);depthEase_.advance(dt);depthPosition_=depthEase_.value;
     barEase_.retarget(shell_.depth(),barMilliseconds,5,depthDelay);barEase_.advance(dt);barDepthPosition_=barEase_.value;
     // Capture-only switch: XMB_DEPTH_PIN=<0..2> holds the depth progress at that value, so a deterministic

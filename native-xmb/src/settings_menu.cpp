@@ -2034,6 +2034,7 @@ void Shell::openSettings(const QString& id) {
             if(lists.isEmpty())qWarning().noquote()<<"settings: the Date and Time choice rows did not resolve";
         }
         page.title=data.title;
+        page.sysconfPlugin=true; // a sysconf_plugin page: the console loads the plugin before it moves (View)
         // Dump before the rows move into the page, so the file is what the page will show. The aggregate
         // catalogue is written once per process: it is the whole choice model, so opening any page records
         // every page's lists (audit/SETTINGS-FIRMWARE.md 11).
