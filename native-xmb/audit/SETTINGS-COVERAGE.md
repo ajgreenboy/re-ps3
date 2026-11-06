@@ -208,7 +208,7 @@ Console page: title `System Update`, body `Select an update method.`, two rows, 
 ### 1.3 Game Settings (page `game`, level 1, 6 rows, segment view `seg_game`)
 
 Native rows come from the definition, not a literal (C-sm:330-399). The console frame shows **2 rows**
-on this machine: the four PSP(TM) Remaster rows are conditional and are not drawn.
+on this machine: the four PSP(TM) Remaster rows are conditional (added only when `/setting/game/pspemu3dMenu` is 1, U-a) and are not drawn; the native leaves them out as well.
 
 | id | firmware label | type | console value / options | native now | host source | apply |
 |---|---|---|---|---|---|---|
@@ -836,7 +836,7 @@ $r.host.screens | Format-List
 
 | # | unknown | what would settle it | what the implementation must do until then |
 |---|---|---|---|
-| U-a | Game's four PSP(TM) Remaster rows: are they drawn on a retail console, and with what options? | an RPCS3 still of Game Settings on a unit whose PSP remaster support is enabled; the four items' labels are in the RCO, their *values* are not | keep the RCO list and mark the options unknown; do not invent option text |
+| U-a | Game's four PSP(TM) Remaster rows: are they drawn on a retail console, and with what options? | **RESOLVED 2026-11-06 (traced).** sysconf_plugin's page builder `FUN_000a68fc` adds Screen Mode and 3D Display only when xsetting 0x61 = `/setting/game/pspemu3dMenu` reads 1 (the id is fixed by the order of the `/setting/game` keys in vsh.elf, which five other row handlers agree with), and the two Ad Hoc rows only when `FUN_000f2aa8` also returns true. The RPCS3 console has never set the key and shows the two PS rows | the native skips the four rows (`segmentRows` `skipped`), since nothing on this build can set the key; their values stay unknown |
 | U-b | Accessory's `Keyboard Type` (24), `Key Repeat`, `Mouse Type`, `Pointer Speed`, `Voice Changer` values | one still each, or one scrolled walk of the Accessory page | the RCO item labels are the only authority; a native list that renames them is a new invention |
 | U-c | Printer Selection / Printer Manager page contents | a still of each with a printer attached | no page today; do not draw a printer list until then (a host list is a *replacement*, and must be labelled as one) |
 | U-d | Remote Play registration chain (register / list / custom SSID) | a still of each page | rows stay inert |
