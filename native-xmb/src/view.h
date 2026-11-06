@@ -391,6 +391,7 @@ private:
     bool introRunning() const { return coldboot_.ready() && coldboot_.seconds()<Coldboot::showGui; }
     IconRenderer icons_;
     QVector<IconRenderer::Icon> iconQueue_; // category icons for the firmware renderer, rebuilt with the UI layer
+    std::vector<std::pair<quint64,QPointF>> windSites_; // icon centres for the particles' icon wind, rebuilt with the UI layer
     float presetBlend_=1;
     static constexpr double kColumnX=565; // focus column, 1080p px (firmware: camera 2700, eye x -5)
     // Firmware quad size (1080p px) of an icontex item icon in a column (RPCS3 capture): level 0 77.616, focused 184.8;

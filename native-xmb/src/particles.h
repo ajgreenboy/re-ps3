@@ -7,6 +7,9 @@
 #include "rsx_program.h"
 #include <memory>
 #include <vector>
+#include <array>
+#include <unordered_map>
+#include <QPointF>
 
 namespace xmb {
 class Assets;
@@ -59,7 +62,8 @@ void logSceneReader(const char* where);
 // not applied (audit/PARTICLES.md). PARTICLES_UI.mnu's d-pad wind is applied, driven by XMB cursor moves (trackCursor;
 // not the held pad, which shows no gust on the console); each move is one 0.03 impulse to a decaying gust, so only rapid
 // moves build one past the rotation threshold (runtime-traced). Its sixaxis
-// shake terms and the icon wind into the flow field have no input in this build and are not applied.
+// shake terms have no input in this build and are not applied. The icon wind is: View hands over every icon centre
+// (trackWidgets) and a moving icon writes the flow field the kernel samples (stepIconWind, step()).
 //
 // Determinism: every random number comes from the firmware's Park-Miller generator seeded with
 // kSeed, and the simulation state is a pure function of the elapsed seconds passed to render(). No
@@ -108,6 +112,11 @@ public:
     // page depth is one move event. Not the held pad: the console's held d-pad shows no gust (audit/PARTICLES.md).
     // Pinned captures take no steps after their first frame, so it never reaches a --render-clock capture.
     void trackCursor(int category,int depth,int selection);
+    // The icon wind's input: every XMB icon's centre in 1920 x 1080 screen pixels, keyed by a value that stays the
+    // same for one icon from frame to frame. custom_render_plugin's per-widget render hook (FUN_000122c0 ->
+    // FUN_0002f90c) projects each tracked widget's translation to NDC once per tick and writes the change since its
+    // last visit into the flow-field cell under it (see step()). The latest call's positions are what a tick reads.
+    void trackWidgets(const std::vector<std::pair<quint64,QPointF>>& screen);
     // Simulation state, for determinism logging (XMB_PARTICLE_LOG) and the audit's parity table.
     int liveCount() const { return live_; }
     long long stepIndex() const { return step_; }
@@ -155,6 +164,10 @@ private:
         float dpadRotMax=0.000116654f;  // fallback: PARTICLES_UI dpad rot max
         float dpadScaleX=1.f;           // fallback: PARTICLES_UI dpad scale x
         float dpadScaleY=0.f;           // fallback: PARTICLES_UI dpad scale y
+        // The icon wind (FUN_0002f90c; runtime sim+0x1474/+0x1478/+0x147c = 11.3877 / 0 / 1).
+        float iconWind=11.3877f;        // fallback: PARTICLES_UI icon wind
+        float iconWindSclX=0.f;         // fallback: PARTICLES_UI icon wind scl x
+        float iconWindSclY=1.f;         // fallback: PARTICLES_UI icon wind scl y
     };
     // PARTICLES.mnu's look block. These are the base-file values; the four theme overrides replace
     // them per key (day/night/yoake/higure) and the plugin's clock keyframes blend the result.
@@ -204,6 +217,7 @@ private:
     void step();
     void spawnFromGrid(int column,int row);
     void spawnInBox();
+    void stepIconWind();
     void orientParticle(Particle& p);
     float random(); // Park-Miller 16807 mod 2^31-1, the native's spawn RNG (the PPU emitter's own RNG is not traced)
     int takeSlot();  // pops a free slot, -1 when the pool is full
@@ -247,6 +261,11 @@ private:
     float padGustVelocity_=0,padGain_=0;
     float excitePosition_=0,exciteVelocity_=0,exciteLevel_=0;
     std::vector<QVector3D> emitter_,emitterVelocity_;
+    // The flow field (sim+0x180): 32 x 16 cells of signed-byte XYZ, row 0 at NDC y -1. The widgets' NDC positions:
+    // the latest trackWidgets() input and the position each widget had at the last tick (the plugin's map at
+    // layer+0x1018, node+0x20).
+    std::array<qint8,32*16*3> flowGrid_{};
+    std::unordered_map<quint64,QPointF> widgetNow_,widgetLast_;
     int emitterSide_=0;
     // The reader's values: the base physics block, the base look, the four theme looks and the
     // blended look the shaders get.

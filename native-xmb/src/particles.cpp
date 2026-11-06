@@ -327,6 +327,37 @@ void Particles::trackCursor(int category,int depth,int selection) {
     }
     cursorCategory_=category;cursorDepth_=depth;cursorSelection_=selection;
 }
+void Particles::trackWidgets(const std::vector<std::pair<quint64,QPointF>>& screen) {
+    // FUN_0002f90c projects the widget's world translation through layer+0x1020, which at runtime is the XMB camera
+    // at 2700 (rows (2.8125,0,0,0) (0,5,0,0) (0,0,-1.00002,-1) (0,0,2680.05,2700)): on the z = 0 plane that is
+    // x / 960 and y / 540 from the screen centre, y up. View hands over screen centres that already carry the
+    // parent column's recede, so they are mapped straight to NDC. [TRACED matrix; runtime dump]
+    widgetNow_.clear();
+    for(const auto& [key,point]:screen)widgetNow_[key]=QPointF((point.x()-960.)/960.,(540.-point.y())/540.);
+}
+void Particles::stepIconWind() {
+    // FUN_0002f90c, once per tracked widget per tick [TRACED, custom_render_plugin; constants read at runtime]:
+    //   N = the widget's NDC position; d = N - the N stored at its last visit (a first visit stores N, so d = 0);
+    //   a non-zero (dx, dy) writes the ONE cell under N: X = clamp(int((Nx + 1) / 2 * 32), 0, 31),
+    //   Y = clamp(int((Ny + 1) / 2 * 16), 0, 15), bytes (trunc(clamp(dx K S0 S1 10, -1, 1) 127),
+    //   trunc(clamp(dy S0 S2 10, -1, 1) 127), 0), K = layer+0x14 = 16/9, S0..S2 = ICON WIND / SCL X / SCL Y.
+    // The store overwrites the cell (the last widget in it wins). The plugin clears its map above 100 entries;
+    // the console tracked 14..23, so that never triggers here. [The runtime grid: only Y bytes, up to +-127 on a
+    // list scroll in the item column, +-53 on a category move in the category row.]
+    for(const auto& [key,now]:widgetNow_) {
+        const auto last=widgetLast_.find(key);
+        if(last==widgetLast_.end()){widgetLast_.emplace(key,now);continue;}
+        const double dx=now.x()-last->second.x(),dy=now.y()-last->second.y();
+        last->second=now;
+        if(dx==0. && dy==0.)continue;
+        const int cx=std::clamp(int((now.x()+1.)*.5*32.),0,31),cy=std::clamp(int((now.y()+1.)*.5*16.),0,15);
+        const auto toByte=[](double v){return qint8(int(std::clamp(v*10.,-1.,1.)*127.));};
+        qint8* cell=&flowGrid_[size_t((cy*32+cx)*3)];
+        cell[0]=toByte(dx*double(aspect_)*physics_.iconWind*physics_.iconWindSclX);
+        cell[1]=toByte(dy*physics_.iconWind*physics_.iconWindSclY);
+        cell[2]=0;
+    }
+}
 
 void Particles::resetSimulation() {
     live_=0;
@@ -336,6 +367,7 @@ void Particles::resetSimulation() {
     padRotation_=QVector3D();
     padGustVelocity_=padGain_=0;
     excitePosition_=exciteVelocity_=exciteLevel_=0;
+    flowGrid_.fill(0);widgetLast_.clear();
     std::fill(pool_.begin(),pool_.end(),Particle{});
     // The console's first births take slot 2047 and fill downward (pool dumps, audit/PARTICLES.md): the free list
     // holds 0..2047 pushed in order and pops LIFO.
@@ -427,6 +459,9 @@ void Particles::loadMaterials(Assets& assets) {
         key("dpad rot max",physics_.dpadRotMax);
         key("dpad scale x",physics_.dpadScaleX);
         key("dpad scale y",physics_.dpadScaleY);
+        key("icon wind",physics_.iconWind);
+        key("icon wind scl x",physics_.iconWindSclX);
+        key("icon wind scl y",physics_.iconWindSclY);
     } else {
         qWarning().noquote()<<"particles: PARTICLES_UI.mnu unavailable; the d-pad wind uses the 4.93 fallbacks";
     }
@@ -578,8 +613,28 @@ void Particles::step() {
     // FUN_00031494 splats the parameter struct's DELTA TIME (sim+0x1360 +0x38, the mnu key order) into it every tick
     // (stvx at 0x319ac), with w = 1 so age adds a bare AGING. [TRACED] The idle kernel's other terms are zero: the pad
     // pivot impulse (0x7064, M92 identity without pad input), the constant acceleration V890 (layer+0x680, never
-    // written) and the flow field (gated by WIND SCALE 0).
+    // written) and the flow field, which is zero until an icon moves (the icon wind below; no WIND SCALE gate).
     const float dt=float(physics_.deltaTime);
+    // The icon wind into the flow field, once per tick before the kernel: every cell steps 1 toward 0 (the console's
+    // grid falls by exactly 1 per tick - 36 -> 21 -> 6 over 15-tick dumps - and neither the SPU kernel nor the
+    // plugin's tick reads as that decay, so its writer is not traced; the rate is measured), then the widgets that
+    // moved since the last tick write their cells (stepIconWind).
+    bool windy=false;
+    for(auto& byte:flowGrid_){if(byte>0)--byte;else if(byte<0)++byte;windy|=byte!=0;}
+    stepIconWind();
+    if(!windy)windy=std::any_of(flowGrid_.begin(),flowGrid_.end(),[](qint8 v){return v!=0;});
+    // Local diagnosis: XMB_FLOW_LOG=1 prints the non-zero cells every 15 ticks, the console dumps' cadence
+    // (work/flow-grid.ts prints the same form from an RPCS3 run).
+    if(static const bool flowLog=qEnvironmentVariableIsSet("XMB_FLOW_LOG");flowLog && windy && step_%15==0) {
+        QStringList hot;int cells=0,peak=0;
+        for(int c=0;c<512;++c) {
+            const int y=flowGrid_[size_t(c*3+1)],x=flowGrid_[size_t(c*3)];
+            if(!x && !y && !flowGrid_[size_t(c*3+2)])continue;
+            ++cells;peak=std::max(peak,std::abs(y));
+            if(hot.size()<6)hot<<QStringLiteral("(%1,%2)=%3/%4/0").arg(c%32).arg(c/32).arg(x).arg(y);
+        }
+        qInfo().noquote()<<QStringLiteral("flow: step %1: %2 cells, max y %3 %4").arg(step_).arg(cells).arg(peak).arg(hot.join(' '));
+    }
     // The input wind, once per tick before the kernel (FUN_0002d02c, FUN_00031494). [TRACED unless marked]
     // A pressed direction (dx, dy) sets the rotation vector R = (SCALE Y * -dy, SCALE X * dx, 0) - in the particle
     // camera's view basis, which is the world basis here (the lookAt runs down -z with y up) - and adds 0.03 to the
@@ -643,6 +698,26 @@ void Particles::step() {
         p.vx+=kick*rx;
         p.vy+=kick*ry+physics_.gravity*dt;
         p.vz+=kick*rz;
+        // The flow-field term (particles.elf 0x6fa4-0x7018, in the same dt bracket as the kick): s_a0 x M94 .
+        // bilinear(grid / 127, (M95 . [p, 1]).xy x (32, 16) - 0.5), corner indices clamped to the grid. Runtime
+        // values (sim+0x800..0x8bf, sim+0x9a0): M95 = scale (0.0626836, 0.111427) + 0.5, i.e. world x +-7.977 and
+        // y +-4.487 - the screen at the dust's z = -7 plane - onto [0, 1]; M94 = its inverse scale (15.9546,
+        // 8.97447, 1), applied to a w = 0 sample so its translation drops out; s_a0 = 1. [TRACED + runtime dump]
+        if(windy) {
+            const float u=(0.0626836f*p.px+.5f)*32.f-.5f,v=(0.111427f*p.py+.5f)*16.f-.5f;
+            const float fu=std::floor(u),fv=std::floor(v),wu=u-fu,wv=v-fv;
+            const int x0=std::clamp(int(fu),0,31),x1=std::clamp(int(fu)+1,0,31);
+            const int y0=std::clamp(int(fv),0,15),y1=std::clamp(int(fv)+1,0,15);
+            float g[3];
+            for(int k=0;k<3;++k) {
+                const auto at=[&](int x,int y){return float(flowGrid_[size_t((y*32+x)*3+k)])/127.f;};
+                const float bottom=at(x0,y0)+(at(x1,y0)-at(x0,y0))*wu,top=at(x0,y1)+(at(x1,y1)-at(x0,y1))*wu;
+                g[k]=bottom+(top-bottom)*wv;
+            }
+            p.vx+=15.9546f*g[0]*dt;
+            p.vy+=8.97447f*g[1]*dt;
+            p.vz+=g[2]*dt;
+        }
         p.vx*=drag;
         p.vy*=drag;
         p.vz*=drag;

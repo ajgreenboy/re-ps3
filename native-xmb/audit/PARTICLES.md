@@ -1481,3 +1481,68 @@ modules; diagnostic runs must too. Re-measured with `--vsh-modules`:
 
 New diagnostics: `XMB_RIBBON_CLIP_EVERY` (frames between clip-sheet dumps) and `XMB_RIBBON_CLOTH_LOG=<file>` (step,
 noise counter and the first six cloth points per step).
+
+## The icon wind, 2026-11-06
+
+The last unported input to the dust is now in. It was traced statically (two read-only subagents: custom_render_plugin
+FUN_0002f90c and particles.elf) and read at runtime on the RPCS3 rig (interpreter; PC watch on the wind tick
+FUN_0002d02c, dumping layer+0x14, sim+0x1474..147c, layer+0x101c, layer+0x1020, sim+0x800..0x8bf, sim+0x9a0, plus
+the grid sim+0x180 as raw bulk dumps every 15 ticks). Data: `C:/dev/out/padwind-2026-11-05/iconwind` and `flowmat`
+(local only). Analysis: `work/flow-grid.ts`.
+
+**Writer (FUN_0002f90c, once per tracked widget per tick).**
+- **Input.** The widget's translation is projected through layer+0x1020. At runtime that matrix has rows
+  (2.8125,0,0,0) (0,5,0,0) (0,0,-1.00002,-1) (0,0,2680.05,2700): the XMB camera at 2700, so on the z = 0 plane
+  NDC = ((x - 960) / 960, (540 - y) / 540).
+- **Delta.** d = N - the N stored at the widget's last visit (map at layer+0x1018). A first visit stores N.
+- **Write.** A non-zero d overwrites the one cell under N, at X = clamp(int((Nx+1)/2*32), 0, 31) and
+  Y = clamp(int((Ny+1)/2*16), 0, 15). The bytes are (trunc(clamp(dx K S0 S1 10, -1, 1) 127),
+  trunc(clamp(dy S0 S2 10, -1, 1) 127), 0).
+- **Constants (runtime).** K = layer+0x14 = 1.7778 (16/9). S0 / S1 / S2 = 11.3877 / 0 / 1 (ICON WIND / SCL X /
+  SCL Y). So only vertical motion makes wind, and 0.0088 NDC (4.8 px) in one tick saturates a cell.
+- **Map.** It is cleared above 100 entries. The console tracked 14..23 widgets, so it never clears.
+
+**Console grid (runtime).**
+- Only Y bytes are ever non-zero.
+- Category moves write row 11 (the category icons, screen y ~270..337) up to +-53. The cells are mirrored: the old
+  icon sinks and the new one rises.
+- List scrolls write column 9 (the item icons, screen x ~540..600), rows 3..13, saturating at +-127.
+- Every cell falls by exactly 1 per tick (36 -> 21 -> 6 over 15-tick dumps). The grid is all zero within a second
+  of the last move.
+- Neither particles.elf nor the plugin's tick reads as that decay, so its writer is untraced; the rate is measured.
+
+**Kernel (particles.elf 0x6fa4-0x7018, traced).**
+- **Formula.** vel += dt x s_a0 x M94 . bilinear(grid / 127, (M95 . [p, 1]).xy x (32, 16) - 0.5), in the same
+  bracket as gravity and the Brownian kick.
+- **Sampling.** Corner indices are clamped to the grid (no wrap). Each byte is sign-extended and multiplied by
+  1/127 (0x3c010204).
+- **M95** (sim+0x840) = scale (0.0626836, 0.111427) + 0.5. That maps world x +-7.977, y +-4.487 (the screen at the
+  dust's z = -7 plane, eye (0,0,2), fovy 53) onto [0, 1].
+- **M94** (sim+0x800) = its inverse scale (15.9546, 8.97447, 1). The sample's w is 0, so M94's translation drops out.
+- **s_a0** (sim+0x9a0) = 1.0. Nothing else gates the term. WIND SCALE does not appear in the kernel, so the native's
+  old note that the field is "gated by WIND SCALE 0" was wrong.
+
+**Native.**
+- `View` collects every category icon and item row centre per UI-layer rebuild (`windSites_`) and hands them to
+  `Particles::trackWidgets`.
+- `Particles::step` decays the grid by 1, runs the writer (`stepIconWind`) and adds the sampled term to every live
+  particle. Constants come from PARTICLES_UI.mnu (`icon wind`, `scl x`, `scl y`) and the runtime dumps.
+- `XMB_FLOW_LOG=1` prints the grid in the same form as the console analysis.
+
+| | console | native |
+|---|---|---|
+| three DOWN scrolls | column 9, rows 3..13, up to +127, -15 per 15 ticks | column 9, rows 2..13, up to +127, -15 per 15 ticks |
+| LEFT | (6..8, 11) +48/+31/+10, (10..11) -41/-23 | (6..8, 11) +59/+36/+29, (10..11) -32/-29 |
+| RIGHT | (6..8, 11) -16/-26/-53, (10..12) +16/+44/+53 | (7..8, 11) -30/-105, (10..11) +30/+26 |
+
+The grid also exposed a native pop. The 10 px focus lift applied only to the open category icon, so on a move the
+old icon dropped 10 px in the key frame, and the first native grid had a saturated -122 cell. The lift now eases on
+every icon (`view.cpp`, the category row).
+
+**Open.**
+- The old icon's first-tick drop on RIGHT is still larger than the console's (-105 against <= ~67 after decay
+  bounds), so its ease differs. Not fitted.
+- The dust's response to a scroll is not yet compared against a console burst.
+- The decay's writer is untraced.
+
+Gate 19.58 dB, 6/6, unchanged (pinned captures take no simulation steps).
