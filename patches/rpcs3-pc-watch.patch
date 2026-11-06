@@ -1,6 +1,9 @@
 # XMB entry-point watch for the capture RPCS3 (local, not upstream). Applies on top of rpcs3-xmb-trace.patch.
-# XMB_PC_TRACE=<file> XMB_PC_WATCH=<hex,...> logs r3..r8, f1..f4, lr and the stack back chain at taken b/bl/bcctr to
-# the watched guest addresses. PPU interpreter only (PPU Decoder: Interpreter (static)). Used by audit/PAGE-MOVE.md 2026-11-05.
+# XMB_PC_TRACE=<file> XMB_PC_WATCH=<hex,...> logs r3..r8, f1..f4, lr, the stack back chain and the RSX flip/vblank
+# counters at taken b/bl/bcctr to the watched guest addresses. XMB_PC_WATCH_PRX=<module name> makes the watch values
+# offsets from that PRX's first segment (rebased when it loads; PRX bases move between runs). XMB_PC_DUMP=
+# <reg>,<deref|->,<off>,<count>;... (hex) logs count words at gpr[reg] (+deref read as a pointer) + off per hit.
+# PPU interpreter only (PPU Decoder: Interpreter (static)). Used by audit/PAGE-MOVE.md and audit/PARTICLES.md 2026-11-05.
 diff --git a/rpcs3/Emu/Cell/PPUInterpreter.cpp b/rpcs3/Emu/Cell/PPUInterpreter.cpp
 index 4aed434..837f96f 100644
 --- a/rpcs3/Emu/Cell/PPUInterpreter.cpp
@@ -31,10 +34,18 @@ index 4aed434..837f96f 100644
  		ppu.cia = target;
  	}
 diff --git a/rpcs3/Emu/Cell/PPUModule.cpp b/rpcs3/Emu/Cell/PPUModule.cpp
-index 4a8351c..8cf8e03 100644
+index 4a8351c..a91434a 100644
 --- a/rpcs3/Emu/Cell/PPUModule.cpp
 +++ b/rpcs3/Emu/Cell/PPUModule.cpp
-@@ -239,6 +239,68 @@ void xmb_trace_bclr(ppu_thread& ppu, u32 target)
+@@ -16,6 +16,7 @@
+ #include "Emu/Cell/SPUThread.h"
+ #include "Emu/Cell/PPUAnalyser.h"
+ #include "Emu/Cell/timers.hpp"
++#include "Emu/RSX/RSXThread.h"
+ 
+ #include "Emu/Cell/lv2/sys_process.h"
+ #include "Emu/Cell/lv2/sys_prx.h"
+@@ -239,6 +240,125 @@ void xmb_trace_bclr(ppu_thread& ppu, u32 target)
  	t_calls.pop_back();
  }
  
@@ -49,6 +60,11 @@ index 4a8351c..8cf8e03 100644
 +	std::mutex g_mutex;
 +	atomic_t<u64> g_seq = 0;
 +	u64 g_max = 50000;
++	std::string g_prx; // XMB_PC_WATCH_PRX: watch values are offsets from this module's first segment
++	atomic_t<bool> g_ready = true;
++	struct dump_spec { u32 reg, deref, off, count; };
++	dump_spec g_dumps[8]{};
++	u32 g_dump_count = 0;
 +
 +	bool init()
 +	{
@@ -64,6 +80,27 @@ index 4a8351c..8cf8e03 100644
 +			p = *end == ',' ? end + 1 : end;
 +		}
 +		if (const char* max = std::getenv("XMB_PC_TRACE_MAX"); max && *max) g_max = std::strtoull(max, nullptr, 0);
++		if (const char* prx = std::getenv("XMB_PC_WATCH_PRX"); prx && *prx) { g_prx = prx; g_ready = false; }
++		// XMB_PC_DUMP=<reg>,<deref|->,<off>,<count>;... (hex): log count words at gpr[reg] (+deref, read as a pointer) + off.
++		if (const char* dump = std::getenv("XMB_PC_DUMP"); dump && *dump)
++		{
++			for (const char* p = dump; *p && g_dump_count < 8;)
++			{
++				dump_spec d{};
++				char* end = nullptr;
++				d.reg = static_cast<u32>(std::strtoul(p, &end, 16));
++				if (*end != ',') break;
++				p = end + 1;
++				if (*p == '-') { d.deref = umax; p++; }
++				else { d.deref = static_cast<u32>(std::strtoul(p, &end, 16)); p = end; }
++				if (*p != ',') break;
++				d.off = static_cast<u32>(std::strtoul(p + 1, &end, 16));
++				if (*end != ',') break;
++				d.count = std::min<u32>(64, static_cast<u32>(std::strtoul(end + 1, &end, 16)));
++				g_dumps[g_dump_count++] = d;
++				p = *end == ';' ? end + 1 : end;
++			}
++		}
 +		if (!g_count || !(g_file = std::fopen(out, "w"))) return false;
 +		std::fprintf(g_file, "# xmb pc watch: %u addresses, max %llu hits\n", g_count, static_cast<unsigned long long>(g_max));
 +		std::fflush(g_file);
@@ -73,15 +110,28 @@ index 4a8351c..8cf8e03 100644
 +
 +bool g_xmb_pc_trace = xmb_pc_trace::init();
 +
++// Called by sys_prx after a module loads: rebases the watch offsets onto XMB_PC_WATCH_PRX's first segment.
++void xmb_pc_trace_on_prx(const std::string& name, u32 base)
++{
++	using namespace xmb_pc_trace;
++	if (!g_xmb_pc_trace || g_prx.empty() || g_ready || name.find(g_prx) == umax) return;
++	std::lock_guard lock(g_mutex);
++	for (u32 i = 0; i < g_count; i++) g_watch[i] += base;
++	std::fprintf(g_file, "# prx %s base %08X\n", name.c_str(), base);
++	std::fflush(g_file);
++	g_ready = true;
++}
++
 +void xmb_pc_trace_branch(ppu_thread& ppu, u32 source, u32 target)
 +{
 +	using namespace xmb_pc_trace;
++	if (!g_ready) return;
 +	bool hit = false;
 +	for (u32 i = 0; i < g_count; i++) hit |= g_watch[i] == target;
 +	if (!hit) return;
 +	const u64 seq = ++g_seq;
 +	if (seq > g_max) return;
-+	char buf[768];
++	char buf[2048];
 +	int n = std::snprintf(buf, sizeof(buf), "%llu T%08X tgt=%08X src=%08X lr=%08X r3=%llX r4=%llX r5=%llX r6=%llX r7=%llX r8=%llX f1=%g f2=%g f3=%g f4=%g bt=",
 +		static_cast<unsigned long long>(seq), ppu.id, target, source, static_cast<u32>(ppu.lr), ppu.gpr[3], ppu.gpr[4], ppu.gpr[5],
 +		ppu.gpr[6], ppu.gpr[7], ppu.gpr[8], ppu.fpr[1], ppu.fpr[2], ppu.fpr[3], ppu.fpr[4]);
@@ -94,6 +144,24 @@ index 4a8351c..8cf8e03 100644
 +		n += std::snprintf(buf + n, sizeof(buf) - n, "%08X,", static_cast<u32>(vm::read64(back + 16)));
 +		sp = back;
 +	}
++	if (const auto rsx = rsx::get_current_renderer(); rsx && n > 0 && n < static_cast<int>(sizeof(buf)) - 64)
++		n += std::snprintf(buf + n, sizeof(buf) - n, " flip=%llu vbl=%llu tb=%llu", static_cast<unsigned long long>(rsx->int_flip_index),
++			static_cast<unsigned long long>(rsx->vblank_count.load()), static_cast<unsigned long long>(get_timebased_time()));
++	for (u32 i = 0; i < g_dump_count && n > 0 && n < static_cast<int>(sizeof(buf)) - 32; i++)
++	{
++		const dump_spec& d = g_dumps[i];
++		u32 addr = static_cast<u32>(ppu.gpr[d.reg & 31]);
++		if (d.deref != umax)
++		{
++			if (!vm::check_addr(addr + d.deref, vm::page_readable, 4)) continue;
++			addr = vm::read32(addr + d.deref);
++		}
++		addr += d.off;
++		n += std::snprintf(buf + n, sizeof(buf) - n, " d%u@%08X=", i, addr);
++		for (u32 k = 0; k < d.count && n > 0 && n < static_cast<int>(sizeof(buf)) - 12; k++)
++			n += std::snprintf(buf + n, sizeof(buf) - n, vm::check_addr(addr + k * 4, vm::page_readable, 4) ? "%08X," : "--------,",
++				vm::check_addr(addr + k * 4, vm::page_readable, 4) ? static_cast<u32>(vm::read32(addr + k * 4)) : 0u);
++	}
 +	std::lock_guard lock(g_mutex);
 +	std::fputs(buf, g_file);
 +	std::fputc('\n', g_file);
@@ -103,3 +171,15 @@ index 4a8351c..8cf8e03 100644
  void xmb_trace_syscall(ppu_thread& ppu, u64 code, bool after)
  {
  	using namespace xmb_trace;
+diff --git a/rpcs3/Emu/Cell/lv2/sys_prx.cpp b/rpcs3/Emu/Cell/lv2/sys_prx.cpp
+index c339b0c..dfb4426 100644
+--- a/rpcs3/Emu/Cell/lv2/sys_prx.cpp
++++ b/rpcs3/Emu/Cell/lv2/sys_prx.cpp
+@@ -317,6 +317,7 @@ static error_code prx_load_module(const std::string& vpath, u64 flags, vm::ptr<s
+ 
+ 	ppu_initialize(*prx);
+ 
++	{ extern void xmb_pc_trace_on_prx(const std::string&, u32); xmb_pc_trace_on_prx(prx->name, prx->segs.empty() ? 0 : prx->segs[0].addr); }
+ 	sys_prx.success("Loaded module: \"%s\" (id=0x%x)", vpath, idm::last_id());
+ 
+ 	return not_an_error(idm::last_id<lv2_prx>());

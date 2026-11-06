@@ -567,9 +567,9 @@ void Particles::step() {
     // camera's view basis, which is the world basis here (the lookAt runs down -z with y up) - and adds 0.03 to the
     // gust smoother and 0.04 |Rx + Ry + Rz| to the brownian excitation. The direction table's signs (data 0x93ea0)
     // are read as left (-1, 0), right (1, 0), up (0, 1), down (0, -1). [INFERRED signs]
-    // While the state is not 4 every tick adds the input (0x2d35c-0x2d368); the state returns to 4 only when the
-    // rotation below is under 1e-5 rad (0x2d500), so one move's first tick (0.03 x DPAD ROT MAX = 3.5e-6) resets it,
-    // and only moves close enough together to lift g past ~0.086 latch a gust, which then holds until a later move.
+    // The state is a one-shot event: every tick writes 4 back (0x2d4f0-0x2d500 is reached on both sides of the 1e-5
+    // test), so each cursor move adds the input (layer+0x190 = 0.03, 0x2d35c-0x2d368) exactly once, and R stays at
+    // the last move's direction while g decays. [TRACED at runtime: audit/PARTICLES.md, the wind's runtime trace]
     float gustInput=0.f,exciteInput=0.f;
     if(padState_>=0 && padState_<4) {
         static constexpr float kDirection[4][2]={{-1.f,0.f},{1.f,0.f},{0.f,1.f},{0.f,-1.f}};
@@ -578,6 +578,7 @@ void Particles::step() {
         gustInput=0.03f;
         exciteInput=0.04f*std::abs(padRotation_.x()+padRotation_.y()+padRotation_.z());
     }
+    padState_=4;
     padGustVelocity_=0.98f*padGustVelocity_+gustInput;
     padGain_=std::clamp(padGustVelocity_,0.f,1.f);
     // Brownian excitation: v' = 0.6 v - 0.004 x + input, x' = x + v' (data 0x92444 / 0x92448), level clamp(x', 0, 1);
@@ -592,7 +593,6 @@ void Particles::step() {
     const QVector3D spin=physics_.dpadRotMax*padGain_*padRotation_;
     const float angle=spin.length();
     const bool rotating=angle>=1e-5f;
-    if(!rotating)padState_=4;
     const QVector3D pivot=kCameraEye-2.f*(kCameraEye-QVector3D(0,0,-7)).normalized();
     QMatrix4x4 rotation;
     if(rotating)rotation.rotate(qRadiansToDegrees(angle),spin/angle);

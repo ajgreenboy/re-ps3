@@ -57,7 +57,8 @@ void logSceneReader(const char* where);
 // day and higure, blended on the plugin's own keyframe table (FUN_00011600) - because those four are
 // the only presets this build ever schedules. PARTICLES_SPE.mnu (the playback variant) is documented but
 // not applied (audit/PARTICLES.md). PARTICLES_UI.mnu's d-pad wind is applied, driven by XMB cursor moves (trackCursor;
-// not the held pad, which shows no gust on the console), so only rapid moves latch a gust. Its sixaxis
+// not the held pad, which shows no gust on the console); each move is one 0.03 impulse to a decaying gust, so only rapid
+// moves build one past the rotation threshold (runtime-traced). Its sixaxis
 // shake terms and the icon wind into the flow field have no input in this build and are not applied.
 //
 // Determinism: every random number comes from the firmware's Park-Miller generator seeded with

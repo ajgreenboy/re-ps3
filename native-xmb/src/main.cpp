@@ -1225,6 +1225,15 @@ int main(int argc,char** argv) {
                     QKeyEvent press(QEvent::KeyPress,key,Qt::NoModifier);QCoreApplication::sendEvent(view,&press);
                     QTimer::singleShot(ms,view,[view,key]{QKeyEvent release(QEvent::KeyRelease,key,Qt::NoModifier);QCoreApplication::sendEvent(view,&release);});
                 } else qWarning()<<"script: invalid hold"<<token;
+            } else if(token.startsWith("seq=")) {
+                // seq=<KEY>@<ms>+<KEY>@<ms>...: key taps at the given offsets from this token, for input spaced closer
+                // than the 300 ms token step (console comparison bursts with moves 150 ms apart).
+                for(const QString& item:token.mid(4).split('+')) {
+                    const auto parts=item.split('@');
+                    const int key=keys.value(parts[0],0),ms=parts.size()>1?parts[1].toInt():-1;
+                    if(key && ms>=0 && ms<=60000)QTimer::singleShot(ms,view,[tap,key]{tap(key);});
+                    else qWarning()<<"script: invalid seq item"<<item;
+                }
             } else if(token.startsWith("type=")) {
                 for(const QChar c:token.mid(5)){QKeyEvent event(QEvent::KeyPress,0,Qt::NoModifier,QString(c));QCoreApplication::sendEvent(view,&event);}
             } else if(keys.contains(token)) {
