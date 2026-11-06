@@ -195,6 +195,8 @@ public:
     int category() const { return category_; }
     int selection() const { return pages_.isEmpty()?selections_[category_]:pages_.last().selection; }
     int depth() const { return int(pages_.size()); }
+    // True when the open top page is one the console's sysconf_plugin draws (the Settings rows' pages).
+    bool topPageLoadsPlugin() const { return !pages_.isEmpty() && pages_.back().sysconfPlugin; }
     const QVector<Entry>& entriesAt(int depth) const;
     int selectionAt(int depth) const;
     // End-of-list overscroll (GRAPHICS-INVENTORY #13): DOWN on the last row does not move the focus; the whole
@@ -541,7 +543,7 @@ private:
     int columnSink_=0;
     // `grouped` is a page the item menu's Group Content level rebuilt into letter folders: `groupedSource` keeps
     // the ungrouped rows so All can put them back without a rescan, and the folders' rows are the same entries.
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step

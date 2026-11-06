@@ -2092,3 +2092,37 @@ both opens). Settings -> Game Settings, Cross, Circle, Cross:
   job chain ~0.25 s after the press (a timer, or the end of the press feedback) is not traced yet.
 - The staggered 680..790 ms mode-5 set with two 800 ms mode-0 eases comes ~3.1 s after each open (41.21, 48.83), not
   with the open itself; it is a later effect on the open page (not identified).
+
+## The page-open job chain, 2026-11-06 (corrects the section above)
+
+Traced on the RPCS3 rig (interpreter) with the syscall/import trace (`XMB_TRACE`, now with `tb=` on every line and
+`XMB_TRACE_AFTER_S` to skip the boot) next to the ease-setup PC watch. Settings -> Game Settings, Cross; guest
+timebase seconds, main thread T01000000, its loop ~18 ms a frame on this rig (one `sys_event_queue_receive` per frame):
+
+| tb s | event |
+|---|---|
+| 83.0205 | main loop reads the pad (`sys_hid_manager_read`); press feedback eases at 83.021 |
+| 83.0234 | same frame: `_sys_ppu_thread_create` from 0x60ced4 (job 1; exits 83.0239) |
+| 83.0400 / .0412 | next frame: `sys_ppu_thread_join` job 1, create job 2 |
+| 83.0584 / .0588 | next frame: join job 2, create job 3 (exits 83.0762, just after the 83.0759 frame) |
+| 83.0937 / .0942 | join job 3, create job 4 (exits 83.1117, just after the 83.1115 frame) |
+| 83.1301 / .1305 | join job 4, create job 5 |
+| 83.1309 | job 5: `_sys_prx_load_module_on_memcontainer` (sysconf_plugin) |
+| 83.2657 | job 5: `_sys_prx_start_module`; then the plugin's resources are read (fs reads to 83.4976) and one more module is loaded and started (83.4978) |
+| 83.5091 | job 5 exits |
+| 83.5235 | next frame: main loop joins job 5 |
+| 83.526 | the page's eases (m5/200 ...) |
+
+- Nothing waits on a timer. The open is a chain of jobs, each run on its own thread and joined by the main loop on
+  the frame after it finishes. Jobs 1-4 are tiny (under a millisecond each where the interpreter does not stretch
+  them), job 5 loads and starts the plugin and reads its resources, and the frame that joins job 5 starts the page.
+- The earlier "~0.25 s before the job chain" came from matching RPCS3's own log clock to the guest timebase; with
+  `tb=` on the syscalls themselves the first job starts in the press frame.
+- The firmware floor is therefore 5 frames after the press frame (jobs 1-5 joined on frames 1-5) = 83 ms at 60 Hz,
+  plus job 5's load. That load (0.38 s here, 0.14 s of it the PRX load) is I/O and emulation speed and is not a
+  firmware constant.
+- Native: a Settings page open (the sysconf_plugin pages, `Shell::topPageLoadsPlugin`) now holds the depth eases for
+  the 5-frame floor (`View::pluginPageOpenFloorMs`); the load is not added. Other page opens are unchanged (not
+  traced: they may not load a plugin). A/B gate unchanged (19.58 dB, 6/6).
+- Seen while checking: the native's first frame after Enter on a Settings row arrives ~150 ms late (its own page
+  build), so the hold is mostly hidden inside that frame. Not addressed here.
