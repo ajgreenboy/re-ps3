@@ -517,9 +517,8 @@ void Ribbon::sheetMotion(std::vector<QVector3D>& world,std::vector<QVector3D>& v
     // The console's emitter reads the drawn sheet: FUN_00030b80 samples a cell's clip-space vertex through the sheet
     // matrix at layer+0x50 (FUN_0002d640), which maps it back to camera space + (0, 0, 2): x / sx, y / sy, -w, plus
     // (0, 0, 2), the same world as here. Its velocity is that point minus the same cell sampled one tick earlier, over
-    // DELTA TIME (0x30d8c). The earlier stand-in (the move of a once-stepped copy of the cloth) read the births'
-    // vertical speed ~40% low (audit/PARTICLES.md); it remains only for a frame without a tick-old history (a pinned
-    // first frame, or after a stall), where the rest table has not stepped yet.
+    // DELTA TIME (0x30d8c). The earlier stand-in, the move of a once-stepped copy of the cloth, remains only for a frame
+    // without a tick-old history (a pinned first frame, or after a stall), where the rest table has not stepped yet.
     if(clipScaleX_>0 && clipScaleY_>0 && vertices_.size()>=size_t(grid_)*grid_*12) {
         world.resize(size_t(grid_)*grid_);
         for(size_t i=0;i<world.size();++i){const float* v=&vertices_[i*12];world[i]=QVector3D(v[0]/clipScaleX_,v[1]/clipScaleY_,-v[3]+2.f);}
@@ -571,7 +570,18 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
     // over time"). Off by default: the rest table is the state the console's vertex buffer matches.
     if(firstFrame && qEnvironmentVariableIsSet("XMB_RIBBON_ADVANCE"))for(int i=0,n=int(std::min(seconds,3600.)*60);i<n;++i)cloth_.step(p);
     cloth_.acc+=float(dt*60);
-    while(cloth_.acc>1){cloth_.step(p);cloth_.acc-=1;}
+    // XMB_RIBBON_CLOTH_LOG=<file>: per cloth step, the step number, the noise counter and the first six points, for
+    // comparison with the console's cloth (custom_render_plugin FUN_0004bed0, counter at +0x2d4; audit/PARTICLES.md).
+    static FILE* clothLog=[]{const QByteArray path=qgetenv("XMB_RIBBON_CLOTH_LOG");return path.isEmpty()?nullptr:std::fopen(path.constData(),"w");}();
+    static long long clothSteps=0;
+    while(cloth_.acc>1) {
+        if(clothLog) {
+            std::fprintf(clothLog,"%lld %d",clothSteps,cloth_.seed);
+            for(int i=0;i<6;++i)std::fprintf(clothLog," %.7g %.7g %.7g",cloth_.pos[size_t(i)].x(),cloth_.pos[size_t(i)].y(),cloth_.pos[size_t(i)].z());
+            std::fputc('\n',clothLog);
+        }
+        cloth_.step(p);cloth_.acc-=1;++clothSteps;
+    }
     cloth_.swell(p);
     // 2. The FFD lattice from ffd_shader1, 3. spline.elf's sheet.
     deformLattice(gl,p);
@@ -583,8 +593,9 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
     {
         static const QString clipDump=qEnvironmentVariable("XMB_RIBBON_CLIP_DUMP");
         static const int from=qEnvironmentVariableIntValue("XMB_RIBBON_CLIP_FROM"),count=std::max(1,qEnvironmentVariableIntValue("XMB_RIBBON_CLIP_COUNT"));
+        static const int every=std::max(1,qEnvironmentVariableIntValue("XMB_RIBBON_CLIP_EVERY")); // frames between dumps
         static int frame=0;
-        if(!clipDump.isEmpty() && frame>=from && frame<from+count) {
+        if(!clipDump.isEmpty() && frame>=from && (frame-from)/every<count && (frame-from)%every==0) {
             QFile file(QString("%1_%2_%3us.bin").arg(clipDump).arg(frame).arg(qint64(seconds*1e6)));
             if(file.open(QIODevice::WriteOnly))for(int i=0;i<grid_*grid_;++i)file.write(reinterpret_cast<const char*>(&vertices_[size_t(i)*12]),4*sizeof(float));
         }
