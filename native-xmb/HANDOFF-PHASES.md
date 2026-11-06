@@ -107,6 +107,10 @@ cell a tick apart through the sheet matrix at layer+0x50, which is exactly camer
 used a stepped copy of the cloth. `Ribbon::sheetMotion` now reads the drawn clip sheet back and differences it over
 one tick: newborn speed p50 0.20 (console 0.22), |vy|/speed 0.74..0.79 (0.79), older vy sd 0.187 (0.201). Open: the
 console's whole sheet drifts sideways over time (Vx skewed -0.7..+0.6 by window), the native's does not (the ribbon).
+Corrected the same day: that drift gap came from native runs without `--vsh-modules` (the fallback cloth). With the
+plugin's rest tables the native cloth matches the console step for step at the start (noise counter 0, +1083 per
+step, same parameters) and its slow sideways swing over five minutes matches; the runs then diverge chaotically
+through float rounding. Diagnostic native runs must pass `--vsh-modules` like the gate does.
 
 ## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
 

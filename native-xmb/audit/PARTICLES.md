@@ -1460,3 +1460,24 @@ per frame, file names carry the frame time).
 
 Gate (A/B layers): frame 19.58, 6/6. The named-state self-baselines (native vs stored native, 55 dB) move with any
 dust change and are not re-saved here (shared tree).
+
+### Correction, same day: the sideways drift was the fallback cloth
+
+The "not ported / open" sideways drift above, and the native numbers in the table, came from native runs without
+`--vsh-modules`: without the decrypted custom_render_plugin.prx the ribbon cannot read its rest tables and starts
+from a four-minute warm-up of an approximate state (noise counter 15,595,200 at the first step). The gate passes the
+modules; diagnostic runs must too. Re-measured with `--vsh-modules`:
+- **The cloth matches the console step for step at the start.** The console's noise counter (cloth +0x2d4) is 0 at the
+  first step and +1083 per step (361 points x 3 draws), one step per 60 Hz tick (3098 steps over 3074 emitter ticks);
+  its live parameters equal the native preset (damping 1e-4, length 0.306001, tension 0.25, timestep 2,
+  perturbation 0.1, END Y/Z 0.4/0.2). Point 0 after one step: console (5.05210, 0.58835, 0.444443), native
+  (5.052054, 0.5883595, 0.4444412). By step 999 the two differ in the second decimal and by step 2999 more: the
+  cloth is chaotic and PPU / x86 rounding differs, so frame-exact sync is not possible (as PIPELINE.md found).
+- **The slow sideways swing matches.** Sheet x centroid over five minutes: console -2.12 (10 s), -3.72 (30 s), -1.93
+  (60 s), then +-0.4 about -2.6; native -1.66 (8 s), -3.78 (34 s), -2.07 (66 s), then +-0.3 about -2.5.
+- **Emitter and births (native with modules):** V windows Vx -0.73..+0.07 at 9..12 s (console -0.70..+0.08), -0.38..
+  +0.26 at 30..33 s (console -0.36..+0.30); newborn speed p50 0.229 (0.223), |vy| / speed 0.755 (0.791); older sd
+  vx / vy / vz 0.178 / 0.192 / 0.101 (0.183 / 0.201 / 0.114).
+
+New diagnostics: `XMB_RIBBON_CLIP_EVERY` (frames between clip-sheet dumps) and `XMB_RIBBON_CLOTH_LOG=<file>` (step,
+noise counter and the first six cloth points per step).
