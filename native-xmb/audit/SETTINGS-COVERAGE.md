@@ -1173,3 +1173,41 @@ All under `C:\dev\out\settings-accept\`:
 | `capture\det-final-1.png`, `det-final-2.png` | the two `--render-clock 20` determinism frames (identical) |
 | `capture\volume-60.png`, `hud-after.png`, `hud-after-crop.png` | the volume apply and the HUD's raised plate |
 | `C:\dev\xmb\out\parity\scorecards\scorecard-20261029-182450.md` | the parity scorecard summarised in 8.6 |
+
+## Page sweep against the console, 2026-11-06
+
+All 15 Settings pages were grabbed from the native in one scripted run and compared with the 2026-10-28 RPCS3
+captures (`rpcs3-ref-2026-10-28/settings/page-*-settings.png`) by a read-only subagent, then checked here on crops.
+
+**Fixed:**
+- **Rows.**
+  - Game drops its four PSP(TM) Remaster rows (U-a).
+  - Printer now lists Printer Manager first, which is where the console's page opens, so the focus and the help
+    line now match.
+- **Values.**
+  - PS - Upscaler, PS - Smoothing and Audio Multi-Output show the firmware's own label for this build's fixed
+    reading: "Off", read from each row's choice page in `sysconf_plugin.rco`. `Shell::valueText`'s `fixedReadings`
+    table holds them.
+  - Seven rows that the console draws with no value no longer show a host reading in the value column: Audio Output
+    Settings, Video Output Settings, Printer Manager, Printer Selection, Settings and Connection Status List,
+    Internet Connection Test and Camera Device Settings (`noValueOnConsole`). Each reading stays on the row's page
+    and in the report.
+  - Long host values are elided before the screen edge at 560 px (a microphone name ran off the frame).
+- **Help line.**
+  - Video Output Settings now fills "%1" with the primary display's mode ("1080p"). It had shown a literal "%1".
+  - The help line is 19 px on a 22 px pitch (TEXT-RENDERER 9). Its wrap width is bounded to 1181..1184 px by two
+    console lines, Game ("...to an HD" fits) and Chat ("the" does not fit after "...video from"). It is set to
+    1182, and the wraps on Game, Chat and Accessory now match the console.
+
+**Left as they are (policy, not a defect):**
+- **Rows with no reading on this build.** Video's BD/DVD languages, Security's parental levels, Remote Play, and
+  Music's import format, crossfade, bitmapping and normaliser have no value here, where the console shows its
+  registry defaults. This build shows only real readings.
+- **Different machine state.** Date/Time formats and zone, the screensaver, System Name, and Deep Color reflect
+  this computer's settings, not the captured console's.
+- **Native-only rows.** Sound's Host Volume and Host Mute are this build's own. Chat's Audio/Camera Device
+  Settings and Music's Repeat are not on the console's frames; those firmware rows are probably conditional
+  (not traced).
+- **Power Save.** The console shows "Off" on Controller Auto-Off and nothing on System Auto-Off. The native is the
+  reverse, because its System Auto-Off is a working idle timer with a value. Left until that row's firmware page
+  is traced.

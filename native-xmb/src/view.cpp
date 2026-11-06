@@ -2202,12 +2202,17 @@ void View::drawScene(QPainter& p) {
                              QString(QChar(0x2026)),27,QColor(255,255,255,int(255*alpha)));
                     if(!value.isEmpty() && panelAmount<.5) {
                         QString shown=value;
-                        if(entry.action==Action::JellyfinSignInField) {
+                        // Every value is elided before the screen edge: a host reading such as a Windows device name
+                        // ran off the frame (Chat's microphone, Sound's headset). The sign-in fields keep their 440 px
+                        // field; anything else may run to 1860 (60 px from the edge, the console's widest value - the
+                        // Samoa time zone - ends near 1735).
+                        const qreal valueWidth=entry.action==Action::JellyfinSignInField?440.:560.;
+                        {
                             QFont valueFont(shell_.fontFamily());valueFont.setPixelSize(21);
                             if(textRenderer_.ready()) {
-                                const auto clipped=textRenderer_.elideToWidth(valueFont,value,440);
+                                const auto clipped=textRenderer_.elideToWidth(valueFont,value,valueWidth);
                                 shown=clipped.elided?clipped.prefix+QString(QChar(0x2026)):value;
-                            } else shown=QFontMetrics(valueFont).elidedText(value,Qt::ElideRight,440);
+                            } else shown=QFontMetrics(valueFont).elidedText(value,Qt::ElideRight,int(valueWidth));
                         }
                         text({1300+ahead*210+offset,y-25,440,50},shown,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
                     }
@@ -2218,12 +2223,13 @@ void View::drawScene(QPainter& p) {
                     // Size and box measured against the console on one shared string (Game Settings' PS - Upscaler help,
                     // rpcs3-ref-2026-10-28/settings/page-game-settings.png; audit/TEXT-RENDERER.md section 9): word
                     // gaps scale 1.057 against 18 px, so 19 px; cap top y 528 (5 px above the old 24 px offset); line 1
-                    // wraps after "...to an HD" with ink to x 1805 and "TV." does not fit, so the box is 1181..1219 px
-                    // wide - 1200 is inside that bound, not a traced constant. The console's line pitch is 22 px (cap
+                    // wraps after "...to an HD" with ink to x 1805 and "TV." does not fit (box >= 1181), and Chat's line 1 ends at
+                    // "...video from" where "the" would reach x 1809 (box < 1184): 1182 is inside that 1181..1184 bound, not a
+                    // traced constant. The console's line pitch is 22 px (cap
                     // tops 528 / 550), tighter than the font's own 24 px line height, so the lines are broken here and
                     // drawn one by one on that pitch.
                     else if(i==column.selection && !entry.detail.isEmpty()) {
-                        constexpr int helpSize=19,helpPitch=22;constexpr qreal helpWidth=1200;
+                        constexpr int helpSize=19,helpPitch=22;constexpr qreal helpWidth=1182;
                         QFont helpFont(shell_.fontFamily());helpFont.setPixelSize(helpSize);
                         helpFont.setHintingPreference(QFont::PreferNoHinting);
                         QTextLayout wrap(entry.detail,helpFont);QTextOption option;

@@ -205,7 +205,16 @@ struct RowSpec {
 Entry rowEntry(const RowSpec& spec,Assets& assets,const QString& pageId) {
     const auto text=[&assets](const char* key){return key?assets.text("sysconf_plugin",QString::fromLatin1(key)):QString{};};
     const auto title=text(spec.titleKey);
-    const auto detail=text(spec.infoKey);
+    auto detail=text(spec.infoKey);
+    // Video Output Settings' help is "Current Output Resolution: %1" in sysconf_plugin.rco, and the console fills the
+    // %1 with its output mode ("1080p", rpcs3-ref settings/page-display-settings.png). Here the output is the
+    // primary display, in the same form: its height and "p".
+    if(qstrcmp(spec.id,"display_output_setting")==0 && detail.contains(QLatin1String("%1"))) {
+        QString mode;
+        for(const auto& display:host::snapshot().displays)
+            if(display.primary || mode.isEmpty())mode=QStringLiteral("%1p").arg(display.resolution.height());
+        if(!mode.isEmpty())detail=detail.arg(mode);
+    }
     const auto literalTitle=spec.literalTitle?QString::fromLatin1(spec.literalTitle):QString{};
     const auto literalDetail=spec.literalDetail?QString::fromLatin1(spec.literalDetail):QString{};
     Entry entry=option(QString::fromLatin1(spec.id),title.isEmpty()?literalTitle:title,
@@ -324,9 +333,11 @@ const QVector<RowSpec>* firmwareRows(const QString& id) {
         {"output_frequency","msg_output_frequency","msg_output_frequency_explanation",Action::Information,nullptr,nullptr,"Output Frequency"},
         {"bitmapping","msg_bitmapping_sacd","msg_bitmapping_sacd_explanation",Action::Information,nullptr,nullptr,"Bitmapping"},
         {"dnormal","msg_music_dnormal","msg_music_dnormal_explanation",Action::Information,nullptr,nullptr,"Dynamic Normalizer"}};
+    // Printer Manager first, then Printer Selection: the console's page opens on Printer Manager with Printer
+    // Selection below it and nothing above (rpcs3-ref settings/page-printer-settings.png).
     static const QVector<RowSpec> print{
-        {"printer_selection","msg_printer_selection","msg_printer_selection_explanation",Action::Information,nullptr,nullptr,"Printer Selection"},
-        {"printer_manager","msg_printer_manager","msg_printer_manager_explanation",Action::Information,nullptr,nullptr,"Printer Manager"}};
+        {"printer_manager","msg_printer_manager","msg_printer_manager_explanation",Action::Information,nullptr,nullptr,"Printer Manager"},
+        {"printer_selection","msg_printer_selection","msg_printer_selection_explanation",Action::Information,nullptr,nullptr,"Printer Selection"}};
     static const QVector<RowSpec> power{
         {"idle","msg_system_auto_power_off","msg_system_auto_power_off_explanation",Action::SettingChoices,"power/idleMinutes",nullptr,"System Auto-Off"},
         {"controller","msg_controller_auto_power_off","msg_controller_auto_power_off_explanation",Action::Information,nullptr,nullptr,"Controller Auto-Off"}};
@@ -2078,6 +2089,16 @@ QString Shell::valueText(const Entry& entry) const {
     // - a picker, an information page or the confirmed reset - which the console also draws with no value
     // (SETTINGS 2.3: Format Utility, Change Password and Remote Play's rows carry none).
     if(!entry.settingsPage.isEmpty()) {
+        // Rows the console draws with no value although this build has a reading: each is an action or a page of its
+        // own on the console, and its value column is empty in the 2026-10-28 captures (rpcs3-ref settings/page-*-
+        // settings.png: Audio Output Settings, Video Output Settings, both printer rows, the network status list and
+        // connection test, the camera row). The reading stays on the row's own page and in the settings report.
+        static const QSet<QString> noValueOnConsole{
+            QStringLiteral("sound/sound_output_setting"),QStringLiteral("display/display_output_setting"),
+            QStringLiteral("print/printer_selection"),QStringLiteral("print/printer_manager"),
+            QStringLiteral("network/net_netlist"),QStringLiteral("network/net_internet_test"),
+            QStringLiteral("device/pd_camera")};
+        if(noValueOnConsole.contains(entry.settingsPage+QLatin1Char('/')+entry.id))return {};
         const auto reading=host::rowValue(entry.settingsPage,entry.id);
         if(!reading.text.isEmpty())return reading.text;
         // The Date and Time row's value is the running clock in the stored formats (SETTINGS 9.3d).
@@ -2086,19 +2107,25 @@ QString Shell::valueText(const Entry& entry) const {
             const int hourFormat=preferences_.value("clock/hourFormat").toInt();
             return clockDateTime().toString(clockFullDate(dateFormat)+" "+clockTime(hourFormat));
         }
-        // PS - Upscaler / PS - Smoothing: sysconf_plugin reads /setting/game/emuUpConvert and emuSmoothing
-        // (xsetting 0x5b / 0x5c, FUN_000a68fc) and anything out of range reads as 0; the row's value is that
-        // index's item on the row's own choice page (the console frame: "Off" on both). This build runs no PS
-        // emulator, so 0 - nothing upscaled, nothing smoothed - is the true reading here, and the label is
-        // the firmware's, read from sysconf_plugin.rco.
-        if(entry.settingsPage==QStringLiteral("game")
-           && (entry.id==QStringLiteral("game_ps_emu_upcon") || entry.id==QStringLiteral("game_ps_emu_smooth"))) {
+        // Rows whose true reading on this build is fixed, shown with the firmware's own label for it from the row's
+        // choice page in sysconf_plugin.rco (the console frames show the same labels):
+        //  - PS - Upscaler / PS - Smoothing: sysconf reads /setting/game/emuUpConvert and emuSmoothing (xsetting
+        //    0x5b / 0x5c, FUN_000a68fc), anything out of range as 0. No PS emulator runs here, so 0 (index 0, "Off").
+        //  - Audio Multi-Output: this build plays to the one default endpoint, so the fan-out is off (Off/On -> false).
+        struct FixedReading { const char* page; const char* row; QVariant value; };
+        static const FixedReading fixedReadings[]{{"game","game_ps_emu_upcon",0},{"game","game_ps_emu_smooth",0},
+            {"sound","audio_multi_output",false}};
+        for(const auto& fixed:fixedReadings) {
+            if(entry.settingsPage!=QLatin1String(fixed.page) || entry.id!=QLatin1String(fixed.row))continue;
             static QHash<QString,QString> label;   // the RCO is fixed for the process; read once per row
-            if(!label.contains(entry.id)) {
-                const auto list=buildChoiceList(entry.settingsPage,entry,assets_,QVariant{});
-                label.insert(entry.id,list.items.isEmpty()?QString{}:list.items.front().label);
+            const QString key=entry.settingsPage+QLatin1Char('/')+entry.id;
+            if(!label.contains(key)) {
+                QString found;
+                for(const auto& item:buildChoiceList(entry.settingsPage,entry,assets_,QVariant{}).items)
+                    if(choiceValueMatches(fixed.value,item.value)){found=item.label;break;}
+                label.insert(key,found);
             }
-            return label.value(entry.id);
+            return label.value(key);
         }
     }
     if(entry.setting.isEmpty())return {};
