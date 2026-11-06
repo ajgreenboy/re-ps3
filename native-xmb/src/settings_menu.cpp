@@ -2097,7 +2097,10 @@ QString Shell::valueText(const Entry& entry) const {
             QStringLiteral("sound/sound_output_setting"),QStringLiteral("display/display_output_setting"),
             QStringLiteral("print/printer_selection"),QStringLiteral("print/printer_manager"),
             QStringLiteral("network/net_netlist"),QStringLiteral("network/net_internet_test"),
-            QStringLiteral("device/pd_camera")};
+            QStringLiteral("device/pd_camera"),
+            // System Auto-Off opens the console's two-timer page and draws no value (SETTINGS-FIRMWARE 5.8); the
+            // native row is the timer itself, whose current value the choice band marks.
+            QStringLiteral("power/idle")};
         if(noValueOnConsole.contains(entry.settingsPage+QLatin1Char('/')+entry.id))return {};
         const auto reading=host::rowValue(entry.settingsPage,entry.id);
         if(!reading.text.isEmpty())return reading.text;
@@ -2127,6 +2130,11 @@ QString Shell::valueText(const Entry& entry) const {
             }
             return label.value(key);
         }
+        // Controller Auto-Off has no choice page in sysconf_plugin.rco, and the console shows "Off" on it
+        // (page-power-save-settings.png). This build has no controller idle timer, so Off is the true reading; the
+        // label is sysconf's own msg_off.
+        if(entry.settingsPage==QLatin1String("power") && entry.id==QLatin1String("controller"))
+            return assets_.text(QStringLiteral("sysconf_plugin"),QStringLiteral("msg_off"));
     }
     if(entry.setting.isEmpty())return {};
     const auto value=preferences_.value(entry.setting);
