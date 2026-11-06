@@ -1,13 +1,13 @@
 # XMB entry-point watch for the capture RPCS3 (local, not upstream). Applies on top of rpcs3-xmb-trace.patch.
 # XMB_PC_TRACE=<file> XMB_PC_WATCH=<hex,...> logs r3..r8, f1..f4, lr, the stack back chain and the RSX flip/vblank
-# counters at taken b/bl/bcctr to the watched guest addresses. XMB_PC_WATCH_PRX=<module name> makes the watch values
+# counters at taken b/bl/bcctr/bclr to the watched guest addresses. XMB_PC_WATCH_PRX=<module name> makes the watch values
 # offsets from that PRX's first segment (rebased when it loads; PRX bases move between runs).
 # XMB_PC_DUMP=<reg>:<off>:...:<count>;... (hex) logs count words per hit at a pointer chain: addr = gpr[reg], then
 # addr = read32(addr + off) for every offset but the last, plus the last. XMB_PC_BULK=<every N hits of the first
 # watch>;<reg>:<off>:...:<bytes> with XMB_PC_BULK_OUT=<path prefix> writes that many raw bytes to <prefix>_<seq>.bin.
 # PPU interpreter only (PPU Decoder: Interpreter (static)). Used by audit/PAGE-MOVE.md and audit/PARTICLES.md 2026-11-05.
 diff --git a/rpcs3/Emu/Cell/PPUInterpreter.cpp b/rpcs3/Emu/Cell/PPUInterpreter.cpp
-index 4aed434..837f96f 100644
+index 4aed434..24cd5af 100644
 --- a/rpcs3/Emu/Cell/PPUInterpreter.cpp
 +++ b/rpcs3/Emu/Cell/PPUInterpreter.cpp
 @@ -598,6 +598,8 @@ extern void ppu_trap(ppu_thread& ppu, u64 addr);
@@ -27,7 +27,15 @@ index 4aed434..837f96f 100644
  	if (op.lk) ppu.lr = link;
  	ppu.exec_bytes += link - old_cia;
  	};
-@@ -3489,6 +3492,7 @@ auto BCCTR()
+@@ -3349,6 +3352,7 @@ auto BCLR()
+ 	if (ctr_ok && cond_ok)
+ 	{
+ 		if (g_xmb_trace) [[unlikely]] xmb_trace_bclr(ppu, target);
++		if (g_xmb_pc_trace) [[unlikely]] xmb_pc_trace_branch(ppu, vm::get_addr(this_op), target);
+ 		ppu_record_call<Flags...>(ppu, target, op, true);
+ 		ppu.cia = target;
+ 	}
+@@ -3489,6 +3493,7 @@ auto BCCTR()
  	{
  		const u32 target = static_cast<u32>(ppu.ctr) & ~3;
  		if (g_xmb_trace) [[unlikely]] xmb_trace_bcctr(ppu, vm::get_addr(this_op), target);
