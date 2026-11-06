@@ -1249,3 +1249,28 @@ fresh binary will differ in the ribbon; every "before" number here belongs to th
 
 No source file in the write fence changed in this pass; this section and the out-of-tree builds are the
 deliverable, and the three `view.cpp` hunks in section 5 are the change to apply.
+
+## 9. The settings help line, measured on a shared string (2026-11-06; closes item 6's help-line half)
+
+With the Game Settings rows now matching the console (PS - Upscaler focused on both), the help line is the same
+string in `out/rpcs3-ref-2026-10-28/settings/page-game-settings.png` and the native, so its size can be read the
+way section 8 read the label. `work/text-gaps.ts` lists the word gaps along line 1 (band y 526..547):
+
+| | ink | gap after "resolution." | after "setting" | after "to" | line 1 cap rows | line 2 cap rows |
+|---|---|---:|---:|---:|---|---|
+| console | 626..1805 | 1210 | 1327 | 1715 | 528..542 | 550..564 |
+| native before (18 px, y+24, box 1100) | 626..1709 | 1178 | 1289 | - (wrapped earlier) | 533..547 | 556..570 |
+| native now (19 px, y+19, box 1200, pitch 22) | 626..1804 | 1209 | 1326 | 1714 | 528..543 | 551..565 |
+
+- **Size 19 px (measured).** The gaps scale 1.057-1.058 against 18 px. At 19 px all 15 visible gaps sit within 1 px of the console's.
+- **Top y+19 (measured).** The cap top is now 528 on both.
+- **Pitch 22 (measured).** Cap tops are 528 and 550. The font's own line height at 19 px is 24, so the native
+  breaks the lines with `QTextLayout` and draws each one on the 22 px pitch.
+- **Box width: bounded, not traced.** Line 1 ends after "...to an HD" (ink 1805) and "TV." does not fit, so the
+  console's wrap width is 1181..1219 px. The native uses 1200. No RCO object carries it: section 4 found no
+  `label2_text` object in the plugins' RCOs, so the width is set at run time.
+
+The value column's "Off" on the two PS rows is the firmware's: sysconf reads `/setting/game/emuUpConvert` /
+`emuSmoothing` (0x5b / 0x5c) and draws the label of that index on the row's choice page. `Shell::valueText` reads item
+0's label from `sysconf_plugin.rco`, since this build has no PS emulator and 0 is the true reading.
+Gate 19.58 dB, 6/6 (frame SSIM 0.8522 -> 0.8524).
