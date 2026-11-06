@@ -951,12 +951,15 @@ void View::paintGL() {
             QPainter ui(&paintDevice);
             ui.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing|QPainter::SmoothPixmapTransform);
             const double scale=std::min(pixels.width()/1920.,pixels.height()/1080.);
-            ui.translate((pixels.width()-1920*scale)/2,(pixels.height()-1080*scale)/2);ui.scale(scale,scale);drawScene(ui);
+            ui.translate((pixels.width()-1920*scale)/2,(pixels.height()-1080*scale)/2);ui.scale(scale,scale);
+            const qint64 sceneStart=clock_.nsecsElapsed();drawScene(ui);sceneNs_=clock_.nsecsElapsed()-sceneStart;
         }
         QOpenGLFramebufferObject::blitFramebuffer(uiResolved_.get(),uiMsaa_.get());
     }
     // Category icons: the firmware glass shader, refracting the finished background (each cut before its own draw).
+    const qint64 iconStart=clock_.nsecsElapsed();
     if(glReady_ && icons_.ready())icons_.render(*this,iconQueue_,renderSeconds,presetBlend_,device.width(),device.height(),defaultFramebufferObject());
+    iconNs_=clock_.nsecsElapsed()-iconStart;
     // Composite (premultiplied alpha) over the background in the widget's framebuffer.
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
     glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);
@@ -979,6 +982,15 @@ void View::paintGL() {
         for(const auto& column:columns_)moving|=column.ease.running();
         frameTrace_.push_back({frameStart,clock_.nsecsElapsed()-frameStart,false,rebuild,moving});
     }
+    // Local diagnosis: XMB_TEXT_COST=1 logs any frame whose CPU time passes 10 ms, with the glyph-cache misses
+    // (FreeType raster + halo tile) it paid for, so a first-use stall can be told apart from other work.
+    if(static const bool textCost=qEnvironmentVariableIsSet("XMB_TEXT_COST");textCost) {
+        const auto [misses,missNs]=textRenderer_.takeMissCost();
+        const qint64 frameNs=clock_.nsecsElapsed()-nowNs;
+        if(frameNs>10'000'000)qInfo().noquote()<<QString("text cost: frame %1 ms, scene %2 ms, glass icons %3 ms, %4 glyph misses %5 ms")
+            .arg(frameNs/1e6,0,'f',1).arg(sceneNs_/1e6,0,'f',1).arg(iconNs_/1e6,0,'f',1).arg(misses).arg(missNs/1e6,0,'f',1);
+    }
+    sceneNs_=0;
     ++frames_;if(now-reportAt_>=5000){qInfo()<<"native frames:"<<frames_*1000./double(now-reportAt_)<<"fps; decoded images"<<assets_.decodedImages()<<"missing images"<<assets_.failedImages();frames_=0;reportAt_=now;}
 }
 // Local verification: XMB_INTRO_GRAB=<dir>@<seconds>,<seconds>,... saves the frame (as drawn) the first time the

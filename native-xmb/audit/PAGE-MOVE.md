@@ -2177,3 +2177,27 @@ Not modelled: the two 800 ms help-text fades. They are fades between `label2_tex
 this page (help text that fits) the burst shows no visible change; a page whose help text needs the extended
 object would show one. Also seen: the rig's Game Settings page lists only PS - Upscaler and PS - Smoothing, while
 the native lists four PSP Remaster rows above them (not addressed here).
+
+## The Settings page's frame stalls, 2026-11-06 (the "~150 ms first frame" noted above)
+
+Measured with a new frame-cost diagnostic, `XMB_TEXT_COST=1`. It logs every frame over 10 ms with its drawScene
+time, its glass-icon pass and the glyph-cache misses it paid for, and it also names any image load over 5 ms. Run:
+Settings -> Game Settings, Enter, 7 s idle.
+
+- **Not text, not images.** The slow frame had 0 glyph misses and no slow image load. drawScene took 148 ms, and
+  all of it was one `Shell::valueText` call on the first row.
+- **The host snapshot.** `host::rowValue` starts with `host::snapshot()`. That re-read the whole machine whenever
+  its copy was over 2 s old: adapters 13 ms, printers 11-15, audio endpoints ~11, volumes 4, mute 3. The first read
+  also spent 96 ms on the token-elevation check. It ran on the paint path. The first Settings page frame took 151 ms.
+  After that, the Settings rows hit it at every UI-layer rebuild more than 2 s after the last read (the breathing
+  glow rebuilds the layer every few frames), so an idle Settings page dropped about three frames every 2 s (45-50 ms
+  frames at 11.4, 13.4, 15.5 s).
+- **Fix (`src/host.cpp`).** The GUI thread now reads synchronously only when there is no reading at all, or right
+  after `invalidateSnapshot()`, so a write's result shows at once. Otherwise a stale reading is returned as it is
+  while a worker (`QThreadPool`) takes a new one.
+  - The worker runs every Win32/COM/QtCore reader. The GUI thread adds the two GUI-thread-only parts (screens, Qt
+    Multimedia cameras) and swaps the result in.
+  - A worker result that started before an invalidation is dropped.
+  - `main` prefetches the first reading on a worker once the window is shown.
+  - `--settings-report` still reads synchronously and still writes its report.
+- **After:** no frame over 10 ms from Enter through 7 s idle on Game Settings. Gate 19.58 dB, 6/6, unchanged.

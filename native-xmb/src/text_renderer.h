@@ -1,4 +1,5 @@
 #pragma once
+#include <utility>
 #include <QColor>
 #include <QFont>
 #include <QHash>
@@ -90,7 +91,11 @@ public:
     // (see audit/TEXT-RENDERER.md). The GL probe renders through the real mask pass and reads it back,
     // so it compares the shipped union path with the pure helper rather than re-testing the helper.
     void selfCheck(QOpenGLFunctions_3_3_Core& gl);
+    // Glyph-cache misses since the last call (count, nanoseconds spent rasterising and building tiles), for
+    // the XMB_TEXT_COST frame diagnostic in View::paintGL. Taking them resets both.
+    std::pair<int,qint64> takeMissCost() { const auto cost=std::pair{misses_,missNs_};misses_=0;missNs_=0;return cost; }
 private:
+    int misses_=0;qint64 missNs_=0;
     // The firmware shadow reduced to what the two draw paths apply: colour with its alpha, and the
     // offset in 1920x1080 scene pixels with +y down (screen), already sign-corrected.
     struct ShadowStyle { bool on=false; QColor colour; qreal dx=0,dy=0; };

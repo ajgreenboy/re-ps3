@@ -1,4 +1,5 @@
 #include "assets.h"
+#include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
 #include <QFont>
@@ -496,6 +497,12 @@ const QImage& Assets::loadImage(const QString& container,const QString& name,Ima
         return it->second;
     }
     QImage image;
+    // XMB_TEXT_COST (the frame-cost diagnostic) also names any image whose first load takes over 5 ms.
+    static const bool costLog=qEnvironmentVariableIsSet("XMB_TEXT_COST");
+    QElapsedTimer loadClock;if(costLog)loadClock.start();
+    const struct LoadCost { const QElapsedTimer& clock;const QString& key;
+        ~LoadCost(){ if(clock.isValid() && clock.nsecsElapsed()>5'000'000)
+            qInfo().noquote()<<QString("text cost: image %1 took %2 ms").arg(key).arg(clock.nsecsElapsed()/1e6,0,'f',1); } } loadCost{loadClock,key};
     try {
         if(container=="file") { // installed content (dev_hdd0 ICON0.PNG etc.), by absolute path
             image=QImage(name);
