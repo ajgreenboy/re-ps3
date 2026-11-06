@@ -1540,8 +1540,11 @@ old icon dropped 10 px in the key frame, and the first native grid had a saturat
 every icon (`view.cpp`, the category row).
 
 **Open.**
-- The old icon's first-tick drop on RIGHT is still larger than the console's (-105 against <= ~67 after decay
-  bounds), so its ease differs. Not fitted.
+- The old icon's first-tick drop on RIGHT reads larger than the console's (-105 against <= ~67 after decay bounds).
+  A per-widget log shows the ease is the same: the 10 px lift on the 200 ms mode-5 channel. The native's per-tick steps
+  are 2.77, 1.13, 1.58, 0.95 px..., and 2.77 px writes 74. The gap is sampling: the 60 Hz tick reads whichever frame
+  the ~144 fps renderer drew last, so a tick can take one and a half or two frames' movement. Sampling the widgets at
+  the tick's own time would remove it.
 - The dust's response to a scroll is not yet compared against a console burst.
 - The decay's writer is untraced.
 
