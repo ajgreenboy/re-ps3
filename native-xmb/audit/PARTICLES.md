@@ -1422,3 +1422,41 @@ and draws R from the kernel's reseeded LCG; births keep their own RNG. Native po
 +19.4. The right strip now carries an idle flow like the console's, and the console's single-burst value depends on
 that flow at the moment, so it is not matched. Still open: vy is already narrow at birth (0.106 vs 0.178), which is
 the emitter, not the kernel.
+
+## The emitter reads the drawn sheet, one tick apart, 2026-11-05
+
+Open from the section above: newborns' vertical velocity was narrow (sd 0.106 vs the console's 0.178). Traced with the
+PC watch (now also on `bclr`, so a call's return point can be watched) at FUN_00030b80's return from the sheet sampler
+(0x30d54; the real entry is 0x30b80, called at 0x31d88 - Ghidra's FUN_00030b84 starts one instruction late):
+- **Queue (read).** FUN_0002dde4 queues EMIT PER FRAME random cells (gated by EMIT PROB, sim+0x1378/+0x137c) and
+  FUN_0002dbf4 a streak along one row, each with the cell's sheet point now; the +0x94 / +0xa4 lists swap at the end of
+  the tick, so FUN_00030b80 takes last tick's entries, samples the same cell now (FUN_0002d6e8) and sets
+  V = (now - then) / DELTA TIME (0x30d8c, sim+0x1398): one tick exactly.
+- **Sheet (read + runtime).** layer+0x40 holds the ribbon's 128 x 128 clip-space vertices (32-byte stride; FUN_0002b288
+  copies the pointer, dims and a matrix from its caller) and FUN_0002d640 returns M . vertex with M at layer+0x50.
+  At runtime M = (x 0.886367, y 0.498582, z -9.999 zc + 9.001 wc, w -4.9995 zc + 5.0005 wc), constant to float noise
+  over 3711 ticks: against the native ribbon projection (sx 1.1282, sy 2.0057, near 0.1, far 1000) that is exactly
+  camera space + (0, 0, 2) (0.886367 sx = 0.498582 sy = 1.0000, z = vz + 2.0), the world the native already used.
+- **The gap.** The native took its sheet velocity from a once-stepped copy of the cloth instead of the drawn sheet's
+  one-tick move. Per time window the console's V has Vy p5..p95 about +-0.35..0.55; the native's stand-in read
+  +-0.18 in most windows, and a one-frame difference at the native's ~140 fps swung between +-0.18 and +-1.3 (a frame
+  catches part of a tick or a whole step).
+- **Not ported / open.** The console's whole sheet drifts sideways over time (Vx p5..p95 -0.70..+0.08 at 9..12 s
+  after start, -0.15..+0.57 at 45..50 s); the native's stays symmetric (+-0.35..0.45). That is the ribbon's motion,
+  not the emitter, and is left for the ribbon.
+
+Native: `Ribbon::sheetMotion` reads the drawn clip-space vertices back through that inverse (x / sx, y / sy, -w,
++ (0, 0, 2)) and differences them against the newest kept frame at least 1/60 s old; the stepped-cloth stand-in stays
+only for a frame without that history (a pinned first frame, a stall). Diagnostics: `XMB_PARTICLE_SPAWN_LOG=<file>`
+(each queued cell's P and V) and `XMB_RIBBON_CLIP_DUMP=<prefix>` with `XMB_RIBBON_CLIP_FROM` / `_COUNT` (the clip sheet
+per frame, file names carry the frame time).
+
+| newborns (life < 0.02) | console | native before | native now |
+|---|---|---|---|
+| speed p50 | 0.223 | 0.164 | 0.195..0.212 |
+| \|vy\| / speed p50 | 0.791 | 0.54 | 0.735..0.787 |
+| sd vy (young) | 0.178 | 0.106 | 0.181 |
+| older sd vx / vy / vz | 0.183 / 0.201 / 0.114 | 0.174 / 0.134 / 0.095 | 0.177 / 0.187 / 0.102 |
+
+Gate (A/B layers): frame 19.58, 6/6. The named-state self-baselines (native vs stored native, 55 dB) move with any
+dust change and are not re-saved here (shared tree).

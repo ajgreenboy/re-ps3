@@ -491,6 +491,9 @@ void Particles::spawnFromGrid(int column,int row) {
     const size_t at=size_t(row)*size_t(emitterSide_)+size_t(column);
     const QVector3D V=emitterVelocity_[at]*float((1./kReferenceFrameRate)/physics_.deltaTime);
     const float speedOfPoint=V.length();
+    // XMB_PARTICLE_SPAWN_LOG=<file>: each queued cell's P and V, for comparison with the console's emitter queue.
+    static FILE* spawnLog=[]{const QByteArray path=qgetenv("XMB_PARTICLE_SPAWN_LOG");return path.isEmpty()?nullptr:std::fopen(path.constData(),"w");}();
+    if(spawnLog)std::fprintf(spawnLog,"%lld %d %d %g %g %g %g %g %g\n",step_,column,row,emitter_[at].x(),emitter_[at].y(),emitter_[at].z(),V.x(),V.y(),V.z());
     if(speedOfPoint<1e-4f || free_.empty())return;
     QVector3D axis=V/speedOfPoint;
     if(random()<physics_.emitNegProb)axis=-axis;

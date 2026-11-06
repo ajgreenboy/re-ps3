@@ -402,6 +402,7 @@ void Ribbon::splineSheet(const Preset& p,float aspect) {
     QMatrix4x4 rotation;rotation.rotate(p.angle,p.axis);
     const float sy=1.f/std::tan(cameraFovy*pi/360),sx=sy/aspect;
     const float za=(cameraFar+cameraNear)/(cameraNear-cameraFar),zb=2*cameraFar*cameraNear/(cameraNear-cameraFar);
+    clipScaleX_=sx;clipScaleY_=sy;
     const QVector3D eye=p.pos+QVector3D(0,0,-2);
     for(int i=0;i<points_;++i) {
         const QVector3D point=cloth_.lattice(i);
@@ -513,16 +514,34 @@ void Ribbon::sheetMotion(std::vector<QVector3D>& world,std::vector<QVector3D>& v
             out[size_t(r)*grid_+c]=position+toWorld;
         }
     };
-    // The velocity is the sheet's move over the next cloth step: a copy of the cloth is stepped once and drawn at the same
-    // blend. A finite difference against the previous step would read zero on a pinned first frame, where the cloth is
-    // still the rest table and has not stepped (prev == pos), while the console's sheet is always moving.
-    Cloth next=cloth_;
-    next.step(p);
-    std::vector<QVector3D> ahead;
-    sheet(swellAt(cloth_,cloth_.acc),world);
-    sheet(swellAt(next,cloth_.acc),ahead);
+    // The console's emitter reads the drawn sheet: FUN_00030b80 samples a cell's clip-space vertex through the sheet
+    // matrix at layer+0x50 (FUN_0002d640), which maps it back to camera space + (0, 0, 2): x / sx, y / sy, -w, plus
+    // (0, 0, 2), the same world as here. Its velocity is that point minus the same cell sampled one tick earlier, over
+    // DELTA TIME (0x30d8c). The earlier stand-in (the move of a once-stepped copy of the cloth) read the births'
+    // vertical speed ~40% low (audit/PARTICLES.md); it remains only for a frame without a tick-old history (a pinned
+    // first frame, or after a stall), where the rest table has not stepped yet.
+    if(clipScaleX_>0 && clipScaleY_>0 && vertices_.size()>=size_t(grid_)*grid_*12) {
+        world.resize(size_t(grid_)*grid_);
+        for(size_t i=0;i<world.size();++i){const float* v=&vertices_[i*12];world[i]=QVector3D(v[0]/clipScaleX_,v[1]/clipScaleY_,-v[3]+2.f);}
+    } else sheet(swellAt(cloth_,cloth_.acc),world);
     velocity.resize(world.size());
-    for(size_t i=0;i<world.size();++i)velocity[i]=(ahead[i]-world[i])*60.f; // one cloth step is 1/60 s
+    // The console differences across exactly one 60 Hz tick; at a higher frame rate a one-frame difference catches a
+    // fraction of a tick or a whole tick's step, so the reference is the newest kept frame at least 1/60 s old.
+    if(sheetHistory_.empty() || sheetHistory_.back().first!=lastSeconds_)sheetHistory_.emplace_back(lastSeconds_,world);
+    while(sheetHistory_.size()>2 && lastSeconds_-sheetHistory_[1].first>=1./60)sheetHistory_.pop_front();
+    const auto& reference=sheetHistory_.front();
+    const double elapsed=lastSeconds_-reference.first;
+    if(elapsed>=1./60-1e-6 && elapsed<=.25 && reference.second.size()==world.size()) {
+        for(size_t i=0;i<world.size();++i)velocity[i]=(world[i]-reference.second[i])/float(elapsed);
+    } else {
+        if(elapsed>.25){sheetHistory_.clear();sheetHistory_.emplace_back(lastSeconds_,world);} // a stall: restart
+        Cloth next=cloth_;
+        next.step(p);
+        std::vector<QVector3D> now,ahead;
+        sheet(swellAt(cloth_,cloth_.acc),now);
+        sheet(swellAt(next,cloth_.acc),ahead);
+        for(size_t i=0;i<world.size();++i)velocity[i]=(ahead[i]-now[i])*60.f; // one cloth step is 1/60 s
+    }
     side=grid_;
 }
 
@@ -558,6 +577,19 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
     deformLattice(gl,p);
     const float aspect=float(pixelWidth)/float(pixelHeight);
     splineSheet(p,aspect);
+    // XMB_RIBBON_CLIP_DUMP=<prefix>: the 128 x 128 clip-space sheet (x y z w per vertex, raw floats) on frames
+    // XMB_RIBBON_CLIP_FROM..+XMB_RIBBON_CLIP_COUNT, for comparison with the console sheet the particle emitter reads
+    // (custom_render_plugin layer+0x40, audit/PARTICLES.md).
+    {
+        static const QString clipDump=qEnvironmentVariable("XMB_RIBBON_CLIP_DUMP");
+        static const int from=qEnvironmentVariableIntValue("XMB_RIBBON_CLIP_FROM"),count=std::max(1,qEnvironmentVariableIntValue("XMB_RIBBON_CLIP_COUNT"));
+        static int frame=0;
+        if(!clipDump.isEmpty() && frame>=from && frame<from+count) {
+            QFile file(QString("%1_%2_%3us.bin").arg(clipDump).arg(frame).arg(qint64(seconds*1e6)));
+            if(file.open(QIODevice::WriteOnly))for(int i=0;i<grid_*grid_;++i)file.write(reinterpret_cast<const char*>(&vertices_[size_t(i)*12]),4*sizeof(float));
+        }
+        ++frame;
+    }
     // Crest of the centre line (row 64), for the procedural background and measurement.
     for(int k=0;k<int(crest_.size());++k) { // centre line, screen x -> fraction from the top
         const float sx=float(k)/(crest_.size()-1);float best=-1,bestDistance=1e9f;

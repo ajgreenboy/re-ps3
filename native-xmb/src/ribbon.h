@@ -1,4 +1,5 @@
 #pragma once
+#include <deque>
 #include "assets.h"
 #include "rsx_program.h"
 #include <array>
@@ -93,6 +94,9 @@ private:
     void advancePresets(double dt,double dayFraction);
     Cloth cloth_;
     double lastSeconds_=-1;
+    // sheetMotion's recent world sheets with their frame times, for the one-tick velocity the emitter takes.
+    mutable std::deque<std::pair<double,std::vector<QVector3D>>> sheetHistory_;
+    float clipScaleX_=0,clipScaleY_=0; // splineSheet's projection scales, to read the drawn clip sheet back into the world
     CgProgram ffdCg_,linesVertexCg_,linesFragmentCg_;
     QOpenGLShaderProgram ffd_,lines_,composite_;
     std::unique_ptr<QOpenGLTexture> uvw_,stripes_,fresLut_,encode_;

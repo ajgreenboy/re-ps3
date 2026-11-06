@@ -102,6 +102,12 @@ console's idle per-side flow ~10x the native's, which is what the burst's right 
 2048 slots with the console's LIFO free list and draws the kernel's LCG (kick correlation 0.58 / 0.77, older vz sd
 0.095 vs 0.114, was 0.014). Open: birth vy spread (0.106 vs 0.178, the emitter); the flow-field term (grid zero at idle).
 
+Emitter, same day: the console takes a birth's V as the drawn sheet's one-tick move (FUN_00030b80 samples the same
+cell a tick apart through the sheet matrix at layer+0x50, which is exactly camera space + (0, 0, 2)); the native
+used a stepped copy of the cloth. `Ribbon::sheetMotion` now reads the drawn clip sheet back and differences it over
+one tick: newborn speed p50 0.20 (console 0.22), |vy|/speed 0.74..0.79 (0.79), older vy sd 0.187 (0.201). Open: the
+console's whole sheet drifts sideways over time (Vx skewed -0.7..+0.6 by window), the native's does not (the ribbon).
+
 ## 2026-11-04: particle d-pad wind (PARTICLES_UI, traced)
 
 PARTICLES_UI.mnu's d-pad wind is ported (traced through custom_render_plugin by a read-only subagent); the shake and
