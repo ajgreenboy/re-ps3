@@ -2086,6 +2086,20 @@ QString Shell::valueText(const Entry& entry) const {
             const int hourFormat=preferences_.value("clock/hourFormat").toInt();
             return clockDateTime().toString(clockFullDate(dateFormat)+" "+clockTime(hourFormat));
         }
+        // PS - Upscaler / PS - Smoothing: sysconf_plugin reads /setting/game/emuUpConvert and emuSmoothing
+        // (xsetting 0x5b / 0x5c, FUN_000a68fc) and anything out of range reads as 0; the row's value is that
+        // index's item on the row's own choice page (the console frame: "Off" on both). This build runs no PS
+        // emulator, so 0 - nothing upscaled, nothing smoothed - is the true reading here, and the label is
+        // the firmware's, read from sysconf_plugin.rco.
+        if(entry.settingsPage==QStringLiteral("game")
+           && (entry.id==QStringLiteral("game_ps_emu_upcon") || entry.id==QStringLiteral("game_ps_emu_smooth"))) {
+            static QHash<QString,QString> label;   // the RCO is fixed for the process; read once per row
+            if(!label.contains(entry.id)) {
+                const auto list=buildChoiceList(entry.settingsPage,entry,assets_,QVariant{});
+                label.insert(entry.id,list.items.isEmpty()?QString{}:list.items.front().label);
+            }
+            return label.value(entry.id);
+        }
     }
     if(entry.setting.isEmpty())return {};
     const auto value=preferences_.value(entry.setting);

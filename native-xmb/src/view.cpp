@@ -20,6 +20,7 @@
 #include <QOpenGLPaintDevice>
 #include <QTextStream>
 #include <QTextBoundaryFinder>
+#include <QTextLayout>
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
@@ -2193,7 +2194,28 @@ void View::drawScene(QPainter& p) {
                     if(!subtitle.isEmpty())text({labelX,y+20,1100,30},subtitle,17,QColor(230,230,230,int(235*alpha)),Qt::AlignLeft|Qt::AlignTop);
                     // The help line belongs to the selection, not the eased position: on the real XMB it moves to the new
                     // row on the frame the move starts, fully opaque, including on every held-key repeat (RPCS3 capture).
-                    else if(i==column.selection && !entry.detail.isEmpty())text({labelX,y+24,1100,70},entry.detail,18,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap);
+                    // Size and box measured against the console on one shared string (Game Settings' PS - Upscaler help,
+                    // rpcs3-ref-2026-10-28/settings/page-game-settings.png; audit/TEXT-RENDERER.md section 9): word
+                    // gaps scale 1.057 against 18 px, so 19 px; cap top y 528 (5 px above the old 24 px offset); line 1
+                    // wraps after "...to an HD" with ink to x 1805 and "TV." does not fit, so the box is 1181..1219 px
+                    // wide - 1200 is inside that bound, not a traced constant. The console's line pitch is 22 px (cap
+                    // tops 528 / 550), tighter than the font's own 24 px line height, so the lines are broken here and
+                    // drawn one by one on that pitch.
+                    else if(i==column.selection && !entry.detail.isEmpty()) {
+                        constexpr int helpSize=19,helpPitch=22;constexpr qreal helpWidth=1200;
+                        QFont helpFont(shell_.fontFamily());helpFont.setPixelSize(helpSize);
+                        helpFont.setHintingPreference(QFont::PreferNoHinting);
+                        QTextLayout wrap(entry.detail,helpFont);QTextOption option;
+                        option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);wrap.setTextOption(option);
+                        wrap.beginLayout();
+                        for(int k=0;;++k) {
+                            auto line=wrap.createLine();if(!line.isValid())break;
+                            line.setLineWidth(helpWidth);
+                            text({labelX,y+19+k*helpPitch,helpWidth,30},entry.detail.mid(line.textStart(),line.textLength()).trimmed(),
+                                 helpSize,QColor(225,225,225),Qt::AlignLeft|Qt::AlignTop);
+                        }
+                        wrap.endLayout();
+                    }
                 }
                 p.restore();
             }
