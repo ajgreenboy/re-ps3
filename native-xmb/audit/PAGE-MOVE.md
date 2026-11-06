@@ -2126,3 +2126,54 @@ timebase seconds, main thread T01000000, its loop ~18 ms a frame on this rig (on
   traced: they may not load a plugin). A/B gate unchanged (19.58 dB, 6/6).
 - Seen while checking: the native's first frame after Enter on a Settings row arrives ~150 ms late (its own page
   build), so the hold is mostly hidden inside that frame. Not addressed here.
+
+## The Settings idle dim, 2026-11-06 (the "staggered 680..790 ms set" above)
+
+The set that comes ~3.1 s after each open is not part of the page move. It is sysconf_plugin's idle dim, and it
+fires on any Settings page once a row has had focus for 3 s. The PC-watch backtraces are raw runtime addresses;
+sysconf_plugin's text was at 0x01910000 on that run (`# prx ... sysconf_plugin.sprx ... 01910000+15394C/v0` in the
+syscall trace), so 0x01A38970 / 0x01A399D8 / 0x01A3A730 are sysconf 0x128970 / 0x1299D8 / 0x12A730. Those are
+import stubs, which keep LR at sp+0x20 rather than +0x10, so the frame walk skips the real caller. Callers were
+found with `RefsTo` and decompiled with the new `ghidra_scripts/DecompileContaining.java` (Ghidra project
+`boot493/boot`, sysconf at image base 0).
+
+| sysconf function | what it does | constants (sysconf .rodata) |
+|---|---|---|
+| `FUN_000a7948` | restarts a timer ease (property 0x27, callback) when a row takes focus | `DAT_0014bb78` = **3000.0** ms |
+| `FUN_000a76d8` | the timer's callback: 800 ms mode-0 fades on the focused row's `label2_text` and the list's `label2_text_ex` (the help text), then `FUN_000a70e4` | `DAT_0014bb74` = 800.0 |
+| `FUN_000a70e4` | for d = 1..13: rows at selection - d and + d get paf 04081C1E (property **0x1000018**, mode 5) to **0.2** over **800 - 20d** (above) / **800 - 10d** (below) ms after **(14 - d) x 30** ms | `DAT_0014bb60` = 0.2, `bb64` = 800.0, `bb68` = 30.0 |
+| `FUN_000a6fa4` | resets the same property on every row (paf A74FFFC9; the 13 x 30 ms set at each open) | |
+
+The runtime trace agrees exactly: 3000 ms timer at tb 83.677 s, then at 86.675 s twelve mode-5 eases of 790..680 ms
+with delays 390..60 ms on twelve row objects 0x1D10 apart, plus the two 800 ms mode-0 fades. The first object (the
+focused row) gets none. The page had its focus on the top row, so only the "below" branch ran.
+
+0x1000018 is a four-float property (`FUN_0042cbe0` spreads the 0.2 to all four components). **Measured** on a new
+console burst (`idledim/open1`, crop 500,420,1400,340, 973 frames over 5.6 s, Cross at 300 ms; local only),
+tracking the second row's text ink against a per-column background:
+
+| burst ms | label | value | icon bullet |
+|---:|---:|---:|---:|
+| 3500..4268 (settled, before) | 1.086 | 1.03 | 1.009 |
+| 4331 | 0.886 | 0.841 | 1.009 |
+| 4513 | 0.545 | 0.517 | 1.009 |
+| 4998 | 0.264 | 0.267 | 1.009 |
+| 5598 | 0.213 | 0.211 | 1.003 |
+
+The label ends at 0.197 of its settled ink (0.2 traced). The value text dims with it; the icon bullet and the
+focused row's help text do not change. From the first dimmed frame the progress is 0.23 / 0.40 / 0.62 / 0.83 / 0.95
+at 47 / 123 / 229 / 450 / 714 ms, against mode 5 at 790 ms's 0.17 / 0.38 / 0.59 / 0.82 / 0.94. The dim began 3.98 s
+after Cross here: the 3000 ms timer plus its 390 ms delay, counted from when the page's row took focus. That came
+~0.6 s after the press, after the plugin load.
+
+**Native** (`src/view.cpp`, the row loop; `settingsIdleMs`, `settingsIdleDim` in `src/view.h`): on the open page of a
+sysconf page (`Shell::topPageLoadsPlugin`), each non-focused row within 13 of the selection multiplies its label and
+value opacity by a mode-5 ease from 1 to 0.2. The ease is sampled at the focus rest time, with the traced duration
+and a delay of 3000 + (14 - d) x 30 ms. A focus move restarts the focus clock, which stands in for the firmware's 30 ms restore and timer
+restart. The native's timer counts from the Enter frame. It does not count from the end of the plugin load, which
+depends on I/O. Checked on Game Settings: no change at 1.5 s, and the rows' text at about 20% at 4.6 s with icons untouched. Gate 19.58 dB, 6/6, unchanged.
+
+Not modelled: the two 800 ms help-text fades. They are fades between `label2_text` and `label2_text_ex`, and on
+this page (help text that fits) the burst shows no visible change; a page whose help text needs the extended
+object would show one. Also seen: the rig's Game Settings page lists only PS - Upscaler and PS - Smoothing, while
+the native lists four PSP Remaster rows above them (not addressed here).
