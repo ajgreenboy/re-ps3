@@ -953,6 +953,7 @@ void View::paintGL() {
             const double scale=std::min(pixels.width()/1920.,pixels.height()/1080.);
             ui.translate((pixels.width()-1920*scale)/2,(pixels.height()-1080*scale)/2);ui.scale(scale,scale);
             const qint64 sceneStart=clock_.nsecsElapsed();drawScene(ui);sceneNs_=clock_.nsecsElapsed()-sceneStart;
+            particles_.trackWidgets(windSites_);
         }
         QOpenGLFramebufferObject::blitFramebuffer(uiResolved_.get(),uiMsaa_.get());
     }
@@ -1482,7 +1483,7 @@ bool View::modalMessagePage() const {
 // (work/msgview: the frame with this gain applied) takes the back-hint crop 16.71 -> 19.40 dB.
 constexpr int kMessagePageDimAlpha=68;
 void View::drawScene(QPainter& p) {
-    iconQueue_.clear();
+    iconQueue_.clear();windSites_.clear();
     QFont font(shell_.fontFamily());font.setPixelSize(27);p.setFont(font);
     // The message surface is an explicit kind the shell decides (Shell::MessageKind, audit/DIALOGS-FIRMWARE.md
     // section 4.2 item 1): an inline empty-state line is a list row, a titled page / modal box / error page /
@@ -1826,13 +1827,18 @@ void View::drawScene(QPainter& p) {
             // travels with it (+159 px one frame after the key on the same frames). [TRACED: the 200 px step
             // and the measured positions; the ease it rides is the 200 ms mode-5 category move.]
             const double x=open?pageX+200.*distance*recede:barFocusX+(200.*distance+10.*std::clamp(distance,-1.,1.))*recede;
-            const double y=open?290.-10.*focus:540.-250.*recede;
+            // The 10 px focus lift eases on every icon, not only the open one: on a category move the console's old
+            // icon sinks while the new one rises (the icon wind's grid, RPCS3 dump: mirrored -53 / +53 cells in the
+            // category row, audit/PARTICLES.md "The icon wind"). Lifting only the open icon dropped the old one 10 px
+            // in the key frame. At depth the non-open icons have focus 0, so the recede path is unchanged.
+            const double y=open?290.-10.*focus:540.-250.*recede-10.*focus*recede;
             const double iconScale=open?1.:recede;
             // No dim behind a message: both measured reference frames keep the XMB at full brightness
             // (audit 4.1 "frame dim behind a message"), so the 0.18 and 135-alpha washes are gone.
             const double opacity=open?1.:barPresence;
             const double material=open?1.:barBrightness;
             if(opacity<=0.)continue;
+            windSites_.push_back({(quint64(1)<<60)|quint64(i),QPointF(x,y)}); // the icon wind's widget (Particles::trackWidgets)
             // The Users column's category icon (audit/ICON-GAP-AUDIT.md B1). The shell names the row's asset
             // `explore_plugin_full:user_tex_load`, which this pass verified is the *same* house-with-a-face art
             // as the console's - not a different "loading" glyph - but exported as a flat white mask (RGB 255
@@ -2047,6 +2053,9 @@ void View::drawScene(QPainter& p) {
                 const double sink=(active && level==int(columns.size())-1)?overscrollStep*columnSink_:0.;
                 const double y=540+(505+row-540-15*depth*std::clamp(distance,0.,1.))*(1.-.055*depth)+sink;
                 if(y<-100 || y>1050)continue;
+                // The icon wind's widget: this row's icon centre, keyed by its column set, level and row.
+                windSites_.push_back({(quint64(active?shell_.category():outgoingCategory_)<<40)|(quint64(level)<<20)|quint64(i),
+                    QPointF(kColumnX-behind*(109.46+152*focus)+ahead*210+offset,y)});
                 // The incoming page column is one slot right and 10.223% larger in the decoded transition
                 // (fp_0174..fp_0181: 774.09 = 565+210; 85.554 = 77.616*1.10223, 203.700 = 184.8*1.10227),
                 // easing to zero offset and 1.0 with the depth move. The scale is on the icons only: the
