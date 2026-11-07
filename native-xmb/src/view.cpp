@@ -979,11 +979,14 @@ void View::paintGL() {
     uiComposite_.setUniformValue("boost",0.f);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,uiResolved_->texture());
     glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);
-    // Native approximation: dim the complete composed image; no host brightness or power changes.
-    if(shell_.screensaverMinutes()>0 && shell_.idleDisplayAllowed()) {
-        const qint64 age=shell_.idleMilliseconds()-qint64(shell_.screensaverMinutes())*60000;
-        const float dim=.55f*float(std::clamp(double(age)/750.,0.,1.));
-        if(dim>0){uiComposite_.setUniformValue("dimOpacity",dim);glDrawArrays(GL_TRIANGLES,0,3);}
+    // Screensaver, traced from vsh.elf (audit/FIDELITY-SURFACES-MAP.md S29): the XMB's own client (identify
+    // 0xFFFFFFF0, priority 0xFD, property 0x202 = BRIGHTNESS<<8 | ACTIVE) fires once the idle time passes the
+    // start time (300/600/1200/1800 s). BRIGHTNESS writes the global colour multiplier straight to
+    // (0.2,0.2,0.2,1) with no ramp, and input restores it. Black at 0.8 over the premultiplied frame is that x0.2.
+    // No host brightness or power changes.
+    if(shell_.screensaverMinutes()>0 && shell_.idleDisplayAllowed()
+       && shell_.idleMilliseconds()>qint64(shell_.screensaverMinutes())*60000) {
+        uiComposite_.setUniformValue("dimOpacity",.8f);glDrawArrays(GL_TRIANGLES,0,3);
     }
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D,0);uiComposite_.release();glDisable(GL_BLEND);
