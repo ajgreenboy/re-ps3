@@ -143,7 +143,15 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&shell_,&Shell::requestTheme,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Theme",{},"PS3 Themes (*.p3t)");shell_.noteActivity();if(!file.isEmpty())shell_.chooseTheme(file);});
     connect(&shell_,&Shell::requestImportApps,this,[this]{AppEditor editor(shell_.appRegistryPath(),this);connect(&editor,&AppEditor::registryChanged,&shell_,&Shell::refreshContent);editor.exec();shell_.noteActivity();});
     connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){openOsk("System Name",value,[this](const QString& name){shell_.setSystemName(name);});});
-    connect(&shell_,&Shell::requestNewUser,this,[this]{openOsk("Create New User",{},[this](const QString& name){shell_.createUser(name);});});
+    // Create New User opens user_plugin's page_create first (prompt, prefilled field, OK; drawUserCreatePage), not
+    // the keyboard: the keyboard is what Cross on the field opens.
+    connect(&shell_,&Shell::requestNewUser,this,[this]{
+        userCreate_=UserCreatePage{};userCreate_.open=true;
+        // "User 1" with one user on the console (page-user-create.png). The numbering rule is INFERRED: the
+        // existing user count, the one data point the frame gives.
+        userCreate_.name=QStringLiteral("User %1").arg(std::max(1,shell_.userCount()));
+        update();
+    });
     // The Jellyfin sign-in page's fields (audit/JELLYFIN-NATIVE.md): Cross on one of the page's field rows asks
     // for the XMB keyboard. The password field is the masked case - the keyboard composes dots and its cached
     // UI signature carries the dot count, never the characters - so no credential ever reaches this view's
@@ -1254,6 +1262,61 @@ void View::drawOptionHint(QPainter& p,double amount) {
         p.drawText(textRect,Qt::AlignLeft|Qt::AlignVCenter,text);p.restore();
     }
 }
+// user_plugin page_create: page_create_seat -> create_title_msg (Text), create_title_user_name (EditBox),
+// create_btn_fix (Button). The RCO carries no positions (user_plugin lays them out), so the rects are measured on
+// rpcs3-allgraphics-2026-10-28/frames/page-user-create.png:
+//   prompt "Enter a user name." ink x 853..1065 (centred on 960), y 306..323
+//   field x 555..1368, y 479..518; its text "User 1" ink from x 562, y 489..506
+//   OK button x 930..989, y 554..597; "OK" ink x 944..974, y 566..583
+//   hints: Cross ink 726..743 / "Edit" from 762, Circle ink 1155..1174 / "Back" from 1192, y 897..916
+// Strings are user_plugin's own (msg_username_create, msg_fix, msg_edit, msg_back). The field and button
+// textures are the paf defaults: system_plugin tex_default_text_field(_focus) and user_plugin's own tex_button
+// (_focus).
+void View::drawUserCreatePage(QPainter& p) {
+    const auto label=[&](const QRectF& r,const QString& value,int size,int flags) {
+        QFont font(shell_.fontFamily());font.setPixelSize(size);
+        if(textRenderer_.ready()){textRenderer_.draw(*this,p,r,value,font,QColor(255,255,255),flags);return;}
+        p.save();p.setFont(font);p.setPen(Qt::white);p.drawText(r,flags,value);p.restore();
+    };
+    const auto rco=[&](const char* key,const char* fallback){return assets_.text("user_plugin",key,fallback);};
+    label({0,294,1920,42},rco("msg_username_create","Enter a user name."),23,Qt::AlignHCenter|Qt::AlignVCenter);
+    // Each texture is drawn out by its own transparent margin so the visible edge lands on the measured one:
+    // tex_default_text_field(_focus) is 27x27 with ink 1..25, user_plugin tex_button 60x60 with ink 7..52.
+    // tex_button_shadow (opaque, RGB 0..17) is a mask whose paf blend is not traced, so it is not drawn.
+    const QRectF field(555,479,814,40);
+    drawNineSlice(p,"system_plugin",userCreate_.focus==0?"tex_default_text_field_focus":"tex_default_text_field",
+                  field.adjusted(-1,-1,1,1),8.,1.);
+    label(field.adjusted(10,0,-8,0),userCreate_.name,22,Qt::AlignLeft|Qt::AlignVCenter);
+    const QRectF ok(930,554,60,44);
+    drawNineSlice(p,"user_plugin",userCreate_.focus==1?"tex_button_focus":"tex_button",ok.adjusted(-7,-7,7,7),16.,1.);
+    label(ok,rco("msg_fix","OK"),23,Qt::AlignHCenter|Qt::AlignVCenter);
+    drawImage(p,"system_plugin","tex_cross",{726,898,18,18});
+    // The Cross hint names the focused control's action: Edit on the field (the frame); on OK it is this build's
+    // msg_enter, INFERRED (no frame shows OK focused).
+    label({760,890,140,34},userCreate_.focus==0?rco("msg_edit","Edit"):rco("msg_enter","Enter"),21,Qt::AlignLeft|Qt::AlignVCenter);
+    drawImage(p,"system_plugin","tex_circle",{1155,897,20,20});
+    label({1190,890,140,34},rco("msg_back","Back"),21,Qt::AlignLeft|Qt::AlignVCenter);
+}
+bool View::userCreateInput(int action) {
+    if(!userCreate_.open)return false;
+    switch(action) {
+    case 0:case 1:userCreate_.focus=action;break;
+    case 2:
+        if(userCreate_.focus==0)
+            openOsk(assets_.text("user_plugin","msg_user_name","User Name"),userCreate_.name,[this](const QString& name){
+                userCreate_.name=name;});
+        else {
+            const QString name=userCreate_.name.trimmed();
+            userCreate_=UserCreatePage{};
+            if(!name.isEmpty())shell_.createUser(name);
+        }
+        break;
+    case 3:userCreate_=UserCreatePage{};break;
+    default:return false;
+    }
+    update();
+    return true;
+}
 void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect) {
     const auto& original=assets_.bestImage(category.container,category.texture);
     if(original.isNull())return;
@@ -1602,7 +1665,9 @@ void View::drawScene(QPainter& p) {
     // A Page/Box/ErrorCode/Info surface replaces the item list and the category band (the firmware's page is
     // the whole screen: the reference frame's band is off-frame). The modal message pages dim the page they
     // replace - the wash below is the measurement - while the box and the table page dim nothing (14.1).
-    const bool messageScreen=messageUp && !inlineMessage;
+    // user_plugin's name page also replaces the list, the category band and the info bar (page-user-create.png
+    // has neither icons nor the clock).
+    const bool messageScreen=(messageUp && !inlineMessage) || userCreate_.open;
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
         if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);textRenderer_.draw(*this,p,r,value,f,colour,flags);return;}
         QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(QColor(0,0,0,38));p.drawText(r.translated(1,1),flags,value);p.setPen(colour);p.drawText(r,flags,value);
@@ -2593,6 +2658,7 @@ void View::drawScene(QPainter& p) {
     // knows its total or its ring phase.
     else if(busyPageUp())drawBusySurface(p,shell_.busyProgress(),shell_.busySpinnerPhase());
     else if(messageShown_.kind==MessageKind::Box && (dialogEase_.value>.002 || dialogPlateEase_.value>.002))drawMessageBox(p);
+    if(userCreate_.open)drawUserCreatePage(p);
     if(osk_.open)drawOsk(p);
     // The transient volume HUD. It is a timed composite, not a panel: it appears on every change and fades on
     // the MediaControls model, takes no input (nothing here reads a key or a button), and draws only in the
@@ -2623,7 +2689,7 @@ void View::drawScene(QPainter& p) {
     // The operation guide sits on the same system_plugin page as the notification, under it. It belongs to
     // the XMB's own focus, so no overlay that takes the focus (PS menu, item menu, media, a message) shows it.
     if(!shell_.psMenuOpen() && !shell_.optionsOpen() && !optionsDrawn() && !shell_.mediaOpen() &&
-       shell_.message().isEmpty() && !osk_.open)
+       shell_.message().isEmpty() && !osk_.open && !userCreate_.open)
         if(const double hint=optionHintAmount();hint>.002)drawOptionHint(p,hint);
     if(!shell_.psMenuOpen() && notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
         drawNotification(p,notificationEase_.value);
@@ -3458,6 +3524,15 @@ void View::keyPressEvent(QKeyEvent* e) {
         }
         return;
     }
+    if(userCreate_.open) { // the name page owns input until it closes
+        switch(e->key()) {
+        case Qt::Key_Up:userCreateInput(0);break;case Qt::Key_Down:userCreateInput(1);break;
+        case Qt::Key_Return:case Qt::Key_Enter:userCreateInput(2);break;
+        case Qt::Key_Escape:case Qt::Key_Backspace:userCreateInput(3);break;
+        default:break;
+        }
+        e->accept();return;
+    }
     // The music control panel owns its keys while it is up: Left/Right walk the seven buttons, Cross runs
     // the focused one, Circle/Triangle close it. Nothing else in the frame reads them in this state.
     if(musicPanelOpen_) {
@@ -3591,6 +3666,11 @@ void View::pollController() {
         if(edge&XINPUT_GAMEPAD_X)oskBackspace();if(edge&XINPUT_GAMEPAD_Y)oskInsert(" ");
         if(edge&XINPUT_GAMEPAD_START)oskClose(true);
         if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
+        buttons_=buttons;return;
+    }
+    if(userCreate_.open) {
+        if(edge&XINPUT_GAMEPAD_DPAD_UP)userCreateInput(0);if(edge&XINPUT_GAMEPAD_DPAD_DOWN)userCreateInput(1);
+        if(edge&XINPUT_GAMEPAD_A)userCreateInput(2);if(edge&XINPUT_GAMEPAD_B)userCreateInput(3);
         buttons_=buttons;return;
     }
     if(shell_.photoOpen() && shell_.message().isEmpty()) {

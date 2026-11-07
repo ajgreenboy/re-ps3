@@ -360,6 +360,7 @@ public:
     bool jellyfinRemembered() const;
     QString focusedRowId() const;
     void createUser(const QString& name);
+    int userCount() const { return int(profiles_.profiles().size()); }
     // PS button (DualSense/DualShock over HID, keyboard substitute): a tap shows the controller indicator
     // and returns focus to the XMB; a hold opens the system menu the console shows (captured in RPCS3:
     // Turn Off the System / Turn Off the Controller, plus Quit Game while a title runs).
