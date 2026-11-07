@@ -1,5 +1,6 @@
 #include "profiles.h"
 
+#include <algorithm>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -193,6 +194,39 @@ bool Profiles::select(QString id) {
     if (!found) return fail(QStringLiteral("The selected local user does not exist."));
     if (activeId_ == id) { error_.clear(); return true; }
     return commit(profiles_, id);
+}
+
+bool Profiles::rename(QString id, QString name) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (!writable_) { emit failed(error_); return false; }
+    QString normalized;
+    if (!normalizeName(name, normalized))
+        return fail(QStringLiteral("Enter a user name of 1 to 16 characters without line breaks or control characters."));
+    const auto foldedName = normalized.toCaseFolded();
+    auto next = profiles_;
+    Profile* target = nullptr;
+    for (auto& profile : next) {
+        if (profile.id == id) { target = &profile; continue; }
+        if (profile.name.toCaseFolded() == foldedName)
+            return fail(QStringLiteral("A local user with this name already exists."));
+    }
+    if (!target) return fail(QStringLiteral("The selected local user does not exist."));
+    if (target->name == normalized) { error_.clear(); return true; }
+    target->name = std::move(normalized);
+    return commit(next, activeId_);
+}
+
+bool Profiles::remove(QString id) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (!writable_) { emit failed(error_); return false; }
+    if (id == activeId_)
+        return fail(QStringLiteral("The logged-in user cannot be deleted. Select another user first."));
+    if (profiles_.size() <= 1) return fail(QStringLiteral("The only local user cannot be deleted."));
+    auto next = profiles_;
+    const auto before = next.size();
+    next.erase(std::remove_if(next.begin(), next.end(), [&](const Profile& p) { return p.id == id; }), next.end());
+    if (next.size() == before) return fail(QStringLiteral("The selected local user does not exist."));
+    return commit(next, activeId_);
 }
 
 }

@@ -122,7 +122,10 @@ enum class OptionCommand { Activate, Information,
     // Group Content's level and its two answers (msg_folder_class, msg_title_folder "By Title", msg_all "All"),
     // offered only where optionGroupable() holds. They rebuild the open page's row vector; the page keeps the
     // ungrouped rows so All is reversible and no rescan is needed.
-    GroupMenu, GroupByTitle, GroupAll };
+    GroupMenu, GroupByTitle, GroupAll,
+    // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
+    // Information with two or more users, Information alone with one. Delete runs the traced two-step ask.
+    UserLogOut, UserAutoLogin, UserDelete };
 // A label read from the RCO text table: the key plus the English string it should resolve to. The fallback
 // is used only when the local flash image has no table; whenever the RCO is present, its value is the label.
 struct OptionLabel { const char* key=nullptr; QString fallback; };
@@ -359,7 +362,12 @@ public:
     // True while a DPAPI session record exists for this installation (the "stay signed in" opt-in).
     bool jellyfinRemembered() const;
     QString focusedRowId() const;
+    QString focusedBackgroundPath();
     void createUser(const QString& name);
+    // Rename and delete a local user (Profiles::rename/remove). A name clash shows the firmware's
+    // msg_error_other_username_create_pls; delete also drops that user's settings (forgetProfile).
+    void renameUser(const QString& id,const QString& name);
+    void deleteUser(const QString& id);
     int userCount() const { return int(profiles_.profiles().size()); }
     // PS button (DualSense/DualShock over HID, keyboard substitute): a tap shows the controller indicator
     // and returns focus to the XMB; a hold opens the system menu the console shows (captured in RPCS3:
@@ -427,7 +435,10 @@ signals:
     void requestQuit();
     void psTapIndicator();
     void requestNewUser();
+    // Information on a user row: the name page in rename mode, prefilled with the current name.
+    void requestRenameUser(QString id,QString name);
     void requestImportApps();
+    void requestArtworkSettings();
     void requestJellyfinSignIn(QUrl server);
     void jellyfinSignInFinished(bool success,QString error);
     // Cross on a sign-in field: the view opens the on-screen keyboard on `initial` and returns what the user

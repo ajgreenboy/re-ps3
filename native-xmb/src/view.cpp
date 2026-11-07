@@ -152,6 +152,11 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         userCreate_.name=QStringLiteral("User %1").arg(std::max(1,shell_.userCount()));
         update();
     });
+    // Information on a user row renames it on the same page (Shell::requestRenameUser), prefilled with the name.
+    connect(&shell_,&Shell::requestRenameUser,this,[this](QString id,QString name){
+        userCreate_=UserCreatePage{};userCreate_.open=true;userCreate_.name=name;userCreate_.renameId=id;
+        update();
+    });
     // The Jellyfin sign-in page's fields (audit/JELLYFIN-NATIVE.md): Cross on one of the page's field rows asks
     // for the XMB keyboard. The password field is the masked case - the keyboard composes dots and its cached
     // UI signature carries the dot count, never the characters - so no credential ever reaches this view's
@@ -1309,9 +1314,9 @@ bool View::userCreateInput(int action) {
             openOsk(assets_.text("user_plugin","msg_user_name","User Name"),userCreate_.name,[this](const QString& name){
                 userCreate_.name=name;});
         else {
-            const QString name=userCreate_.name.trimmed();
+            const QString name=userCreate_.name.trimmed(),renameId=userCreate_.renameId;
             userCreate_=UserCreatePage{};
-            if(!name.isEmpty())shell_.createUser(name);
+            if(!name.isEmpty()){if(renameId.isEmpty())shell_.createUser(name);else shell_.renameUser(renameId,name);}
         }
         break;
     case 3:userCreate_=UserCreatePage{};break;

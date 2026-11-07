@@ -2176,6 +2176,27 @@ void Shell::buildOptions() {
     resetOptions();
     if(entries().isEmpty())return;
     const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
+    // ---- A user row: explore_plugin's own table (FUN_0008cdf4, TRACED) ----------------------------------
+    // With two or more users (user.num >= 2) the menu is table 0x27dc40: msg_logout, msg_auto_login (an On/Off
+    // level, table 0x27dc50), msg_del, msg_info. With one user it is table 0x27dc58: msg_info alone.
+    if(entry.action==Action::SelectUser) {
+        if(userCount()>=2) {
+            // This build has no logged-out state and no login screen: it always starts as the last selected
+            // user. The two rows are listed and cannot be chosen, with that reason on screen.
+            addOption({"msg_logout","Log Out"},OptionCommand::UserLogOut,"user-row",false,
+                      tr("This native build has no logged-out state; select another user to switch."));
+            addOption({"msg_auto_login","Automatic Login"},OptionCommand::UserAutoLogin,"user-row",false,
+                      tr("This native build always starts as the last selected user."));
+            // Delete: the logged-in user's settings are in use, so this build refuses to delete that user
+            // (Preferences::forgetProfile has the same rule). Whether the console offers the row for the
+            // logged-in user is not traced.
+            const bool active=entry.value==profiles_.activeId();
+            addOption({"msg_del","Delete"},OptionCommand::UserDelete,"user-row",!active,
+                      active?tr("Select another user before deleting this one."):QString());
+        }
+        addOption({"msg_info","Information"},OptionCommand::Information,"always-last");
+        return;
+    }
     // ---- The Game-row class: the firmware's five rows, in its two groups -------------------------------
     // The settled 4.93 frame (frames/menu-options-open.png, re-measured this pass) is this menu: Sort By and
     // Group Content at ink 301-323 / 341-362 with a right-pointing chevron at x 1573..1583 on both and the
@@ -2430,6 +2451,15 @@ void Shell::optionsActivate() {
         break;
     case OptionCommand::Information:
         resetOptions();
+        // A user row's Information is where the firmware edits the name (FUN_0008f42c builds a msg_user_name
+        // field from user.info; FUN_0008f5ec checks and saves it). This build edits it on user_plugin's name
+        // page instead of drawing that information page.
+        if(entry.action==Action::SelectUser) {
+            emit requestRenameUser(entry.value,entry.title);
+            interactionAudio_.play(InteractionAudio::Cue::Confirm);
+            emit changed();
+            break;
+        }
         showEntryInformation(entry);
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
         emit changed();
@@ -2563,6 +2593,31 @@ void Shell::optionsActivate() {
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
         emit changed();
         break;
+    // Delete a user: explore_plugin FUN_0008f9b4 cases 4, 5 and 8 (TRACED) - a Yes/No box with
+    // msg_user_del_ask, then a second Yes/No box with msg_user_del_2nd_ask, then msg_wait while it runs.
+    // Both boxes start on No (showConfirm), and No on either leaves the user untouched.
+    case OptionCommand::UserDelete: {
+        resetOptions();
+        const QString id=entry.value;
+        showConfirm(assets_.text("explore_plugin_full","msg_user_del_ask",
+                        "If you delete the User, saved data for PlayStation®3 format software, messages, trophies "
+                        "and other information will also be deleted.\nAre you sure you want to continue?"),QString(),
+            [this,id]{
+                showConfirm(assets_.text("explore_plugin_full","msg_user_del_2nd_ask",
+                                "Are you sure you want to delete the user?"),QString(),
+                    [this,id]{
+                        showMessage(assets_.text("explore_plugin_full","msg_wait","Please wait..."),MessageKind::Box);
+                        emit changed();
+                        QTimer::singleShot(0,this,[this,id]{clearMessage();deleteUser(id);emit changed();});
+                    });
+                emit changed();
+            });
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        emit changed();
+        break;
+    }
+    case OptionCommand::UserLogOut:
+    case OptionCommand::UserAutoLogin:
     // Listed but not choosable (the copy/delete backend does not exist yet), so this is unreachable until a
     // future backend enables the row and opens its own page here.
     case OptionCommand::Copy:
@@ -4031,6 +4086,26 @@ void Shell::steamSwitchCancel(const QString& why) {
     steamSwitch_=SteamSwitchPrompt{};
 }
 void Shell::createUser(const QString& name){profiles_.create(name);}
+void Shell::renameUser(const QString& id,const QString& name) {
+    // FUN_0008f5ec: a name another user already has raises msg_error_other_username_create_pls (TRACED); the
+    // case-folded comparison is Profiles' own rule.
+    const auto folded=name.trimmed().toCaseFolded();
+    for(const auto& profile:profiles_.profiles())
+        if(profile.id!=id && profile.name.toCaseFolded()==folded) {
+            showMessage(assets_.text("explore_plugin_full","msg_error_other_username_create_pls",
+                "The name you entered has already been used.\nEnter a different user name."),MessageKind::Box);
+            emit changed();
+            return;
+        }
+    if(profiles_.rename(id,name))qInfo().noquote()<<"profiles: renamed"<<id;
+}
+void Shell::deleteUser(const QString& id) {
+    // The user record first, then that user's settings; a refused record leaves the settings alone.
+    if(!profiles_.remove(id))return;
+    if(!preferences_.forgetProfile(id))
+        qWarning().noquote()<<"profiles: deleted"<<id<<"but its settings stay:"<<preferences_.error();
+    else qInfo().noquote()<<"profiles: deleted"<<id<<"and its settings";
+}
 QString Shell::subtitleText(const Entry& entry) const {
     // The returned hunk from the render pass (audit/FIDELITY-SURFACES.md 14.10 A). A user-scoped row's second
     // line is the firmware's own scope marker, not the active user's name. Measured there: col-game-r00 (Vita,

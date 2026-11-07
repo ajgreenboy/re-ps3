@@ -24,6 +24,12 @@ public:
     QString activeName() const;
     bool create(QString name);
     bool select(QString id);
+    // Renames a user; the name rules and the case-folded duplicate check are create()'s (the firmware's
+    // msg_error_other_username_create_pls covers a clash). Renaming to the same name is a no-op success.
+    bool rename(QString id, QString name);
+    // Deletes a user record. Refused for the active user, an unknown id and the last remaining user; the
+    // caller removes that user's settings (Preferences::forgetProfile) once this succeeds.
+    bool remove(QString id);
     QString error() const { return error_; }
 
 signals:

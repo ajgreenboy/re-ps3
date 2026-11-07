@@ -206,7 +206,8 @@ private:
     double optionHintAmount() const;
     // user_plugin's page_create (audit/FIDELITY-SURFACES-MAP.md S25): the prompt, the name field and OK. Field
     // focus is 0, OK is 1; Cross on the field opens the OSK, Cross on OK creates the user, Circle goes back.
-    struct UserCreatePage { bool open=false; QString name; int focus=0; };
+    // renameId set: the page renames that user (Information on a user row) instead of creating one.
+    struct UserCreatePage { bool open=false; QString name; int focus=0; QString renameId; };
     UserCreatePage userCreate_;
     void drawUserCreatePage(QPainter& painter);
     bool userCreateInput(int action); // 0 up, 1 down, 2 cross, 3 circle; true when the page took it

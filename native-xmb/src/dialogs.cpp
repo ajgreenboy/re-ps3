@@ -351,7 +351,12 @@ void View::drawMessageBox(QPainter& p) {
     p.save();
     // Body: left-aligned at the measured column, one measured pitch. No heading, no centring.
     const auto lines=wrapMessage(text,kBoxTextWidth,kBodySize);
-    double y=kBoxTextTop;
+    // The measured box carries two body lines (471/505) and its answers at 579. A longer body (msg_user_del_ask
+    // wraps to five) would run over the answers, so each extra line moves the text up and the answers down by
+    // half a pitch, keeping the group centred where the measured one sits (INFERRED: no long-box capture).
+    // Two lines or fewer draw exactly as measured.
+    const double extra=std::max(0,int(lines.size())-2)*kBoxPitch;
+    double y=kBoxTextTop-extra/2.;
     for(const auto& line:lines) {
         if(!line.isEmpty())
             drawMessageText(p,{kBoxTextX,y,kBoxTextWidth,qreal(kBodySize)+10.},line,kBodySize,
@@ -380,7 +385,7 @@ void View::drawMessageBox(QPainter& p) {
                              left+advance(choices[0])+kBoxChoiceGap+advance(choices[1])/2.};
     const int focused=shell_.boxChoiceSlot();
     for(int i=0;i<2;++i) {
-        const QRectF rect(centres[i]-150.,kBoxChoiceTop,300.,30.);
+        const QRectF rect(centres[i]-150.,kBoxChoiceTop+extra/2.,300.,30.);
         if(i==focused) {
             if(textRenderer_.ready())
                 textRenderer_.draw(*this,p,rect,choices[i],choiceFont,Qt::white,
