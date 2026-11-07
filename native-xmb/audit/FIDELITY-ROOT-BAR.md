@@ -509,3 +509,34 @@ the show delay.
 The native drew a fixed 10 px marker at the unfocused place. It now interpolates both size and offset with the row's
 focus, and enlarges the box by 26/21 because the glyph's ink fills 21/26 of the box it is fitted to. Native now:
 unfocused 11 px at 510, focused 25 x 26 at (434, 504.5). Gate 19.58 dB, 6/6.
+
+### 6.1 update 2, 2026-11-06: the plate's timing, measured
+
+RPCS3 rig (interpreter), Game column; local data in `padwind-2026-11-05/opthint`.
+
+**Getter calls (PC watch on explore_plugin `FUN_00072b7c`).**
+- It is called once per focus arrival on an item that has a hint: at boot, and again when focus came back to
+  Corrupted Data.
+- It is not called on a DOWN that changes nothing.
+- The caller chain is explore_plugin 0x4D6F4 <- 0x473D8 <- 0x6A370 (runtime base 0x1690000, offsets below are
+  module-relative). 0x4D6F4 is where to look next for the item-class dispatch.
+
+**Plate timing.** Burst over (1600,930,320,90) at 240 fps, DOWN onto Corrupted Data at 300 ms. Plate mean luma:
+
+| ms | event |
+|---:|---|
+| <= 347 | the previous item's plate is gone within 47 ms of the key (no fade-out) |
+| 1363 -> 1530 | fade-in, ~167 ms (luma 32 -> 75, slightly accelerating steps) |
+| 1530 -> 4547 | held, 3.0 s |
+| 4547 -> 4710 | fade-out, ~167 ms |
+
+**Spec for the native.**
+- Any focus change hides the plate at once.
+- About 1.06 s after the key (1.0 s after the focus change, allowing the rig's ~60 ms input latency), the plate fades
+  in over ~167 ms, holds 3.0 s, then fades out over ~167 ms.
+- It shows only for items whose class getter returns `msg_option_with_icon`.
+
+**Still open.**
+- Which item classes return the hint. Known: Corrupted Data, a user row, and probably Saved Data Utility (PS3). Not
+  on Settings rows or game-01-down's row.
+- The plate's texture and layout. The plate spans about (1663,955)-(1820,995).
