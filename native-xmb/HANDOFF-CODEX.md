@@ -96,3 +96,4 @@ must stay at 19.58 dB, 6/6.
    not modelled; it is only visible when help text needs the extended object.
 7. **The native's own Settings stall.** None left after 860cdfb; re-check with `XMB_TEXT_COST` after any host-read
    change.
+8. **The "△ : Options" hint plate.** It appears on the console for some focused items (FIDELITY-ROOT-BAR 6.1 update). explore_plugin's per-class getter at vtable +0x54 returns `msg_option_with_icon`; the shower and its delay are not traced. The native does not draw it yet.
