@@ -902,6 +902,8 @@ void View::paintGL() {
         (osk_.masked?QString(osk_.text.size(),oskLayout_.mask.glyph):osk_.text);
     // The notification composite animates outside a shell change (slide/fade), so its amount and content are
     // part of the signature: quantised by 1/256, which is finer than the 2x layer can show.
+    // The operation guide fades on the focus clock alone, so its amount is part of the drawn state.
+    if(const double hint=optionHintAmount();hint>.002)signature+=QString::asprintf(" opthint %d",int(hint*256.));
     if(notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
         signature+=QString::asprintf(" notify %d ",int(notificationEase_.value*256.))+notificationShown_.title+'|'+
             notificationShown_.detail+'|'+notificationShown_.icon;
@@ -1145,6 +1147,76 @@ void View::drawNotification(QPainter& p,double amount) {
         label(QRectF(textLeft,plaque.top()+10.+titleSize+4.,textRight-textLeft,detailSize+6.),
             notificationShown_.detail,detailSize,QColor(206,206,206));
     } else label(QRectF(textLeft,plaque.top()+8.,textRight-textLeft,plaque.height()-16.),title,titleSize,QColor(245,245,245));
+}
+// The operation guide behind "Triangle : Options" (audit/FIDELITY-ROOT-BAR.md 6.1 update 3), all TRACED:
+//   explore_plugin 0x4D5B4 hands the focused item's hint string (its class getter returns msg_option_with_icon
+//     or 0) to xmb_plugin's XMB2 interface slot +0x58 on every focus arrival, and 0 on every focus loss;
+//   xmb_plugin 0x99E4 drops the shown guide at once, then arms a 1000 ms timer (DATA 0x18014 = 1000.f) whose
+//     callback 0x9B24 creates the guide through vshcommon F55812AE (style 4) and gives it a 3000 ms life
+//     (DATA 0x18018 = 3000.f, vshcommon F1918912);
+//   vsh 0x346324 fades it in over 200 ms (DATA 0x68CC90) and schedules the hide at life + 200 ms; the hide
+//     (0x345B88) fades it out over 200 ms (DATA 0x68CC70).
+// So, from the focus arrival: nothing until 1000 ms, a 200 ms fade-in, full until 4200 ms, a 200 ms fade-out.
+// The fade curve is drawn linear (INFERRED; the console burst's steps are only slightly accelerating).
+double View::optionHintAmount() const {
+    if(!shell_.focusedRowHasOptionHint())return 0.;
+    const double t=double(focusTime());
+    if(t<1000. || t>=4400.)return 0.;
+    if(t<1200.)return (t-1000.)/200.;
+    if(t<4200.)return 1.;
+    return 1.-(t-4200.)/200.;
+}
+// system_plugin page_notification, vsh 0x345D24: tex_operation_guide_base_shadow (50x50) under
+// tex_operation_guide_base (48x48), the shadow 2 px larger (the two textures' size difference), and the text.
+// The layout is measured on the console (nav/users-column.png and nav2/game-02-down.png agree to the pixel):
+// plate x 1654..1815, y 954..994; the Triangle gaiji's green ink at x 1678..1691, y 969..981; the white
+// ": Options" ink at x 1702..1793, y 967..986. Its right/bottom anchor is the style-4 layout row, grid ids
+// e7a/e7b = (860, -459) from the screen centre (TRACED, layout_grid_table_1080.txt), the plate ending
+// 4-5 px inside it. The plate grows to the left with the text.
+void View::drawOptionHint(QPainter& p,double amount) {
+    QString text=assets_.text("explore_plugin_full","msg_option_with_icon",QString(QChar(0xF883))+": Options");
+    // The string's first character is the firmware's Triangle gaiji (U+F883). No dev_flash font maps it (the
+    // SCE-PS3-*.TTF and SONY-CC cmaps were checked), so paf draws it from a source this build has not found.
+    // Its place is taken by a composite matched to the console's pixels: a 20 px dark disc (3,4,3) with a
+    // light 1 px rim centred 17 px left of the text ink, and system_plugin's own tex_triangle tinted to the
+    // measured green (1,215,96) with its ink at 14 x 13 px (x 1678..1691, y 969..981 on the console).
+    const bool gaiji=!text.isEmpty() && text.front().unicode()>=0xE000 && text.front().unicode()<=0xF8FF;
+    if(gaiji)text=text.mid(1);
+    const int size=21;
+    QFont font(shell_.fontFamily());font.setPixelSize(size);
+    const double advance=QFontMetricsF(font).horizontalAdvance(text);
+    const double plateRight=1816.,top=954.,height=41.,centreY=976.;
+    const double textLeft=plateRight-22.-advance;
+    // textLeft is the advance origin; the ':' ink starts ~4 px later (x 1702 on both sides).
+    const double discX=textLeft-13.;
+    const double plateLeft=gaiji?textLeft-52.5:textLeft-21.;
+    const QRectF plate(plateLeft,top,plateRight-plateLeft,height);
+    drawNineSlice(p,"system_plugin","tex_operation_guide_base_shadow",plate.adjusted(-1.,-1.,1.,1.),12.,amount);
+    drawNineSlice(p,"system_plugin","tex_operation_guide_base",plate,12.,amount);
+    if(gaiji) {
+        p.save();p.setOpacity(amount);p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(QPen(QColor(150,150,150),1.));p.setBrush(QColor(3,4,3));
+        p.drawEllipse(QPointF(discX,centreY),9.5,9.5);
+        static QImage tinted;
+        if(tinted.isNull()) {
+            const QImage& source=assets_.image("system_plugin","tex_triangle");
+            if(!source.isNull()) {
+                tinted=source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+                QPainter tint(&tinted);tint.setCompositionMode(QPainter::CompositionMode_SourceIn);
+                tint.fillRect(tinted.rect(),QColor(1,215,96));
+            }
+        }
+        // tex_triangle's solid ink fills 0.8 x 0.62 of its box, so a 17.5 x 21 box puts it at 14 x 13.
+        if(!tinted.isNull())p.drawImage(QRectF(discX-8.75,centreY-11.,17.5,21.),tinted);
+        p.restore();
+    }
+    const QRectF textRect(textLeft,top,advance+6.,height);
+    if(textRenderer_.ready())
+        textRenderer_.draw(*this,p,textRect,text,font,QColor(255,255,255,int(255.*amount)),Qt::AlignLeft|Qt::AlignVCenter);
+    else {
+        p.save();p.setOpacity(amount);p.setFont(font);p.setPen(QColor(255,255,255));
+        p.drawText(textRect,Qt::AlignLeft|Qt::AlignVCenter,text);p.restore();
+    }
 }
 void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect) {
     const auto& original=assets_.bestImage(category.container,category.texture);
@@ -2510,6 +2582,11 @@ void View::drawScene(QPainter& p) {
     // The console's notification pop-up, drawn last so it sits above the XMB, and never while the PS menu is
     // up: that menu blacks the frame and owns the screen. It takes no input (nothing here reads keys), so it
     // cannot steal a press from whatever is underneath.
+    // The operation guide sits on the same system_plugin page as the notification, under it. It belongs to
+    // the XMB's own focus, so no overlay that takes the focus (PS menu, item menu, media, a message) shows it.
+    if(!shell_.psMenuOpen() && !shell_.optionsOpen() && !optionsDrawn() && !shell_.mediaOpen() &&
+       shell_.message().isEmpty() && !osk_.open)
+        if(const double hint=optionHintAmount();hint>.002)drawOptionHint(p,hint);
     if(!shell_.psMenuOpen() && notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
         drawNotification(p,notificationEase_.value);
     // PS button: the console's system menu, re-measured on the 4.93 day frame (a21-ps-menu-1.png, the

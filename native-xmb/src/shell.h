@@ -374,6 +374,9 @@ public:
     bool psMenuConfirmingOff() const { return psConfirmOff_; }
     // Triangle options panel for the selected entry (a right-hand panel; the XMB behind it keeps its layout).
     bool optionsOpen() const { return optionsOpen_; }
+    // Whether the focused row's firmware class offers the "Triangle : Options" operation guide
+    // (audit/FIDELITY-ROOT-BAR.md 6.1 update 3): a user row or a game title. Not "has an item menu".
+    bool focusedRowHasOptionHint() const;
     // Let a view-owned surface play a system cue through the shell's one audio player (the music
     // control panel opens with the firmware's message cue; audit MEDIA-PANELS-FIRMWARE 7.2/11.7).
     void playCue(InteractionAudio::Cue cue) { interactionAudio_.play(cue); }
