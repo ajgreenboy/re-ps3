@@ -327,13 +327,19 @@ void Particles::trackCursor(int category,int depth,int selection) {
     }
     cursorCategory_=category;cursorDepth_=depth;cursorSelection_=selection;
 }
-void Particles::trackWidgets(const std::vector<std::pair<quint64,QPointF>>& screen) {
+void Particles::trackWidgets(const std::vector<std::pair<quint64,QPointF>>& screen,double seconds) {
     // FUN_0002f90c projects the widget's world translation through layer+0x1020, which at runtime is the XMB camera
     // at 2700 (rows (2.8125,0,0,0) (0,5,0,0) (0,0,-1.00002,-1) (0,0,2680.05,2700)): on the z = 0 plane that is
     // x / 960 and y / 540 from the screen centre, y up. View hands over screen centres that already carry the
     // parent column's recede, so they are mapped straight to NDC. [TRACED matrix; runtime dump]
-    widgetNow_.clear();
-    for(const auto& [key,point]:screen)widgetNow_[key]=QPointF((point.x()-960.)/960.,(540.-point.y())/540.);
+    // The renderer draws faster than the 60 Hz tick (~144 fps here), so a tick that took whichever frame came last could
+    // carry one and a half or two frames' movement. The last eight sets are kept and each tick samples them by linear
+    // interpolation one tick late (stepIconWind), a time that always lies inside the drawn history.
+    std::unordered_map<quint64,QPointF> set;
+    for(const auto& [key,point]:screen)set.emplace(key,QPointF((point.x()-960.)/960.,(540.-point.y())/540.));
+    if(!widgetFrames_.empty() && widgetFrames_.back().first>=seconds)widgetFrames_.back().second=std::move(set);
+    else widgetFrames_.emplace_back(seconds,std::move(set));
+    while(widgetFrames_.size()>8)widgetFrames_.pop_front();
 }
 void Particles::stepIconWind() {
     // FUN_0002f90c, once per tracked widget per tick [TRACED, custom_render_plugin; constants read at runtime]:
@@ -344,7 +350,23 @@ void Particles::stepIconWind() {
     // The store overwrites the cell (the last widget in it wins). The plugin clears its map above 100 entries;
     // the console tracked 14..23, so that never triggers here. [The runtime grid: only Y bytes, up to +-127 on a
     // list scroll in the item column, +-53 on a category move in the category row.]
-    for(const auto& [key,now]:widgetNow_) {
+    if(widgetFrames_.empty())return;
+    // One tick late: the sample time lies inside the drawn frames, so every position is an interpolation (a
+    // decelerating ease extrapolated past the newest frame overshot its first step by ~60%).
+    const double at=double(step_)/double(kReferenceFrameRate);
+    size_t after=0;
+    while(after<widgetFrames_.size() && widgetFrames_[after].first<at)++after;
+    for(const auto& [key,newest]:widgetFrames_.back().second) {
+        QPointF now=newest;
+        if(after==0) {
+            if(const auto hit=widgetFrames_.front().second.find(key);hit!=widgetFrames_.front().second.end())now=hit->second;
+        } else if(after<widgetFrames_.size()) {
+            const auto& a=widgetFrames_[after-1];const auto& b=widgetFrames_[after];
+            const auto pa=a.second.find(key),pb=b.second.find(key);
+            if(pa!=a.second.end() && pb!=b.second.end() && b.first>a.first)
+                now=pa->second+(pb->second-pa->second)*((at-a.first)/(b.first-a.first));
+            else if(pb!=b.second.end())now=pb->second;
+        }
         const auto last=widgetLast_.find(key);
         if(last==widgetLast_.end()){widgetLast_.emplace(key,now);continue;}
         const double dx=now.x()-last->second.x(),dy=now.y()-last->second.y();

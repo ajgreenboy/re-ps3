@@ -953,7 +953,7 @@ void View::paintGL() {
             const double scale=std::min(pixels.width()/1920.,pixels.height()/1080.);
             ui.translate((pixels.width()-1920*scale)/2,(pixels.height()-1080*scale)/2);ui.scale(scale,scale);
             const qint64 sceneStart=clock_.nsecsElapsed();drawScene(ui);sceneNs_=clock_.nsecsElapsed()-sceneStart;
-            particles_.trackWidgets(windSites_);
+            particles_.trackWidgets(windSites_,renderSeconds);
         }
         QOpenGLFramebufferObject::blitFramebuffer(uiResolved_.get(),uiMsaa_.get());
     }

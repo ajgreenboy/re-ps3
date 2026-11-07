@@ -9,6 +9,7 @@
 #include <vector>
 #include <array>
 #include <unordered_map>
+#include <deque>
 #include <QPointF>
 
 namespace xmb {
@@ -116,7 +117,9 @@ public:
     // same for one icon from frame to frame. custom_render_plugin's per-widget render hook (FUN_000122c0 ->
     // FUN_0002f90c) projects each tracked widget's translation to NDC once per tick and writes the change since its
     // last visit into the flow-field cell under it (see step()). The latest call's positions are what a tick reads.
-    void trackWidgets(const std::vector<std::pair<quint64,QPointF>>& screen);
+    // `seconds` is the render clock of the frame the positions were drawn for (the clock render() steps against), so a
+    // 60 Hz tick can sample each icon at its own time rather than at whichever frame the faster renderer drew last.
+    void trackWidgets(const std::vector<std::pair<quint64,QPointF>>& screen,double seconds);
     // Simulation state, for determinism logging (XMB_PARTICLE_LOG) and the audit's parity table.
     int liveCount() const { return live_; }
     long long stepIndex() const { return step_; }
@@ -265,7 +268,9 @@ private:
     // the latest trackWidgets() input and the position each widget had at the last tick (the plugin's map at
     // layer+0x1018, node+0x20).
     std::array<qint8,32*16*3> flowGrid_{};
-    std::unordered_map<quint64,QPointF> widgetNow_,widgetLast_;
+    std::unordered_map<quint64,QPointF> widgetLast_;
+    // The last few trackWidgets() sets (NDC) with their frame times; a tick samples them one tick late (stepIconWind).
+    std::deque<std::pair<double,std::unordered_map<quint64,QPointF>>> widgetFrames_;
     int emitterSide_=0;
     // The reader's values: the base physics block, the base look, the four theme looks and the
     // blended look the shaders get.
