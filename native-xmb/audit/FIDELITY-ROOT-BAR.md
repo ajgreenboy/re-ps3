@@ -636,3 +636,11 @@ rectangles; it now draws the glyph 1:1 at the label's 23 px.
 
 The video help strip keeps dropping its trailing gaiji on purpose: it draws the 86x30 key textures itself.
 Gate 19.58 dB, 6/6.
+
+**Media rows: not measurable on this rig (2026-11-07).** I put a synthetic 640x480 PNG in the rig's own
+`dev_usb000/PICTURE` and walked the Photo column (`padwind-2026-11-05/plans/usbphoto3.txt`). It still lists only
+Search for Media Servers, Photo Gallery and Playlists: this RPCS3 build does not present `dev_usb000` to vsh as an
+attached USB device. I removed the file afterwards.
+
+Media-file rows therefore stay unmeasured, and the native keeps them without the hint. Measuring them needs content
+in the rig's `dev_hdd0` media database, through the XMB's own import, or a console capture.
