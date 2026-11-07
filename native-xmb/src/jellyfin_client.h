@@ -32,6 +32,7 @@ struct JellyfinTrack {
     QString language, codec;
     int channels = 0;
     bool external = false;
+    bool text = false;      // IsTextSubtitleStream: the server can deliver it as SRT (subtitle())
     bool isDefault = false;
 };
 struct JellyfinPlayback {
@@ -63,6 +64,10 @@ public:
     // missing art is not an error the user needs to see.
     quint64 artwork(QString itemId, QString tag, bool backdrop = false);
     void setImageCache(QString directory);
+    // A text subtitle stream of the playing item, converted by the server to SRT:
+    // GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{streamIndex}/Stream.srt. Bounded like every
+    // response; subtitleReady carries empty bytes when it fails.
+    quint64 subtitle(QString itemId, QString mediaSourceId, int streamIndex);
     void reportPlayback(const JellyfinPlayback& playback, qint64 positionMs, bool paused, QString event);
     // ---- Remembered sign-in (DPAPI, opt-in) ----------------------------------------------
     // The store keeps one record: server URL, user id and the access token, protected with
@@ -81,8 +86,9 @@ signals:
     void pageReady(quint64 request, xmb::JellyfinPage page);
     void playbackReady(quint64 request, xmb::JellyfinPlayback playback);
     void artworkReady(quint64 request, QString itemId, bool backdrop, QImage image);
+    void subtitleReady(quint64 request, int streamIndex, QByteArray bytes);
 private:
-    enum class Operation { SignIn, Views, Items, Search, Playback, Artwork, Report };
+    enum class Operation { SignIn, Views, Items, Search, Playback, Artwork, Report, Subtitle };
     quint64 send(Operation operation, QNetworkReply* reply, QString context = {}, bool audio = false);
     void finish(QNetworkReply* reply, Operation operation, quint64 request,
                 quint64 generation, QString context = {}, bool audio = false);

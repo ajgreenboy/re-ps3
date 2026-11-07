@@ -272,6 +272,20 @@ Discovery discover(const QString& mediaPath) {
     return result;
 }
 
+bool parse(const QByteArray& bytes,const QString& format,Track& track,QString* reason) {
+    const QString kind=format.toLower();
+    if(!supportedFormat(kind)){if(reason)*reason=QString("format %1 is not SRT or WebVTT").arg(format);return false;}
+    if(bytes.isEmpty()){if(reason)*reason="stream is empty";return false;}
+    if(bytes.size()>maximumFileBytes) {
+        if(reason)*reason=QString("stream is %1 bytes, above the %2-byte limit").arg(bytes.size()).arg(maximumFileBytes);
+        return false;
+    }
+    const auto parsed=parseCueText(decodeBytes(bytes),kind);
+    if(parsed.cues.isEmpty()){if(reason)*reason=parsed.error;return false;}
+    track.cues=parsed.cues;track.skipped=parsed.skipped;track.format=kind;track.bytes=bytes.size();
+    return true;
+}
+
 QString displayName(const Track& track) {
     const QString format=track.format.toUpper();
     if(track.language.isEmpty())return QString("On (%1)").arg(format.isEmpty()?"file":format);

@@ -51,6 +51,11 @@ struct Discovery {
 // candidate and returns the usable ones. Never throws, never writes, and reads at most 4 MB per file
 // from at most 16 candidates.
 Discovery discover(const QString& mediaPath);
+// Parses subtitle bytes that did not come from a sidecar (a Jellyfin server's text subtitle stream)
+// with the same decoder and the same tolerance as a file: `format` is "srt" or "vtt", the bytes are
+// bounded by the same 4 MB limit. Returns false with `reason` set when no cue is usable; `track`
+// keeps the caller's path/name/language and gets cues, bytes, format and skipped filled in.
+bool parse(const QByteArray& bytes,const QString& format,Track& track,QString* reason=nullptr);
 // 0-based index of the cue covering `positionMs`, or -1 when none does. Overlapping cues resolve to
 // the latest one that has started, which is what a player shows when two overlap.
 int cueAt(const QVector<Cue>& cues,qint64 positionMs);

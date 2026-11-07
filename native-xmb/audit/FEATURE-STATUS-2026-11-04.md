@@ -12,12 +12,11 @@ release verification, and exact PS3 fidelity.
    unavailable rows. `Shell::resolveMediaColumns()` in `src/shell.cpp` explains
    that current playback queues are built from the source folder; there is no
    stored playlist model or editor.
-2. **Profile rename, deletion, and avatar editing.** The current `Profiles` API
-   in `src/profiles.h` exposes `create()` and `select()`; `src/profiles.cpp`
-   implements those operations and atomic persistence. Rename/delete/avatar
-   operations are absent. Preferences are profile-scoped now: `Preferences`
-   stores keys under `profile/<id>/...` (`src/preferences.cpp`); do not rely on
-   the old audit's claim that all preferences are shared.
+2. **Avatar editing.** Updated 2026-11-07: rename and delete are implemented from explore_plugin's own user-row
+   menu (`audit/FIDELITY-SURFACES-MAP.md`; `Profiles::rename/remove`, `Shell::renameUser/deleteUser`): Delete runs the
+   traced two Yes/No asks and drops that user's settings, Information renames with the firmware's duplicate-name
+   error. Avatar editing (user_plugin `msg_icon_image_select`) and the Log Out / Automatic Login rows (listed
+   disabled: this build has no logged-out state) remain.
 3. **DLNA/UPnP discovery.** Video, Music, and Photo discovery rows are explicitly
    `Action::Unavailable` in `Shell::resolveMediaColumns()` (`src/shell.cpp`).
    Jellyfin is a separate working network-media integration; it does not provide
@@ -26,11 +25,9 @@ release verification, and exact PS3 fidelity.
    explicitly unavailable in `src/shell.cpp`. The built-in photo library,
    full-screen viewer, slideshow, rotation, and zoom/pan are separate native
    features and do not implement the firmware's 3D Gallery app.
-5. **Jellyfin server subtitle playback.** `Shell::buildPlayerOptions()`,
-   `chooseSubtitleTrack()` and the Jellyfin track mapping in `src/shell.cpp`
-   expose the server's subtitle streams honestly, but subtitle rows are disabled:
-   the app does not fetch/render server subtitle streams. Local sidecar subtitle
-   playback is implemented. See `audit/JELLYFIN-NATIVE.md`.
+5. **Jellyfin image-based subtitles.** Updated 2026-11-07: text subtitle streams are fetched from the server
+   as SRT and drawn like a sidecar (`audit/JELLYFIN-NATIVE.md`, "Server text subtitles"). Image-based streams
+   (PGS, VobSub) stay listed and disabled with that reason.
 6. **Jellyfin quality/bitrate selection.** There is no quality selector for
    server playback (`audit/JELLYFIN-NATIVE.md`). Direct play and server-negotiated
    HLS playback work. The page backdrop is fetched and cached, but its draw path

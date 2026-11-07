@@ -566,6 +566,17 @@ quint64 JellyfinClient::artwork(QString itemId, QString tag, bool backdrop) {
                 QLatin1Char('#') + tag);
 }
 
+quint64 JellyfinClient::subtitle(QString itemId, QString mediaSourceId, int streamIndex) {
+    if (!signedIn() || !validId(itemId) || !validId(mediaSourceId) || streamIndex < 0) {
+        const quint64 request = ++nextRequest_;
+        QTimer::singleShot(0, this, [this, request, streamIndex] { emit subtitleReady(request, streamIndex, QByteArray{}); });
+        return request;
+    }
+    const QUrl url = apiUrl(QStringLiteral("Videos/") + itemId + QLatin1Char('/') + mediaSourceId +
+                            QStringLiteral("/Subtitles/") + QString::number(streamIndex) + QStringLiteral("/Stream.srt"));
+    return send(Operation::Subtitle, get(url), QString::number(streamIndex));
+}
+
 void JellyfinClient::setSessionStore(QString path) { sessionPath_ = std::move(path); }
 
 bool JellyfinClient::hasStoredSession() const {
@@ -676,6 +687,11 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
         emit artworkReady(request, itemId, backdrop, image);
         return;
     }
+    // A subtitle stream is text, not JSON: the bytes go to the parser as they are, or empty on failure.
+    if (operation == Operation::Subtitle) {
+        emit subtitleReady(request, context.toInt(), ok ? bytes : QByteArray{});
+        return;
+    }
     if (!ok) { fail(request, QStringLiteral("Jellyfin could not complete that request.")); return; }
     QJsonParseError parse{};
     const auto document = QJsonDocument::fromJson(bytes, &parse);
@@ -769,6 +785,7 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
                 track.channels = entry.value(QStringLiteral("Channels")).toInt(0);
                 track.external = entry.value(QStringLiteral("IsExternal")).toBool(false);
                 track.isDefault = entry.value(QStringLiteral("IsDefault")).toBool(false);
+                track.text = entry.value(QStringLiteral("IsTextSubtitleStream")).toBool(false);
                 track.title = entry.value(QStringLiteral("DisplayTitle")).toString().trimmed();
                 if (track.title.isEmpty()) track.title = track.language;
                 if (track.title.isEmpty()) track.title = track.codec;

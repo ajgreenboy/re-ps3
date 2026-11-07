@@ -719,3 +719,35 @@ thresholds/references. The stub server, the runner, the captures and the logs ar
   after an explicit Back, which is why their Stopped lines are complete).
 - Poster prefetch is bounded to the first 60 playable rows per page and the cache to 400 files; a very large
   library re-fetches art after eviction by design.
+
+## Server text subtitles (2026-11-07)
+
+A Jellyfin item's text subtitle streams are now fetched and drawn; they were listed and disabled before.
+
+- **Client:** `JellyfinTrack::text` reads `IsTextSubtitleStream`. `JellyfinClient::subtitle(itemId, mediaSourceId,
+  streamIndex)` GETs `/Videos/{item}/{source}/Subtitles/{index}/Stream.srt` (the server converts any text format
+  to SRT), with the same auth header, timeout and 4 MB bound as every request. `subtitleReady` carries the bytes,
+  or empty bytes on failure.
+- **Parser:** `subtitles::parse(bytes, format, track, reason)` runs the sidecar parser (same decoder, same
+  tolerance, same limit) on bytes that did not come from a file.
+- **Shell:** when PlaybackInfo arrives, `requestJellyfinSubtitles()` makes one track per text stream (at most
+  eight) keyed `jellyfin:<item>#<index>` and requests each. The LoadedMedia handler leaves `jellyfin:` keyed
+  tracks alone. A track that arrives is selected when the server marks it default and the item has no session
+  choice; a session choice is honoured.
+- **Panel rows:** a text stream reads "Loading this subtitle stream from the server." until it arrives, then is
+  selectable with "From the server as SRT - N cues". A failed fetch or a stream with no usable cue keeps the
+  reason. An image-based stream (PGS, VobSub) stays disabled: "this build draws text subtitles only".
+
+Verified against a copy of the stub (`C:\dev\out\native-jf-subs`, never committed) that adds
+`IsTextSubtitleStream`, an image-based PGS stream and the `Stream.srt` route (authorization required):
+
+    jellyfin: playback 1111...8888 DirectPlay 5 server stream(s) ...|Subtitle:English (SRT)|Subtitle:English (PGS)
+    jellyfin: requested 1 text subtitle stream(s)
+    jellyfin: subtitle stream 3 English (SRT) 3 cues 184 bytes; skipped 0
+    subtitle: track jellyfin:1111...8888#3 (English (SRT))
+    subtitle: cue 2 at 8000 ms (8000-14000 ms) Server subtitle two second line
+    shell: playback panel opened rows= 7 subtitles= 1 audio= 1 Subtitles Off|Subtitles 1: English (SRT)|Subtitles 2: English (PGS)|...
+
+The stub logged `GET /Videos/.../Subtitles/3/Stream.srt auth=yes stream=3 bytes=184`. The frame shows the
+two-line cue over the video after the 8 s resume, and the panel shows the SRT row marked and the PGS row dimmed.
+Not done: image-based subtitle streams, and burning subtitles into a server transcode.

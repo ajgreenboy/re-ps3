@@ -1470,7 +1470,10 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
                 // seek (QFFmpegMediaPlayer::setPosition), and re-running discovery there would re-parse
                 // the sidecars and forget a refused audio track on each Left/Right.
                 const bool local=categories_[category_].id=="video" && !jellyfinQueue_;
-                const QString path=local?player_->source().toLocalFile():QString{};
+                // A Jellyfin item's server subtitle tracks are keyed "jellyfin:<item>" (jellyfin_shell.cpp), so
+                // its LoadedMedia leaves them in place instead of clearing them as a path change.
+                const QString path=local?player_->source().toLocalFile():
+                    (jellyfinQueue_ && subtitleMediaPath_.startsWith(QLatin1String("jellyfin:"))?subtitleMediaPath_:QString{});
                 if(path!=subtitleMediaPath_) {
                     prepareSubtitles(path);
                     refreshAudioTracks();
@@ -2695,9 +2698,21 @@ void Shell::buildPlayerOptions() {
             ++seen;
             MenuOption row{QObject::tr("Subtitles %1: %2").arg(seen).arg(stream.title),OptionCommand::SubtitleTrack};
             row.index=-1;row.enabled=false;
-            row.note=stream.external
-                ?QObject::tr("External subtitle stream: this build does not download subtitle streams.")
-                :QObject::tr("Subtitle stream inside the file: the media backend cannot switch stream subtitles.");
+            // A text stream (IsTextSubtitleStream) is fetched from the server as SRT and drawn like a sidecar;
+            // an image-based stream (PGS, VobSub) still cannot be shown, and the row says so.
+            const QString key=jellyfinSubtitleKey(stream.index);
+            int track=-1;
+            for(int i=0;i<subtitleTracks_.size();++i)if(subtitleTracks_[i].path==key){track=i;break;}
+            if(!stream.text) {
+                row.note=QObject::tr("Image-based subtitle stream (%1): this build draws text subtitles only.").arg(stream.codec);
+            } else if(jellyfinSubtitleErrors_.contains(stream.index)) {
+                row.note=jellyfinSubtitleErrors_.value(stream.index);
+            } else if(track<0 || subtitleTracks_[track].cues.isEmpty()) {
+                row.note=QObject::tr("Loading this subtitle stream from the server.");
+            } else {
+                row.index=track;row.enabled=true;row.active=track==subtitleTrackIndex_;
+                row.note=QObject::tr("From the server as SRT - %1 cues").arg(subtitleTracks_[track].cues.size());
+            }
             options_.push_back(row);
         }
         if(!seen) {

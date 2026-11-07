@@ -455,6 +455,14 @@ private:
     JellyfinClient jellyfin_;
     JellyfinStream jellyfinStream_;
     JellyfinPlayback jellyfinPlayback_;
+    // Server text subtitles (jellyfin_shell.cpp): each text stream becomes a subtitle track keyed
+    // "jellyfin:<item>#<stream index>", filled when its SRT arrives; a failed fetch keeps its reason.
+    QHash<quint64,int> jellyfinSubtitleRequests_;   // request -> stream index
+    QHash<int,QString> jellyfinSubtitleErrors_;     // stream index -> why it cannot be shown
+    QString jellyfinSubtitleKey(int streamIndex) const {
+        return QStringLiteral("jellyfin:%1#%2").arg(jellyfinPlayback_.itemId).arg(streamIndex);
+    }
+    void requestJellyfinSubtitles();
     QTimer jellyfinProgress_;
     quint64 jellyfinRequest_=0;
     int jellyfinRequestDepth_=0,jellyfinRootDepth_=0;

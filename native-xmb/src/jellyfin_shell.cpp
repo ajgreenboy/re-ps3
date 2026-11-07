@@ -128,9 +128,42 @@ void Shell::initJellyfin() {
         for(const auto& stream:playback.streams)streams<<stream.type+":"+stream.title;
         qInfo().noquote()<<"jellyfin: playback"<<playback.itemId<<playback.playMethod<<playback.streams.size()
             <<"server stream(s)"<<streams.join('|');
+        requestJellyfinSubtitles();
         const auto local=jellyfinStream_.open(playback.url,jellyfin_.authorizationHeader());
         if(!local.isValid() || local.isEmpty()){advanceMedia(true,{});return;}
         player_->setSource(local);player_->play();emit changed();
+    });
+    // A server subtitle stream arrived: parse it with the sidecar parser, fill its track, and select it when
+    // the server marks it default and this item has no session choice yet.
+    connect(&jellyfin_,&JellyfinClient::subtitleReady,this,[this](quint64 request,int streamIndex,const QByteArray& bytes){
+        if(!jellyfinSubtitleRequests_.contains(request))return;
+        jellyfinSubtitleRequests_.remove(request);
+        if(!jellyfinQueue_ || !mediaOpen_)return;
+        const QString key=jellyfinSubtitleKey(streamIndex);
+        int track=-1;
+        for(int i=0;i<subtitleTracks_.size();++i)if(subtitleTracks_[i].path==key){track=i;break;}
+        if(track<0)return;
+        QString reason;
+        if(bytes.isEmpty())reason=tr("The server did not deliver this subtitle stream.");
+        else if(!subtitles::parse(bytes,QStringLiteral("srt"),subtitleTracks_[track],&reason))
+            reason=tr("The server's subtitle stream has no usable cue (%1).").arg(reason);
+        if(!reason.isEmpty()) {
+            jellyfinSubtitleErrors_.insert(streamIndex,reason);
+            qWarning().noquote()<<"jellyfin: subtitle stream"<<streamIndex<<"unusable:"<<reason;
+            refreshPlayerOptions();
+            return;
+        }
+        qInfo().noquote()<<"jellyfin: subtitle stream"<<streamIndex<<subtitleTracks_[track].name<<subtitleTracks_[track].cues.size()
+            <<"cues"<<bytes.size()<<"bytes; skipped"<<subtitleTracks_[track].skipped;
+        bool isDefault=false;
+        for(const auto& stream:jellyfinPlayback_.streams)if(stream.index==streamIndex)isDefault=stream.isDefault;
+        if(subtitleChoice_.contains(subtitleMediaPath_)) {
+            if(subtitleChoice_.value(subtitleMediaPath_)==key)applySubtitleTrack(track);
+        } else if(isDefault && subtitleTrackIndex_<0) {
+            applySubtitleTrack(track);
+        }
+        refreshPlayerOptions();
+        emit changed();
     });
     connect(&jellyfinStream_,&JellyfinStream::failed,this,[this](const QString&){
         if(!jellyfinQueue_ || !mediaOpen_)return;const auto request=mediaRequest_;
@@ -284,6 +317,23 @@ void Shell::finishJellyfinPlayback(bool completed) {
         }
     }
     jellyfinPlayback_={};jellyfinStarted_=false;jellyfinResumePending_=0;jellyfinStream_.close();
+    jellyfinSubtitleRequests_.clear();jellyfinSubtitleErrors_.clear();
+}
+// One track per text subtitle stream of the item about to play (at most eight), each fetched as SRT.
+// The tracks start empty, so their rows read "Loading" until the bytes arrive (subtitleReady above).
+void Shell::requestJellyfinSubtitles() {
+    subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;
+    jellyfinSubtitleRequests_.clear();jellyfinSubtitleErrors_.clear();
+    subtitleMediaPath_=QStringLiteral("jellyfin:")+jellyfinPlayback_.itemId;
+    for(const auto& stream:jellyfinPlayback_.streams) {
+        if(stream.type!=QLatin1String("Subtitle") || !stream.text || stream.index<0)continue;
+        if(subtitleTracks_.size()>=8)break;
+        subtitles::Track track;
+        track.path=jellyfinSubtitleKey(stream.index);track.name=stream.title;track.language=stream.language;track.format="srt";
+        subtitleTracks_.push_back(track);
+        jellyfinSubtitleRequests_.insert(jellyfin_.subtitle(jellyfinPlayback_.itemId,jellyfinPlayback_.mediaSourceId,stream.index),stream.index);
+    }
+    if(!subtitleTracks_.isEmpty())qInfo().noquote()<<"jellyfin: requested"<<subtitleTracks_.size()<<"text subtitle stream(s)";
 }
 void Shell::signOutJellyfin() {
     jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();jellyfin_.forgetSession();
