@@ -92,8 +92,7 @@ must stay at 19.58 dB, 6/6.
 4. **Non-Settings page opens.** Do they load a plugin? The last run landed on "Corrupted Data". `explore_plugin` is
    resident from boot, so ordinary list pages probably don't.
 5. **Conditional rows.** Done: Chat's two extra rows were Accessory rows and are dropped (traced). Music's Repeat is a native-only row by design.
-6. **Help-text fades.** The 800 ms mode-0 crossfade between `label2_text` and `label2_text_ex` at the idle timer is
-   not modelled; it is only visible when help text needs the extended object.
+6. **Help-text fades.** Closed (PAGE-MOVE "help-text crossfade"): the swap is a 4-line ellipsised label2_text -> 10-line label2_text_ex, visible only for help past 4 lines; no English Settings help reaches that, so nothing to draw.
 7. **The native's own Settings stall.** None left after 860cdfb; re-check with `XMB_TEXT_COST` after any host-read
    change.
 8. **The "△ : Options" hint plate.** Done (FIDELITY-ROOT-BAR 6.1 update 3): traced through explore_plugin -> xmb_plugin XMB2 +0x58 -> vshcommon operation guide (1000 ms delay, 200 ms fades, 3000+200 ms life); shown on user and game-title rows (rig walk). Open: the paf source of the Triangle gaiji (the native composes it from measured pixels), and media-file rows (unmeasured).
