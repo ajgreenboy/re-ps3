@@ -152,6 +152,12 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         userCreate_.name=QStringLiteral("User %1").arg(std::max(1,shell_.userCount()));
         update();
     });
+    // Create New Playlist (playlist_plugin): the keyboard titled with the plugin's own prompt; the name goes to
+    // Shell::createPlaylist, which raises the plugin's duplicate-name and limit errors itself.
+    connect(&shell_,&Shell::requestPlaylistName,this,[this](QString type){
+        openOsk(assets_.text("playlist_plugin","msg_input_playlist_name","Enter a name for the playlist."),QString(),
+            [this,type](const QString& name){if(!name.trimmed().isEmpty())shell_.createPlaylist(type,name);});
+    });
     // Information on a user row renames it on the same page (Shell::requestRenameUser), prefilled with the name.
     connect(&shell_,&Shell::requestRenameUser,this,[this](QString id,QString name){
         userCreate_=UserCreatePage{};userCreate_.open=true;userCreate_.name=name;userCreate_.renameId=id;

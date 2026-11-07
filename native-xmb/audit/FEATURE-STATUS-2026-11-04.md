@@ -8,10 +8,16 @@ release verification, and exact PS3 fidelity.
 
 ## Definite product gaps
 
-1. **Persistent playlists.** Music and Photo Playlists are present as explicit
-   unavailable rows. `Shell::resolveMediaColumns()` in `src/shell.cpp` explains
-   that current playback queues are built from the source folder; there is no
-   stored playlist model or editor.
+1. **Playlist editor (Move, Add All).** Updated 2026-11-07: Music and Photo > Playlists are real. The folder
+   lists Create New Playlist (category_music.xml seg_playlist_fixed_items) then the user's playlists with
+   playlist_plugin's "%1 Tracks"/"%1 Images"; Create New Playlist asks for the name with msg_input_playlist_name
+   and refuses a duplicate with msg_error_same_name_cannot_use; "Add to Playlist" (msg_add_to_playlist) on a local
+   music/photo row opens "Select a playlist."; a playlist opens as a page of its files in order and Play queues
+   the playlist (scripted run: "Track 1 of 2" from a two-item playlist in a three-file folder); Delete removes a
+   row from a playlist or a whole playlist, never a file. Storage is `src/playlists.*`: one atomic JSON file per
+   user under `<data>/playlists/`, removed with the user; limits 100 playlists and 1000 items are this build's
+   (no firmware value traced). Open: playlist_plugin's two-pane editor (expage_select_list / expage_edit_list
+   with Add All and Move) is not drawn; adding is from the item menu instead.
 2. **Avatar editing.** Updated 2026-11-07: rename and delete are implemented from explore_plugin's own user-row
    menu (`audit/FIDELITY-SURFACES-MAP.md`; `Profiles::rename/remove`, `Shell::renameUser/deleteUser`): Delete runs the
    traced two Yes/No asks and drops that user's settings, Information renames with the firmware's duplicate-name

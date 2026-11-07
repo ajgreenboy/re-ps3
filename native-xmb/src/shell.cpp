@@ -415,9 +415,7 @@ void Shell::resolveMediaColumns() {
         {"music:seg_dlna_scan",{"dlna-scan",Action::Unavailable,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_music",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
             "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
-        {"music:seg_playlist_mgmt",{"playlists",Action::Unavailable,"msg_playlists","tex_playlist","explore_category_music",
-            "Playlists is the console's playlist manager (playlist_plugin). This build's queue is the folder a track was "
-            "started from, so there is no stored playlist to list or edit."}},
+        {"music:seg_playlist_mgmt",{"playlists",Action::PlaylistFolder,"msg_playlists","tex_playlist","explore_category_music",""}},
         // Photo (category_photo.xml)
         {"photo:seg_dlna_scan",{"dlna-scan",Action::Unavailable,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_photo",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
@@ -425,9 +423,7 @@ void Shell::resolveMediaColumns() {
         {"photo:seg_hakoniwa",{"gallery",Action::Unavailable,"msg_photo_gallery","","file",
             "Photo Gallery is the console's own 3D gallery application (hakoniwa). This build's photo viewer is the "
             "full-screen slideshow Photo Library opens."}},
-        {"photo:seg_playlist_mgmt",{"playlists",Action::Unavailable,"msg_playlists","tex_playlist","explore_category_photo",
-            "Playlists is the console's playlist manager (playlist_plugin). This build's queue is the folder a photo was "
-            "started from, so there is no stored playlist to list or edit."}}};
+        {"photo:seg_playlist_mgmt",{"playlists",Action::PlaylistFolder,"msg_playlists","tex_playlist","explore_category_photo",""}}};
     // The queries a media column never draws at rest, each with the reason it is not a row here. A provider with
     // nothing attached produces no row on the console either, which is why these are skipped rather than listed.
     static const QHash<QString,QString> skipped{
@@ -1177,6 +1173,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     // build holds {id: milliseconds} with no path, so those entries are resolved or dropped here, once,
     // before anything can list or resume them.
     migrateResumePoints();
+    playlists_.open(dataDirectory_,profiles_.activeId());
     const QString sys="explore_category_sysconf",full="explore_plugin_full";
     const auto friendText=[&assets](const QString& id,const QString& fallback){return assets.text("explore_category_friend",id,fallback);};
     categories_={
@@ -1800,6 +1797,7 @@ void Shell::activate() {
         mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};photoRotation_=0;player_->stop();player_->setSource(QUrl{});
         resumePath_.clear();resumePending_=0;mediaDisplayPinned_=false;loading_=false;status_.clear();
         pages_.clear();resetOptions();clearMessage();
+        playlists_.open(dataDirectory_,id);
         applyPreferences();
         rebuildUsers();
         refreshContent();
@@ -1857,6 +1855,12 @@ void Shell::activate() {
     case Action::ChooseLibrary:emit requestLibrary();break;
     case Action::Folder:openDirectory(entry.value);break;
     case Action::File:openFile(entry);break;
+    case Action::PlaylistFolder:openPlaylists(categories_[category_].id);break;
+    case Action::CreatePlaylist:
+        if(playlists_.list(entry.value).size()>=PlaylistStore::MaximumPlaylists)showPlaylistResult(PlaylistStore::Result::TooManyPlaylists);
+        else emit requestPlaylistName(entry.value);
+        break;
+    case Action::Playlist:openPlaylist(entry.value);break;
     case Action::Launch:launch(entry);break;
     case Action::LaunchSteam:startSteamTracked(entry.value,entry.title);break;
     case Action::SteamFolder:openSteamFolder(entry.value);break;
@@ -2200,6 +2204,15 @@ void Shell::buildOptions() {
         addOption({"msg_info","Information"},OptionCommand::Information,"always-last");
         return;
     }
+    // ---- Playlists (playlist_plugin) ----------------------------------------------------------------------
+    // A stored playlist row opens like a folder and can be deleted; the files it lists are never touched.
+    if(entry.action==Action::Playlist) {
+        addOption({"msg_open","Open"},OptionCommand::Activate,"playlist");
+        addOption({"msg_del","Delete"},OptionCommand::PlaylistDelete,"playlist",true,
+                  tr("Deletes this playlist. The files it lists stay on disk."));
+        addOption({"msg_info","Information"},OptionCommand::Information,"always-last");
+        return;
+    }
     // ---- The Game-row class: the firmware's five rows, in its two groups -------------------------------
     // The settled 4.93 frame (frames/menu-options-open.png, re-measured this pass) is this menu: Sort By and
     // Group Content at ink 301-323 / 341-362 with a right-pointing chevron at x 1573..1583 on both and the
@@ -2254,7 +2267,21 @@ void Shell::buildOptions() {
     // msg_copy / msg_del. The firmware's per-item file commands, offered only for local content (A4's Copy
     // condition). This build has no copy or delete backend, so both rows are listed and cannot be chosen:
     // the panel's disabled-row rule puts the reason on screen instead of pretending the command exists.
-    if(optionIsLocalContent(entry)) {
+    // Inside a playlist, Delete takes the row out of the playlist (playlist_plugin's msg_help_move_delete_*
+    // pairs Delete with the playlist editor), so the file commands give way to it there.
+    const bool inPlaylist=!pages_.isEmpty() && !pages_.last().playlistId.isEmpty();
+    if(inPlaylist && entry.id.startsWith(QLatin1String("playlistitem:"))) {
+        addOption({"msg_del","Delete"},OptionCommand::PlaylistRemoveItem,"playlist-item",true,
+                  tr("Removes this item from the playlist. The file stays on disk."));
+    }
+    // explore_plugin's msg_add_to_playlist, on a local music or photo file: the two kinds a Playlists folder
+    // exists for (category_music.xml / category_photo.xml).
+    const QString mediaKind=categories_[category_].id;
+    if(!inPlaylist && entry.action==Action::File && optionIsLocalContent(entry) && (mediaKind=="music" || mediaKind=="photo")) {
+        addOption({"msg_add_to_playlist","Add to Playlist"},OptionCommand::AddToPlaylist,"local-media");
+        options_.last().submenu=true;
+    }
+    if(!inPlaylist && optionIsLocalContent(entry)) {
         addOption({"msg_copy","Copy"},OptionCommand::Copy,"local-content",false,
                   tr("This native build does not copy files yet."));
         addOption({"msg_del","Delete"},OptionCommand::Delete,"local-content",false,
@@ -2577,6 +2604,71 @@ void Shell::optionsActivate() {
     // destructive change to this build's own state, so it asks first with the firmware's two-button box:
     // buttons msg_ok/msg_cancel on Cross/Circle, snd_decide only when Cross accepts (TRACED 0x00341870).
     // The body is this build's wording - no firmware string covers removing a resume point.
+    // Add to Playlist: the level lists this user's playlists of the column's kind under playlist_plugin's
+    // "Select a playlist." (msg_select_playlist). With none, its one row says to create one first.
+    case OptionCommand::AddToPlaylist: {
+        const QString type=categories_[category_].id;
+        optionsParent_=options_;optionsNested_=true;
+        optionsTitle_=assets_.text("playlist_plugin","msg_select_playlist","Select a playlist.");
+        options_.clear();
+        const auto lists=playlists_.list(type);
+        for(int i=0;i<lists.size();++i) {
+            MenuOption row{lists[i].name,OptionCommand::AddToPlaylistTarget};
+            row.index=i;
+            row.note=playlistCountText(type,int(lists[i].items.size()));
+            options_.push_back(row);
+        }
+        if(lists.isEmpty()) {
+            MenuOption row{assets_.text("playlist_plugin","msg_create_new_playlist","Create New Playlist"),OptionCommand::AddToPlaylistTarget};
+            row.enabled=false;row.note=tr("There is no playlist yet. Create one in the Playlists folder first.");
+            options_.push_back(row);
+        }
+        optionsSelection_=0;
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        emit changed();
+        break;
+    }
+    case OptionCommand::AddToPlaylistTarget: {
+        const auto lists=playlists_.list(categories_[category_].id);
+        if(option.index<0 || option.index>=lists.size())break;
+        const auto target=lists[option.index];
+        resetOptions();
+        const auto result=playlists_.add(target.id,entry.value);
+        if(result==PlaylistStore::Result::Ok) {
+            qInfo().noquote()<<"playlists: added"<<QFileInfo(entry.value).fileName()<<"to"<<target.name;
+            interactionAudio_.play(InteractionAudio::Cue::Confirm);
+            refreshPlaylistPages();
+        } else showPlaylistResult(result);
+        emit changed();
+        break;
+    }
+    case OptionCommand::PlaylistDelete: {
+        resetOptions();
+        const QString id=entry.value,name=entry.title;
+        showConfirm(tr("Do you want to delete the playlist \"%1\"? The files it lists stay on disk.").arg(name),QString(),
+            [this,id,name]{
+                const auto result=playlists_.remove(id);
+                if(result==PlaylistStore::Result::Ok){qInfo().noquote()<<"playlists: deleted"<<name;refreshPlaylistPages();}
+                else showPlaylistResult(result);
+                emit changed();
+            });
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        emit changed();
+        break;
+    }
+    case OptionCommand::PlaylistRemoveItem: {
+        resetOptions();
+        const QString id=pages_.isEmpty()?QString{}:pages_.last().playlistId;
+        const int itemIndex=entry.id.mid(QStringLiteral("playlistitem:").size()).toInt();
+        const auto result=playlists_.removeItem(id,itemIndex);
+        if(result==PlaylistStore::Result::Ok) {
+            qInfo().noquote()<<"playlists: removed item"<<itemIndex<<"from"<<id;
+            interactionAudio_.play(InteractionAudio::Cue::Confirm);
+            refreshPlaylistPages();
+        } else showPlaylistResult(result);
+        emit changed();
+        break;
+    }
     case OptionCommand::RemoveResume: {
         resetOptions();
         const auto id=entry.id,title=entry.title;
@@ -4101,6 +4193,114 @@ void Shell::steamSwitchCancel(const QString& why) {
     steamSwitch_=SteamSwitchPrompt{};
 }
 void Shell::createUser(const QString& name){profiles_.create(name);}
+// ---- Playlists (playlist_plugin; playlists.h) -----------------------------------------------------------
+// The Playlists folder lists "Create New Playlist" first (category_music.xml seg_playlist_fixed_items:
+// msg_create_new_playlist, tex_add_playlist) and then the user's playlists of the column's kind, each with
+// playlist_plugin's own "%1 Tracks" / "%1 Images" count. A playlist opens as a page of its files in order, so
+// Play on one of them queues the whole playlist from there (openFile queues a page's File rows).
+QString Shell::playlistCountText(const QString& type,int count) const {
+    const bool photo=type=="photo";
+    const char* key=count==1?(photo?"msg_image_count_value":"msg_track_count_value"):(photo?"msg_images_count_value":"msg_tracks_count_value");
+    const QString fallback=count==1?(photo?"%1 Image":"%1 Track"):(photo?"%1 Images":"%1 Tracks");
+    return assets_.text("playlist_plugin",key,fallback).arg(count);
+}
+QVector<Entry> Shell::playlistsRows(const QString& type) {
+    const QString container=QStringLiteral("explore_category_")+type;
+    QVector<Entry> rows;
+    rows.push_back(item(QStringLiteral("playlist:new"),assets_.text("playlist_plugin","msg_create_new_playlist","Create New Playlist"),
+                        QStringLiteral("tex_add_playlist"),container,Action::CreatePlaylist,type));
+    for(const auto& playlist:playlists_.list(type)) {
+        auto row=item(QStringLiteral("playlist:")+playlist.id,playlist.name,QStringLiteral("tex_playlist"),container,Action::Playlist,playlist.id);
+        row.detail=playlistCountText(type,int(playlist.items.size()));
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+QVector<Entry> Shell::playlistRows(const QString& id) {
+    QVector<Entry> rows;
+    const auto* playlist=playlists_.find(id);
+    if(!playlist)return rows;
+    const bool photo=playlist->type=="photo";
+    for(int i=0;i<playlist->items.size();++i) {
+        const QString path=playlist->items[i];
+        auto row=item(QStringLiteral("playlistitem:%1").arg(i),QFileInfo(path).completeBaseName(),
+                      photo?QStringLiteral("photo_tex_album_pic"):QStringLiteral("music_tex_album_pic"),
+                      QStringLiteral("explore_plugin_full"),Action::File,path);
+        if(!QFileInfo::exists(path)) {
+            // A missing file stays listed with the reason, and is not queued (openFile queues File rows only).
+            row.action=Action::Unavailable;row.disabled=true;
+            row.detail=tr("Missing - this file is not on disk any more. Triangle removes it from the playlist.");
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+void Shell::openPlaylists(const QString& type) {
+    if(pages_.size()>=32){showMessage(QObject::tr("The maximum folder depth has been reached."),MessageKind::Page);return;}
+    if(!playlists_.writable()){showMessage(playlists_.error(),MessageKind::Page);return;}
+    Page page;page.title=assets_.text(QStringLiteral("explore_category_")+type,"msg_playlists","Playlists");
+    page.entries=playlistsRows(type);page.playlistsType=type;
+    qInfo().noquote()<<"playlists:"<<type<<"folder opened with"<<page.entries.size()-1<<"playlist(s)";
+    pages_.push_back(std::move(page));
+}
+void Shell::openPlaylist(const QString& id) {
+    const auto* playlist=playlists_.find(id);
+    if(!playlist)return;
+    if(pages_.size()>=32){showMessage(QObject::tr("The maximum folder depth has been reached."),MessageKind::Page);return;}
+    auto rows=playlistRows(id);
+    if(rows.isEmpty()) {
+        showMessage(assets_.text("playlist_plugin","msg_error_no_content","There are no content items."),MessageKind::Inline);
+        emit changed();
+        return;
+    }
+    Page page;page.title=playlist->name;page.entries=std::move(rows);page.playlistId=id;
+    qInfo().noquote()<<"playlists: opened"<<playlist->name<<"with"<<page.entries.size()<<"item(s)";
+    pages_.push_back(std::move(page));
+}
+// Rebuilds every open playlist page in place after a change, keeping each page's selection in range. A page
+// whose playlist was deleted, or emptied, closes along with anything above it.
+void Shell::refreshPlaylistPages() {
+    for(int p=0;p<pages_.size();++p) {
+        auto& page=pages_[p];
+        if(!page.playlistsType.isEmpty())page.entries=playlistsRows(page.playlistsType);
+        else if(!page.playlistId.isEmpty()) {
+            if(!playlists_.find(page.playlistId)){pages_.resize(p);break;}
+            page.entries=playlistRows(page.playlistId);
+            if(page.entries.isEmpty()){pages_.resize(p);break;}
+        } else continue;
+        page.selection=std::clamp(page.selection,0,std::max(0,int(page.entries.size())-1));
+    }
+}
+void Shell::createPlaylist(const QString& type,const QString& name) {
+    QString id;
+    const auto result=playlists_.create(type,name,&id);
+    if(result!=PlaylistStore::Result::Ok){showPlaylistResult(result);emit changed();return;}
+    qInfo().noquote()<<"playlists: created"<<type<<"playlist"<<name.trimmed();
+    refreshPlaylistPages();
+    // Focus the new playlist on the open Playlists page.
+    if(!pages_.isEmpty() && pages_.last().playlistsType==type)
+        for(int i=0;i<pages_.last().entries.size();++i)if(pages_.last().entries[i].value==id){pages_.last().selection=i;break;}
+    interactionAudio_.play(InteractionAudio::Cue::Confirm);
+    emit changed();
+}
+void Shell::showPlaylistResult(PlaylistStore::Result result) {
+    QString text;
+    switch(result) {
+    case PlaylistStore::Result::Ok:return;
+    case PlaylistStore::Result::DuplicateName:
+        text=assets_.text("playlist_plugin","msg_error_same_name_cannot_use","This name is already in use.\nEnter another name.");break;
+    case PlaylistStore::Result::TooManyPlaylists:
+        text=assets_.text("playlist_plugin","msg_error_create_playlist_over","The maximum number of playlists that can be created has been reached.");break;
+    case PlaylistStore::Result::TooManyItems:
+        text=assets_.text("playlist_plugin","msg_error_add_content_over","The maximum number of content items that can be added has been reached.");break;
+    case PlaylistStore::Result::AlreadyListed:text=tr("This item is already in the playlist.");break;
+    case PlaylistStore::Result::InvalidName:text=tr("Enter a playlist name of 1 to 64 characters.");break;
+    case PlaylistStore::Result::NotFound:text=tr("That playlist or item no longer exists.");break;
+    case PlaylistStore::Result::WriteFailed:text=playlists_.error();break;
+    }
+    interactionAudio_.play(InteractionAudio::Cue::Error);
+    showMessage(text,MessageKind::Box);
+}
 void Shell::renameUser(const QString& id,const QString& name) {
     // FUN_0008f5ec: a name another user already has raises msg_error_other_username_create_pls (TRACED); the
     // case-folded comparison is Profiles' own rule.
@@ -4117,6 +4317,7 @@ void Shell::renameUser(const QString& id,const QString& name) {
 void Shell::deleteUser(const QString& id) {
     // The user record first, then that user's settings; a refused record leaves the settings alone.
     if(!profiles_.remove(id))return;
+    if(!PlaylistStore::forget(dataDirectory_,id))qWarning().noquote()<<"profiles: deleted"<<id<<"but its playlists file stays";
     if(!preferences_.forgetProfile(id))
         qWarning().noquote()<<"profiles: deleted"<<id<<"but its settings stay:"<<preferences_.error();
     else qInfo().noquote()<<"profiles: deleted"<<id<<"and its settings";

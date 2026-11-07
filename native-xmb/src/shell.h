@@ -5,6 +5,7 @@
 #include "playback_queue.h"
 #include "interaction_audio.h"
 #include "profiles.h"
+#include "playlists.h"
 #include "steam_friends.h"
 #include "content_registry.h"
 #include "jellyfin_client.h"
@@ -60,7 +61,10 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     GroupFolder,
     // Users > Turn Off System (category_user.xml's first query, #seg_poweroff, class xmlpoweroff): opens the same
     // "Turn Off the System?" confirmation the PS menu reaches, so the shutdown path stays one implementation.
-    TurnOffSystem };
+    TurnOffSystem,
+    // Music/Photo > Playlists (category_music.xml / category_photo.xml #seg_playlist_mgmt, playlist_plugin):
+    // the folder itself, its Create New Playlist row, and one stored playlist (value = its id).
+    PlaylistFolder, CreatePlaylist, Playlist };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -123,6 +127,10 @@ enum class OptionCommand { Activate, Information,
     // offered only where optionGroupable() holds. They rebuild the open page's row vector; the page keeps the
     // ungrouped rows so All is reversible and no rescan is needed.
     GroupMenu, GroupByTitle, GroupAll,
+    // Playlists: "Add to Playlist" (msg_add_to_playlist) on a local music/photo row opens a level of the
+    // user's playlists of that kind (msg_select_playlist); a playlist row offers Delete; a row inside a
+    // playlist offers Delete, which takes it out of the playlist and leaves the file alone.
+    AddToPlaylist, AddToPlaylistTarget, PlaylistDelete, PlaylistRemoveItem,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
     // Information with two or more users, Information alone with one. Delete runs the traced two-step ask.
     UserLogOut, UserAutoLogin, UserDelete };
@@ -368,6 +376,8 @@ public:
     // msg_error_other_username_create_pls; delete also drops that user's settings (forgetProfile).
     void renameUser(const QString& id,const QString& name);
     void deleteUser(const QString& id);
+    // Playlists (playlists.h): create from the keyboard's name, with playlist_plugin's own error strings.
+    void createPlaylist(const QString& type,const QString& name);
     int userCount() const { return int(profiles_.profiles().size()); }
     // PS button (DualSense/DualShock over HID, keyboard substitute): a tap shows the controller indicator
     // and returns focus to the XMB; a hold opens the system menu the console shows (captured in RPCS3:
@@ -437,6 +447,8 @@ signals:
     void requestNewUser();
     // Information on a user row: the name page in rename mode, prefilled with the current name.
     void requestRenameUser(QString id,QString name);
+    // Create New Playlist: the view asks for the name with the XMB keyboard, then calls createPlaylist().
+    void requestPlaylistName(QString type);
     void requestImportApps();
     void requestArtworkSettings();
     void requestJellyfinSignIn(QUrl server);
@@ -450,6 +462,7 @@ private:
     MediaLibrary library_;
     InteractionAudio interactionAudio_;
     Profiles profiles_;
+    PlaylistStore playlists_;   // the active user's playlists (playlists.h); reopened on a user switch
     QString dataDirectory_,steamRoot_,steamId_;
     QVector<ContentApp> contentApps_;
     JellyfinClient jellyfin_;
@@ -566,7 +579,7 @@ private:
     int columnSink_=0;
     // `grouped` is a page the item menu's Group Content level rebuilt into letter folders: `groupedSource` keeps
     // the ungrouped rows so All can put them back without a rescan, and the folders' rows are the same entries.
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step
@@ -577,6 +590,13 @@ private:
     QVector<MenuOption> options_,optionsParent_;
     QString optionsTitle_;
     void buildOptions();
+    void openPlaylists(const QString& type);
+    void openPlaylist(const QString& id);
+    void refreshPlaylistPages();
+    QVector<Entry> playlistsRows(const QString& type);
+    QVector<Entry> playlistRows(const QString& id);
+    void showPlaylistResult(PlaylistStore::Result result);
+    QString playlistCountText(const QString& type,int count) const;
     // Item-menu rows and labels. Every title comes from explore_plugin_full's English table (A3); the row's
     // labelKey and condition travel with it so the panel log and the options dump can show what was built
     // and why (the same evidence path XMB_DUMP_ENTRIES already writes for the catalogue and folder pages).
