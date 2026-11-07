@@ -553,6 +553,10 @@ const QImage& Assets::loadImage(const QString& container,const QString& name,Ima
         if(image.isNull())throw std::runtime_error("Image decoder returned no pixels");
         ++decodedImages_;
         qInfo().noquote()<<"assets: decoded"<<key<<image.size();
+        // Local diagnosis: XMB_TEXTURE_DUMP=<dir> writes every decoded RCO image there as <container>__<name>.png,
+        // so a texture's own margins and alpha can be inspected. The files are firmware assets: keep them local.
+        if(static const QString dumpDir=qEnvironmentVariable("XMB_TEXTURE_DUMP");!dumpDir.isEmpty())
+            image.save(dumpDir+"/"+container+"__"+name+".png");
     } catch(const std::exception& e) { qWarning().noquote()<<"assets:"<<key<<e.what(); }
     if(hit)*hit=hitFor(container,name);
     return images_.insert_or_assign(key,std::move(image)).first->second;
