@@ -1752,15 +1752,17 @@ void View::drawScene(QPainter& p) {
                 // label (frames/menu-options-open.png: 13x14 at x 1517..1529, y 345..358, 14 px after the ink of
                 // "Group Content"). It is the firmware's gaiji U+F882 in msg_folder_class_with_icon, which the
                 // text path would draw as a missing-glyph box, so the shell names the row with msg_folder_class and
-                // the badge is drawn here: fill #BF4EA6, a #32172A inner rect and a lighter lower band.
+                // the badge is drawn here. The badge is that gaiji itself, from vsh's image font (imageFontGlyph: a 26 x 23 dark disc with
+                // the pink Square, whose square ink sits at glyph columns 7..19, rows 5..17). It is drawn at the
+                // label's 23 px, i.e. 1:1, placed so the square lands on the measured 1517..1529 / y 346..358.
                 QFont badgeFont(shell_.fontFamily());badgeFont.setPixelSize(23);
                 const double labelRight=labelX+QFontMetrics(badgeFont).horizontalAdvance(title);
-                const QRectF badge(labelRight+14.,y-7.,13.,14.);
-                p.save();p.setPen(Qt::NoPen);
-                p.setBrush(QColor(191,78,166));p.drawRoundedRect(badge,2.,2.);
-                p.setBrush(QColor(50,23,42));p.drawRect(badge.adjusted(3.,3.,-3.,-3.));
-                p.setBrush(QColor(127,53,109));p.drawRect(QRectF(badge.left()+3.,badge.bottom()-4.,badge.width()-6.,2.));
-                p.restore();
+                const QImage glyph=imageFontGlyph(assets_.root(),0xF882);
+                if(!glyph.isNull()) {
+                    p.save();p.setOpacity(enabled?1.:.45);
+                    p.drawImage(QRectF(labelRight+13.-7.,y-6.5-5.,glyph.width(),glyph.height()),glyph);
+                    p.restore();
+                }
             }
             if(firmwareBand && submenus && submenus->value(i,false)) {
                 // The firmware's submenu row carries a right-pointing chevron: an 11x10 px triangle,
