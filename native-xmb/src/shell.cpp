@@ -2107,6 +2107,22 @@ bool Shell::optionPageSortable() const {
 static bool isGameTitleRow(const Entry& entry) {
     return entry.action==Action::Launch || entry.action==Action::LaunchSteam || entry.action==Action::LaunchApp;
 }
+// The firmware decides the guide per item class (explore_plugin: each class's hint getter returns
+// msg_option_with_icon or 0; 63 getters call it). Which rows answer yes was measured on the RPCS3 rig, one
+// grab 2 s after every focus arrival across all ten columns (FIDELITY-ROOT-BAR 6.1 update 3):
+//   yes  the signed-in user row (Users); Corrupted Data (Game, a game-data content item)
+//   no   every utility/application row: PlayStation Store, Saved Data Utility (PS3, minis/PSP), Memory Card
+//        Utility, Internet Browser, Internet Search, What's New, Trophy Collection, PlayStation Plus, Video
+//        Editor & Uploader, Search for Media Servers, Playlists, Photo Gallery, and the Settings rows.
+// Here: any user row (the rig has one user, so other users are INFERRED to share its class) and a game title
+// row (INFERRED: the game-content class family Corrupted Data belongs to; the rig has no installed title).
+// Media files are not included: the rig has none, so their class is unmeasured.
+bool Shell::focusedRowHasOptionHint() const {
+    if(entries().isEmpty())return false;
+    const auto& entry=entries()[std::clamp(selection(),0,int(entries().size())-1)];
+    if(entry.disabled)return false;
+    return entry.action==Action::SelectUser || isGameTitleRow(entry);
+}
 bool Shell::optionGroupable() const {
     // Group Content needs a list of titled rows and nothing else: this build groups by first letter, which every
     // ordinary list can do. A form (the sign-in page), a provider page (Steam store, Jellyfin, downloads) and a

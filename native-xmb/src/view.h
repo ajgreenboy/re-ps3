@@ -201,6 +201,10 @@ private:
     NotificationShown notificationShown_;
     bool notificationTextureWarned_=false;
     void drawNotification(QPainter& painter,double amount);
+    // The "Triangle : Options" operation guide (audit/FIDELITY-ROOT-BAR.md 6.1 update 3): its opacity at this
+    // focus time, 0 outside the traced 1000 ms delay / 200 ms fade / 3000+200 ms life window, and its draw.
+    double optionHintAmount() const;
+    void drawOptionHint(QPainter& painter,double amount);
     // The active sidecar subtitle cue (Shell::subtitleCueText): centred in the lower third, above the
     // media controls, drawn through the GL glyph atlas with a dark outline so it stays legible over a
     // bright frame. audit/SUBTITLES.md.

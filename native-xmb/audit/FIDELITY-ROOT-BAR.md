@@ -540,3 +540,59 @@ RPCS3 rig (interpreter), Game column; local data in `padwind-2026-11-05/opthint`
 - Which item classes return the hint. Known: Corrupted Data, a user row, and probably Saved Data Utility (PS3). Not
   on Settings rows or game-01-down's row.
 - The plate's texture and layout. The plate spans about (1663,955)-(1820,995).
+
+### 6.1 update 3, 2026-11-07: the hint plate, traced end to end and drawn
+
+**The path (TRACED).**
+- explore_plugin `FUN_0004d5b4` (on focus arrival) asks the focused item for its hint string and passes it to
+  `xmb_plugin`'s `XMB2` interface slot +0x58. `FUN_0004d358` (on focus loss) passes 0. The interface is
+  `FUN_0001f72c` = `GetInterface("xmb_plugin", 'XMB2')`.
+- xmb_plugin registers `XMB2` at 0x5420 with table 0x1a640. Slot +0x58 is OPD 0x1b8d4, which runs 0x5450 and then
+  `FUN_000099e4`.
+- `FUN_000099e4` destroys any shown guide at once and cancels timer 0x138d on `page_xmb_indicator`. With a string,
+  it re-arms the timer for **1000 ms** (DATA 0x18014 = 0x447a0000).
+- The callback `FUN_00009b24` creates the guide through vshcommon `F55812AE` (vsh 0x346294) with **style 4**, then
+  gives it a **3000 ms** life through vshcommon `F1918912` (DATA 0x18018 = 0x453b8000).
+- vsh `FUN_00345d24` builds the guide on system_plugin `page_notification`:
+  - `tex_operation_guide_base_shadow` (50x50) is drawn under `tex_operation_guide_base` (48x48).
+  - Then the text object.
+  - The style row sits at 0x6fac4c + 4*0x24.
+- The show, `0x346324`, fades in over **200 ms** (DATA 0x68cc90) and schedules the hide at life + 200 ms. The hide,
+  `0x345b88`, fades out over **200 ms** (DATA 0x68cc70).
+- Timeline from focus arrival: 0 until 1000 ms, fade-in to 1200, full to 4200, fade-out to 4400. The console burst
+  (update 2) gave 1063..1230 and 4247..4410 after the key, which includes the rig's ~60 ms input latency.
+- **Layout ids.** The style row's ids resolve through `vsh FUN_0033fbb8` into `dev_flash/vsh/etc/layout_grid_table_1080.txt`
+  (0-based line = id). Style 4's e7a/e7b give (860, -459) from the screen centre, which is (1820, 999), the
+  plate's right/bottom anchor.
+
+**Which items show it (measured).** On the RPCS3 rig I took one grab 2 s after every focus arrival, across all ten
+columns (`padwind-2026-11-05/hintwalk`, plan `plans/hintwalk.txt`).
+- **Shown:** the signed-in user row and Corrupted Data.
+- **Not shown:**
+  - **Game:** PlayStation Store, Saved Data Utility (PS3), Saved Data Utility (minis/PSP), Memory Card Utility.
+  - **Network:** Internet Browser, Internet Search.
+  - **PSN:** What's New, Trophy Collection, PlayStation Plus, PlayStation Store.
+  - **Video:** Video Editor & Uploader.
+  - **Music:** Search for Media Servers, Playlists.
+  - **Photo:** Photo Gallery, Playlists.
+  - **Settings:** Game, Video, Chat and Theme Settings.
+
+  This corrects update 2's "probably Saved Data Utility": it shows nothing. Friends had no rows. The rig has no
+  media files and no installed title.
+
+**Native (`Shell::focusedRowHasOptionHint`, `View::optionHintAmount`/`drawOptionHint`).**
+- It shows on any user row (INFERRED: the rig has one user) and on a game title row (INFERRED: the game-content
+  class Corrupted Data belongs to). Media files are left out because their class is unmeasured.
+- The timeline above runs on the view's focus clock, and the plate is hidden under the PS menu, the item menu,
+  media, messages and the OSK.
+- **Measured against `nav/users-column.png`.**
+  - **Plate:** x 1654..1815, y 954..994, identical down the x 1800 column.
+  - **Text ink:** 1702..1792 (console 1702..1793).
+  - **Green triangle:** 1678..1691 x 968..981 (console 1678..1691 x 969..981).
+- A live burst gives fade-in 1022->1201 ms, fade-out 4222->4400 ms. Create New User and Settings rows stay clean.
+  Gate 19.58 dB, 6/6.
+
+**Not traced: the Triangle gaiji (U+F883).** No dev_flash font maps it. I checked the cmaps of every
+`SCE-PS3-*.TTF` and `SONY-CC/*.ttf`. paf draws it from a source not yet found. The native composes it from the
+console's pixels instead: a 20 px disc (3,4,3) with a light rim, and `tex_triangle` tinted (1,215,96). The fade
+curve is drawn linear (INFERRED).
