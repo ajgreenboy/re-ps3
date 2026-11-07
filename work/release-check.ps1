@@ -399,9 +399,17 @@ try {
             if ($cited.Count -ge 500) { break }
         }
         $deadHashes = @()
-        foreach ($hash in $cited) {
-            & git cat-file -e ("{0}^{{commit}}" -f $hash) 2>$null
-            if ($LASTEXITCODE -ne 0) { $deadHashes += $hash }
+        # Windows PowerShell turns a native command's stderr into a terminating error under 'Stop', so a
+        # missing commit would abort the run instead of being reported. Relax it for the probe only.
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            foreach ($hash in $cited) {
+                & git cat-file -e ("{0}^{{commit}}" -f $hash) 2>$null
+                if ($LASTEXITCODE -ne 0) { $deadHashes += $hash }
+            }
+        } finally {
+            $ErrorActionPreference = $previousPreference
         }
         if ($deadHashes.Count -eq 0) {
             Add-Check 'stale' 'PASS' ("{0} cited commit id(s) across {1} documents resolve in this repository" -f $cited.Count, $docs.Count)
