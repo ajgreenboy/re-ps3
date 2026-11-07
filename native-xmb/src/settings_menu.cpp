@@ -341,10 +341,11 @@ const QVector<RowSpec>* firmwareRows(const QString& id) {
     static const QVector<RowSpec> power{
         {"idle","msg_system_auto_power_off","msg_system_auto_power_off_explanation",Action::SettingChoices,"power/idleMinutes",nullptr,"System Auto-Off"},
         {"controller","msg_controller_auto_power_off","msg_controller_auto_power_off_explanation",Action::Information,nullptr,nullptr,"Controller Auto-Off"}};
+    // Chat has one row on 4.93: sysconf_plugin's Chat builder (0x760ec-0x76120) adds only msg_av_chat_start. Audio Device
+    // Settings and Camera Device Settings are Accessory rows (the Accessory builder, 0x8ef9c-0x8f004, indices 5 and 6),
+    // which the Accessory page already lists (pd_camera, pd_audio_setting); the console's Chat frame shows the one row.
     static const QVector<RowSpec> chat{
-        {"av_chat_start","msg_av_chat_start","msg_av_chat_start_explanation",Action::Information,nullptr,nullptr,"Voice/Video Chat Start"},
-        {"audio_device_setting","msg_audio_device_setting","msg_audio_device_setting_explanation",Action::Information,nullptr,nullptr,"Audio Device Settings"},
-        {"camera_device_setting","msg_camera_device_setting","msg_camera_device_setting_explanation",Action::Information,nullptr,nullptr,"Camera Device Settings"}};
+        {"av_chat_start","msg_av_chat_start","msg_av_chat_start_explanation",Action::Information,nullptr,nullptr,"Voice/Video Chat Start"}};
     if(id=="theme")return &theme;
     if(id=="date")return &date;
     if(id=="system")return &system;
@@ -1603,11 +1604,11 @@ namespace {
 // The console inventory this report is graded against (SETTINGS-COVERAGE 2.1/2.2): one entry per page, in
 // the column's order, with the number of firmware rows the row matrix counts for it. "column" is the
 // Settings column's 16 page entries; "network-status-list" is the level-2 table behind the status row.
-// 16 + 114 + 13 = 143.
+// 16 + 112 + 13 = 141.
 struct InventoryPage { const char* id; int rows; int level; };
 const QVector<InventoryPage>& settingsInventory() {
     static const QVector<InventoryPage> table{
-        {"column",16,0},{"update",2,1},{"game",6,1},{"video",19,1},{"music",5,1},{"chat",3,1},{"system",26,1},
+        {"column",16,0},{"update",2,1},{"game",6,1},{"video",19,1},{"music",5,1},{"chat",1,1},{"system",26,1},
         {"theme",4,1},{"date",6,1},{"power",2,1},{"device",14,1},{"print",2,1},{"display",6,1},{"sound",3,1},
         {"security",6,1},{"remote",5,1},{"network",5,1},{"network-status-list",13,2}};
     return table;
@@ -1933,7 +1934,7 @@ QJsonObject settingsReport(Assets& assets,Preferences& preferences,const QString
     }
     report["pages"]=pages;
 
-    // ---- the inventory's own totals: 16 column entries + 114 page rows + 13 status rows = 143 --------
+    // ---- the inventory's own totals: 16 column entries + 112 page rows + 13 status rows = 141 --------
     int inventoryTotal=0;
     QJsonArray inventoryPages;
     for(const auto& page:settingsInventory()) {

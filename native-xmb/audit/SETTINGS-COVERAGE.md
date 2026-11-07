@@ -1208,6 +1208,9 @@ captures (`rpcs3-ref-2026-10-28/settings/page-*-settings.png`) by a read-only su
   registry defaults. This build shows only real readings.
 - **Different machine state.** Date/Time formats and zone, the screensaver, System Name, and Deep Color reflect
   this computer's settings, not the captured console's.
-- **Native-only rows.** Sound's Host Volume and Host Mute are this build's own. Chat's Audio/Camera Device
-  Settings and Music's Repeat are not on the console's frames; those firmware rows are probably conditional
-  (not traced).
+- **Native-only rows.** Sound's Host Volume and Host Mute and Music's Repeat (with Shuffle and Volume) are this
+  build's own working media rows.
+- **Chat, fixed (traced).** sysconf_plugin's Chat builder (0x760ec..0x76120) adds only Voice/Video Chat Start. Audio
+  Device Settings and Camera Device Settings are Accessory rows (Accessory builder 0x8ef9c..0x8f004, indices 5 and 6),
+  so the native's Chat page drops them; the Accessory page already has both. The inventory's Chat count is now 1
+  (totals 16 + 112 + 13 = 141).
