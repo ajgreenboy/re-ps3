@@ -2165,14 +2165,18 @@ void View::drawScene(QPainter& p) {
                 // the password as dots). Every other row leaves Entry::fieldValue empty, so this falls through to
                 // Shell::valueText() exactly as before and no existing frame changes.
                 auto value=active?(entry.fieldValue.isEmpty()?shell_.valueText(entry):entry.fieldValue):QString{};
-                // The signed-in user is not a value: the console marks it with the firmware's tex_indi_Me diamond just
-                // left of the avatar (col-users-r00: centre x510 against the 50 px icon at 565), and draws nothing in
-                // the value column, so the shell's "current" dot moves there.
+                // The signed-in user is not a value: the console marks it with the firmware's tex_indi_Me diamond left of
+                // the avatar and draws nothing in the value column, so the shell's "current" dot moves there. The diamond
+                // grows and moves out with the row's focus, measured on two console frames: unfocused 11 px, centre 54.5
+                // left of the icon centre (rpcs3-ref nav/users-column-up.png: 510 against 564.5); focused 26 px, 130.5
+                // left (nav/users-column.png: 434.5). Interpolated with the same focus the avatar scales by.
                 const bool activeUser=entry.action==Action::SelectUser && value==QString(QChar(0x25cf));
                 if(activeUser) {
                     value.clear();
+                    // The diamond's ink fills 21/26 of the box drawItemGlyph fits it to, so the box is the measured ink x 26/21.
+                    const double mark=(11.+15.*focus)*26./21.,markX=iconX-(54.5+76.*focus);
                     drawItemGlyph(p,QStringLiteral("explore_plugin_full"),QStringLiteral("tex_indi_Me"),
-                                  {iconX-size/2-35,y-5,10,10},p.opacity());
+                                  {markX-mark/2,y-mark/2,mark,mark},p.opacity());
                 }
                 QFont labelFont(shell_.fontFamily());labelFont.setPixelSize(32);
                 // Elision keeps the firmware's shape (audit/TEXT-RENDERER.md section 4): PAF draws a character
