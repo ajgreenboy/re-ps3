@@ -86,8 +86,7 @@ must stay at 19.58 dB, 6/6.
 
 ## Open, in suggested order
 
-1. **Dust on scroll.** Compare the dust's response to a list scroll against a console burst (cburst over the item
-   column, `speed.ts`-style tracking).
+1. **Dust on scroll.** Done: same direction and size on both (PARTICLES.md, "The dust's response to a scroll"; `work/dust-flow.ts`).
 2. **Icon-wind tick sampling.** Done in 6054fdf: ticks sample the icon positions one tick late, by interpolation.
 3. **Grid decay.** The writer of the flow grid's 1-per-tick decay is untraced. The native models the measured rate.
 4. **Non-Settings page opens.** Do they load a plugin? The last run landed on "Corrupted Data". `explore_plugin` is
