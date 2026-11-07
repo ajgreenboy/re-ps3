@@ -1540,11 +1540,16 @@ old icon dropped 10 px in the key frame, and the first native grid had a saturat
 every icon (`view.cpp`, the category row).
 
 **Open.**
-- The old icon's first-tick drop on RIGHT reads larger than the console's (-105 against <= ~67 after decay bounds).
-  A per-widget log shows the ease is the same: the 10 px lift on the 200 ms mode-5 channel. The native's per-tick steps
-  are 2.77, 1.13, 1.58, 0.95 px..., and 2.77 px writes 74. The gap is sampling: the 60 Hz tick reads whichever frame
-  the ~144 fps renderer drew last, so a tick can take one and a half or two frames' movement. Sampling the widgets at
-  the tick's own time would remove it.
+- **Fixed, same day: tick sampling.** The old icon's first-tick drop on RIGHT read larger than the console's (-105
+  against <= ~67). A per-widget log showed the ease was the same, but the 60 Hz tick read whichever frame the
+  ~144 fps renderer drew last, so a tick could carry one and a half or two frames' movement (steps 2.77, 1.13, 1.58,
+  0.95 px).
+  - `trackWidgets` now takes the frame's render time and keeps the last eight sets. Each tick samples them by
+    interpolation one tick late (a 17 ms lag).
+  - Linear extrapolation past the newest frame was tried first. It overshot the decelerating ease's first step by
+    ~60%.
+  - Now the category moves write +-36 / +-33 / +-45, against the console's +-53 / +-53 / +-48, where they were +-105..122
+    before. A cell keeps its last writer, so the dump peaks also depend on the dump timing.
 - The dust's response to a scroll is not yet compared against a console burst.
 - The decay's writer is untraced.
 
