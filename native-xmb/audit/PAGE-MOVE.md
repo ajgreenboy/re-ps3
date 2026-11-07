@@ -2245,5 +2245,5 @@ it assumes the guest clock runs at wall speed. The Music and Photo Playlists ope
 
 So an ordinary list page (a playlist folder) is built by the resident explore_plugin with no PRX load and no
 job-chain floor. The native's rule, which holds the page move only for sysconf pages
-(`Shell::topPageLoadsPlugin`), is right for those pages. The native lists no Saved Data Utility page, so the
-`x3_mdimp12` load has nothing to attach to.
+(`Shell::topPageLoadsPlugin`), is right for those pages. The native lists the Saved Data Utility (PS3) row but opens no
+page from it (`Action::Unavailable`), so the `x3_mdimp12` load has nothing to attach to.
