@@ -1554,3 +1554,24 @@ every icon (`view.cpp`, the category row).
 - The decay's writer is untraced.
 
 Gate 19.58 dB, 6/6, unchanged (pinned captures take no simulation steps).
+
+### The dust's response to a scroll, measured (2026-11-06)
+
+- **Captures.** The console burst is `dustscroll/console`: RPCS3 LLVM capture config, Settings column, a 900 x 900
+  crop at (200, 100), 120 fps, DOWN at 1000 ms, DOWN at 1600 ms and UP at 3000 ms. The native burst uses its own
+  `burst=` verb (150 frames, 33 ms): refcap3's screen copy of a fullscreen GL window returned a stale frame.
+- **Tracker.** `work/dust-flow.ts` pairs specks of 1..12 px with their mutual nearest neighbour 100 ms later, in the
+  same screen region on both. It splits them into the item-icon strip (x 480..680) and the rest.
+
+| | console strip vy (px/s, + down) | native strip vy |
+|---|---|---|
+| before the scroll | +3.3 .. +4.1 | -2 (native's own drift) |
+| first 250 ms after DOWN | -1.3, then -4.9 / -3.3 / -6.2 with the second DOWN | -7.2, then -5.0 |
+| after UP | +1.1, +0.8 | +0.1, -2.6 |
+
+- **Both push the dust in the strip.** The push is upward on a DOWN scroll, at a few px/s. Away from the strip
+  nothing changes.
+- **Ambient drift.** It differs between runs (outside the strip vx +3 on the console, -5 on the native). That is the
+  chaotic cloth and emitter flow documented above, so the two do not compare frame for frame.
+- **Key timing.** The native's second DOWN and its UP came ~0.6 / 1.2 s later than the console's: its script engine
+  adds 300 ms per token.
