@@ -1158,6 +1158,51 @@ void View::drawNotification(QPainter& p,double amount) {
 //     (0x345B88) fades it out over 200 ms (DATA 0x68CC70).
 // So, from the focus arrival: nothing until 1000 ms, a 200 ms fade-in, full until 4200 ms, a 200 ms fade-out.
 // The fade curve is drawn linear (INFERRED; the console burst's steps are only slightly accelerating).
+// vsh's image font, the source of the firmware's gaiji (vsh.elf names /dev_flash/vsh/resource/imagefont.bin and
+// logs "IMAGEFONT &#x%04x not registered."). Layout, read from the file: u16 version 0x0100, u16 count, u32 n (the
+// data region's end), the zlib data from 8, then `count` 16-byte entries from n: u32 offset, u16 packed, u16 raw,
+// u16 code, u16 w, u16 h, u16 flags. An entry's stream inflates to an 18-byte header and a 256-entry RGBA palette;
+// the header's u16 at 8 / 10 is the (offset, packed size) of the glyph's w x h 8-bit index stream. The last entry
+// ends exactly at the file's end. Cached per code; a null image when the file or the code is absent.
+static QImage imageFontGlyph(const QString& flashRoot,ushort code) {
+    static QHash<ushort,QImage> glyphs;static QByteArray file;static bool loaded=false;
+    if(const auto hit=glyphs.constFind(code);hit!=glyphs.constEnd())return *hit;
+    if(!loaded) {
+        loaded=true;
+        QFile f(flashRoot+"/vsh/resource/imagefont.bin");
+        if(f.open(QIODevice::ReadOnly))file=f.readAll();
+        else qWarning().noquote()<<"imagefont: cannot read"<<f.fileName();
+    }
+    const auto u16=[](const QByteArray& b,qsizetype p){return quint16((uchar(b[p])<<8)|uchar(b[p+1]));};
+    const auto u32=[&](const QByteArray& b,qsizetype p){return (quint32(u16(b,p))<<16)|u16(b,p+2);};
+    const auto unzip=[](const QByteArray& b,qsizetype p,qsizetype packed,quint32 expanded) {
+        if(p<0 || packed<=0 || p+packed>b.size())return QByteArray();
+        QByteArray framed(4,'\0');framed[0]=char(expanded>>24);framed[1]=char(expanded>>16);framed[2]=char(expanded>>8);
+        framed[3]=char(expanded);framed+=b.mid(p,packed);
+        return qUncompress(framed);
+    };
+    QImage glyph;
+    if(file.size()>=8) {
+        const quint32 n=u32(file,4);
+        for(qsizetype o=n;o+16<=file.size();o+=16) {
+            if(u16(file,o+8)!=code)continue;
+            const int w=u16(file,o+10),h=u16(file,o+12);
+            const QByteArray palette=unzip(file,u32(file,o),u16(file,o+4),u16(file,o+6));
+            if(palette.size()<18+256*4)break;
+            const QByteArray index=unzip(file,u16(palette,8),u16(palette,10),quint32(w*h));
+            if(index.size()!=w*h)break;
+            glyph=QImage(w,h,QImage::Format_ARGB32);
+            for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
+                const int p=18+uchar(index[y*w+x])*4;
+                glyph.setPixel(x,y,qRgba(uchar(palette[p]),uchar(palette[p+1]),uchar(palette[p+2]),uchar(palette[p+3])));
+            }
+            break;
+        }
+    }
+    if(glyph.isNull())qWarning().noquote()<<"imagefont: no glyph"<<QString::number(code,16);
+    glyphs.insert(code,glyph);
+    return glyph;
+}
 double View::optionHintAmount() const {
     if(!shell_.focusedRowHasOptionHint())return 0.;
     const double t=double(focusTime());
@@ -1175,40 +1220,31 @@ double View::optionHintAmount() const {
 // 4-5 px inside it. The plate grows to the left with the text.
 void View::drawOptionHint(QPainter& p,double amount) {
     QString text=assets_.text("explore_plugin_full","msg_option_with_icon",QString(QChar(0xF883))+": Options");
-    // The string's first character is the firmware's Triangle gaiji (U+F883). No dev_flash font maps it (the
-    // SCE-PS3-*.TTF and SONY-CC cmaps were checked), so paf draws it from a source this build has not found.
-    // Its place is taken by a composite matched to the console's pixels: a 20 px dark disc (3,4,3) with a
-    // light 1 px rim centred 17 px left of the text ink, and system_plugin's own tex_triangle tinted to the
-    // measured green (1,215,96) with its ink at 14 x 13 px (x 1678..1691, y 969..981 on the console).
-    const bool gaiji=!text.isEmpty() && text.front().unicode()>=0xE000 && text.front().unicode()<=0xF8FF;
+    // The string's first character is the firmware's Triangle gaiji (U+F883), drawn from vsh's image font: a
+    // 26 x 23 RGBA glyph (dark disc, pale rim, hollow green triangle). The console draws it at the text's
+    // 21 px height (rim rows y 966 / 986), centred 17 px left of the text ink.
+    const ushort gaijiCode=text.isEmpty()?0:text.front().unicode();
+    const bool gaiji=gaijiCode>=0xE000 && gaijiCode<=0xF8FF;
     if(gaiji)text=text.mid(1);
     const int size=21;
     QFont font(shell_.fontFamily());font.setPixelSize(size);
     const double advance=QFontMetricsF(font).horizontalAdvance(text);
-    const double plateRight=1816.,top=954.,height=41.,centreY=976.;
+    const double plateRight=1816.,top=954.,height=41.,centreY=976.5;
     const double textLeft=plateRight-22.-advance;
     // textLeft is the advance origin; the ':' ink starts ~4 px later (x 1702 on both sides).
-    const double discX=textLeft-13.;
+    const double discX=textLeft-12.5;
     const double plateLeft=gaiji?textLeft-52.5:textLeft-21.;
     const QRectF plate(plateLeft,top,plateRight-plateLeft,height);
     drawNineSlice(p,"system_plugin","tex_operation_guide_base_shadow",plate.adjusted(-1.,-1.,1.,1.),12.,amount);
     drawNineSlice(p,"system_plugin","tex_operation_guide_base",plate,12.,amount);
     if(gaiji) {
-        p.save();p.setOpacity(amount);p.setRenderHint(QPainter::Antialiasing);
-        p.setPen(QPen(QColor(150,150,150),1.));p.setBrush(QColor(3,4,3));
-        p.drawEllipse(QPointF(discX,centreY),9.5,9.5);
-        static QImage tinted;
-        if(tinted.isNull()) {
-            const QImage& source=assets_.image("system_plugin","tex_triangle");
-            if(!source.isNull()) {
-                tinted=source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-                QPainter tint(&tinted);tint.setCompositionMode(QPainter::CompositionMode_SourceIn);
-                tint.fillRect(tinted.rect(),QColor(1,215,96));
-            }
+        const QImage glyph=imageFontGlyph(assets_.root(),gaijiCode);
+        if(!glyph.isNull()) {
+            const double h=size,w=glyph.width()*h/glyph.height();
+            p.save();p.setOpacity(amount);p.setRenderHint(QPainter::SmoothPixmapTransform);
+            p.drawImage(QRectF(discX-w/2.,centreY-h/2.,w,h),glyph);
+            p.restore();
         }
-        // tex_triangle's solid ink fills 0.8 x 0.62 of its box, so a 17.5 x 21 box puts it at 14 x 13.
-        if(!tinted.isNull())p.drawImage(QRectF(discX-8.75,centreY-11.,17.5,21.),tinted);
-        p.restore();
     }
     const QRectF textRect(textLeft,top,advance+6.,height);
     if(textRenderer_.ready())

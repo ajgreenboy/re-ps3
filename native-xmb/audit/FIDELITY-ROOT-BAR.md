@@ -596,3 +596,33 @@ columns (`padwind-2026-11-05/hintwalk`, plan `plans/hintwalk.txt`).
 `SCE-PS3-*.TTF` and `SONY-CC/*.ttf`. paf draws it from a source not yet found. The native composes it from the
 console's pixels instead: a 20 px disc (3,4,3) with a light rim, and `tex_triangle` tinted (1,215,96). The fade
 curve is drawn linear (INFERRED).
+
+### 6.1 update 4, 2026-11-07: the Triangle gaiji comes from vsh's image font
+
+vsh.elf names `/dev_flash/vsh/resource/imagefont.bin` and logs "IMAGEFONT &#x%04x not registered.". That file is
+where the firmware's gaiji come from.
+
+**Format, read from the file.**
+- **Header:** u16 0x0100, u16 count (332), u32 n.
+- **Data:** zlib streams from offset 8.
+- **Index:** `count` 16-byte entries from offset n, ending exactly at the file's end. Each entry is u32 offset,
+  u16 packed, u16 raw, u16 code, u16 w, u16 h, u16 flags.
+- **An entry's stream** inflates to 1042 bytes:
+  - an 18-byte header, whose u16 at 8 and 10 give the offset and packed size of the glyph's w x h 8-bit index
+    stream;
+  - a 256-entry RGBA palette.
+- **Codes:** F880.. are the pad buttons (○ ✕ □ △ ↑ ↓ ← →, L1..R3, ...), F400.. the chat smileys and hands, and so
+  on.
+
+U+F883 is a 26x23 glyph: a dark disc, a pale rim and a hollow green triangle.
+
+**Native.** `imageFontGlyph()` in `view.cpp` decodes the glyph, and the hint draws it at the text's 21 px height.
+This replaces update 3's composite (a drawn disc plus a tinted `tex_triangle`). Checked against
+`nav/users-column.png`:
+- **Green ink:** x 1678..1691, y 969..981, identical to the console.
+- **Colour:** (1,214,95) against the console's (1,215,96).
+
+Gate 19.58 dB, 6/6.
+
+**Follow-up.** The same file has the other `*_with_icon` gaiji that the native strips or draws by hand: Group
+Content's U+F882 (□) badge, U+F88E (Display), U+F88F and U+F893. Those sites can now use the firmware's own glyphs.
