@@ -2201,3 +2201,25 @@ Settings -> Game Settings, Enter, 7 s idle.
   - `main` prefetches the first reading on a worker once the window is shown.
   - `--settings-report` still reads synchronously and still writes its report.
 - **After:** no frame over 10 ms from Enter through 7 s idle on Game Settings. Gate 19.58 dB, 6/6, unchanged.
+
+## The Settings help-text crossfade, 2026-11-07: traced, and invisible in English
+
+`FUN_000a76d8` (sysconf_plugin, the 3000 ms idle callback) does three things:
+- It fades the focused row's `label2_text` out over 800 ms with paf 73CF3BB9 (DAT 0x14bb74 = 800.0).
+- If that text overflows, it also fades out the row's `label2_text_ellipsis`. "Overflows" is `FUN_000a7660`: more
+  than 4 lines in total, and fewer lines laid out than the text has.
+- It fades the list's `label2_text_ex` in over 800 ms with paf DE113DC2.
+
+`FUN_000a7e30` builds both objects with the same width and the same text properties. Only their heights differ:
+- `label2_text` is `grid(0x16) x 4.0 + 9.0`, a 4-line box (DAT 0x14bb88 / 0x14bb8c).
+- `label2_text_ex` is `grid(0x16) x 10.0 + 30.0`, a 10-line box (0x14bb94 / 0x14bb98). It is created hidden, through
+  `FUN_000068a8(0)`.
+
+So the crossfade swaps a 4-line, ellipsised copy of the help for a 10-line copy. On screen it changes something
+only when the help needs a fifth line.
+
+None does in English. The longest row-help strings in `sysconf_plugin.rco` are 243..288 characters, about 2.5
+lines at the 1182 px box. Short of that, the swap is between two identical renderings, which is what the
+`idledim/open1` burst shows: the focused row's help text does not change. The native draws the help unlimited and
+without the swap. That is pixel-identical for every English Settings row. A language or a string that ran past
+four lines would need the 4-line clip, the ellipsis object and this 800 ms swap.
