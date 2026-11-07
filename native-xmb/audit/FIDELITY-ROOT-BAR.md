@@ -626,3 +626,13 @@ Gate 19.58 dB, 6/6.
 
 **Follow-up.** The same file has the other `*_with_icon` gaiji that the native strips or draws by hand: Group
 Content's U+F882 (□) badge, U+F88E (Display), U+F88F and U+F893. Those sites can now use the firmware's own glyphs.
+
+**Group Content badge, done.** The item menu's badge after "Group Content" (`frames/menu-options-open.png`) is
+U+F882 from the same image font: a dark disc with the pink Square. The native used to draw it as hand-made
+rectangles; it now draws the glyph 1:1 at the label's 23 px.
+- **Pink ink:** x 1517..1529, y 346..357, identical to the console.
+- **Peak colour:** (254,104,220) native against the console's (228,93,198). Solved against the console's local
+  band, that is ~0.9 opacity, which matches no traced row level, so it is left at 1.0 and not fitted.
+
+The video help strip keeps dropping its trailing gaiji on purpose: it draws the 86x30 key textures itself.
+Gate 19.58 dB, 6/6.
