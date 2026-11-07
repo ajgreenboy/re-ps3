@@ -42,6 +42,8 @@ public:
     void setClock(const QDateTime& when) { clock_=when; }
     // The 0.12 tint strength is a fit: the opaque material's tint weight has no ICONS.mnu key.
     void setFixedTint(const QVector3D& tint,float strength=.12f) { fixedTint_=tint;tintStrength_=strength; }
+    // Scales every icon's colour, alpha untouched: the screensaver's BRIGHTNESS multiplier (0.2), else 1.
+    void setColourScale(float scale) { colourScale_=scale; }
     // Draws the icons onto targetFbo, cutting each one's background from that same framebuffer first.
     // light: 0 night .. 1 day (the background's NightDayBlend preset blend).
     void render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& icons,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo);
@@ -54,6 +56,7 @@ private:
     bool opaqueReady_=false;
     QVector3D fixedTint_;
     float tintStrength_=.12f;
+    float colourScale_=1.f;
     GLuint vao_=0,vbo_=0,diffuse_=0,environment_=0,cut_=0,cutFbo_=0;
     QHash<QString,GLuint> normalMaps_;
     // ICONS.mnu, read at run time through the shared Materials reader (one parser for the whole app).

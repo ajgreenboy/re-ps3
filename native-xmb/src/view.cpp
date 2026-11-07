@@ -359,10 +359,11 @@ void main(){
 out vec2 uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);})";
     static const char* compositeFragment=R"(#version 330 core
-in vec2 uv;out vec4 colour;uniform sampler2D layer;uniform float dimOpacity;uniform float boost;
-void main(){colour=boost>0.0?texture(layer,uv)*boost:(dimOpacity>0.0?vec4(0,0,0,dimOpacity):texture(layer,uv));})"; // premultiplied; linear filtering at half scale = 2x2 box filter
+in vec2 uv;out vec4 colour;uniform sampler2D layer;uniform float dimOpacity;uniform float boost;uniform float rgbScale;
+void main(){colour=boost>0.0?texture(layer,uv)*boost:(dimOpacity>0.0?vec4(0,0,0,dimOpacity):texture(layer,uv));colour.rgb*=rgbScale;})"; // premultiplied; linear filtering at half scale = 2x2 box filter
     if(!uiComposite_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) || !uiComposite_.addShaderFromSourceCode(QOpenGLShader::Fragment,compositeFragment) || !uiComposite_.link())
         qCritical().noquote()<<"UI composite shader failed:"<<uiComposite_.log();
+    else {uiComposite_.bind();uiComposite_.setUniformValue("rgbScale",1.f);uiComposite_.release();} // a GLSL uniform starts at 0
     particles_.init(*this,assets_);
     if(introEnabled_)coldboot_.init(*this,assets_);
     if(!monthImage_.isNull()) {
@@ -974,25 +975,29 @@ void View::paintGL() {
     }
     // Category icons: the firmware glass shader, refracting the finished background (each cut before its own draw).
     const qint64 iconStart=clock_.nsecsElapsed();
+    // Screensaver state for this frame (see the UI composite below): the XMB bar's icon draws read the same
+    // BRIGHTNESS colour as the widgets (FUN_0038fcb4 -> FUN_00396328/00396528), so the icon pass is scaled too.
+    const bool screensaver=shell_.screensaverMinutes()>0 && shell_.idleDisplayAllowed()
+        && shell_.idleMilliseconds()>qint64(shell_.screensaverMinutes())*60000;
+    icons_.setColourScale(screensaver?.2f:1.f);
     if(glReady_ && icons_.ready())icons_.render(*this,iconQueue_,renderSeconds,presetBlend_,device.width(),device.height(),defaultFramebufferObject());
     iconNs_=clock_.nsecsElapsed()-iconStart;
     // Composite (premultiplied alpha) over the background in the widget's framebuffer.
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
     glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
-    uiComposite_.bind();uiComposite_.setUniformValue("layer",0);uiComposite_.setUniformValue("dimOpacity",0.f);
-    uiComposite_.setUniformValue("boost",0.f);
-    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,uiResolved_->texture());
-    glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);
     // Screensaver, traced from vsh.elf (audit/FIDELITY-SURFACES-MAP.md S29): the XMB's own client (identify
     // 0xFFFFFFF0, priority 0xFD, property 0x202 = BRIGHTNESS<<8 | ACTIVE) fires once the idle time passes the
     // start time (300/600/1200/1800 s). BRIGHTNESS writes the global colour multiplier straight to
-    // (0.2,0.2,0.2,1) with no ramp, and input restores it. Black at 0.8 over the premultiplied frame is that x0.2.
-    // No host brightness or power changes.
-    if(shell_.screensaverMinutes()>0 && shell_.idleDisplayAllowed()
-       && shell_.idleMilliseconds()>qint64(shell_.screensaverMinutes())*60000) {
-        uiComposite_.setUniformValue("dimOpacity",.8f);glDrawArrays(GL_TRIANGLES,0,3);
-    }
+    // (0.2,0.2,0.2,1) with no ramp, and input restores it. Its traced readers are the paf widget renderers and
+    // the item list (FUN_0039d4a8 callers, FUN_0038fcb4), i.e. this UI layer: its colour is scaled, its alpha
+    // kept. The background, ribbon and particles come from custom_render_plugin, which is not seen reading that
+    // colour, so they are left as they are (INFERRED). No host brightness or power changes.
+    uiComposite_.bind();uiComposite_.setUniformValue("layer",0);uiComposite_.setUniformValue("dimOpacity",0.f);
+    uiComposite_.setUniformValue("boost",0.f);uiComposite_.setUniformValue("rgbScale",screensaver?.2f:1.f);
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,uiResolved_->texture());
+    glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);
+    uiComposite_.setUniformValue("rgbScale",1.f);
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D,0);uiComposite_.release();glDisable(GL_BLEND);
     grabIntroFrame();

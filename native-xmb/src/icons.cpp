@@ -113,15 +113,15 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     // The program's alpha (envmap alpha x _Ambiant.w: 0.698 for unfocused icons) blends the icon over the frame; the
     // layout's fade (page depth, dialogs) scales it.
     QString fragment=fragmentCg_.glsl;
-    fragment.replace("uniform vec4 fc[","uniform float layoutOpacity_;\nuniform vec4 fc[");
-    fragment.replace("fragColor = h[0];","fragColor = vec4(h[0].rgb, h[0].a * layoutOpacity_);");
+    fragment.replace("uniform vec4 fc[","uniform float layoutOpacity_;\nuniform float colourScale_;\nuniform vec4 fc[");
+    fragment.replace("fragColor = h[0];","fragColor = vec4(h[0].rgb * colourScale_, h[0].a * layoutOpacity_);");
     // Diagnosis: XMB_ICON_DEBUG=0..3 shows that texture unit at the icon's coordinates instead of the result
     // (0-2 at uv, 3 the background cut at v_tc[1]); 4 shows the shaded colour before the final exposure curve.
     if(qEnvironmentVariableIsSet("XMB_ICON_DEBUG")) {
         const int unit=qEnvironmentVariableIntValue("XMB_ICON_DEBUG");
         const QString debug=unit<3?QString("fragColor = vec4(texture(tex%1, v_tc[0].xy).rgb, 1.);").arg(unit):
             unit==3?QString("fragColor = vec4(texture(tex3, v_tc[1].xy).rgb, 1.);"):QString("fragColor = vec4(h[0].rgb * 0.25, 1.);");
-        fragment.replace("fragColor = vec4(h[0].rgb, h[0].a * layoutOpacity_);",debug);
+        fragment.replace("fragColor = vec4(h[0].rgb * colourScale_, h[0].a * layoutOpacity_);",debug);
     }
     if(!program_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) || !program_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment) || !program_.link()) {
         qWarning().noquote()<<"icons: link failed:"<<program_.log();return false;
@@ -142,7 +142,7 @@ bool IconRenderer::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     // icons are drawn through the glass path.
     static const char* opaqueFragment=R"(#version 330 core
 in vec4 v_tc[10];out vec4 colour;
-uniform sampler2D tex0;uniform vec3 tint;uniform float brightness,opacity,tintStrength;
+uniform sampler2D tex0;uniform vec3 tint;uniform float brightness,opacity,tintStrength,colourScale;
 uniform vec3 light1;
 void main(){
     vec4 material=texture(tex0,v_tc[0].xy);
@@ -157,7 +157,7 @@ void main(){
     // 0.85 dB on the category-icon layer while this opaque material has no glass refraction, so the RGB
     // dimming stays here; the glass path above applies the firmware's alpha semantics instead
     // (audit/ITEM-ICONS.md).
-    colour=vec4(clamp(mix(vec3(1.),tint,tintStrength)*light,0.,1.),material.a*opacity);
+    colour=vec4(clamp(mix(vec3(1.),tint,tintStrength)*light,0.,1.)*colourScale,material.a*opacity);
 })";
     opaqueReady_=opaque_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertexCg_.glsl) &&
         opaque_.addShaderFromSourceCode(QOpenGLShader::Fragment,opaqueFragment) && opaque_.link();
@@ -295,7 +295,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
             opaque_.setUniformValue("tint",fixedTint_/peak);opaque_.setUniformValue("brightness",float(icon.brightness));
             opaque_.setUniformValue("light1",l1);
             opaque_.setUniformValue("tintStrength",tintStrength_);
-            opaque_.setUniformValue("opacity",float(icon.opacity));opaque_.setUniformValue("tex0",0);
+            opaque_.setUniformValue("opacity",float(icon.opacity));opaque_.setUniformValue("colourScale",colourScale_);opaque_.setUniformValue("tex0",0);
             gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,normals);
             gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
             gl.glBindVertexArray(vao_);gl.glDrawArrays(GL_TRIANGLES,0,6);gl.glBindVertexArray(0);
@@ -324,7 +324,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         gl.glActiveTexture(GL_TEXTURE1);gl.glBindTexture(GL_TEXTURE_2D,diffuse_);
         gl.glActiveTexture(GL_TEXTURE2);gl.glBindTexture(GL_TEXTURE_2D,environment_);
         gl.glActiveTexture(GL_TEXTURE3);gl.glBindTexture(GL_TEXTURE_2D,cut_);
-        program_.setUniformValue("layoutOpacity_",float(icon.opacity));
+        program_.setUniformValue("layoutOpacity_",float(icon.opacity));program_.setUniformValue("colourScale_",colourScale_);
         gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
         gl.glBindVertexArray(vao_);gl.glDrawArrays(GL_TRIANGLES,0,6);gl.glBindVertexArray(0);
         gl.glDisable(GL_BLEND);
