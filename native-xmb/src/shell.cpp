@@ -456,7 +456,7 @@ void Shell::resolveMediaColumns() {
     // The native rows each column appends, by the ids the built-in table already declared. They are taken
     // from the current entries so their action/value/setting stay exactly as the table wrote them.
     static const QHash<QString,QStringList> nativeIds{
-        {"video",{"continue","library","choose"}},{"music",{"library","choose"}},
+        {"video",{"continue","library","choose"}},{"music",{"library","choose","spotify"}},
         {"photo",{"library","choose","options"}}};
     static const QHash<QString,QString> xmlFiles{
         {"video","category_video.xml"},{"music","category_music.xml"},{"photo","category_photo.xml"}};
@@ -1212,7 +1212,9 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             // Native rows: the library and the picker. Music Settings is dropped from this column because the
             // Settings column's own "Music Settings" row opens the same page (id "music", Action::SettingsPage).
             item("library","Music Library","item_tex_plain_folder",full,Action::Library),
-            item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary)}},
+            item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary),
+            // Spotify (spotify_shell.cpp): browse the account's library and play on a Spotify Connect device.
+            item("spotify","Spotify","item_tex_plain_folder",full,Action::SpotifyApp)}},
         {"video","Video","qgl/icontex","5n",{
             item("bddata","BD Data Utility","item_tex_plain_folder","explore_category_video"),
             item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_video"),
@@ -1520,6 +1522,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     // cancelled) so a scripted run can prove which choice it made without reading pixels (audit section 11).
     dialogLog_=qEnvironmentVariableIsSet("XMB_DIALOG_LOG");
     initJellyfin();
+    initSpotify();
     // The sign-in surface is this shell's own page, not a modal dialog: openJellyfin() emits
     // requestJellyfinSignIn, which used to reach a QDialog in the view. Connecting it here keeps one sign-in
     // surface and leaves jellyfin_shell.cpp (outside this change's fence) as the owner of the app entry.
@@ -1911,6 +1914,9 @@ void Shell::activate() {
     case Action::RefreshContent:refreshContent();break;
     case Action::RefreshFriends:refreshSteamFriends(true);break;
     case Action::ImportApps:emit requestImportApps();break;
+    case Action::SpotifyApp:case Action::SpotifySignIn:case Action::SpotifySignOut:case Action::SpotifyNowPlaying:
+    case Action::SpotifyLiked:case Action::SpotifyPlaylist:case Action::SpotifyTrack:case Action::SpotifyDevice:
+        activateSpotify(entry);break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
     case Action::JellyfinPlay:openJellyfinMedia(entry);break;
@@ -2202,6 +2208,14 @@ void Shell::buildOptions() {
                       active?tr("Select another user before deleting this one."):QString());
         }
         addOption({"msg_info","Information"},OptionCommand::Information,"always-last");
+        return;
+    }
+    // ---- Spotify's Now Playing row: the commands Spotify takes for the active Connect device ---------------
+    if(entry.action==Action::SpotifyNowPlaying) {
+        addOption({"msg_play","Play"},OptionCommand::SpotifyResume,"spotify-now");
+        addOption({"msg_pause","Pause"},OptionCommand::SpotifyPause,"spotify-now");
+        addOption({"msg_next","Next"},OptionCommand::SpotifyNext,"spotify-now");
+        addOption({"msg_prev","Previous"},OptionCommand::SpotifyPrevious,"spotify-now");
         return;
     }
     // ---- Playlists (playlist_plugin) ----------------------------------------------------------------------
@@ -2604,6 +2618,13 @@ void Shell::optionsActivate() {
     // destructive change to this build's own state, so it asks first with the firmware's two-button box:
     // buttons msg_ok/msg_cancel on Cross/Circle, snd_decide only when Cross accepts (TRACED 0x00341870).
     // The body is this build's wording - no firmware string covers removing a resume point.
+    case OptionCommand::SpotifyPause:case OptionCommand::SpotifyResume:
+    case OptionCommand::SpotifyNext:case OptionCommand::SpotifyPrevious:
+        resetOptions();
+        spotifyCommand(option.command);
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        emit changed();
+        break;
     // Add to Playlist: the level lists this user's playlists of the column's kind under playlist_plugin's
     // "Select a playlist." (msg_select_playlist). With none, its one row says to create one first.
     case OptionCommand::AddToPlaylist: {

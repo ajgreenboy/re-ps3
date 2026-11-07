@@ -6,6 +6,7 @@
 #include "interaction_audio.h"
 #include "profiles.h"
 #include "playlists.h"
+#include "spotify_client.h"
 #include "steam_friends.h"
 #include "content_registry.h"
 #include "jellyfin_client.h"
@@ -64,7 +65,10 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     TurnOffSystem,
     // Music/Photo > Playlists (category_music.xml / category_photo.xml #seg_playlist_mgmt, playlist_plugin):
     // the folder itself, its Create New Playlist row, and one stored playlist (value = its id).
-    PlaylistFolder, CreatePlaylist, Playlist };
+    PlaylistFolder, CreatePlaylist, Playlist,
+    // Music > Spotify (spotify_shell.cpp, audit/SPOTIFY.md): the column row, sign-in/out, Now Playing, Liked Songs,
+    // one playlist (value = id, setting = its URI), one track (value = URI) and one Connect device (value = id).
+    SpotifyApp, SpotifySignIn, SpotifySignOut, SpotifyNowPlaying, SpotifyLiked, SpotifyPlaylist, SpotifyTrack, SpotifyDevice };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -131,6 +135,8 @@ enum class OptionCommand { Activate, Information,
     // user's playlists of that kind (msg_select_playlist); a playlist row offers Delete; a row inside a
     // playlist offers Delete, which takes it out of the playlist and leaves the file alone.
     AddToPlaylist, AddToPlaylistTarget, PlaylistDelete, PlaylistRemoveItem,
+    // Spotify's Now Playing row: playback commands sent to the active Connect device.
+    SpotifyPause, SpotifyResume, SpotifyNext, SpotifyPrevious,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
     // Information with two or more users, Information alone with one. Delete runs the traced two-step ask.
     UserLogOut, UserAutoLogin, UserDelete };
@@ -462,6 +468,21 @@ private:
     MediaLibrary library_;
     InteractionAudio interactionAudio_;
     Profiles profiles_;
+    SpotifyClient spotify_;
+    quint64 spotifyRequest_=0,spotifyPlaylistsRequest_=0,spotifyDevicesRequest_=0,spotifyCommandRequest_=0;
+    QVector<SpotifyPlaylist> spotifyPlaylists_;
+    SpotifyNowPlaying spotifyNowPlaying_;
+    QString spotifyPendingContext_,spotifyPendingOffset_,spotifyPendingTitle_,spotifyCommandNote_,spotifyCommandDetail_;
+    QStringList spotifyPendingUris_;
+    void initSpotify();
+    void openSpotify();
+    void openSpotifyList(const QString& kind,const QString& id,const QString& title,const QString& contextUri);
+    void startSpotifyPlay(const Entry& entry);
+    void spotifyPlayOn(const QString& deviceId,const QString& deviceName);
+    void refreshSpotifyRoot();
+    QVector<Entry> spotifyRootRows();
+    bool activateSpotify(const Entry& entry);
+    void spotifyCommand(OptionCommand command);
     PlaylistStore playlists_;   // the active user's playlists (playlists.h); reopened on a user switch
     QString dataDirectory_,steamRoot_,steamId_;
     QVector<ContentApp> contentApps_;
@@ -579,7 +600,7 @@ private:
     int columnSink_=0;
     // `grouped` is a page the item menu's Group Content level rebuilt into letter folders: `groupedSource` keeps
     // the ungrouped rows so All can put them back without a rescan, and the folders' rows are the same entries.
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step
