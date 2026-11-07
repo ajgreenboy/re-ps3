@@ -89,8 +89,7 @@ must stay at 19.58 dB, 6/6.
 1. **Dust on scroll.** Done: same direction and size on both (PARTICLES.md, "The dust's response to a scroll"; `work/dust-flow.ts`).
 2. **Icon-wind tick sampling.** Done in 6054fdf: ticks sample the icon positions one tick late, by interpolation.
 3. **Grid decay.** The writer of the flow grid's 1-per-tick decay is untraced. The native models the measured rate.
-4. **Non-Settings page opens.** Do they load a plugin? The last run landed on "Corrupted Data". `explore_plugin` is
-   resident from boot, so ordinary list pages probably don't.
+4. **Non-Settings page opens.** Closed (PAGE-MOVE "Non-Settings page opens"): Music/Photo Playlists load no PRX; only Saved Data Utility loads x3_mdimp12 for its lifetime. The native's sysconf-only open floor stands.
 5. **Conditional rows.** Done: Chat's two extra rows were Accessory rows and are dropped (traced). Music's Repeat is a native-only row by design.
 6. **Help-text fades.** Closed (PAGE-MOVE "help-text crossfade"): the swap is a 4-line ellipsised label2_text -> 10-line label2_text_ex, visible only for help past 4 lines; no English Settings help reaches that, so nothing to draw.
 7. **The native's own Settings stall.** None left after 860cdfb; re-check with `XMB_TEXT_COST` after any host-read

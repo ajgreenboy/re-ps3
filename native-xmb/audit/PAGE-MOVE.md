@@ -2223,3 +2223,27 @@ lines at the 1182 px box. Short of that, the swap is between two identical rende
 `idledim/open1` burst shows: the focused row's help text does not change. The native draws the help unlimited and
 without the swap. That is pixel-identical for every English Settings row. A language or a string that ran past
 four lines would need the 4-line clip, the ellipsis object and this 800 ms swap.
+
+## Non-Settings page opens, 2026-11-07: list pages load no plugin
+
+I ran the RPCS3 rig (LLVM capture config) with the syscall trace from 58 s and opened three non-Settings pages from
+the root:
+- **Game:** Saved Data Utility (PS3).
+- **Music:** Playlists.
+- **Photo:** Playlists.
+
+The plan is `padwind-2026-11-05/plans/listload.txt`, the trace `listload/sys.txt` and the frames `listload/*.png`.
+All three pages opened: Online Storage under SDU, and Create New Playlist on both Playlists pages.
+
+The only module load after boot is `x3_mdimp12.sprx`:
+- **Load:** tb 6302760141 = 78.98 s.
+- **Unload:** tb 6721965398 = 84.23 s.
+
+The trace ends at 116.42 s, about 46 s into the plan. That puts the SDU Cross at about 78.6 s and its close at about
+84.0 s. So the load belongs to the Saved Data Utility page and lasts as long as it does. That mapping is INFERRED:
+it assumes the guest clock runs at wall speed. The Music and Photo Playlists opens load nothing.
+
+So an ordinary list page (a playlist folder) is built by the resident explore_plugin with no PRX load and no
+job-chain floor. The native's rule, which holds the page move only for sysconf pages
+(`Shell::topPageLoadsPlugin`), is right for those pages. The native lists no Saved Data Utility page, so the
+`x3_mdimp12` load has nothing to attach to.
