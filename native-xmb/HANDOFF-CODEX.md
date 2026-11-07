@@ -88,8 +88,7 @@ must stay at 19.58 dB, 6/6.
 
 1. **Dust on scroll.** Compare the dust's response to a list scroll against a console burst (cburst over the item
    column, `speed.ts`-style tracking).
-2. **Icon-wind tick sampling.** The 60 Hz tick reads whichever frame the ~144 fps renderer drew last, so a write
-   can be up to 2x too strong. Sample widget positions at the tick time (PARTICLES.md, "The icon wind").
+2. **Icon-wind tick sampling.** Done in 6054fdf: ticks sample the icon positions one tick late, by interpolation.
 3. **Grid decay.** The writer of the flow grid's 1-per-tick decay is untraced. The native models the measured rate.
 4. **Non-Settings page opens.** Do they load a plugin? The last run landed on "Corrupted Data". `explore_plugin` is
    resident from boot, so ordinary list pages probably don't.
