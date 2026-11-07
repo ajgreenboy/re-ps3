@@ -91,8 +91,7 @@ must stay at 19.58 dB, 6/6.
 3. **Grid decay.** The writer of the flow grid's 1-per-tick decay is untraced. The native models the measured rate.
 4. **Non-Settings page opens.** Do they load a plugin? The last run landed on "Corrupted Data". `explore_plugin` is
    resident from boot, so ordinary list pages probably don't.
-5. **Conditional rows.** The native adds Chat's Audio/Camera Device Settings and Music's Repeat, which the console
-   frames don't show.
+5. **Conditional rows.** Done: Chat's two extra rows were Accessory rows and are dropped (traced). Music's Repeat is a native-only row by design.
 6. **Help-text fades.** The 800 ms mode-0 crossfade between `label2_text` and `label2_text_ex` at the idle timer is
    not modelled; it is only visible when help text needs the extended object.
 7. **The native's own Settings stall.** None left after 860cdfb; re-check with `XMB_TEXT_COST` after any host-read
