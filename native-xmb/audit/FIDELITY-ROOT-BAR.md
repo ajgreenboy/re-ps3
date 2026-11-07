@@ -474,3 +474,38 @@ two-image path and belongs back in this file's `drawItemGlyph`.
   2026-10-28 10:00.
 - Did not run a category-move or page-move burst: the plate, the veil and the disc are drawn inside the same
   eases the rest frame already uses, so motion is unchanged in construction but unmeasured in this pass.
+
+### 6.1 update, 2026-11-06: the hint plate exists; its trigger is not traced yet
+
+The plate is real. Six RPCS3 frames show it at (1663,955)-(1820,995): a grey rounded plate with a green Triangle and
+": Options". The frames are `rpcs3-ref nav/users-column.png`, `rpcs3-ref2 nav/boot-01.png`, `colL-9.png`,
+`game-02-down.png`, `game-03-down.png` and `nav2/game-column-back.png`. The three `*-idle-hint.png` frames in 6.1 do
+not show it.
+
+**It depends on the focused item.**
+- In the `mapgame` run every grab came ~1.2 s after its key.
+- The plate is up with Corrupted Data (game-02/03) and with a user row focused. It is absent on game-01-down and on
+  every Settings frame.
+- So the delay alone does not decide it.
+
+**Traced so far (explore_plugin).**
+- `FUN_00072b7c` returns `msg_option_with_icon`.
+- Each item class's virtual getter at vtable slot **+0x54** returns that string or 0. There are 63 getters; for
+  example `FUN_00078c28` returns 0 when item+0x16c != 0 or item+0x48 == 0.
+- The three vtables checked start at 0x27c268, 0x27c908 and 0x281540.
+
+**Not yet found.** The caller of slot +0x54 that shows the plate, and its delay. vsh.elf holds `page_btnnavi` and
+`msg_option`, so the plate itself is likely vsh's.
+
+**Native.** Still not drawn. Implementing it needs the per-class getter table (which items return the string) and
+the show delay.
+
+### Users column signed-in marker, 2026-11-06
+
+`tex_indi_Me` beside the signed-in user grows and moves out with focus. Measured on two console frames:
+- unfocused (`nav/users-column-up.png`): 11 px wide, centre 510, which is 54.5 left of the 46 px icon at 564.5;
+- focused (`nav/users-column.png`): 26 x 26, centre 434.5, which is 130.5 left of the icon centre.
+
+The native drew a fixed 10 px marker at the unfocused place. It now interpolates both size and offset with the row's
+focus, and enlarges the box by 26/21 because the glyph's ink fills 21/26 of the box it is fitted to. Native now:
+unfocused 11 px at 510, focused 25 x 26 at (434, 504.5). Gate 19.58 dB, 6/6.
