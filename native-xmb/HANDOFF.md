@@ -3,11 +3,13 @@
 > **Historical, 2026-10-23/24 - this is not the current handoff.** It survives as the record of the first
 > application slice (the procedural-wave checkpoint, the initial asset decode and the reference-observation
 > constraint). Everything it calls current has been replaced: the current handoff is
-> [HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md) (tree at `9545047`), the plan of record is
-> [PHASES-2026-10-28.md](archive/PHASES-2026-10-28.md) (completion ledger: 15 done / 44 partly / 28 not started /
-> 1 obsolete), per-feature status is [audit/FEATURE-CATALOG.md](audit/FEATURE-CATALOG.md), and the scored
+> [HANDOFF-2026-11-08.md](HANDOFF-2026-11-08.md), and the plan of record is
+> [audit/PHASES-2026-11-07.md](audit/PHASES-2026-11-07.md). The 2026-10-28 handoff
+> ([HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md), tree at `9545047`) and its completion ledger
+> ([PHASES-2026-10-28.md](archive/PHASES-2026-10-28.md)) are historical; per-feature status is
+> [audit/FEATURE-STATUS-2026-11-04.md](audit/FEATURE-STATUS-2026-11-04.md) with its dated updates, and the scored
 > gap register is [audit/FIRMWARE-PARITY-GAPS.md](audit/FIRMWARE-PARITY-GAPS.md). [audit/HANDOFF.md](audit/HANDOFF.md)
-> is the October 24 audit handoff and is historical in the same way; it was not updated by the 2026-10-28 pass.
+> is the October 24 audit handoff and is historical in the same way.
 
 **Current plan to an exact match:** [HANDOFF-PHASES.md](HANDOFF-PHASES.md) — current state and remaining phases.
 See [MaXMB integration and handoff review](audit/MAXMB-INTEGRATION.md) for the October 25 continuation.
