@@ -404,3 +404,29 @@ node work/item-icon-eyes.js C:\dev\out\rpcs3-xmb-cap\fp-open
 ```
 
 Firmware-derived numbers stay in this audit note; no dump, module, capture or scratch script is committed.
+
+## 6. Layout-table trace (2026-11-08): the factor/grid tables are a packed-id resolver
+
+The firmware loads two plain-text tables at boot (one float per line, 0-based line = index): `vsh/etc/layout_factor_table_1080.txt`
+(143 entries) and `vsh/etc/layout_grid_table_1080.txt` (4602 entries). `vsh` FUN_000bc0f8 reads them and FUN_003705e8 installs
+the pointers/counts. The accessors (traced with a full `ghidra_proj/vsh493` analysis, `RefsTo` + `DecompileAt`):
+
+- `FUN_0033fbb8(i)` = `grid[i]`
+- `FUN_0033fbf4(j)` = `factor[j]`
+- `FUN_0033fc30(v, id)` = `factor[id >> 16] * v + grid[id & 0xffff]` — the packed "layout id" resolver: the high 16 bits of
+  `id` select a factor (slope), the low 16 bits a grid entry (offset), and `v` is the value being laid out. It has 58 callers.
+
+Direct literal reads (`li r3, imm` before the call) are a small set — factor `{5, 10, 11, 12}` and grid `{0, 20..26, 41..62,
+73..80, 89, 193..226, 239..248, 1205..1219}` — plus computed indices from the packed ids. Confirmed view.cpp mappings are only
+`factor[10] = 200` (category pitch), `factor[11] = 10` and `factor[12] = 10` (focus padding), and `factor[5] = 1`.
+
+This corrects the 2026-11-08 F8 value-match draft (`C:\dev\out\f8\FINDINGS-DRAFT.md`): its "exact" matches — page travel
+262 → factor[22], bar travel 395 → grid[2275], icon 320x176 → factor[78/79], unfocused y 290 → grid[2257], column step 210 →
+grid[281], centre y 540 → grid[13], text x 110 → factor[127], row pitch 80 → factor[15/25] — are **not confirmed**: the firmware
+never reads those indices through the accessors. They are value coincidences in a 4602-entry table, not role evidence. Those
+constants stay capture-derived, exactly as section 1 concluded, so there is nothing to replace with a table read except the
+three confirmed factor entries (and even those match the already-captured 200/10/10).
+
+Remaining, if a direct trace of 262/395/320x176 is still wanted: evaluate the 58 `FUN_0033fc30` callers' `(id, value)` pairs as
+`factor[id>>16] * value + grid[id & 0xffff]` and match the results against the measured constants; failing that, accept them as
+draw-time projections. No source edit is made on the strength of value coincidence alone.
