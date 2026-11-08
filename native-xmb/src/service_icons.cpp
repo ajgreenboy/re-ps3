@@ -93,6 +93,20 @@ const QImage& steam(const QString& steamRoot) {
     return icon.isNull() ? glyphs::steamLogo() : icon;
 }
 
+const QImage& tailscale() {
+    static const QImage icon=[]{
+        QImage image;
+#ifdef Q_OS_WIN
+        const QString programFiles=qEnvironmentVariable("ProgramFiles",QStringLiteral("C:/Program Files"));
+        const QString exe=QDir(programFiles).filePath(QStringLiteral("Tailscale/tailscale-ipn.exe"));
+        if(QFileInfo::exists(exe))image=squared(jumboIcon(exe));
+        if(!image.isNull())qInfo().noquote()<<"service icons: Tailscale's own icon from tailscale-ipn.exe"<<image.size();
+#endif
+        return image;
+    }();
+    return icon.isNull()?glyphs::tailscaleLogo():icon;
+}
+
 const QImage& jellyfin() { return jellyfinIcon.isNull() ? glyphs::jellyfinLogo() : jellyfinIcon; }
 
 void loadJellyfin(QNetworkAccessManager* network, const QUrl& server, const QString& cacheFile, std::function<void()> done) {

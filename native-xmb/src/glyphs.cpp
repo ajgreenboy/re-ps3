@@ -87,6 +87,21 @@ const QImage& steamLogo() {
     return logo;
 }
 
+const QImage& tailscaleLogo() {
+    static const QImage logo=[]{
+        QImage image=canvas();QPainter p(&image);p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(Qt::NoPen);p.setBrush(QColor(0x24,0x24,0x24));p.drawEllipse(QRectF(20,20,216,216));
+        // Rows of three dots: the middle row and the bottom centre solid, the rest faded (Tailscale's mark).
+        const bool solid[9]={false,false,false,true,true,true,false,true,false};
+        for(int i=0;i<9;++i) {
+            p.setBrush(solid[i]?QColor(250,250,250):QColor(250,250,250,90));
+            p.drawEllipse(QPointF(78+50*(i%3),78+50*(i/3)),19,19);
+        }
+        return image;
+    }();
+    return logo;
+}
+
 const QImage& likedSongs() {
     static const QImage tile=[]{
         QImage image=canvas();QPainter p(&image);p.setRenderHint(QPainter::Antialiasing);

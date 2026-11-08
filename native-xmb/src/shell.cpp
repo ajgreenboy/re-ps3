@@ -1616,6 +1616,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     initJellyfin();
     initSpotify();
     initDlna();
+    initTailscale();
     // The sign-in surface is this shell's own page, not a modal dialog: openJellyfin() emits
     // requestJellyfinSignIn, which used to reach a QDialog in the view. Connecting it here keeps one sign-in
     // surface and leaves jellyfin_shell.cpp (outside this change's fence) as the owner of the app entry.
@@ -2012,6 +2013,9 @@ void Shell::activate() {
         activateSpotify(entry);break;
     case Action::DlnaScan:case Action::DlnaServer:case Action::DlnaFolder:case Action::DlnaPhoto:
         activateDlna(entry);break;
+    case Action::TailscaleApp:case Action::TailscaleToggle:case Action::TailscaleExitNodes:case Action::TailscaleExitNode:
+    case Action::TailscalePeer:
+        activateTailscale(entry);break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
     case Action::JellyfinPlay:openJellyfinMedia(entry);break;
