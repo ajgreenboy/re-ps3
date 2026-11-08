@@ -528,8 +528,13 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
             }
             return monthIconTints_.value(month);
         };
-        const float fraction=float(date.day()-1)/date.daysInMonth();
-        iconTint=monthTint(date.month())*(1-fraction)+monthTint(date.month()%12+1)*fraction;
+        // A theme can pin a month's palette (P3t colour 1..12): that month alone, no seasonal interpolation.
+        const int themeMonth=shell_.themeColorMonth();
+        if(themeMonth>0)iconTint=monthTint(themeMonth);
+        else {
+            const float fraction=float(date.day()-1)/date.daysInMonth();
+            iconTint=monthTint(date.month())*(1-fraction)+monthTint(date.month()%12+1)*fraction;
+        }
     }
     icons_.setFixedTint(iconTint,selectedColour==0?.45f:.12f);
     // Original colour theme: the firmware's own background shader and monthly palettes.
@@ -547,7 +552,12 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         QDateTime when=backgroundOverride_.isValid()?backgroundOverride_:QDateTime::currentDateTime();
         // Fixed colours pin the month palette (day 1: that month's textures alone); the clock still drives day/night.
         static const int fixedMonth[]={0,8,6,12,5,1}; // Original, Blue, Purple, Red, Green, Silver
-        if(shell_.theme()>0 && shell_.theme()<int(std::size(fixedMonth)))
+        // A theme's own colour (P3t 1..12) pins the month, but only in the Original/follows-month path: a built-in
+        // colour is an explicit user choice that overrides it (INFERRED).
+        const int themeMonth=shell_.theme()==0?shell_.themeColorMonth():0;
+        if(themeMonth>0)
+            when=QDateTime(QDate(when.date().year(),themeMonth,1),when.time());
+        else if(shell_.theme()>0 && shell_.theme()<int(std::size(fixedMonth)))
             when=QDateTime(QDate(when.date().year(),fixedMonth[shell_.theme()],1),when.time());
         if(when.date().month()!=texturesMonth_)loadMonthTextures(when.date().month());
         // Fixed colours select a background palette, not a different calendar for

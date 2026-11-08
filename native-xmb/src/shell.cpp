@@ -4625,8 +4625,14 @@ void Shell::loadTheme() {
     if(p3t.isNull()){showMessage(QFileInfo(path).fileName(),error,MessageKind::Page);qWarning().noquote()<<"theme:"<<path<<error;return;}
     theme_.name=p3t.name().isEmpty()?QFileInfo(path).completeBaseName():p3t.name();
     theme_.background=p3t.background();theme_.icons=p3t.icons();
+    // The theme's appearance selections (THEMES 6): font 0 Original / 1 Rounded / 2 Pop maps to the assets' font
+    // style 0 Rodin / 1 Seurat / 2 VAGRundschriftDLig, so Rounded -> 2 and Pop -> 1; colour 0 follows the month,
+    // 1..12 pins a month's palette. A theme without the element leaves -1 (the user's own choice applies).
+    const int fontSel=p3t.fontSelection();
+    theme_.font=fontSel<0?-1:(fontSel==0?0:(fontSel==1?2:1));
+    theme_.color=p3t.colorSelection();
     interactionAudio_.setThemeSounds(p3t.sounds());
-    qInfo().noquote()<<"theme:"<<theme_.name<<"background"<<theme_.background.size()<<(p3t.dynamic()?"(its animated scene is not drawn)":"")<<"icons"<<theme_.icons.size();
+    qInfo().noquote()<<"theme:"<<theme_.name<<"background"<<theme_.background.size()<<(p3t.dynamic()?"(its animated scene is not drawn)":"")<<"icons"<<theme_.icons.size()<<"font"<<theme_.font<<"color"<<theme_.color;
 }
 qint64 Shell::mediaPosition()const{return player_->position();}
 qint64 Shell::mediaDuration()const{return player_->duration();}

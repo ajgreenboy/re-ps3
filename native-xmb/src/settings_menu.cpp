@@ -2199,7 +2199,7 @@ QString Shell::valueText(const Entry& entry) const {
         return settingsChoiceLabel(entry.setting,QVariant{},assets_);
     return settingsChoiceLabel(entry.setting,value,assets_);
 }
-QString Shell::fontFamily()const{return assets_.fontFamily(preferences_.value("appearance/font").toInt());}
+QString Shell::fontFamily()const{return assets_.fontFamily(theme_.font>=0?theme_.font:preferences_.value("appearance/font").toInt());}
 QDateTime Shell::clockDateTime()const {
     const auto zone=preferences_.value("clock/timeZone").toString();
     auto now=clockOverride_.isValid()?clockOverride_:QDateTime::currentDateTime();
