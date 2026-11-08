@@ -211,7 +211,9 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&psWatcher_,&PsWatcher::released,this,&View::psReleasedEvent);
     connect(&psWatcher_,&PsWatcher::cancelled,this,[this]{psPressActionable_=false;});
     psWatcher_.start();
-    connect(this,&QOpenGLWidget::frameSwapped,this,[this]{if(isVisible())update();},Qt::QueuedConnection);
+    // renderPaused() (ps_watcher.h, H5): while a launched title owns the foreground the loop stops re-arming;
+    // TitleSession calls update() to restart it when the XMB is back in front.
+    connect(this,&QOpenGLWidget::frameSwapped,this,[this]{if(isVisible() && !renderPaused())update();},Qt::QueuedConnection);
     frameTracePath_=qEnvironmentVariable("XMB_FRAME_TRACE");
     if(!frameTracePath_.isEmpty()) {
         frameTrace_.reserve(20000);

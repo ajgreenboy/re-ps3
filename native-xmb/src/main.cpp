@@ -1054,6 +1054,18 @@ int main(int argc,char** argv) {
     } else if(startWindowed)window.show();
     else if(shell.fullscreen())window.showFullScreen();else window.show();
     if(window.screen())qInfo()<<"native display refresh:"<<window.screen()->refreshRate()<<"Hz";
+    // ---- Launch and return (PHASES H5) ----
+    // Idle while a launched title owns the foreground, and restore the window, fullscreen state, foreground and
+    // keyboard focus when it ends however it ends (ps_watcher.h, TitleSession). "A title is running" is the same
+    // public predicate the PS hook uses: psMenuItems() offers Quit Game exactly while Shell::gameRunning().
+    auto* titleSession=new xmb::TitleSession(&window,view,{
+        [&shell]{return shell.psMenuItems().size()>2;},
+        [&shell]{
+            const auto entries=shell.entries();const int selection=shell.selection();
+            return QString("%1/%2/%3/%4").arg(shell.categories()[shell.category()].id).arg(shell.depth()).arg(selection)
+                .arg(selection>=0 && selection<entries.size()?entries[selection].id:QString{});
+        }},&app);
+    QObject::connect(&shell,&xmb::Shell::changed,titleSession,&xmb::TitleSession::evaluate);
     // The Settings rows read the host snapshot from the paint path; take the first reading on a worker now so the
     // first Settings page does not pay for it (host::snapshot, ~145 ms cold).
     xmb::host::prefetchSnapshot();
