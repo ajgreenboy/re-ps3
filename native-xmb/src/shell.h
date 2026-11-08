@@ -12,6 +12,7 @@
 #include "tailscale_client.h"
 #include "wol_client.h"
 #include "homeassistant_client.h"
+#include "file_ops.h"
 #include "steam_friends.h"
 #include "content_registry.h"
 #include "jellyfin_client.h"
@@ -560,7 +561,13 @@ private:
     void refreshWolPages();
     void refreshHaPages();
     void reloadWolDevices();
-    bool addWolDevice(const QString& mac,const QString& host);   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
+    bool addWolDevice(const QString& mac,const QString& host);
+    // Delete on a local media file (file_ops.h): to the Recycle Bin, only inside the user's chosen library folders.
+    FileOperations fileOps_;
+    quint64 fileOpsRequest_=0;
+    QStringList libraryRoots() const;
+    QString deleteRefusal(const Entry& entry);
+    void deleteLocalFile(const Entry& entry);   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
     void spotifyCommand(OptionCommand command);
     PlaylistStore playlists_;   // the active user's playlists (playlists.h); reopened on a user switch
     QString dataDirectory_,steamRoot_,steamId_;

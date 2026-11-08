@@ -25,6 +25,7 @@ qt_add_executable(re-ps3-native
     src/service_icons.cpp src/service_icons.h
     src/tailscale_client.cpp src/tailscale_client.h src/tailscale_shell.cpp
     src/system_power.cpp src/system_power.h
+    src/file_ops.cpp src/file_ops.h
     src/wol_client.cpp src/wol_client.h src/homeassistant_client.cpp src/homeassistant_client.h src/home_shell.cpp
     src/photo_viewport.cpp src/photo_viewport.h
     src/interaction_audio.cpp src/interaction_audio.h

@@ -1666,6 +1666,15 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     initDlna();
     initTailscale();
     initHome();
+    connect(&fileOps_,&FileOperations::finished,this,[this](quint64 request,bool ok,const QString& message,const QStringList&){
+        if(request!=fileOpsRequest_)return;
+        fileOpsRequest_=0;loading_=false;status_.clear();
+        if(ok) {
+            notify(assets_.text("explore_plugin_full","msg_deleted","Delete completed."),tr("Moved to the Recycle Bin."));
+            refreshDirectory();
+        } else showMessage(assets_.text("explore_plugin_full","msg_del","Delete"),message,MessageKind::Page);
+        emit changed();
+    });
     // The sign-in surface is this shell's own page, not a modal dialog: openJellyfin() emits
     // requestJellyfinSignIn, which used to reach a QDialog in the view. Connecting it here keeps one sign-in
     // surface and leaves jellyfin_shell.cpp (outside this change's fence) as the owner of the app entry.
@@ -2512,9 +2521,11 @@ void Shell::buildOptions() {
     }
     if(!inPlaylist && optionIsLocalContent(entry)) {
         addOption({"msg_copy","Copy"},OptionCommand::Copy,"local-content",false,
-                  tr("This native build does not copy files yet."));
-        addOption({"msg_del","Delete"},OptionCommand::Delete,"local-content",false,
-                  tr("This native build does not delete files yet."));
+                  tr("This native build has no destination picker for Copy yet."));
+        // Delete moves the file to the Recycle Bin (file_ops.h), only inside the chosen library folders.
+        const QString refusal=deleteRefusal(entry);
+        addOption({"msg_del","Delete"},OptionCommand::Delete,"local-content",refusal.isEmpty(),
+                  refusal.isEmpty()?tr("Moves this file to the Recycle Bin."):refusal);
     }
     // The Continue Watching row is this build's own record, not a firmware item: the firmware has no row
     // for forgetting a resume point. Its label is the firmware's own generic remove word (`msg_eject` =
@@ -3030,8 +3041,16 @@ void Shell::optionsActivate() {
     case OptionCommand::UserAutoLogin:
     // Listed but not choosable (the copy/delete backend does not exist yet), so this is unreachable until a
     // future backend enables the row and opens its own page here.
-    case OptionCommand::Copy:
     case OptionCommand::Delete:
+        if(optionIsLocalContent(entry) && deleteRefusal(entry).isEmpty()) {
+            const Entry row=entry;
+            resetOptions();
+            deleteLocalFile(row);
+            emit changed();
+            break;
+        }
+        [[fallthrough]];
+    case OptionCommand::Copy:
         interactionAudio_.play(InteractionAudio::Cue::Error);
         qInfo().noquote()<<"shell: option unavailable"<<option.title<<option.note;
         emit changed();
@@ -4290,6 +4309,30 @@ void Shell::loadTheme() {
 }
 qint64 Shell::mediaPosition()const{return player_->position();}
 qint64 Shell::mediaDuration()const{return player_->duration();}
+QStringList Shell::libraryRoots() const {
+    QStringList roots;
+    for(const char* kind:{"video","music","photo"}) {
+        const QString root=preferences_.value(QStringLiteral("library/")+QLatin1String(kind)).toString();
+        if(!root.isEmpty())roots<<root;
+    }
+    return roots;
+}
+QString Shell::deleteRefusal(const Entry& entry) {
+    if(entry.action!=Action::File)return tr("Only files can be deleted here.");
+    fileOps_.setAllowedRoots(libraryRoots());
+    return fileOps_.checkDeletable(entry.value);
+}
+void Shell::deleteLocalFile(const Entry& entry) {
+    const QString path=entry.value,title=entry.title;
+    showConfirm(assets_.text("explore_plugin_full","msg_del_content_ask","The content will be deleted.\nAre you sure you want to continue?"),
+                tr("It is moved to the Recycle Bin."),[this,path,title]{
+        fileOps_.setAllowedRoots(libraryRoots());
+        fileOpsRequest_=fileOps_.deleteToRecycleBin({path});
+        loading_=true;status_=assets_.text("explore_plugin_full","msg_deleting","Deleting...");
+        qInfo().noquote()<<"files: delete asked for"<<title;
+        emit changed();
+    });
+}
 void Shell::refreshDirectory(){
     if(!mediaOpen_ && !pages_.isEmpty() && pages_.last().jellyfin) {
         const auto page=pages_.last();loadJellyfinPage(page.jellyfinParent,page.title,page.jellyfinStart,page.jellyfinViews,true);return;
