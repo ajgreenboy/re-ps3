@@ -93,7 +93,7 @@ recreation, with coherent architecture and functioning features. Work under
 `native-xmb/` is the active track. The firmware runtime remains a reference and
 is not the new application's execution engine. Read `native-xmb/HANDOFF.md` first.
 
-Claude's completed changes were preserved in commit `5a6b3db`. They include 1ms
+The earlier runtime changes were preserved in commit `5a6b3db`. They include 1ms
 Windows timer resolution, asynchronous GL completion fences, stale-turnoff-marker
 clearing, syscall/FIFO timing and SPU event/reservation work. Clearing the dirty
 shutdown marker avoids the recovery route; it does not fix database recovery.
@@ -832,7 +832,7 @@ rsxaudio ring to WASAPI).
   translated code pointing at the old addresses (a run showed `lis r9,0; lwz r4,0(r9)` after the image was fixed).
 
 - REA (reverse-engineer-anything) rejects PPC64 ELFs, so drive Ghidra headless directly.
-- Child processes of the Claude desktop app get AppData redirected (MSIX), which breaks Ghidra's OSGi cache. That's
+- Child processes of an MSIX-packaged desktop host get AppData redirected, which breaks Ghidra's OSGi cache. That's
   why `launch.properties` is edited.
 - Use forward slashes in CMake `-D` paths. Ninja paths need `$:` for drive letters.
 - RPCS3's prebuilt LLVM needs VS 2026's STL. With VS 2022, build LLVM from source (`tools/build-llvm.bat`).
@@ -841,6 +841,6 @@ rsxaudio ring to WASAPI).
   functions unresolved at link time. Fixed in the patch (`recompiler.cpp`, fallback name now `sub_{:X}`).
 - XenonRecomp: ~12,000 "Unable to decode" lines are jump-table data inside function spans (harmless). Its
   analysis needs `pdata_only = true` with this input; without it, it loops forever on split functions.
-- In this environment Claude Code's auto-mode permission check blocked some long-running tool runs; add a
-  PowerShell permission rule if an agent should run the pipeline unattended.
+- In this environment an automated permission check blocked some long-running tool runs; allow PowerShell
+  explicitly if the pipeline should run unattended.
 - Firmware and anything derived from it stays out of git (`.gitignore`).

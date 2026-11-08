@@ -26,7 +26,7 @@ fix,307-topic guide catalog,122-file RCO scan and finer animation observations.
 User requested a complete native C++ XMB recreation using original XMB assets,
 and rejected continuing as a rendering patch over the firmware runtime.
 
-The original runtime is preserved in Git checkpoints `5a6b3db` (Claude's work)
+The original runtime is preserved in Git checkpoints `5a6b3db` (the runtime work)
 and `e20fdb5` (takeover findings). Its latest bounded guest-only boots still fell
 to 1.2–1.4 FPS, with an intermittent SPURS task-state abort. Preserve that track
 for comparison; the native application does not execute it.
