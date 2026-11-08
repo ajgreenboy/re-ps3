@@ -1,113 +1,133 @@
-# re-ps3: a native PS3 XMB recreation (and its companion tooling)
+# re-ps3 — a native PS3 XMB recreation for Windows
 
-A native C++20/OpenGL recreation of the PlayStation 3 4.93 XMB that runs on a Windows PC, built from
-the firmware's own assets and analysed against console captures. It ships two programs:
+A native C++20 / OpenGL recreation of the PlayStation 3 **4.93 XMB**, built from the firmware's own
+assets and matched against console captures, intended as a living-room HTPC front end. It ships two
+programs from one CMake project:
 
-| Program | What it is | Documentation |
+| Program | What it is | Docs |
 |---|---|---|
-| **`re-ps3-native.exe`** | the XMB itself - category bar, item columns, pages, options menus, dialogs, settings, media panels, the OSK, the PS menu, themes and transitions | [native-xmb/README.md](native-xmb/README.md), [INSTALL.md](native-xmb/INSTALL.md) |
-| **`xmb-manager.exe`** | a companion tool that sets up emulators, imports games/ROMs as virtual PS3-style packages, and organizes the library the XMB launches | [MANAGER.md](native-xmb/MANAGER.md) |
+| **`re-ps3-native.exe`** | the XMB itself — category bar, item columns, pages, options menus, dialogs, settings, media panels, the on-screen keyboard, the PS menu, themes, the cold-boot intro and transitions | [native-xmb/README.md](native-xmb/README.md), [INSTALL.md](native-xmb/INSTALL.md) |
+| **`xmb-manager.exe`** | a companion tool that detects emulators and imports ROMs/ISOs/game folders as virtual PS3-style packages into the XMB's library | [MANAGER.md](native-xmb/MANAGER.md) |
 
-Both build from one CMake project and share one Qt runtime; the manager writes the same
-`apps.json` registry the XMB reads, so an imported game appears as a Game-column tile and starts
-through its mapped emulator.
+The manager writes the same `apps.json` registry the XMB reads, so an imported game appears as a
+Game-column tile and launches through its mapped emulator. Nothing is a firmware replacement and no
+Sony asset ships with this repository — the app reads your local `dev_flash` read-only.
 
-## Status (2026-11-04)
+## What it does
 
-The recreation is **buildable, gated and measured**, not "finished". The honest snapshot:
+- **The XMB shell, end to end:** category navigation, a submenu page stack with selection restore,
+  the item options menu, message boxes, settings pages, the PS system menu, themes (`.p3t`), the
+  firmware's 4.93 cold-boot intro and health warning, and the traced interaction sounds.
+- **Local media:** video with sidecar subtitles (`.srt`/`.vtt` and PGS/VobSub image subtitles) and
+  resume/Continue Watching, a full-screen music player page, photo viewing/slideshow/zoom/rotate, and
+  playlists (create, add, add-all, reorder, delete).
+- **Real content backends** behind the console's presentation:
+  - **Jellyfin** — library pages, direct play and HLS, streaming-quality ceiling, text and image
+    subtitles, in-XMB sign-in with a remembered (DPAPI-sealed) session.
+  - **Steam** — installed titles inline as ICON0 tiles (most recently played first), collections,
+    the store, play activity, downloads, accounts, friends, and `steam://` actions.
+  - **Spotify** (PKCE sign-in, Connect control), **DLNA/UPnP** discovery, **RAWG** artwork.
+- **Home & network:** Tailscale, Wake on LAN, Home Assistant scenes/entities, and Weather — each a
+  native page, not a browser shortcut.
+- **System:** real Restart / Sleep / Shut Down (shutdown only in `--kiosk`), audio output switching,
+  a read-only System Check, and user management (create/rename/delete, the firmware's 27 icons plus
+  "from a file", Log Out, Automatic Login).
+- **Input:** keyboard, XInput pads 0–3, DualShock 3/4 and DualSense over HID, and IR/HID remotes plus
+  media keys (`WM_APPCOMMAND`). One press is one action; the PS/Guide button brings the XMB forward
+  and a hold opens the system menu.
 
-| Measure | Current result | Where the detail lives |
+## Status
+
+Buildable, gated, and measured — not "finished". The current snapshot:
+
+| Measure | Result | Detail |
 |---|---|---|
-| Canonical render gate | **6/6 layers PASS**, frame 18.84 dB / 0.8456 SSIM against the matched console frame, text-presence guard green | [HANDOFF.md](native-xmb/HANDOFF.md) section 4 |
-| Regression states | **12/12 PASS** against deliberate self-baselines | same |
-| Behavioural oracles (Tier A) | **35/35** capturable states | [audit/PARITY-SCORECARD.md](native-xmb/audit/PARITY-SCORECARD.md) |
-| Matched fidelity (Tier B) | 0 states pass every gating region, 2-3 informative, 23 real region failures - the remaining differences are named and measured | [audit/FIDELITY-VERDICT.md](native-xmb/audit/FIDELITY-VERDICT.md) |
-| Element-level fidelity | 375 audited elements: **44.8 % match, 23.2 % differ, 17.1 % absent, 14.9 % unverified** | same verdict |
-| Surface breadth | **125 firmware surfaces: 23 reachable, 40 partial, 62 absent** (browser, store, trophies, messaging, save data, full players) | [audit/FIDELITY-SURFACES-MAP.md](native-xmb/audit/FIDELITY-SURFACES-MAP.md) |
-| Settings | **143 firmware rows, 68 showing real host values, 0 absent**; live machine data in System Information | [audit/SETTINGS-COVERAGE.md](native-xmb/audit/SETTINGS-COVERAGE.md) |
-| Manager | **120/120 core assertions**, desktop UI + 25-verb CLI, import proven end-to-end into the XMB | [MANAGER.md](native-xmb/MANAGER.md) |
+| Build | clean, reproducible (MSVC 2022 + Qt 6 + Ninja) | [INSTALL.md](native-xmb/INSTALL.md) §2 |
+| Canonical render gate | **6/6 layers PASS** vs the matched console frame (frame ≈ 19.5 dB) | `work/ab-layers.ts --all` |
+| Regression states | **12/12 PASS** (deterministic self-baselines) | same |
+| Release hygiene | **PASS** (no secrets, no firmware data, links + cited commits resolve) | `work/release-check.ps1` |
+| Feature breadth | feature-complete for daily HTPC use | [HANDOFF-2026-11-08.md](native-xmb/HANDOFF-2026-11-08.md) |
+| Fidelity vs the console | partial and measured per surface | [FIDELITY-VERDICT.md](native-xmb/audit/FIDELITY-VERDICT.md), [FIDELITY-SURFACES-MAP.md](native-xmb/audit/FIDELITY-SURFACES-MAP.md) |
 
-What works well: the frame and bar geometry, icons and typography, transitions, the settings pages,
-the OSK, dialogs, media panels, the PS menu, themes, the Manager's import/organization/backup tools.
-What is visibly unfinished: the background/ribbon exposure residuals, some player panels, and the
-surfaces listed above that have no native page yet. The unprovable set (PSN services, disc/BD rows,
-in-game XMB, notifications, media players, volume HUD) is documented with the artifact that would
-settle each one instead of being guessed.
+What still needs work is release plumbing and the remaining fidelity surfaces, not core features: the
+on-device evidence run ([RELEASE-CHECKLIST.md](native-xmb/audit/RELEASE-CHECKLIST.md)), and fidelity
+items like the playlist two-pane editor, dynamic (RAF) themes, Photo Gallery, in-game XMB, OSK
+variants, the game boot splash, the music visualizer and layout-table tracing. The plan of record is
+[PHASES-2026-11-07.md](native-xmb/audit/PHASES-2026-11-07.md).
 
-## Quick start
+## Build and run
 
-Requirements: Windows 10/11 x64, Visual Studio 2022 with the C++ workload, a Qt 6 MSVC kit
-(6.8+; the build picks the newest installed kit), and a local PS3 4.93 `dev_flash` directory
-(the app never ships firmware assets).
+Requirements: Windows 10/11 x64, Visual Studio 2022 with the C++ workload, a Qt 6 MSVC kit (6.8+),
+and a local PS3 4.93 `dev_flash` directory.
 
 ```powershell
-# build both programs into out\integration
+# build both programs (default output out\integration)
 & .\native-xmb\build.ps1
 
-# the XMB (points at the local firmware flash)
+# run the XMB (launcher resolves dev_flash / data-dir / vsh-modules for you)
 & .\run-native-xmb.ps1
 
-# the companion manager (same data directory by default)
+# run the companion manager
 & .\out\integration\xmb-manager.exe
 ```
 
-`run-native-xmb.ps1` resolves its own paths and passes `--dev-flash`, `--data-dir` and
-`--vsh-modules` for you; `native-xmb/build.ps1 -OutputDirectory <dir>` builds anywhere. The XMB reads
-`<exe dir>\data` unless `--data-dir` is passed, which is the same default the manager uses.
+`run-native-xmb.ps1` defaults `--dev-flash` to a sibling `rpcs3\bin\dev_flash` and passes
+`--vsh-modules` from `fw493\vsh_module` (decrypted `*.prx`) for the ribbon's rest tables; without
+them the ribbon uses its approximate fallback. Full command-line reference, data-folder layout and
+troubleshooting: [INSTALL.md](native-xmb/INSTALL.md).
 
-First run of the manager: **Emulators > Detect installed** (it finds portable installs such as
-`C:\dev\rpcs3`), check the **Platform map**, then **Import** ROMs/ISOs/folders. Imports become
-`<data>\pkg\<id>\` virtual packages plus an `apps.json` entry; press F5 in the XMB to refresh the
-Game column.
+## Packaging for the TV
+
+`native-xmb/packaging/` turns a build into a self-contained folder for the living-room PC and sets up
+unattended operation:
+
+```powershell
+& .\native-xmb\packaging\build-package.ps1    # -> dist\re-ps3  (add -Zip for an archive)
+```
+
+The package holds the executables, the deployed Qt runtime, and three scripts — `run-kiosk.ps1`
+(the fullscreen launcher), `watchdog.ps1` (restarts the XMB after a crash), and
+`install-autostart.ps1` (registers a logon scheduled task that runs the watchdog). Firmware is never
+copied: write an `xmb-config.json` on the target with the `devFlash` / `dataDir` / `vshModules` paths.
+Details and the auto-logon step: [packaging/README.md](native-xmb/packaging/README.md).
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `native-xmb/` | the application: `src/` (94 C++ files), `manager/` (Manager core, CLI, UI, tests), `audit/` (fidelity and firmware audits), `CMakeLists.txt`, current documents |
-| `native-xmb/archive/` | superseded dated handoffs and phase plans, with an index of what each was replaced by |
+| `native-xmb/` | the application: `src/`, `manager/`, `packaging/`, `audit/` (fidelity + firmware audits), `CMakeLists.txt`, current documents |
+| `native-xmb/archive/` | superseded dated handoffs and phase plans |
 | `work/` | verification tools (`ab-layers`, `parity`, transition harness, release check) and fidelity probes |
-| `out/` | local build and capture output (gitignored; `out/integration` is the current build) |
-| `fw493/vsh_module/`, `rea/`, `ghidra_scripts/` | decrypted VSH modules and RE analysis assets the native fidelity work reads (local only, gitignored or sourced) |
-| `run-native-xmb.ps1` | the launcher, kept at the root because it resolves its own paths from `$PSScriptRoot` |
+| `out/`, `dist/` | local build, capture and package output (gitignored) |
+| `fw493/vsh_module/`, `rea/`, `ghidra_scripts/` | decrypted VSH modules and RE analysis assets the fidelity work reads (local only, gitignored) |
+| `run-native-xmb.ps1` | the launcher, at the root because it resolves its own paths |
 
-## Verification instruments
+## Verification
 
-The project measures itself instead of trusting screenshots:
+The project measures itself rather than trusting screenshots:
 
-- `work/ab-layers.ts` - the canonical render gate (six content-neutral layers + text-presence guard)
-  and the twelve named-state regression references; `--strict` re-gates annotated layers.
-- `work/parity.ts` - the matched-fidelity corpus: catalogue states, Tier A behavioural oracles, Tier
-  B region budgets, Tier C traces, `contentDiffers` annotations with mandatory reasons.
-- `work/transition-compare.ts` - frame-by-frame console-vs-native transition verdicts with
-  side-by-side GIFs.
-- `work/release-check.ps1` - credential, firmware-data, dump, broken-link and dead-commit gate.
+- `bun work/ab-layers.ts --all --exe <exe>` — the canonical render gate (six content-neutral layers +
+  a text-presence guard) and the twelve named-state regression references.
+- `bun work/parity.ts` — the matched-fidelity corpus (Tier A behavioural oracles, Tier B region
+  budgets, Tier C traces).
+- `bun work/transition-compare.ts` — frame-by-frame console-vs-native transition verdicts.
+- `.\work\release-check.ps1` — the credential, firmware-data, dump, broken-link and dead-commit gate.
 
 ## Documentation
 
-- [Native application README](native-xmb/README.md) - architecture, build, controls.
-- [Active handoff](native-xmb/HANDOFF-2026-11-08.md) - current state, what landed, open work.
-- [Plan of record](native-xmb/audit/PHASES-2026-11-07.md), [ISA](native-xmb/ISA.md).
-- [Manager](native-xmb/MANAGER.md), [install/packaging](native-xmb/INSTALL.md),
-  [write fences](native-xmb/WORKSPACES.md).
-- [Fidelity verdict](native-xmb/audit/FIDELITY-VERDICT.md) and the six domain audits it consolidates.
-- [Audit index](native-xmb/audit/README.md).
-- [Archived dated documents](native-xmb/archive/README.md).
+- [Application README](native-xmb/README.md) — architecture, build, controls, service setup.
+- [Active handoff](native-xmb/HANDOFF-2026-11-08.md) — current state, what landed, open work.
+- [Plan of record](native-xmb/audit/PHASES-2026-11-07.md) · [ISA](native-xmb/ISA.md) · [audit index](native-xmb/audit/README.md).
+- [Install, build and run](native-xmb/INSTALL.md) · [Manager](native-xmb/MANAGER.md) · [packaging](native-xmb/packaging/README.md).
 
-## Source snapshot and honesty
+## Provenance and honesty
 
-The repository preserves the project history, native runtime, analysis tooling, dependency patches
-and documentation. **Local firmware, decrypted/derived images, generated firmware C++, analysis
-databases, console identities, API keys and build outputs are excluded.** The XMB needs a local
-`dev_flash`; the native fidelity work additionally reads the decrypted VSH modules and RE analysis
-assets under `fw493/vsh_module/`, `rea/` and `ghidra_scripts/`, which stay local and gitignored.
-
-Measurements are labelled by provenance throughout the audits: **traced** (from a console frame,
+Every measurement is labelled by provenance throughout the audits: **traced** (from a console frame,
 RCO object, MNU table or decoded program), **fit** (a native approximation with its removal
-criterion), or **unprovable** (with the artifact that would settle it). Where a game is imported
-through the Manager, a real `.pkg` install is deliberately **not** supported - this is a PC
-recreation, so ROMs/ISOs/folders become virtual packages instead, and encrypted retail packages are
-refused with an explanation rather than faked.
+criterion), or **unprovable** (with the artifact that would settle it). The repository holds source,
+docs and approved UI screenshots only — firmware, decrypted/derived assets, analysis databases,
+console identities, API keys and build outputs stay local and gitignored.
 
-No redistribution license is assigned by this upload. Refer to dependency licenses for
-third-party components and patches.
+Online services never fabricate anything: no sign-in, purchase, trophy or message is faked, and an
+encrypted retail `.pkg` is refused with an explanation rather than emulated. No redistribution
+license is assigned by this upload; see the dependency licenses for third-party components.
