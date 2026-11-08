@@ -1671,10 +1671,14 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     connect(&fileOps_,&FileOperations::finished,this,[this](quint64 request,bool ok,const QString& message,const QStringList&){
         if(request!=fileOpsRequest_)return;
         fileOpsRequest_=0;loading_=false;status_.clear();
+        const bool copying=fileOpsKind_==QLatin1String("copy");
         if(ok) {
-            notify(assets_.text("explore_plugin_full","msg_deleted","Delete completed."),tr("Moved to the Recycle Bin."));
+            if(copying)notify(assets_.text("explore_plugin_full","msg_copied","Copy completed."),message);
+            else notify(assets_.text("explore_plugin_full","msg_deleted","Delete completed."),tr("Moved to the Recycle Bin."));
             refreshDirectory();
-        } else showMessage(assets_.text("explore_plugin_full","msg_del","Delete"),message,MessageKind::Page);
+        } else if(copying && message.startsWith(QLatin1String("Not enough free space")))
+            showMessage(assets_.text("explore_plugin_full","msg_copy_incomplete","There is not enough free space. The copy operation was not completed."),MessageKind::Page);
+        else showMessage(assets_.text("explore_plugin_full",copying?"msg_copy":"msg_del",copying?"Copy":"Delete"),message,MessageKind::Page);
         emit changed();
     });
     // The sign-in surface is this shell's own page, not a modal dialog: openJellyfin() emits
@@ -2539,8 +2543,10 @@ void Shell::buildOptions() {
         }
     }
     if(!inPlaylist && optionIsLocalContent(entry)) {
-        addOption({"msg_copy","Copy"},OptionCommand::Copy,"local-content",false,
-                  tr("This native build has no destination picker for Copy yet."));
+        // Copy: to one of the chosen library folders, or this file's own folder (a numbered copy); never overwrites.
+        addOption({"msg_copy","Copy"},OptionCommand::Copy,"local-content",entry.action==Action::File,
+                  entry.action==Action::File?tr("Copies this file to a library folder."):tr("Only files can be copied here."));
+        options_.last().submenu=true;
         // Delete moves the file to the Recycle Bin (file_ops.h), only inside the chosen library folders.
         const QString refusal=deleteRefusal(entry);
         addOption({"msg_del","Delete"},OptionCommand::Delete,"local-content",refusal.isEmpty(),
@@ -3061,6 +3067,44 @@ void Shell::optionsActivate() {
     case OptionCommand::UserAutoLogin:
     // Listed but not choosable (the copy/delete backend does not exist yet), so this is unreachable until a
     // future backend enables the row and opens its own page here.
+    case OptionCommand::Copy:
+        if(optionIsLocalContent(entry) && entry.action==Action::File) {
+            copySource_=entry.value;copyTitle_=entry.title;copyTargets_.clear();
+            optionsParent_=options_;optionsNested_=true;
+            optionsTitle_=assets_.text("explore_plugin_full","msg_copy","Copy");
+            options_.clear();
+            const QString here=QFileInfo(entry.value).absolutePath();
+            static const char* const kinds[][2]={{"video","Video Library"},{"music","Music Library"},{"photo","Photo Library"}};
+            for(const auto& kind:kinds) {
+                const QString root=preferences_.value(QStringLiteral("library/")+QLatin1String(kind[0])).toString();
+                if(root.isEmpty() || QDir::cleanPath(root)==QDir::cleanPath(here))continue;
+                MenuOption row{tr(kind[1]),OptionCommand::CopyTarget};
+                row.index=int(copyTargets_.size());row.note=QDir::toNativeSeparators(root);
+                const QString refusal=fileOps_.checkCopy({entry.value},root);
+                if(!refusal.isEmpty()){row.enabled=false;row.note=refusal;}
+                copyTargets_<<root;options_.push_back(row);
+            }
+            MenuOption same{tr("This Folder"),OptionCommand::CopyTarget};
+            same.index=int(copyTargets_.size());same.note=tr("Makes a numbered copy next to the original.");
+            copyTargets_<<here;options_.push_back(same);
+            optionsSelection_=0;
+            interactionAudio_.play(InteractionAudio::Cue::Options);
+            emit changed();
+            break;
+        }
+        interactionAudio_.play(InteractionAudio::Cue::Error);
+        emit changed();
+        break;
+    case OptionCommand::CopyTarget: {
+        if(option.index<0 || option.index>=copyTargets_.size() || copySource_.isEmpty())break;
+        const QString target=copyTargets_[option.index],source=copySource_,title=copyTitle_;
+        resetOptions();
+        fileOpsRequest_=fileOps_.copy({source},target);fileOpsKind_=QStringLiteral("copy");
+        loading_=true;status_=assets_.text("explore_plugin_full","msg_copying","Copying...");
+        qInfo().noquote()<<"files: copy asked for"<<title<<"to"<<QDir::toNativeSeparators(target);
+        emit changed();
+        break;
+    }
     case OptionCommand::Delete:
         if(optionIsLocalContent(entry) && deleteRefusal(entry).isEmpty()) {
             const Entry row=entry;
@@ -3069,8 +3113,6 @@ void Shell::optionsActivate() {
             emit changed();
             break;
         }
-        [[fallthrough]];
-    case OptionCommand::Copy:
         interactionAudio_.play(InteractionAudio::Cue::Error);
         qInfo().noquote()<<"shell: option unavailable"<<option.title<<option.note;
         emit changed();
@@ -4460,7 +4502,7 @@ void Shell::deleteLocalFile(const Entry& entry) {
     showConfirm(assets_.text("explore_plugin_full","msg_del_content_ask","The content will be deleted.\nAre you sure you want to continue?"),
                 tr("It is moved to the Recycle Bin."),[this,path,title]{
         fileOps_.setAllowedRoots(libraryRoots());
-        fileOpsRequest_=fileOps_.deleteToRecycleBin({path});
+        fileOpsRequest_=fileOps_.deleteToRecycleBin({path});fileOpsKind_=QStringLiteral("delete");
         loading_=true;status_=assets_.text("explore_plugin_full","msg_deleting","Deleting...");
         qInfo().noquote()<<"files: delete asked for"<<title;
         emit changed();

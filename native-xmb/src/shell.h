@@ -177,6 +177,8 @@ enum class OptionCommand { Activate, Information,
     // The playlist editor's Move (playlist_plugin msg_help_move_delete_*), as two option rows, and its Add All
     // (msg_add_all_playlist): every local file of the column's kind on the page into one chosen playlist.
     PlaylistMoveUp, PlaylistMoveDown, AddAllToPlaylist, AddAllToPlaylistTarget,
+    // Copy's destination level (file_ops.h): one library folder (MenuOption::index into copyTargets_).
+    CopyTarget,
     // A Steam game row's hand-offs to the Steam client (steam:// links); MenuOption::index picks which.
     SteamLink,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
@@ -586,6 +588,9 @@ private:
     QStringList libraryRoots() const;
     QString deleteRefusal(const Entry& entry);
     void deleteLocalFile(const Entry& entry);
+    QStringList copyTargets_;   // the destinations the open Copy level lists, by MenuOption::index
+    QString copySource_,copyTitle_;
+    QString fileOpsKind_;       // "copy" or "delete": what the request in flight is
     WeatherClient weather_;
     WeatherReport weatherReport_;
     QString weatherError_;
