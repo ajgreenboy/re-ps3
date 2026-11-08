@@ -427,6 +427,15 @@ never reads those indices through the accessors. They are value coincidences in 
 constants stay capture-derived, exactly as section 1 concluded, so there is nothing to replace with a table read except the
 three confirmed factor entries (and even those match the already-captured 200/10/10).
 
-Remaining, if a direct trace of 262/395/320x176 is still wanted: evaluate the 58 `FUN_0033fc30` callers' `(id, value)` pairs as
-`factor[id>>16] * value + grid[id & 0xffff]` and match the results against the measured constants; failing that, accept them as
-draw-time projections. No source edit is made on the strength of value coincidence alone.
+Evaluated 2026-11-08 and closed. The 58 `FUN_0033fc30` callers were enumerated with `ghidra_scripts/CallerArgs.java`
+(a `RefsTo` + backward-literal scan; output `C:\dev\out\f8\caller-args.txt`, evaluation `C:\dev\out\f8\eval-ids.ts`). The
+ABI is confirmed from the listing (`C:\dev\out\f8\fc30.lst`): `v` in `f1`, `id` in `r3`, body `factor[id>>16]*v +
+grid[id&0xffff]` (low 16 bits = grid index, high 16 = factor index). Of the 58 callers, **30 pass a literal `id`** and **28
+load `id` from a struct field** (runtime, not statically resolvable). The literal `li r3,imm` ids (grid index, so
+`factor[0]=1`) are `{0, 189, 192, 228..238, 256, 3372, 3494}` → grid `{0, 340, 30, 4/15/12/4/4/-4/0/0/0/3/4/-1, 1, 0.09, 1}`;
+the literal `lis r3,imm` ids (factor index) are `{5, 7, 13}` → `factor` `{1, 1.0, 1}` (a pass-through scale, `grid[0]=0`); one
+`li r3,-1` is a sentinel (grid index 65535, out of range). **None of the nine measured constants (262, 395, 320, 176, 290,
+210, 540, 110, 80) is produced by any literal id** — reaching them would need the runtime ids, i.e. draw-time projections.
+This closes the question: the draft's value matches stay coincidences, the constants stay capture-derived, and there is
+nothing to replace with a table read beyond the three confirmed factor entries already noted. No source edit is made on the
+strength of value coincidence alone.
