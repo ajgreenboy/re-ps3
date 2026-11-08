@@ -142,6 +142,9 @@ enum class OptionCommand { Activate, Information,
     SpotifyPlayAll, SpotifyShuffleAll,
     // Jellyfin's streaming ceiling: the list (from an item row or the player panel) and one choice in it.
     JellyfinQuality, JellyfinQualityTarget,
+    // The playlist editor's Move (playlist_plugin msg_help_move_delete_*), as two option rows, and its Add All
+    // (msg_add_all_playlist): every local file of the column's kind on the page into one chosen playlist.
+    PlaylistMoveUp, PlaylistMoveDown, AddAllToPlaylist, AddAllToPlaylistTarget,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
     // Information with two or more users, Information alone with one. Delete runs the traced two-step ask.
     UserLogOut, UserAutoLogin, UserDelete };

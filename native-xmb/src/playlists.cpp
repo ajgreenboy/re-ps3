@@ -152,6 +152,38 @@ PlaylistStore::Result PlaylistStore::add(const QString& id, const QString& path)
     return Result::NotFound;
 }
 
+PlaylistStore::Result PlaylistStore::moveItem(const QString& id, int from, int to) {
+    auto next = playlists_;
+    for (auto& playlist : next) {
+        if (playlist.id != id) continue;
+        if (from < 0 || from >= playlist.items.size() || to < 0 || to >= playlist.items.size()) return Result::NotFound;
+        if (from == to) return Result::Ok;
+        playlist.items.move(from, to);
+        return save(next) ? Result::Ok : Result::WriteFailed;
+    }
+    return Result::NotFound;
+}
+
+PlaylistStore::Result PlaylistStore::addAll(const QString& id, const QStringList& paths, int* added) {
+    if (added) *added = 0;
+    auto next = playlists_;
+    for (auto& playlist : next) {
+        if (playlist.id != id) continue;
+        int count = 0;bool full = false;
+        for (const auto& path : paths) {
+            if (path.isEmpty() || path.size() > MaximumPathCharacters || !QFileInfo(path).isAbsolute()) continue;
+            if (playlist.items.contains(path)) continue;
+            if (playlist.items.size() >= MaximumItems) { full = true;break; }
+            playlist.items << path;++count;
+        }
+        if (count == 0) return full ? Result::TooManyItems : Result::AlreadyListed;
+        if (!save(next)) return Result::WriteFailed;
+        if (added) *added = count;
+        return Result::Ok;
+    }
+    return Result::NotFound;
+}
+
 PlaylistStore::Result PlaylistStore::removeItem(const QString& id, int index) {
     auto next = playlists_;
     for (auto& playlist : next) {

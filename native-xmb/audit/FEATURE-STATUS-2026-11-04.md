@@ -16,8 +16,13 @@ release verification, and exact PS3 fidelity.
    the playlist (scripted run: "Track 1 of 2" from a two-item playlist in a three-file folder); Delete removes a
    row from a playlist or a whole playlist, never a file. Storage is `src/playlists.*`: one atomic JSON file per
    user under `<data>/playlists/`, removed with the user; limits 100 playlists and 1000 items are this build's
-   (no firmware value traced). Open: playlist_plugin's two-pane editor (expage_select_list / expage_edit_list
-   with Add All and Move) is not drawn; adding is from the item menu instead.
+   (no firmware value traced). Updated 2026-11-07 (later): the editor's two commands exist as option rows. Inside a playlist an item
+   offers Move Up / Move Down (disabled at the ends, focus follows the item; `PlaylistStore::moveItem`), and a
+   local music/photo folder with more than one file offers Add All (playlist_plugin `msg_add_all_playlist`) into
+   a chosen playlist, skipping files already listed (`PlaylistStore::addAll`, one save). Scripted run: Add All
+   added 1 of 3 files to a playlist already holding two of them; Move Down reordered Alpha, Charlie, Bravo to
+   Charlie, Alpha, Bravo on disk. Still open: the two-pane editor itself (expage_select_list /
+   expage_edit_list, Cross to pick a row up) is not drawn.
 2. **Avatar editing.** Updated 2026-11-07: rename and delete are implemented from explore_plugin's own user-row
    menu (`audit/FIDELITY-SURFACES-MAP.md`; `Profiles::rename/remove`, `Shell::renameUser/deleteUser`): Delete runs the
    traced two Yes/No asks and drops that user's settings, Information renames with the firmware's duplicate-name

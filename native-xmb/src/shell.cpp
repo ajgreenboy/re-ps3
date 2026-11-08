@@ -2301,6 +2301,12 @@ void Shell::buildOptions() {
     // pairs Delete with the playlist editor), so the file commands give way to it there.
     const bool inPlaylist=!pages_.isEmpty() && !pages_.last().playlistId.isEmpty();
     if(inPlaylist && entry.id.startsWith(QLatin1String("playlistitem:"))) {
+        // Move: the editor's reorder, one step per choice (this build's two rows; the firmware picks the row up
+        // with Cross in its two-pane editor, which is not drawn).
+        const int at=entry.id.mid(QStringLiteral("playlistitem:").size()).toInt();
+        int count=0;for(const auto& row:entries())if(row.id.startsWith(QLatin1String("playlistitem:")))++count;
+        addOption({"","Move Up"},OptionCommand::PlaylistMoveUp,"playlist-item",at>0,at>0?QString():tr("This item is already first."));
+        addOption({"","Move Down"},OptionCommand::PlaylistMoveDown,"playlist-item",at+1<count,at+1<count?QString():tr("This item is already last."));
         addOption({"msg_del","Delete"},OptionCommand::PlaylistRemoveItem,"playlist-item",true,
                   tr("Removes this item from the playlist. The file stays on disk."));
     }
@@ -2310,6 +2316,13 @@ void Shell::buildOptions() {
     if(!inPlaylist && entry.action==Action::File && optionIsLocalContent(entry) && (mediaKind=="music" || mediaKind=="photo")) {
         addOption({"msg_add_to_playlist","Add to Playlist"},OptionCommand::AddToPlaylist,"local-media");
         options_.last().submenu=true;
+        int files=0;for(const auto& row:entries())if(row.action==Action::File && optionIsLocalContent(row))++files;
+        if(files>1) {
+            addOption({"","Add All"},OptionCommand::AddAllToPlaylist,"local-media");
+            options_.last().title=assets_.text("playlist_plugin","msg_add_all_playlist","Add All");
+            options_.last().note=tr("Adds the %1 files in this folder to a playlist.").arg(files);
+            options_.last().submenu=true;
+        }
     }
     if(!inPlaylist && optionIsLocalContent(entry)) {
         addOption({"msg_copy","Copy"},OptionCommand::Copy,"local-content",false,
@@ -2700,6 +2713,62 @@ void Shell::optionsActivate() {
                 emit changed();
             });
         interactionAudio_.play(InteractionAudio::Cue::Options);
+        emit changed();
+        break;
+    }
+    case OptionCommand::PlaylistMoveUp:case OptionCommand::PlaylistMoveDown: {
+        resetOptions();
+        const QString id=pages_.isEmpty()?QString{}:pages_.last().playlistId;
+        const int from=entry.id.mid(QStringLiteral("playlistitem:").size()).toInt();
+        const int to=from+(option.command==OptionCommand::PlaylistMoveUp?-1:1);
+        const auto result=playlists_.moveItem(id,from,to);
+        if(result==PlaylistStore::Result::Ok) {
+            qInfo().noquote()<<"playlists: moved item"<<from<<"to"<<to<<"in"<<id;
+            interactionAudio_.play(InteractionAudio::Cue::Confirm);
+            refreshPlaylistPages();
+            // Focus follows the moved item.
+            if(!pages_.isEmpty())for(int i=0;i<pages_.last().entries.size();++i)
+                if(pages_.last().entries[i].id==QStringLiteral("playlistitem:%1").arg(to)){pages_.last().selection=i;break;}
+        } else showPlaylistResult(result);
+        emit changed();
+        break;
+    }
+    case OptionCommand::AddAllToPlaylist: {
+        const QString type=categories_[category_].id;
+        optionsParent_=options_;optionsNested_=true;
+        optionsTitle_=assets_.text("playlist_plugin","msg_select_playlist","Select a playlist.");
+        options_.clear();
+        const auto lists=playlists_.list(type);
+        for(int i=0;i<lists.size();++i) {
+            MenuOption row{lists[i].name,OptionCommand::AddAllToPlaylistTarget};
+            row.index=i;row.note=playlistCountText(type,int(lists[i].items.size()));
+            options_.push_back(row);
+        }
+        if(lists.isEmpty()) {
+            MenuOption row{assets_.text("playlist_plugin","msg_create_new_playlist","Create New Playlist"),OptionCommand::AddAllToPlaylistTarget};
+            row.enabled=false;row.note=tr("There is no playlist yet. Create one in the Playlists folder first.");
+            options_.push_back(row);
+        }
+        optionsSelection_=0;
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        emit changed();
+        break;
+    }
+    case OptionCommand::AddAllToPlaylistTarget: {
+        const auto lists=playlists_.list(categories_[category_].id);
+        if(option.index<0 || option.index>=lists.size())break;
+        const auto target=lists[option.index];
+        QStringList paths;
+        for(const auto& row:entries())if(row.action==Action::File && optionIsLocalContent(row))paths<<row.value;
+        resetOptions();
+        int added=0;
+        const auto result=playlists_.addAll(target.id,paths,&added);
+        if(result==PlaylistStore::Result::Ok) {
+            qInfo().noquote()<<"playlists: added"<<added<<"of"<<paths.size()<<"file(s) to"<<target.name;
+            notify(target.name,tr("Added %1 of %2 files.").arg(added).arg(paths.size()));
+            interactionAudio_.play(InteractionAudio::Cue::Confirm);
+            refreshPlaylistPages();
+        } else showPlaylistResult(result);
         emit changed();
         break;
     }

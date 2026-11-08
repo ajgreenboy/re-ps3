@@ -40,6 +40,11 @@ public:
     Result create(const QString& type, const QString& name, QString* id = nullptr);
     Result add(const QString& id, const QString& path);
     Result removeItem(const QString& id, int index);
+    // Moves one item to another position (both 0-based, within the playlist).
+    Result moveItem(const QString& id, int from, int to);
+    // Adds every path not already listed, in order, in one save; stops at MaximumItems. `added` says how
+    // many went in. Ok when at least one was added; AlreadyListed when every one was already there.
+    Result addAll(const QString& id, const QStringList& paths, int* added = nullptr);
     Result remove(const QString& id);
     QString error() const { return error_; }
     bool writable() const { return writable_; }
