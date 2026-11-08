@@ -1,5 +1,6 @@
 #include "shell.h"
 #include "glyphs.h"
+#include "service_icons.h"
 #include "settings_menu.h"
 #include "media_controls.h"
 #include <QApplication>
@@ -1016,6 +1017,7 @@ void Shell::refreshContent() {
           if(!familyError.isEmpty())qWarning().noquote()<<"steam family:"<<familyError; }
         const bool accountChanged=steamId_!=result.steam.steamId;
         steamId_=result.steam.steamId;
+        steamActivity_=scanSteamActivity(steamRoot_,steamId_);
         if(!result.error.isEmpty()){showMessage("App Library",result.error,MessageKind::Page);result.apps=contentApps_;}
         contentApps_=result.apps;
         for(int c=0;c<categories_.size();++c) {
@@ -1034,19 +1036,28 @@ void Shell::refreshContent() {
                     auto e=item("steam:"+game.appId,game.title,"game_tex_default_ps3","explore_plugin_full",
                         Action::LaunchSteam,game.appId);
                     e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;
-                    e.detail=collectionLabel(game.appId);installed.push_back(std::move(e));
+                    // The detail line says what Steam itself recorded: time played and the last session.
+                    QStringList detail;
+                    const QString label=collectionLabel(game.appId);if(!label.isEmpty())detail<<label;
+                    const QString activity=steamActivityText(steamActivity_.value(game.appId),preferences_.value("clock/dateFormat").toInt());
+                    if(!activity.isEmpty())detail<<activity;
+                    e.detail=detail.join(QStringLiteral(" - "));installed.push_back(std::move(e));
                 }
+                // Most recently played first, as a console lists its recent titles; never-played keep Steam's order.
+                std::stable_sort(installed.begin(),installed.end(),[this](const Entry& a,const Entry& b){
+                    return steamActivity_.value(a.value).lastPlayed>steamActivity_.value(b.value).lastPlayed;
+                });
                 {
                     // Browsing the public storefront: the only place to find something not owned yet.
                     auto e=item("steam-store",QObject::tr("Steam Store"),"item_tex_ps_store","explore_plugin_full",
                         Action::SteamStoreBrowse,QString());
-                    e.detail=QObject::tr("Browse and install");providers.push_back(std::move(e));
+                    e.detail=QObject::tr("Browse and install");e.artwork=serviceIcons::steam(steamRoot_);e.iconSized=true;providers.push_back(std::move(e));
                 }
                 const int steamTitles=steamTitleCount();
                 if(steamTitles>0) {
                     auto e=item("steam-folder-all-games",QObject::tr("All Games"),"item_tex_plain_folder",
                         "explore_plugin_full",Action::SteamFolder,"all");
-                    e.detail=QString::number(steamTitles);providers.push_back(std::move(e));
+                    e.detail=QString::number(steamTitles);e.artwork=serviceIcons::steam(steamRoot_);e.iconSized=true;providers.push_back(std::move(e));
                 }
             }
             for(const auto& app:contentApps_)if(app.category==category.id) {
@@ -1057,7 +1068,15 @@ void Shell::refreshContent() {
                 e.detail=app.kind=="game"?QString{}:app.kind=="jellyfin"?QStringLiteral("Jellyfin"):QStringLiteral("Service app ")+QChar(0x00B7)+QStringLiteral(" Opens in your browser");
                 e.artwork=result.art.value("custom:"+app.id);e.gameTile=app.kind=="game";
                 // Jellyfin's row wears Jellyfin's mark unless the user gave the app its own picture.
-                if(app.kind=="jellyfin" && e.artwork.isNull()){e.artwork=glyphs::jellyfinLogo();e.iconSized=true;}
+                if(app.kind=="jellyfin" && e.artwork.isNull()) {
+                    e.artwork=serviceIcons::jellyfin();e.iconSized=true;
+                    // The server's own icon, once: cached under the data folder, then fetched from the server.
+                    serviceIcons::loadJellyfin(dlnaNetwork_,QUrl(app.url),QDir(dataDirectory_).filePath("jellyfin/server-icon.png"),[this]{
+                        for(auto& column:categories_)for(auto& row:column.entries)
+                            if(row.action==Action::JellyfinApp && row.iconSized)row.artwork=serviceIcons::jellyfin();
+                        emit changed();
+                    });
+                }
                 providers.push_back(std::move(e));
             }
             category.entries=installed+providers+category.entries;
@@ -2260,9 +2279,32 @@ void Shell::buildOptions() {
         }
         const int actionGroup=options_.size();
         addOption({"msg_game_start","Start"},OptionCommand::Activate,"game-title");
-        // Delete is the firmware's always-present row (A4 row 4). This build has no delete backend for a title:
-        // a Steam title's files belong to the client and an imported one to the emulator's install folder, so
-        // the row is listed and cannot be chosen and its note says exactly that (the panel's disabled-row rule).
+        // A Steam title: the Steam client's own pages and commands for it, as steam:// hand-offs (this build's
+        // rows; the console has no Steam). Played time and the last session ride on the Library row's note.
+        bool steamId=false;entry.value.toULongLong(&steamId);
+        const bool steamRow=steamId && (entry.action==Action::LaunchSteam || entry.action==Action::InstallSteam);
+        const bool steamInstalled=steamRow && entry.action==Action::LaunchSteam;
+        if(steamRow) {
+            const auto link=[&](const QString& title,int kind,const QString& note){
+                addOption({"",title},OptionCommand::SteamLink,"steam-game");options_.last().index=kind;options_.last().note=note;
+            };
+            const QString played=steamActivityText(steamActivity_.value(entry.value),preferences_.value("clock/dateFormat").toInt());
+            link(QStringLiteral("Open in Steam Library"),0,played.isEmpty()?tr("The game's page in the Steam client."):played);
+            link(QStringLiteral("Store Page"),1,tr("The game's page on the Steam store."));
+            if(steamInstalled) {
+                link(QStringLiteral("Screenshots"),2,tr("This game's screenshots in Steam."));
+                link(QStringLiteral("Verify Game Files"),3,tr("Steam checks the installed files and repairs them."));
+            }
+        }
+        // Delete is the firmware's always-present row (A4 row 4). An installed Steam title's files belong to the
+        // Steam client, so Delete hands off to Steam's own uninstall (Steam confirms first). Any other title has
+        // no delete backend here: an imported one's files belong to the emulator's install folder, so the row is
+        // listed and cannot be chosen and its note says exactly that (the panel's disabled-row rule).
+        if(steamInstalled) {
+            addOption({"msg_del","Delete"},OptionCommand::SteamLink,"game-title",true,
+                      tr("Steam uninstalls the game and asks to confirm first."));
+            options_.last().index=4;
+        } else
         addOption({"msg_del","Delete"},OptionCommand::Delete,"game-title",false,
                   tr("This native build does not delete a title's files; Steam and the emulator's install "
                      "folder own them."));
@@ -2657,6 +2699,19 @@ void Shell::optionsActivate() {
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
         emit changed();
         break;
+    case OptionCommand::SteamLink: {
+        static const char* const routes[]={"steam://nav/games/details/%1","steam://store/%1","steam://open/screenshots/%1",
+                                           "steam://validate/%1","steam://uninstall/%1"};
+        resetOptions();
+        bool numeric=false;entry.value.toULongLong(&numeric);
+        if(!numeric || option.index<0 || option.index>4)break;
+        const QUrl url(QString::fromLatin1(routes[option.index]).arg(entry.value));
+        qInfo().noquote()<<"steam: hand-off"<<url.toString()<<"for"<<entry.title;
+        if(QDesktopServices::openUrl(url))interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        else showMessage(entry.title,tr("Steam could not be opened."),MessageKind::Page);
+        emit changed();
+        break;
+    }
     case OptionCommand::JellyfinQuality:openJellyfinQualityList();break;
     case OptionCommand::JellyfinQualityTarget:chooseJellyfinQuality(option.index);break;
     case OptionCommand::SpotifyPlayAll:case OptionCommand::SpotifyShuffleAll: {

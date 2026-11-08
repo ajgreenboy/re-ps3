@@ -8,6 +8,7 @@
 #include "playlists.h"
 #include "spotify_client.h"
 #include "dlna_client.h"
+#include "steam_activity.h"
 #include "steam_friends.h"
 #include "content_registry.h"
 #include "jellyfin_client.h"
@@ -150,6 +151,8 @@ enum class OptionCommand { Activate, Information,
     // The playlist editor's Move (playlist_plugin msg_help_move_delete_*), as two option rows, and its Add All
     // (msg_add_all_playlist): every local file of the column's kind on the page into one chosen playlist.
     PlaylistMoveUp, PlaylistMoveDown, AddAllToPlaylist, AddAllToPlaylistTarget,
+    // A Steam game row's hand-offs to the Steam client (steam:// links); MenuOption::index picks which.
+    SteamLink,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
     // Information with two or more users, Information alone with one. Delete runs the traced two-step ask.
     UserLogOut, UserAutoLogin, UserDelete };
@@ -513,6 +516,7 @@ private:
     bool activateDlna(const Entry& entry);
     void openDlnaFolder(int server,const QString& objectId,const QString& title);
     void openDlnaPhoto(const Entry& entry);
+    QHash<QString,SteamActivity> steamActivity_;   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
     void spotifyCommand(OptionCommand command);
     PlaylistStore playlists_;   // the active user's playlists (playlists.h); reopened on a user switch
     QString dataDirectory_,steamRoot_,steamId_;

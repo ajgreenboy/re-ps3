@@ -12,6 +12,7 @@
 #include "shell.h"
 #include "assets.h"
 #include "glyphs.h"
+#include "service_icons.h"
 #include "media_controls.h"
 #include <QDir>
 #include <QRandomGenerator>
@@ -45,7 +46,7 @@ void Shell::initSpotify() {
     spotify_.setImageCache(QDir(dataDirectory_).filePath("spotify/images"));
     // The Music column's Spotify row wears Spotify's mark instead of a folder.
     for(auto& category:categories_)if(category.id==QLatin1String("music"))
-        for(auto& entry:category.entries)if(entry.action==Action::SpotifyApp){entry.artwork=glyphs::spotifyLogo();entry.iconSized=true;}
+        for(auto& entry:category.entries)if(entry.action==Action::SpotifyApp){entry.artwork=serviceIcons::spotify();entry.iconSized=true;}
     connect(&spotify_,&SpotifyClient::imageReady,this,[this](const QString& url,const QImage& image){
         QImage square;
         if(!image.isNull()) {
@@ -163,16 +164,16 @@ void Shell::initSpotify() {
 QVector<Entry> Shell::spotifyRootRows() {
     QVector<Entry> rows;
     if(!spotify_.configured()) {
-        rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:setup"),QObject::tr("Set Up Spotify"),Action::Unavailable,{},spotify_.configurationError()),glyphs::spotifyLogo()));
+        rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:setup"),QObject::tr("Set Up Spotify"),Action::Unavailable,{},spotify_.configurationError()),serviceIcons::spotify()));
         return rows;
     }
     if(!spotify_.signedIn()) {
         rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:signin"),QObject::tr("Sign In with Spotify"),Action::SpotifySignIn,{},
-            QObject::tr("Opens Spotify's sign-in in the browser; it returns to %1.").arg(spotify_.redirectUri())),glyphs::spotifyLogo()));
+            QObject::tr("Opens Spotify's sign-in in the browser; it returns to %1.").arg(spotify_.redirectUri())),serviceIcons::spotify()));
         return rows;
     }
     // Now Playing wears the playing track's cover once it is fetched, Spotify's mark until then.
-    auto now=withIcon(spotifyRow(QStringLiteral("spotify:now"),QObject::tr("Now Playing"),Action::SpotifyNowPlaying,{},nowPlayingText(spotifyNowPlaying_)),glyphs::spotifyLogo());
+    auto now=withIcon(spotifyRow(QStringLiteral("spotify:now"),QObject::tr("Now Playing"),Action::SpotifyNowPlaying,{},nowPlayingText(spotifyNowPlaying_)),serviceIcons::spotify());
     now.artworkUrl=spotifyNowPlaying_.image;
     rows.push_back(std::move(now));
     rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:liked"),QObject::tr("Liked Songs"),Action::SpotifyLiked,{},QObject::tr("Your saved tracks")),glyphs::likedSongs()));

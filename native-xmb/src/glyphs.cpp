@@ -63,6 +63,30 @@ const QImage& jellyfinLogo() {
     return logo;
 }
 
+const QImage& steamLogo() {
+    static const QImage logo=[]{
+        QImage image=canvas();QPainter p(&image);p.setRenderHint(QPainter::Antialiasing);
+        // Steam's mark: a navy disc; on it a large ring (upper right) holding a dot, a small ring (lower left),
+        // and the rod joining them, all white.
+        QLinearGradient gradient(40,24,216,232);
+        gradient.setColorAt(0,QColor(0x11,0x1d,0x2e));gradient.setColorAt(1,QColor(0x1f,0x5f,0x8f));
+        p.setPen(Qt::NoPen);p.setBrush(gradient);p.drawEllipse(QRectF(20,20,216,216));
+        const QColor white(250,250,250);
+        QPen rod(white);rod.setWidthF(30);rod.setCapStyle(Qt::RoundCap);
+        p.setPen(rod);p.drawLine(QPointF(98,166),QPointF(150,118));
+        p.setPen(Qt::NoPen);p.setBrush(white);
+        p.drawEllipse(QPointF(160,100),44,44);
+        p.drawEllipse(QPointF(92,170),30,30);
+        p.setBrush(QColor(0x17,0x34,0x52));
+        p.drawEllipse(QPointF(160,100),30,30);
+        p.drawEllipse(QPointF(92,170),17,17);
+        p.setBrush(white);
+        p.drawEllipse(QPointF(160,100),19,19);
+        return image;
+    }();
+    return logo;
+}
+
 const QImage& likedSongs() {
     static const QImage tile=[]{
         QImage image=canvas();QPainter p(&image);p.setRenderHint(QPainter::Antialiasing);
