@@ -1,6 +1,7 @@
 #include "shell.h"
 #include "glyphs.h"
 #include "service_icons.h"
+#include <QPainter>
 #include "settings_menu.h"
 #include "media_controls.h"
 #include <QApplication>
@@ -678,14 +679,24 @@ QVector<Entry> Shell::steamFolderEntries(const QString& mode) const {
     QVector<Entry> rows;
     const QString cache=QDir(dataDirectory_).filePath("cache/steam");
     int decoded=0;
+    // This build's own header cache first, then the Steam client's library cache for the same app.
+    const auto headerPath=[&](const QString& appId)->QString {
+        const QString own=SteamArtwork::cachePath(cache,appId);
+        if(QFileInfo::exists(own))return own;
+        const QString steam=QDir(steamRoot_).filePath(QStringLiteral("appcache/librarycache/%1/header.jpg").arg(appId));
+        return QFileInfo::exists(steam)?steam:own;
+    };
     const auto add=[&](const QString& appId,const QString& title,const QString& detail,Action action) {
         auto e=item("steam:"+appId,title,"game_tex_default_ps3","explore_plugin_full",action,appId);
+        QString fullDetail=detail;
+        const QString played=steamActivityText(steamActivity_.value(appId),preferences_.value("clock/dateFormat").toInt());
+        if(!played.isEmpty())fullDetail+=(fullDetail.isEmpty()?QString():QStringLiteral(" - "))+played;
         // Inside a page these are ordinary items, not the category column's wide provider
         // tiles: a gameTile row here is laid out at the wide-tile size and lands out of
         // alignment. Artwork is centre-cropped to a square for the same reason.
-        e.gameTile=false;e.detail=detail;
+        e.gameTile=false;e.detail=fullDetail;
         if(decoded<64) {
-            QImageReader reader(SteamArtwork::cachePath(cache,appId));
+            QImageReader reader(headerPath(appId));
             if(reader.canRead()) {
                 const auto size=reader.size();
                 if(size.isValid() && size.width()<=16384 && size.height()<=16384) {
@@ -703,9 +714,36 @@ QVector<Entry> Shell::steamFolderEntries(const QString& mode) const {
     };
     // Folder rows only: no artwork decode and no app-id artwork request, because the value
     // is a folder mode string rather than an app id.
-    const auto addFolder=[&](const QString& id,const QString& title,const QString& detail,const QString& folderMode) {
+    // A folder wears an icon of what it holds: Steam's own icon for All Titles, a 2x2 mosaic of its first four
+    // titles' cached headers for a collection, a download / family glyph for Not Installed / Family Shared.
+    const auto mosaic=[&](const QStringList& appIds)->QImage {
+        QVector<QImage> tiles;
+        for(const auto& appId:appIds) {
+            if(tiles.size()>=4)break;
+            QImageReader reader(headerPath(appId));
+            const auto size=reader.size();
+            if(!reader.canRead() || !size.isValid() || size.width()>16384 || size.height()>16384)continue;
+            reader.setScaledSize(size.scaled(256,256,Qt::KeepAspectRatioByExpanding));
+            const QImage image=reader.read();
+            if(image.isNull())continue;
+            const int side=std::min(image.width(),image.height());
+            tiles.push_back(image.copy((image.width()-side)/2,(image.height()-side)/2,side,side).scaled(124,124,Qt::IgnoreAspectRatio,Qt::SmoothTransformation));
+        }
+        if(tiles.isEmpty())return {};
+        if(tiles.size()==1)return tiles.first().scaled(256,256,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+        QImage out(256,256,QImage::Format_ARGB32_Premultiplied);out.fill(Qt::transparent);
+        QPainter p(&out);p.setRenderHint(QPainter::SmoothPixmapTransform);
+        for(int i=0;i<4;++i) {
+            const QImage& tile=tiles[i%tiles.size()];
+            p.drawImage(QPointF(2+(i%2)*130,2+(i/2)*130),tile);
+        }
+        return out;
+    };
+    const auto addFolder=[&](const QString& id,const QString& title,const QString& detail,const QString& folderMode,
+                             const QImage& icon=QImage()) {
         auto e=item(id,title,"item_tex_plain_folder","explore_plugin_full",Action::SteamFolder,folderMode);
         e.detail=detail;
+        if(!icon.isNull()){e.artwork=icon;e.iconSized=true;}
         rows.push_back(std::move(e));
     };
     // Title lookups shared by every folder mode. An installed title wins over its owned
@@ -741,21 +779,24 @@ QVector<Entry> Shell::steamFolderEntries(const QString& mode) const {
         // The All Games folder page: an All Titles folder, then one folder per Steam
         // collection that has at least one known title (collections are already in
         // collection-name order), then the Not Installed and Family Shared folders.
-        addFolder("steam-folder-all-titles",QObject::tr("All Titles"),QString::number(steamTitleCount()),"all-titles");
+        addFolder("steam-folder-all-titles",QObject::tr("All Titles"),QString::number(steamTitleCount()),"all-titles",
+                  serviceIcons::steam(steamRoot_));
         for(const auto& collection:collections_) {
             int known=0;
             for(const auto& appId:collection.appIds)if(isKnown(appId))++known;
             if(known<=0)continue;
+            QStringList known4;
+            for(const auto& appId:collection.appIds){if(isKnown(appId))known4<<appId;if(known4.size()>=8)break;}
             addFolder("steam-folder-collection:"+collection.id,collection.name,QString::number(known),
-                "collection:"+collection.id);
+                "collection:"+collection.id,mosaic(known4));
         }
         const int ownedNotInstalled=int(std::count_if(ownedGames_.cbegin(),ownedGames_.cend(),
             [](const OwnedGame& game){return !game.installed;}));
         const int notInstalled=ownedNotInstalled+int(familyGames_.size());
         if(notInstalled>0)
-            addFolder("steam-folder-library",QObject::tr("Not Installed"),QString::number(notInstalled),"library");
+            addFolder("steam-folder-library",QObject::tr("Not Installed"),QString::number(notInstalled),"library",glyphs::download());
         if(!familyGames_.isEmpty())
-            addFolder("steam-folder-family",QObject::tr("Family Shared"),QString::number(familyGames_.size()),"family");
+            addFolder("steam-folder-family",QObject::tr("Family Shared"),QString::number(familyGames_.size()),"family",glyphs::family());
     } else if(mode=="all-titles") {
         // Every title the library knows: installed rows launch, the rest install. An app
         // can be installed and owned at once, and a family title can also be owned, so a
@@ -1406,7 +1447,13 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         const auto apply=[&](Entry& e){if(e.id=="steam:"+id && !rawgArtworkPaths_.contains(e.id)){
             const auto override=steamArtworkOverride(dataDirectory_,id);
             if(!override.row.isEmpty())return;
-            e.artwork=image;touched=true;
+            // Inside a page the row is an ordinary item: the same centre square as steamFolderEntries() decodes, so
+            // rows that fill in later match the first ones instead of turning into wide tiles over their titles.
+            if(!e.gameTile && !image.isNull() && image.width()!=image.height()) {
+                const int side=std::min(image.width(),image.height());
+                e.artwork=image.copy((image.width()-side)/2,(image.height()-side)/2,side,side);
+            } else e.artwork=image;
+            touched=true;
         }};
         for(auto& category:categories_)for(auto& e:category.entries)apply(e);
         // A Steam library folder may be the open page: fill its rows too, so a folder opens with

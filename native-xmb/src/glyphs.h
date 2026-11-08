@@ -16,6 +16,8 @@ const QImage& device(const QString& spotifyType);   // computer / phone / TV / s
 const QImage& signOut();
 const QImage& search();
 const QImage& more();
+const QImage& download();   // an arrow into a tray
+const QImage& family();     // two figures
 // A Jellyfin library by its CollectionType ("movies", "tvshows", "music", ...); null for unknown kinds.
 const QImage& library(const QString& collectionType);
 }

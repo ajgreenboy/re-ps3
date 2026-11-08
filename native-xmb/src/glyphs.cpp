@@ -150,6 +150,24 @@ const QImage& more() {
     return image;
 }
 
+const QImage& download() {
+    static const QImage image=line([](QPainter& p){
+        p.drawLine(QPointF(128,44),QPointF(128,152));
+        p.drawPolyline(QPolygonF{{84,110},{128,154},{172,110}});
+        p.drawPolyline(QPolygonF{{52,160},{52,206},{204,206},{204,160}});
+    });
+    return image;
+}
+
+const QImage& family() {
+    static const QImage image=line([](QPainter& p){
+        p.drawEllipse(QPointF(96,84),24,24);p.drawEllipse(QPointF(168,96),20,20);
+        QPainterPath a;a.moveTo(52,200);a.cubicTo(52,136,140,136,140,200);p.drawPath(a);
+        QPainterPath b;b.moveTo(132,200);b.cubicTo(132,148,204,148,204,200);p.drawPath(b);
+    });
+    return image;
+}
+
 const QImage& library(const QString& collectionType) {
     static const QImage none;
     static const QImage movies=line([](QPainter& p){
