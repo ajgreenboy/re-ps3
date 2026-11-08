@@ -751,3 +751,17 @@ Verified against a copy of the stub (`C:\dev\out\native-jf-subs`, never committe
 The stub logged `GET /Videos/.../Subtitles/3/Stream.srt auth=yes stream=3 bytes=184`. The frame shows the
 two-line cue over the video after the 8 s resume, and the panel shows the SRT row marked and the PGS row dimmed.
 Not done: image-based subtitle streams, and burning subtitles into a server transcode.
+
+## Streaming quality (2026-11-07)
+
+- "Streaming Quality" on a Jellyfin video row's Triangle menu, and "Quality: <current>" in the player panel, open
+  one list: Maximum (120 Mbps), 40, 20, 10, 8, 4, 2, 1 Mbps, 720 kbps. The current one is marked.
+- The choice is the preference `jellyfin/maxBitrateKbps` (500-200000, default 20000 = the value this build always
+  sent before). `JellyfinClient::playback` sends it as the DeviceProfile's MaxStreamingBitrate/MaxStaticBitrate
+  and as PlaybackInfo's MaxStreamingBitrate; the server direct-plays below the ceiling and transcodes (HLS) above.
+- Changing it while a title plays stores the current position and re-opens the title with the new ceiling.
+- Verified against the local stub: the row menu lists it (Resume | Play from Beginning | Streaming Quality |
+  Information); choosing 4 Mbps logged "PlaybackInfo with a 4000 kbit/s ceiling"; in the player panel choosing 1 Mbps
+  logged "resume pending at 15381 ms" and a new PlaybackInfo with a 1000 kbit/s ceiling. The stub always answers
+  DirectPlay, so the server-side transcode decision itself is not exercised here (needs a real server).
+- Music rows do not offer it (MusicStreamingTranscodingBitrate stays 192 kbit/s).

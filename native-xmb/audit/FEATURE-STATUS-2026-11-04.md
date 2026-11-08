@@ -34,8 +34,12 @@ release verification, and exact PS3 fidelity.
 5. **Jellyfin image-based subtitles.** Updated 2026-11-07: text subtitle streams are fetched from the server
    as SRT and drawn like a sidecar (`audit/JELLYFIN-NATIVE.md`, "Server text subtitles"). Image-based streams
    (PGS, VobSub) stay listed and disabled with that reason.
-6. **Jellyfin quality/bitrate selection.** There is no quality selector for
-   server playback (`audit/JELLYFIN-NATIVE.md`). Direct play and server-negotiated
+6. **Jellyfin quality/bitrate selection.** Updated 2026-11-07: done. "Streaming Quality" on a Jellyfin video's
+   Triangle menu and "Quality" in the player panel pick a ceiling (Maximum 120 Mbps, 40, 20, 10, 8, 4, 2, 1 Mbps,
+   720 kbps; default 20 Mbps, the old fixed value), stored as `jellyfin/maxBitrateKbps` and sent as PlaybackInfo's
+   MaxStreamingBitrate; changing it while playing re-opens the title at the same position
+   (`audit/JELLYFIN-NATIVE.md`, "Streaming quality"). Previously: no quality selector for
+   server playback. Direct play and server-negotiated
    HLS playback work. The page backdrop is fetched and cached, but its draw path
    remains open: `Shell::pageBackdrop()` exists in `src/shell.h` and has no view
    call site yet; see the same audit.

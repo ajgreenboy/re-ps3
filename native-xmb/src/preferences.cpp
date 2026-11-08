@@ -85,6 +85,8 @@ QVariant Preferences::defaultValue(const QString& key) {
     // 12-hour clock. Both are stored preferences, so Settings > Date and Time can still change them.
     if(key=="clock/dateFormat" || key=="clock/hourFormat")return 1;
     if(key=="audio/volume")return 60;
+    // Jellyfin's streaming ceiling in kbit/s; 20000 is what this build always asked for before the setting.
+    if(key=="jellyfin/maxBitrateKbps")return 20000;
     if(key=="photo/interval")return 5000;
     if(key=="media/repeatMode")return 0;
     if(key=="audio/keyTone")return true;
@@ -107,6 +109,7 @@ bool Preferences::validBare(const QString& key,const QVariant& value) {
     if(key=="appearance/tvColumn")return value.metaType().id()==QMetaType::Bool;
     if(key=="clock/hourFormat" || key=="photo/fit")return integer(0,1);
     if(key=="audio/volume")return integer(0,100);
+    if(key=="jellyfin/maxBitrateKbps")return integer(500,200000);
     if(key=="photo/interval")return integer(1000,60000);
     if(key=="media/repeatMode")return integer(0,2);
     if(key=="power/idleMinutes")return integer(0,120);

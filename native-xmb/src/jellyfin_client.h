@@ -59,7 +59,9 @@ public:
     // A free-text library search: the same user-scoped /Items route with SearchTerm and
     // Recursive=true, so results carry the same UserData (resume/played) as a folder listing.
     quint64 search(QString term, int startIndex = 0);
-    quint64 playback(QString itemId, bool audio = false);
+    // maxBitrateKbps caps what the server may send: above the file's bitrate it direct-plays, below it the
+    // server transcodes down (HLS) to fit.
+    quint64 playback(QString itemId, bool audio = false, int maxBitrateKbps = 20000);
     // Primary (poster) or Backdrop art for one item, authenticated, bounded, and cached under
     // the directory set by setImageCache(). A failure emits artworkReady with a null image:
     // missing art is not an error the user needs to see.

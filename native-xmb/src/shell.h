@@ -140,6 +140,8 @@ enum class OptionCommand { Activate, Information,
     SpotifyPause, SpotifyResume, SpotifyNext, SpotifyPrevious,
     // A Spotify playlist row: play the whole playlist from its start, or shuffled from a random track.
     SpotifyPlayAll, SpotifyShuffleAll,
+    // Jellyfin's streaming ceiling: the list (from an item row or the player panel) and one choice in it.
+    JellyfinQuality, JellyfinQualityTarget,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
     // Information with two or more users, Information alone with one. Delete runs the traced two-step ask.
     UserLogOut, UserAutoLogin, UserDelete };
@@ -516,6 +518,10 @@ private:
     QUrl jellyfinServiceServer_;      // the registration's URL, for a sign-in page reached after a refused restore
     QHash<QString,bool> jellyfinAudio_;
     QHash<QString,qint64> jellyfinResume_;
+    static const QVector<QPair<int,QString>>& jellyfinQualities();
+    QString jellyfinQualityText() const;
+    void openJellyfinQualityList();
+    void chooseJellyfinQuality(int index);
     qint64 jellyfinResumePending_=0;
     bool jellyfinApplyingResume_=false;
     bool jellyfinRestoring_=false;    // a remembered session's first page is loading

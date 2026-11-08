@@ -425,7 +425,7 @@ quint64 JellyfinClient::search(QString term, int startIndex) {
     return send(Operation::Search, get(url), QString::number(startIndex));
 }
 
-quint64 JellyfinClient::playback(QString itemId, bool audio) {
+quint64 JellyfinClient::playback(QString itemId, bool audio, int maxBitrateKbps) {
     if (!signedIn()) { const quint64 request = ++nextRequest_; fail(request, QStringLiteral("Sign in to Jellyfin first.")); return request; }
     if (!validId(itemId)) { const quint64 request = ++nextRequest_; fail(request, QStringLiteral("Choose a valid Jellyfin item.")); return request; }
     const QJsonObject videoDirect{{QStringLiteral("Container"), QStringLiteral("mp4,mkv,webm")},
@@ -442,8 +442,10 @@ quint64 JellyfinClient::playback(QString itemId, bool audio) {
     const QJsonObject audioTranscode{{QStringLiteral("Container"), QStringLiteral("ts")},
         {QStringLiteral("Type"), QStringLiteral("Audio")}, {QStringLiteral("AudioCodec"), QStringLiteral("aac")},
         {QStringLiteral("Protocol"), QStringLiteral("hls")}, {QStringLiteral("Context"), QStringLiteral("Streaming")}};
+    const qint64 maxBitrate = qint64(std::clamp(maxBitrateKbps, 500, 200000)) * 1000;
+    qInfo().noquote() << "jellyfin: PlaybackInfo with a" << maxBitrate / 1000 << "kbit/s ceiling";
     const QJsonObject profile{{QStringLiteral("Name"), QStringLiteral("XMB Qt FFmpeg")},
-        {QStringLiteral("MaxStreamingBitrate"), 20000000}, {QStringLiteral("MaxStaticBitrate"), 20000000},
+        {QStringLiteral("MaxStreamingBitrate"), maxBitrate}, {QStringLiteral("MaxStaticBitrate"), maxBitrate},
         {QStringLiteral("MusicStreamingTranscodingBitrate"), 192000},
         {QStringLiteral("DeviceId"), deviceId_},
         {QStringLiteral("DirectPlayProfiles"), QJsonArray{audio ? audioDirect : videoDirect}},
@@ -453,6 +455,7 @@ quint64 JellyfinClient::playback(QString itemId, bool audio) {
         {QStringLiteral("UserId"), userId_}, {QStringLiteral("EnableDirectPlay"), true},
         {QStringLiteral("EnableDirectStream"), true}, {QStringLiteral("EnableTranscoding"), true},
         {QStringLiteral("IsPlayback"), true}, {QStringLiteral("AutoOpenLiveStream"), true},
+        {QStringLiteral("MaxStreamingBitrate"), maxBitrate},
         {QStringLiteral("StartTimeTicks"), 0}};
     QByteArray body = QJsonDocument(bodyObject).toJson(QJsonDocument::Compact);
     auto* reply = post(apiUrl(QStringLiteral("Items/") + itemId + QStringLiteral("/PlaybackInfo")), body);

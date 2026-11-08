@@ -2289,6 +2289,11 @@ void Shell::buildOptions() {
     // command; without a record it would repeat row 0, so it is only offered when there is one.
     if(resumeAt>0)
         addOption({"msg_play_begin","Play from Beginning"},OptionCommand::PlayFromBeginning,"resume-record");
+    // A Jellyfin video's streaming ceiling (this build's row; the console has no Jellyfin).
+    if(entry.action==Action::JellyfinPlay && entry.mediaKind!=QLatin1String("Music")) {
+        addOption({"","Streaming Quality"},OptionCommand::JellyfinQuality,"jellyfin-video");
+        options_.last().note=jellyfinQualityText();
+    }
     // msg_copy / msg_del. The firmware's per-item file commands, offered only for local content (A4's Copy
     // condition). This build has no copy or delete backend, so both rows are listed and cannot be chosen:
     // the panel's disabled-row rule puts the reason on screen instead of pretending the command exists.
@@ -2636,6 +2641,8 @@ void Shell::optionsActivate() {
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
         emit changed();
         break;
+    case OptionCommand::JellyfinQuality:openJellyfinQualityList();break;
+    case OptionCommand::JellyfinQualityTarget:chooseJellyfinQuality(option.index);break;
     case OptionCommand::SpotifyPlayAll:case OptionCommand::SpotifyShuffleAll: {
         const Entry row=entry;
         resetOptions();
@@ -2910,6 +2917,11 @@ void Shell::buildPlayerOptions() {
                 row.note=QObject::tr("The player reports one audio track, so there is no second track to switch to.");
             options_.push_back(row);
         }
+    }
+    if(mediaProvider()=="Jellyfin" && !jellyfinAudio_.value(jellyfinPlayback_.itemId)) {
+        MenuOption quality{QObject::tr("Quality: %1").arg(jellyfinQualityText()),OptionCommand::JellyfinQuality};
+        quality.note=QObject::tr("Choosing another re-opens this title at the same point.");
+        options_.push_back(quality);
     }
     // Repeat and Shuffle live here now, which is what frees Triangle for this panel.
     static const char* const repeatNames[]={"Off","One","All"};

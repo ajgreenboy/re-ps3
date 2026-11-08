@@ -270,6 +270,49 @@ void Shell::openJellyfinMedia(const Entry& entry,bool fromBeginning) {
     jellyfinQueue_=true;mediaQueue_.clear();mediaQueue_.setRepeat(static_cast<PlaybackQueue::Repeat>(mediaRepeatMode()));
     mediaQueue_.setShuffle(preferences_.value("media/shuffle").toBool());mediaQueue_.reset(std::move(queue),selected);mediaFailures_=0;startJellyfinMedia();
 }
+// The streaming ceilings offered for Jellyfin, in kbit/s, with their labels.
+const QVector<QPair<int,QString>>& Shell::jellyfinQualities() {
+    static const QVector<QPair<int,QString>> list{
+        {120000,QStringLiteral("Maximum (120 Mbps)")},{40000,QStringLiteral("40 Mbps")},{20000,QStringLiteral("20 Mbps")},
+        {10000,QStringLiteral("10 Mbps")},{8000,QStringLiteral("8 Mbps")},{4000,QStringLiteral("4 Mbps")},
+        {2000,QStringLiteral("2 Mbps")},{1000,QStringLiteral("1 Mbps")},{720,QStringLiteral("720 kbps")}};
+    return list;
+}
+QString Shell::jellyfinQualityText() const {
+    const int current=preferences_.value("jellyfin/maxBitrateKbps").toInt();
+    for(const auto& q:jellyfinQualities())if(q.first==current)return q.second;
+    return QStringLiteral("%1 kbps").arg(current);
+}
+void Shell::openJellyfinQualityList() {
+    optionsParent_=options_;optionsNested_=true;
+    optionsTitle_=tr("Streaming Quality");
+    options_.clear();optionsSelection_=0;
+    const int current=preferences_.value("jellyfin/maxBitrateKbps").toInt();
+    for(int i=0;i<jellyfinQualities().size();++i) {
+        MenuOption row{jellyfinQualities()[i].second,OptionCommand::JellyfinQualityTarget};
+        row.index=i;row.active=jellyfinQualities()[i].first==current;
+        row.note=i==0?tr("Direct play whenever the file allows it."):tr("The server converts anything above this down to fit.");
+        if(row.active)optionsSelection_=i;
+        options_.push_back(row);
+    }
+    interactionAudio_.play(InteractionAudio::Cue::Options);
+    emit changed();
+}
+void Shell::chooseJellyfinQuality(int index) {
+    if(index<0 || index>=jellyfinQualities().size())return;
+    const auto choice=jellyfinQualities()[index];
+    preferences_.setValue("jellyfin/maxBitrateKbps",choice.first);
+    qInfo().noquote()<<"jellyfin: streaming quality set to"<<choice.second;
+    resetOptions();
+    notify(QStringLiteral("Jellyfin"),tr("Streaming quality: %1").arg(choice.second));
+    // A title that is playing re-opens at the same position with the new ceiling.
+    if(jellyfinQueue_ && mediaOpen_ && mediaQueue_.current()) {
+        jellyfinResume_[mediaQueue_.current()->path]=player_->position();
+        startJellyfinMedia();
+    }
+    interactionAudio_.play(InteractionAudio::Cue::Confirm);
+    emit changed();
+}
 void Shell::startJellyfinMedia() {
     const auto* current=mediaQueue_.current();if(!current)return;const auto media=*current;
     ++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();player_->stop();player_->setSource({});
@@ -281,7 +324,7 @@ void Shell::startJellyfinMedia() {
         qInfo().noquote()<<"jellyfin: resume pending at"<<jellyfinResumePending_<<"ms for"<<media.title;
     }
     for(int i=0;i<entries().size();++i)if(entries()[i].value==media.path && entries()[i].action==Action::JellyfinPlay){currentSelection()=i;break;}
-    jellyfinRequest_=jellyfin_.playback(media.path,jellyfinAudio_.value(media.path));emit changed();
+    jellyfinRequest_=jellyfin_.playback(media.path,jellyfinAudio_.value(media.path),preferences_.value("jellyfin/maxBitrateKbps").toInt());emit changed();
 }
 void Shell::applyJellyfinResume() {
     if(!jellyfinQueue_ || !mediaOpen_ || jellyfinPlayback_.itemId.isEmpty() || jellyfinResumePending_<=0 || jellyfinApplyingResume_ || !player_->isSeekable())return;
