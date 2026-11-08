@@ -42,6 +42,7 @@ qt_add_executable(re-ps3-native
     src/artwork_settings.cpp src/artwork_settings.h
     src/media_controls.cpp src/media_controls.h
     src/subtitles.cpp src/subtitles.h
+    src/image_subtitles.cpp src/image_subtitles.h
     src/jellyfin_client.cpp src/jellyfin_client.h src/jellyfin_stream.cpp src/jellyfin_stream.h
     src/jellyfin_shell.cpp
     src/rsx_program.cpp src/rsx_program.h src/ribbon.cpp src/ribbon.h src/hdr.cpp src/hdr.h src/icons.cpp src/icons.h src/particles.cpp src/particles.h src/coldboot.cpp src/coldboot.h

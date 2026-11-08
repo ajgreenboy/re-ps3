@@ -18,9 +18,11 @@
 //   - a block without a usable timing line, with end <= start, or with no text is dropped and
 //     counted rather than treated as a fatal error, and the file is still usable;
 //   - a file with no usable cue at all is reported with a reason and is not offered as a track.
+#include "image_subtitles.h"
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <memory>
 
 namespace xmb::subtitles {
 // One cue: the half-open interval [start, end) in milliseconds plus its text. Multi-line cues keep
@@ -36,10 +38,22 @@ struct Track {
     QString path;      // the sidecar file itself
     QString name;      // display label: "English", "en.forced", "On (SRT)"
     QString language;  // the tag as written, e.g. "en" or "en.forced"; empty when untagged
-    QString format;    // "srt" or "vtt"
+    QString format;    // "srt" or "vtt"; image tracks: "sup" (PGS) or "vobsub"
     qint64 bytes=0;
     int skipped=0;     // blocks that were dropped (malformed, empty, or end <= start)
     QVector<Cue> cues;
+    // Image-based tracks (image_subtitles.h). Discovery only finds and sizes them; the pictures are
+    // decoded off the GUI thread when the track is chosen, so `images` stays null until then. `path` is
+    // the track's identity (a VobSub language is "<file>.idx#<index>"), `source` the file that is read.
+    bool image=false;
+    QString source;          // the .sup, or the .idx of a VobSub pair; empty for a server stream
+    QString auxPath;         // VobSub: the .sub beside the .idx
+    int vobsubIndex=-1;      // VobSub: the .idx "index:" of this language, -1 = the file's default
+    bool decoding=false;     // a decode (or a server fetch) is in flight
+    QString error;           // why the pictures could not be decoded; the track then stays unusable
+    QString note;            // the decoder's one-line note about skipped data, empty when clean
+    qint64 decodeMs=0;
+    std::shared_ptr<const QVector<ImageCue>> images;
 };
 // The result of looking beside a media file: what can be used, and what was ignored and why. The
 // reasons are one line each so the shell can log them verbatim.
@@ -49,8 +63,18 @@ struct Discovery {
 };
 // Looks beside `mediaPath` for "<base>.srt"/"<base>.vtt" and "<base>.<tag>.srt"/".vtt", parses each
 // candidate and returns the usable ones. Never throws, never writes, and reads at most 4 MB per file
-// from at most 16 candidates.
+// from at most 16 candidates. Image sidecars are found the same way: "<base>[.<tag>].sup" (PGS, checked
+// for its "PG" header and the 64 MB cap) and "<base>[.<tag>].idx" with its ".sub" (one track per
+// language listed in the .idx); they are returned undecoded (Track::image, see decodeImage).
 Discovery discover(const QString& mediaPath);
+// Decodes an image track's pictures: reads its sidecar file(s) within the 64 MB cap, or uses `bytes`
+// when the stream came from a server (PGS only). Runs on a worker thread; touches nothing shared.
+struct ImageDecode {
+    std::shared_ptr<const QVector<ImageCue>> cues;   // null on failure
+    QString error, note;
+    qint64 bytes=0, milliseconds=0;
+};
+ImageDecode decodeImage(const QString& format,const QString& source,const QString& auxPath,int vobsubIndex,const QByteArray& bytes={});
 // Parses subtitle bytes that did not come from a sidecar (a Jellyfin server's text subtitle stream)
 // with the same decoder and the same tolerance as a file: `format` is "srt" or "vtt", the bytes are
 // bounded by the same 4 MB limit. Returns false with `reason` set when no cue is usable; `track`

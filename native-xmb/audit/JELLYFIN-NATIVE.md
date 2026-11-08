@@ -751,7 +751,81 @@ Verified against a copy of the stub (`C:\dev\out\native-jf-subs`, never committe
 
 The stub logged `GET /Videos/.../Subtitles/3/Stream.srt auth=yes stream=3 bytes=184`. The frame shows the
 two-line cue over the video after the 8 s resume, and the panel shows the SRT row marked and the PGS row dimmed.
-Not done: image-based subtitle streams, and burning subtitles into a server transcode.
+Superseded 2026-11-08: image streams are handled, see "Image subtitles" below.
+
+## Image subtitles (PGS / VobSub, 2026-11-08, plan H9)
+
+The decoder is `src/image_subtitles.*` (`parsePgs`, `parseVobSub`, `cueAt`; 64 MB input cap, bounded work).
+This change wires it into playback.
+
+- **Local sidecars** (`subtitles::discover`): `<video>.sup` and `<video>.<tag>.sup` (sized and checked for the
+  `PG` header, not decoded) and `<video>[.<tag>].idx` with its `.sub` (matched without case; one track per
+  `id: <lang>, index: <n>` line, track key `<file>.idx#<n>`). A `.sub` without its `.idx` is named in the log as
+  unsupported. Labels carry the kind: "On (PGS)", "English (PGS)", "French (VobSub)".
+- **Decode** (`subtitles::decodeImage`, `Shell::startImageDecode`): when a track becomes the choice (auto-select
+  of the first track included) the files are read and decoded with `QtConcurrent::run`; the result is matched
+  back by track key and by `subtitleGeneration_`, which every rebuild of the track list bumps, so a decode that
+  finishes after its film closed is dropped. Rows read "decoding the pictures", then "N pictures"; a failed
+  decode disables the row with the decoder's reason and turns the choice off.
+- **Draw** (`Shell::subtitleImageCue`, `view.cpp` `drawImageSubtitle`): the current picture is converted to
+  premultiplied ARGB once per picture and drawn over the video, under the player chrome, with the same
+  "no dialog up" rule as text cues. Its rect is mapped from the stream's frame onto the displayed video
+  rectangle: HD streams scale by width and centre vertically (a 1920x1080 PGS over a cropped encode keeps its
+  place relative to the picture), SD VobSub (width <= 720, anamorphic) stretches on both axes. Show/hide are
+  traced like text cues (`subtitle: picture N at ... ms (start-end) WxH at x,y on frame`).
+- **Jellyfin PGS** (`JellyfinClient::subtitleImage`): `GET /Videos/{item}/{source}/Subtitles/{index}/Stream.sup`,
+  64 MB bound and a 120 s deadline (the server may demux the stream first). Fetched only when the row is chosen
+  (or the server's default stream is PGS with no text default, or the session choice is that track), then
+  decoded like a sidecar.
+- **Jellyfin burn-in** (`JellyfinClient::playback(..., burnSubtitleIndex, codec)`, `Shell::chooseJellyfinBurnIn`):
+  for VobSub/DVB, or a PGS stream whose `.sup` fetch failed, the row is "choosing it re-opens the title with the
+  server burning it in (transcode)". PlaybackInfo then carries `SubtitleStreamIndex`, a DeviceProfile
+  `SubtitleProfiles: [{Format: <codec>, Method: Encode}]`, and `EnableDirectPlay/EnableDirectStream: false`; the
+  transcode URL is used, and `SubtitleStreamIndex`/`SubtitleMethod=Encode` are appended if the server left them
+  out. The title re-opens at the same position; the row is marked and reads "Burned in by the server
+  (transcode)". Subtitles Off (or a client-drawn track) re-opens the original stream. The choice is per item
+  for the session.
+
+Real server check (read-only, no credentials): `GET /System/Info/Public` on 192.168.1.122 reports Jellyfin
+12.2.0; its `/api-docs/openapi.json` lists `GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/Stream.{routeFormat}`
+with no security requirement ("Gets subtitles in a specified format"), and `SubtitleDeliveryMethod` includes
+`Encode`. That the route returns the original PGS bytes for `routeFormat=sup` is **INFERRED** (no item id is
+reachable without signing in); if it does not, the fetch fails and the row falls back to burn-in.
+
+Evidence (`C:\dev\out\imgsub-play\`, never committed; `run.ps1` with `XMB_SUBTITLE_LOG=1`):
+
+    subtitle: image sidecar A PGS Clip.sup sup 90157 bytes; name On (PGS) (decoded when chosen)
+    subtitle: decoded On (PGS) 4 pictures from 90157 bytes in 7 ms (worker thread)
+    subtitle: picture 1 at 1002 ms (1000-3500 ms) 772x56 at 573,951 on 1920x1080
+    subtitle: picture 4 at 7104 ms (7000-9000 ms) 517x65 at 204,710 on 1920x1080 forced
+    subtitle: image sidecar B VobSub Clip.idx#0 vobsub 8737 bytes; name English (VobSub) (decoded when chosen)
+    subtitle: image sidecar B VobSub Clip.idx#1 vobsub 8737 bytes; name French (VobSub) (decoded when chosen)
+    subtitle: picture 1 at 3008 ms (3000-4501 ms) 239x28 at 241,406 on 720x480
+    subtitle: picture 1 at 1024 ms (1000-3500 ms) 772x56 at 573,951 on 1920x1200
+    subtitle: decoded English (PGS) 998 pictures from 21887120 bytes in 233 ms (worker thread)
+
+Frames checked: `captures/a1.png` (cue one at the bottom, 573,951), `a3.png` (two objects, top and bottom),
+`a4.png` (palette-only update at half alpha), `a6-panel.png` (cropped forced cue at 204,710, row note
+"A PGS Clip.sup - 4 pictures"), `b1-en.png` (720x480 VobSub stretched to 613,913 on the 16:9 frame),
+`b3-fr.png` (French track after switching in the panel), `c1-tall.png` (the same stream re-labelled 1920x1200
+lands 60 px higher: width scale, vertical centring). The only clip available is 16:9 full-frame, so a
+letterboxed video rectangle is exercised by that arithmetic, not by a letterboxed frame.
+
+Jellyfin against a copy of the stub (`C:\dev\out\imgsub-play\jf`, adds a `Stream.sup` route serving the
+synthetic PGS, a `DVDSUB` stream 5, and a transcode-only answer when PlaybackInfo carries `SubtitleStreamIndex`):
+
+    GET /Videos/1111...8888/stub-source-1111...8888/Subtitles/4/Stream.sup auth=yes stream=4 bytes=90157 (PGS .sup)
+    POST /Items/1111...8888/PlaybackInfo body SubtitleStreamIndex=5 EnableDirectPlay=False EnableDirectStream=False SubtitleProfiles=dvdsub/Encode
+    GET /Videos/1111...8888/stream query=MediaSourceId=stub-source-1111...8888&Stub=transcode&SubtitleStreamIndex=5&SubtitleMethod=Encode
+    POST /Sessions/Playing ... method=Transcode
+    POST /Items/1111...8888/PlaybackInfo body SubtitleStreamIndex=- EnableDirectPlay=True ...   (after Subtitles Off)
+
+Client side: "jellyfin: PGS subtitle stream 4 arrived, 90157 bytes; decoding", "picture 4 at 7018 ms ... forced",
+"jellyfin: burn in subtitle stream 5; re-opening as a server transcode", "resume applied at 5291 ms", "burn-in off;
+re-opening the original stream". Frames: `jf/captures/j2-pgs.png` (server PGS cue drawn at 204,710),
+`j3-burn-row.png` (VobSub row note), `j4-burning-panel.png` (row marked, "Burned in by the server"). The stub
+serves the plain file for the "transcode", so the burned picture itself needs the real server (plan H9 check:
+"frame shows burned text").
 
 ## Streaming quality (2026-11-07)
 

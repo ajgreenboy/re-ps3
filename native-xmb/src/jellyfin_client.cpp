@@ -40,6 +40,11 @@ namespace xmb {
 namespace {
 constexpr int RequestTimeoutMs = 15000;
 constexpr qsizetype MaxResponseBytes = 4 * 1024 * 1024;
+// An image subtitle stream (a film's whole PGS track) is far larger than any JSON or SRT reply, and the
+// server may first have to demux it out of the container, so it gets the decoder's own 64 MB input cap
+// (image_subtitles.h) and a longer deadline.
+constexpr qsizetype MaxImageSubtitleBytes = 64 * 1024 * 1024;
+constexpr int ImageSubtitleTimeoutMs = 120000;
 constexpr qsizetype MaxImageBytes = 4 * 1024 * 1024;
 constexpr int PageLimit = 200;
 // Artwork is bounded on both sides of the network: the server is asked for a small picture, and
@@ -269,16 +274,17 @@ quint64 JellyfinClient::send(Operation operation, QNetworkReply* reply, QString 
     const quint64 generation = generation_;
     replies_.push_back(reply);
     if (operation == Operation::Report) reportReplies_.insert(reply);
-    reply->setReadBufferSize(MaxResponseBytes + 1);
+    const qsizetype limit = operation == Operation::SubtitleImage ? MaxImageSubtitleBytes : MaxResponseBytes;
+    reply->setReadBufferSize(limit + 1);
     auto* timeout = new QTimer(reply);
     timeout->setSingleShot(true);
     connect(timeout, &QTimer::timeout, reply, &QNetworkReply::abort);
-    timeout->start(RequestTimeoutMs);
-    connect(reply, &QNetworkReply::downloadProgress, this, [reply](qint64 received, qint64) {
-        if (received > MaxResponseBytes) reply->abort();
+    timeout->start(operation == Operation::SubtitleImage ? ImageSubtitleTimeoutMs : RequestTimeoutMs);
+    connect(reply, &QNetworkReply::downloadProgress, this, [reply, limit](qint64 received, qint64) {
+        if (received > limit) reply->abort();
     });
-    connect(reply, &QIODevice::readyRead, this, [reply] {
-        if (reply->bytesAvailable() > MaxResponseBytes) reply->abort();
+    connect(reply, &QIODevice::readyRead, this, [reply, limit] {
+        if (reply->bytesAvailable() > limit) reply->abort();
     });
     connect(reply, &QNetworkReply::finished, this, [this, reply, operation, request, generation,
                                                       context = std::move(context), audio]() mutable {
@@ -425,7 +431,7 @@ quint64 JellyfinClient::search(QString term, int startIndex) {
     return send(Operation::Search, get(url), QString::number(startIndex));
 }
 
-quint64 JellyfinClient::playback(QString itemId, bool audio, int maxBitrateKbps) {
+quint64 JellyfinClient::playback(QString itemId, bool audio, int maxBitrateKbps, int burnSubtitleIndex, QString burnCodec) {
     if (!signedIn()) { const quint64 request = ++nextRequest_; fail(request, QStringLiteral("Sign in to Jellyfin first.")); return request; }
     if (!validId(itemId)) { const quint64 request = ++nextRequest_; fail(request, QStringLiteral("Choose a valid Jellyfin item.")); return request; }
     const QJsonObject videoDirect{{QStringLiteral("Container"), QStringLiteral("mp4,mkv,webm")},
@@ -444,23 +450,36 @@ quint64 JellyfinClient::playback(QString itemId, bool audio, int maxBitrateKbps)
         {QStringLiteral("Protocol"), QStringLiteral("hls")}, {QStringLiteral("Context"), QStringLiteral("Streaming")}};
     const qint64 maxBitrate = qint64(std::clamp(maxBitrateKbps, 500, 200000)) * 1000;
     qInfo().noquote() << "jellyfin: PlaybackInfo with a" << maxBitrate / 1000 << "kbit/s ceiling";
-    const QJsonObject profile{{QStringLiteral("Name"), QStringLiteral("XMB Qt FFmpeg")},
+    QJsonObject profile{{QStringLiteral("Name"), QStringLiteral("XMB Qt FFmpeg")},
         {QStringLiteral("MaxStreamingBitrate"), maxBitrate}, {QStringLiteral("MaxStaticBitrate"), maxBitrate},
         {QStringLiteral("MusicStreamingTranscodingBitrate"), 192000},
         {QStringLiteral("DeviceId"), deviceId_},
         {QStringLiteral("DirectPlayProfiles"), QJsonArray{audio ? audioDirect : videoDirect}},
         {QStringLiteral("TranscodingProfiles"), QJsonArray{audio ? audioTranscode : videoTranscode}}};
-    const QJsonObject bodyObject{{QStringLiteral("DeviceId"), deviceId_},
+    // Burn-in of an image subtitle the client cannot draw (VobSub, DVB, or a PGS stream the server
+    // would not deliver): the stream is selected and its only delivery method is Encode, which the
+    // server can honour only in a transcode, so direct play and direct stream are switched off.
+    const bool burn = !audio && burnSubtitleIndex >= 0;
+    QString codec = burnCodec.trimmed().toLower();
+    for (const QChar ch : codec) if (!(ch.isLetterOrNumber() || ch == QLatin1Char('_'))) { codec.clear(); break; }
+    if (burn) {
+        profile.insert(QStringLiteral("SubtitleProfiles"), QJsonArray{QJsonObject{
+            {QStringLiteral("Format"), codec.isEmpty() ? QStringLiteral("pgssub") : codec},
+            {QStringLiteral("Method"), QStringLiteral("Encode")}}});
+        qInfo().noquote() << "jellyfin: PlaybackInfo burns in subtitle stream" << burnSubtitleIndex << codec;
+    }
+    QJsonObject bodyObject{{QStringLiteral("DeviceId"), deviceId_},
         {QStringLiteral("DeviceProfile"), profile},
-        {QStringLiteral("UserId"), userId_}, {QStringLiteral("EnableDirectPlay"), true},
-        {QStringLiteral("EnableDirectStream"), true}, {QStringLiteral("EnableTranscoding"), true},
+        {QStringLiteral("UserId"), userId_}, {QStringLiteral("EnableDirectPlay"), !burn},
+        {QStringLiteral("EnableDirectStream"), !burn}, {QStringLiteral("EnableTranscoding"), true},
         {QStringLiteral("IsPlayback"), true}, {QStringLiteral("AutoOpenLiveStream"), true},
         {QStringLiteral("MaxStreamingBitrate"), maxBitrate},
         {QStringLiteral("StartTimeTicks"), 0}};
+    if (burn) bodyObject.insert(QStringLiteral("SubtitleStreamIndex"), burnSubtitleIndex);
     QByteArray body = QJsonDocument(bodyObject).toJson(QJsonDocument::Compact);
     auto* reply = post(apiUrl(QStringLiteral("Items/") + itemId + QStringLiteral("/PlaybackInfo")), body);
     body.fill('\0');
-    return send(Operation::Playback, reply, itemId, audio);
+    return send(Operation::Playback, reply, burn ? itemId + QLatin1Char('#') + QString::number(burnSubtitleIndex) : itemId, audio);
 }
 
 void JellyfinClient::reportPlayback(const JellyfinPlayback& playbackInfo, qint64 positionMs,
@@ -581,6 +600,19 @@ quint64 JellyfinClient::subtitle(QString itemId, QString mediaSourceId, int stre
     return send(Operation::Subtitle, get(url), QString::number(streamIndex));
 }
 
+quint64 JellyfinClient::subtitleImage(QString itemId, QString mediaSourceId, int streamIndex) {
+    if (!signedIn() || !validId(itemId) || !validId(mediaSourceId) || streamIndex < 0) {
+        const quint64 request = ++nextRequest_;
+        QTimer::singleShot(0, this, [this, request, streamIndex] { emit subtitleReady(request, streamIndex, QByteArray{}); });
+        return request;
+    }
+    // The same route as the SRT conversion, asked for the PGS stream's own container: the server
+    // extracts the stream and returns the .sup, which the client decodes itself (image_subtitles.h).
+    const QUrl url = apiUrl(QStringLiteral("Videos/") + itemId + QLatin1Char('/') + mediaSourceId +
+                            QStringLiteral("/Subtitles/") + QString::number(streamIndex) + QStringLiteral("/Stream.sup"));
+    return send(Operation::SubtitleImage, get(url), QString::number(streamIndex));
+}
+
 void JellyfinClient::setSessionStore(QString path) { sessionPath_ = std::move(path); }
 
 bool JellyfinClient::hasStoredSession() const {
@@ -673,7 +705,7 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QByteArray bytes = reply->readAll();
     const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300 &&
-                    bytes.size() <= MaxResponseBytes;
+                    bytes.size() <= (operation == Operation::SubtitleImage ? MaxImageSubtitleBytes : MaxResponseBytes);
     reply->deleteLater();
     if (operation == Operation::Report) {flushLogouts();return;}
     // Artwork missing or broken is not an error the viewer needs: the row keeps its built-in
@@ -692,7 +724,7 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
         return;
     }
     // A subtitle stream is text, not JSON: the bytes go to the parser as they are, or empty on failure.
-    if (operation == Operation::Subtitle) {
+    if (operation == Operation::Subtitle || operation == Operation::SubtitleImage) {
         emit subtitleReady(request, context.toInt(), ok ? bytes : QByteArray{});
         return;
     }
@@ -724,6 +756,12 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
         return;
     }
     if (operation == Operation::Playback) {
+        // "<item>" or "<item>#<subtitle stream index>" when that stream is to be burned in (playback()).
+        int burn = -1;
+        if (const int hash = context.indexOf(QLatin1Char('#')); hash > 0) {
+            burn = context.mid(hash + 1).toInt();
+            context.truncate(hash);
+        }
         const auto root = document.object();
         const QString session = root.value(QStringLiteral("PlaySessionId")).toString();
         const auto sources = root.value(QStringLiteral("MediaSources")).toArray();
@@ -731,8 +769,10 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
             if (!sourceValue.isObject()) continue;
             const auto source = sourceValue.toObject();
             const QString sourceId = source.value(QStringLiteral("Id")).toString();
-            const bool directPlay = source.value(QStringLiteral("SupportsDirectPlay")).toBool();
-            const bool directStream = source.value(QStringLiteral("SupportsDirectStream")).toBool();
+            // A burned-in subtitle exists only in the server's transcode, so a burn request never takes
+            // the static file even when the server would allow it.
+            const bool directPlay = burn < 0 && source.value(QStringLiteral("SupportsDirectPlay")).toBool();
+            const bool directStream = burn < 0 && source.value(QStringLiteral("SupportsDirectStream")).toBool();
             QString method;
             QUrl stream;
             if (directPlay) {
@@ -765,6 +805,16 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
                             ? stream.path() : QLatin1Char('/') + stream.path()));
                     }
                 }
+                // The transcode URL normally carries the burn parameters itself; they are added when
+                // the server left them out, so the request cannot silently fall back to no subtitle.
+                if (burn >= 0) {
+                    QUrlQuery query(stream);
+                    if (!query.hasQueryItem(QStringLiteral("SubtitleStreamIndex")))
+                        query.addQueryItem(QStringLiteral("SubtitleStreamIndex"), QString::number(burn));
+                    if (!query.hasQueryItem(QStringLiteral("SubtitleMethod")))
+                        query.addQueryItem(QStringLiteral("SubtitleMethod"), QStringLiteral("Encode"));
+                    stream.setQuery(query);
+                }
             }
             stream = withoutSecrets(stream);
             if (!trustedServerUrl(stream)) continue;
@@ -775,6 +825,7 @@ void JellyfinClient::finish(QNetworkReply* reply, Operation operation, quint64 r
             result.playSessionId = session;
             result.playMethod = method;
             result.audio = audio;
+            result.burnSubtitleIndex = burn;
             // The server's own stream list. What the player can actually switch to is decided
             // later against QMediaPlayer::audioTracks(), so this is a catalogue, not a promise.
             const QJsonArray streams = source.value(QStringLiteral("MediaStreams")).toArray();

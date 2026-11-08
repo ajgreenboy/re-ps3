@@ -2,6 +2,7 @@
 #include <QByteArray>
 #include <QChar>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -172,12 +173,53 @@ ParsedCues parseFile(const QString& path) {
 }
 
 bool supportedFormat(const QString& extension){return extension=="srt" || extension=="vtt";}
+// Image sidecars: a PGS .sup, or a VobSub .idx (whose .sub is its companion, not a track of its own).
+bool imageFormat(const QString& extension){return extension=="sup" || extension=="idx";}
 // Subtitle formats that exist and that this build cannot read. They are named in the log rather
 // than silently skipped, because "I put my .ass file next to the film and nothing happened" is
 // exactly the report this reason answers.
 bool otherSubtitleFormat(const QString& extension) {
-    static const QStringList others{"ass","ssa","sub","idx","smi","sami","ttml","dfxp","sbv","lrc","mpl"};
+    static const QStringList others{"ass","ssa","smi","sami","ttml","dfxp","sbv","lrc","mpl"};
     return others.contains(extension);
+}
+// Same cap as the decoder's (image_subtitles.h): a file above it is refused before it is read.
+constexpr qint64 maximumImageBytes=64*1024*1024;
+constexpr qint64 maximumIdxBytes=4*1024*1024;
+
+// The languages of a VobSub .idx: each "id: <lang>, index: <n>" line, in file order. An .idx with no
+// id line is one track of unknown language.
+struct IdxLanguage { QString language; int index=-1; };
+QVector<IdxLanguage> idxLanguages(const QByteArray& bytes) {
+    QVector<IdxLanguage> out;
+    for(QString line:QString::fromUtf8(bytes).split('\n')) {
+        line=line.trimmed();
+        if(!line.startsWith("id:",Qt::CaseInsensitive))continue;
+        const QString value=line.mid(3).trimmed();
+        IdxLanguage entry;
+        entry.language=value.section(',',0,0).trimmed();
+        const int at=value.indexOf("index:",0,Qt::CaseInsensitive);
+        bool ok=false;
+        if(at>=0){const int v=value.mid(at+6).trimmed().toInt(&ok);if(ok && v>=0 && v<32)entry.index=v;}
+        if(entry.index<0)entry.index=int(out.size())&0x1F;
+        bool plausible=!entry.language.isEmpty() && entry.language.size()<=16;
+        for(const QChar c:entry.language)if(!(c.isLetterOrNumber() || c=='-' || c=='_'))plausible=false;
+        if(!plausible)entry.language.clear();
+        out.push_back(entry);
+        if(out.size()>=32)break;
+    }
+    return out;
+}
+
+// Reads a whole file within `cap`, or says why not.
+QByteArray readBounded(const QString& path,qint64 cap,QString& error) {
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly)){error=QString("cannot be opened (%1)").arg(file.errorString());return {};}
+    const qint64 size=file.size();
+    if(size<=0){error="file is empty";return {};}
+    if(size>cap){error=QString("file is %1 bytes, above the %2-byte limit").arg(size).arg(cap);return {};}
+    QByteArray bytes=file.read(cap+1);
+    if(bytes.size()>cap){error="file grew past the size limit while reading";return {};}
+    return bytes;
 }
 // The tag in "<media>.<tag>.srt": letters, digits, '.', '_' and '-' up to 24 characters. That
 // accepts en, eng, en.forced, english and part2, and refuses a name that is not a tag rather than
@@ -230,6 +272,12 @@ Discovery discover(const QString& mediaPath) {
     if(!directory.exists())return result;
     const auto names=directory.entryList(QDir::Files|QDir::Readable,QDir::Name);
     const QString lowerBase=base.toLower();
+    // The directory's own spelling of a name, matched without case (a VobSub pair is often "Film.IDX"
+    // beside "Film.sub").
+    auto findName=[&names](const QString& lower)->QString{
+        for(const auto& name:names)if(name.toLower()==lower)return name;
+        return {};
+    };
     QStringList candidates;
     for(const auto& name:names) {
         if(candidates.size()>=maximumCandidates)break;
@@ -238,20 +286,67 @@ Discovery discover(const QString& mediaPath) {
         if(!lower.startsWith(lowerBase+'.'))continue;
         QString extension,tag;
         splitCandidate(name,base,extension,tag);
-        if(supportedFormat(extension)) {
+        if(supportedFormat(extension) || imageFormat(extension)) {
             if(tag.isEmpty())candidates.push_back(name);
             else if(plausibleTag(tag))candidates.push_back(name);
             else result.rejected.push_back(QString("%1: the part after the title is not a language tag").arg(name));
             continue;
         }
+        if(extension=="sub") {
+            // The .sub of a VobSub pair is read through its .idx. Alone it is either MicroDVD text or a
+            // VobSub whose index is missing, and neither can be timed.
+            if(findName(lower.left(lower.size()-3)+"idx").isEmpty())
+                result.rejected.push_back(QString("%1: a .sub without its .idx is not supported (VobSub needs both files; MicroDVD text is not read)").arg(name));
+            continue;
+        }
         if(otherSubtitleFormat(extension))
-            result.rejected.push_back(QString("%1: %2 subtitles are not supported (SRT and WebVTT only)")
+            result.rejected.push_back(QString("%1: %2 subtitles are not supported (SRT, WebVTT, PGS and VobSub only)")
                 .arg(name,extension.toUpper()));
     }
     for(const auto& name:candidates) {
         const QString path=directory.filePath(name);
         QString extension,tag;
         splitCandidate(name,base,extension,tag);
+        if(extension=="sup") {
+            // Only sized and sniffed here: the decode is the expensive part and waits for the choice.
+            QFile file(path);
+            const qint64 size=file.size();
+            QString error;
+            if(size<=0)error="file is empty";
+            else if(size>maximumImageBytes)error=QString("file is %1 bytes, above the %2-byte limit").arg(size).arg(maximumImageBytes);
+            else if(!file.open(QIODevice::ReadOnly))error=QString("cannot be opened (%1)").arg(file.errorString());
+            else if(file.read(2)!="PG")error="not a PGS stream (no \"PG\" segment header)";
+            if(!error.isEmpty()){result.rejected.push_back(QString("%1: %2").arg(name,error));continue;}
+            Track track;
+            track.image=true;track.format="sup";track.path=path;track.source=path;track.language=tag;track.bytes=size;
+            track.name=displayName(track);
+            result.tracks.push_back(std::move(track));
+            continue;
+        }
+        if(extension=="idx") {
+            const QString subName=findName(name.toLower().left(name.size()-3)+"sub");
+            if(subName.isEmpty()){result.rejected.push_back(QString("%1: VobSub index without its .sub").arg(name));continue;}
+            const QString subPath=directory.filePath(subName);
+            const qint64 subSize=QFileInfo(subPath).size();
+            QString error;
+            if(subSize<=0)error=QString("%1 is empty").arg(subName);
+            else if(subSize>maximumImageBytes)error=QString("%1 is %2 bytes, above the %3-byte limit").arg(subName).arg(subSize).arg(maximumImageBytes);
+            const QByteArray idx=error.isEmpty()?readBounded(path,maximumIdxBytes,error):QByteArray{};
+            if(!error.isEmpty()){result.rejected.push_back(QString("%1: %2").arg(name,error));continue;}
+            auto languages=idxLanguages(idx);
+            if(languages.isEmpty())languages.push_back({});
+            for(const auto& language:languages) {
+                Track track;
+                track.image=true;track.format="vobsub";track.source=path;track.auxPath=subPath;
+                track.vobsubIndex=language.index;
+                track.path=path+'#'+QString::number(language.index);
+                track.language=language.language.isEmpty()?tag:language.language;
+                track.bytes=subSize+idx.size();
+                track.name=displayName(track);
+                result.tracks.push_back(std::move(track));
+            }
+            continue;
+        }
         auto parsed=parseFile(path);
         if(!parsed.error.isEmpty()) {
             result.rejected.push_back(QString("%1: %2").arg(name,parsed.error));
@@ -287,7 +382,9 @@ bool parse(const QByteArray& bytes,const QString& format,Track& track,QString* r
 }
 
 QString displayName(const Track& track) {
-    const QString format=track.format.toUpper();
+    // Image tracks always carry their kind, so "English" (SRT) and "English (PGS)" beside one film are
+    // two distinguishable rows.
+    const QString format=track.format=="sup"?QStringLiteral("PGS"):track.format=="vobsub"?QStringLiteral("VobSub"):track.format.toUpper();
     if(track.language.isEmpty())return QString("On (%1)").arg(format.isEmpty()?"file":format);
     QString head=track.language,tail;
     for(int i=0;i<track.language.size();++i) {
@@ -295,8 +392,35 @@ QString displayName(const Track& track) {
         if(c=='.' || c=='_' || c=='-'){head=track.language.left(i);tail=track.language.mid(i+1);break;}
     }
     const QString name=languageNames().value(head.toLower());
-    if(name.isEmpty())return track.language; // an unknown tag is shown exactly as the file spells it
-    return tail.isEmpty()?name:QString("%1 (%2)").arg(name,tail);
+    QString label;
+    if(name.isEmpty())label=track.language; // an unknown tag is shown exactly as the file spells it
+    else label=tail.isEmpty()?name:QString("%1 (%2)").arg(name,tail);
+    return track.image?QString("%1 (%2)").arg(label,format):label;
+}
+
+ImageDecode decodeImage(const QString& format,const QString& source,const QString& auxPath,int vobsubIndex,const QByteArray& bytes) {
+    ImageDecode result;
+    QElapsedTimer clock;clock.start();
+    auto cues=std::make_shared<QVector<ImageCue>>();
+    QString reason;
+    bool ok=false;
+    if(format=="sup") {
+        QByteArray sup=bytes;
+        if(sup.isEmpty())sup=readBounded(source,maximumImageBytes,result.error);
+        if(result.error.isEmpty()){result.bytes=sup.size();ok=parsePgs(sup,*cues,&reason);}
+    } else if(format=="vobsub") {
+        const QByteArray idx=readBounded(source,maximumIdxBytes,result.error);
+        const QByteArray sub=result.error.isEmpty()?readBounded(auxPath,maximumImageBytes,result.error):QByteArray{};
+        if(result.error.isEmpty()){result.bytes=idx.size()+sub.size();ok=parseVobSub(idx,sub,vobsubIndex,*cues,&reason);}
+    } else {
+        result.error=QString("%1 is not an image subtitle format").arg(format);
+    }
+    if(result.error.isEmpty()) {
+        if(ok){result.cues=std::move(cues);result.note=reason;}
+        else result.error=reason.isEmpty()?QStringLiteral("no usable picture"):reason;
+    }
+    result.milliseconds=clock.elapsed();
+    return result;
 }
 
 int cueAt(const QVector<Cue>& cues,qint64 positionMs) {

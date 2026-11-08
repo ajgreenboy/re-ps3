@@ -153,6 +153,23 @@ void Shell::initJellyfin() {
         int track=-1;
         for(int i=0;i<subtitleTracks_.size();++i)if(subtitleTracks_[i].path==key){track=i;break;}
         if(track<0)return;
+        // A PGS stream's .sup: decoded on a worker like a sidecar. When the server would not deliver it, the
+        // reason is kept and the row turns into the burn-in choice.
+        if(subtitleTracks_[track].image) {
+            subtitleTracks_[track].decoding=false;
+            if(bytes.isEmpty()) {
+                const QString reason=tr("The server did not deliver this PGS stream as .sup");
+                jellyfinSubtitleErrors_.insert(streamIndex,reason);
+                qWarning().noquote()<<"jellyfin: subtitle stream"<<streamIndex<<"unusable:"<<reason;
+                if(track==subtitleTrackIndex_){subtitleTrackIndex_=-1;subtitleCueNumber_=0;}
+            } else {
+                qInfo().noquote()<<"jellyfin: PGS subtitle stream"<<streamIndex<<"arrived,"<<bytes.size()<<"bytes; decoding";
+                startImageDecode(track,bytes);
+            }
+            refreshPlayerOptions();
+            emit changed();
+            return;
+        }
         QString reason;
         if(bytes.isEmpty())reason=tr("The server did not deliver this subtitle stream.");
         else if(!subtitles::parse(bytes,QStringLiteral("srt"),subtitleTracks_[track],&reason))
@@ -324,7 +341,9 @@ void Shell::startJellyfinMedia() {
         qInfo().noquote()<<"jellyfin: resume pending at"<<jellyfinResumePending_<<"ms for"<<media.title;
     }
     for(int i=0;i<entries().size();++i)if(entries()[i].value==media.path && entries()[i].action==Action::JellyfinPlay){currentSelection()=i;break;}
-    jellyfinRequest_=jellyfin_.playback(media.path,jellyfinAudio_.value(media.path),preferences_.value("jellyfin/maxBitrateKbps").toInt());emit changed();
+    const auto burn=jellyfinBurnIn_.value(media.path,{-1,QString{}});
+    jellyfinRequest_=jellyfin_.playback(media.path,jellyfinAudio_.value(media.path),preferences_.value("jellyfin/maxBitrateKbps").toInt(),
+        burn.first,burn.second);emit changed();
 }
 void Shell::applyJellyfinResume() {
     if(!jellyfinQueue_ || !mediaOpen_ || jellyfinPlayback_.itemId.isEmpty() || jellyfinResumePending_<=0 || jellyfinApplyingResume_ || !player_->isSeekable())return;
@@ -375,18 +394,67 @@ void Shell::finishJellyfinPlayback(bool completed) {
 // One track per text subtitle stream of the item about to play (at most eight), each fetched as SRT.
 // The tracks start empty, so their rows read "Loading" until the bytes arrive (subtitleReady above).
 void Shell::requestJellyfinSubtitles() {
-    subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;
+    subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;++subtitleGeneration_;
     jellyfinSubtitleRequests_.clear();jellyfinSubtitleErrors_.clear();
     subtitleMediaPath_=QStringLiteral("jellyfin:")+jellyfinPlayback_.itemId;
+    int text=0,pgs=0,pgsDefault=-1;
+    bool textDefault=false;
     for(const auto& stream:jellyfinPlayback_.streams) {
-        if(stream.type!=QLatin1String("Subtitle") || !stream.text || stream.index<0)continue;
+        if(stream.type!=QLatin1String("Subtitle") || stream.index<0)continue;
         if(subtitleTracks_.size()>=8)break;
         subtitles::Track track;
-        track.path=jellyfinSubtitleKey(stream.index);track.name=stream.title;track.language=stream.language;track.format="srt";
-        subtitleTracks_.push_back(track);
-        jellyfinSubtitleRequests_.insert(jellyfin_.subtitle(jellyfinPlayback_.itemId,jellyfinPlayback_.mediaSourceId,stream.index),stream.index);
+        track.path=jellyfinSubtitleKey(stream.index);track.name=stream.title;track.language=stream.language;
+        if(stream.text) {
+            track.format="srt";
+            subtitleTracks_.push_back(track);
+            jellyfinSubtitleRequests_.insert(jellyfin_.subtitle(jellyfinPlayback_.itemId,jellyfinPlayback_.mediaSourceId,stream.index),stream.index);
+            ++text;textDefault=textDefault || stream.isDefault;
+        } else if(jellyfinPgsCodec(stream.codec)) {
+            // A whole film's PGS track can be tens of megabytes: it is fetched only when chosen.
+            track.format="sup";track.image=true;
+            if(stream.isDefault && pgsDefault<0)pgsDefault=int(subtitleTracks_.size());
+            subtitleTracks_.push_back(track);
+            ++pgs;
+        }
     }
-    if(!subtitleTracks_.isEmpty())qInfo().noquote()<<"jellyfin: requested"<<subtitleTracks_.size()<<"text subtitle stream(s)";
+    if(text)qInfo().noquote()<<"jellyfin: requested"<<text<<"text subtitle stream(s)";
+    if(pgs)qInfo().noquote()<<"jellyfin:"<<pgs<<"PGS subtitle stream(s), fetched as .sup when chosen";
+    if(jellyfinPlayback_.burnSubtitleIndex>=0)
+        qInfo().noquote()<<"jellyfin: subtitle stream"<<jellyfinPlayback_.burnSubtitleIndex<<"is burned in by the server ("
+            <<jellyfinPlayback_.playMethod<<")";
+    // A remembered choice of a PGS track (or a server default PGS stream with no text default) starts
+    // its fetch now; text tracks are selected when their SRT arrives (subtitleReady).
+    if(jellyfinPlayback_.burnSubtitleIndex>=0)return;
+    int image=-1;
+    if(subtitleChoice_.contains(subtitleMediaPath_)) {
+        const QString chosen=subtitleChoice_.value(subtitleMediaPath_);
+        for(int i=0;i<subtitleTracks_.size();++i)if(subtitleTracks_[i].image && subtitleTracks_[i].path==chosen)image=i;
+    } else if(!textDefault)image=pgsDefault;
+    if(image>=0)applySubtitleTrack(image);
+}
+bool Shell::jellyfinPgsCodec(const QString& codec) {
+    const QString c=codec.trimmed().toLower();
+    return c==QLatin1String("pgssub") || c==QLatin1String("pgs") || c==QLatin1String("hdmv_pgs_subtitle");
+}
+// Burn-in: the title re-opens at the same position with the chosen image stream rendered into a server
+// transcode (JellyfinClient::playback), or, with -1, back on the original stream without it.
+void Shell::chooseJellyfinBurnIn(int streamIndex) {
+    if(!jellyfinQueue_ || !mediaOpen_ || !mediaQueue_.current())return;
+    const QString item=mediaQueue_.current()->path;
+    if(streamIndex<0)jellyfinBurnIn_.remove(item);
+    else {
+        QString codec;
+        for(const auto& stream:jellyfinPlayback_.streams)if(stream.index==streamIndex)codec=stream.codec;
+        jellyfinBurnIn_.insert(item,{streamIndex,codec});
+        subtitleChoice_.insert(subtitleMediaPath_,QString{});   // the client draws nothing over a burned-in stream
+    }
+    qInfo().noquote()<<(streamIndex<0?QStringLiteral("jellyfin: burn-in off; re-opening the original stream")
+        :QStringLiteral("jellyfin: burn in subtitle stream %1; re-opening as a server transcode").arg(streamIndex));
+    jellyfinResume_[item]=player_->position();
+    resetOptions();
+    notify(QStringLiteral("Jellyfin"),streamIndex<0?tr("Subtitles: original stream"):tr("Subtitles burned in by the server (transcode)"));
+    interactionAudio_.play(InteractionAudio::Cue::Confirm);
+    startJellyfinMedia();
 }
 void Shell::signOutJellyfin() {
     jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();jellyfin_.forgetSession();

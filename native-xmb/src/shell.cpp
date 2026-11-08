@@ -3068,6 +3068,10 @@ void Shell::optionsActivate() {
         chooseSubtitleTrack(option.index);
         refreshPlayerOptions();
         break;
+    case OptionCommand::SubtitleBurnIn:
+        // Already burning this stream: nothing to re-open. Otherwise the title re-opens at the same point.
+        if(jellyfinPlayback_.burnSubtitleIndex!=option.index)chooseJellyfinBurnIn(option.index);
+        break;
     case OptionCommand::AudioTrack:
         chooseAudioTrack(option.index);
         break;
@@ -3119,7 +3123,8 @@ void Shell::buildPlayerOptions() {
     // beside it and what QMediaPlayer reports. The panel keeps the same honesty rule in both cases:
     // a track this build cannot switch is listed with the reason and cannot be chosen.
     const bool streamed=mediaProvider()=="Jellyfin" && !jellyfinPlayback_.streams.isEmpty();
-    options_.push_back({QObject::tr("Subtitles Off"),OptionCommand::SubtitlesOff,-1,true,subtitleTrackIndex_<0,{}});
+    const int burning=streamed?jellyfinPlayback_.burnSubtitleIndex:-1;
+    options_.push_back({QObject::tr("Subtitles Off"),OptionCommand::SubtitlesOff,-1,true,subtitleTrackIndex_<0 && burning<0,{}});
     if(streamed) {
         int seen=0;
         for(const auto& stream:jellyfinPlayback_.streams) {
@@ -3127,13 +3132,30 @@ void Shell::buildPlayerOptions() {
             ++seen;
             MenuOption row{QObject::tr("Subtitles %1: %2").arg(seen).arg(stream.title),OptionCommand::SubtitleTrack};
             row.index=-1;row.enabled=false;
-            // A text stream (IsTextSubtitleStream) is fetched from the server as SRT and drawn like a sidecar;
-            // an image-based stream (PGS, VobSub) still cannot be shown, and the row says so.
+            // A text stream (IsTextSubtitleStream) is fetched from the server as SRT and drawn like a sidecar.
+            // An image stream is either fetched as PGS (.sup) and drawn by the client, or, when that is not
+            // possible (VobSub/DVB, or a PGS stream the server would not deliver), burned in by the server.
             const QString key=jellyfinSubtitleKey(stream.index);
             int track=-1;
             for(int i=0;i<subtitleTracks_.size();++i)if(subtitleTracks_[i].path==key){track=i;break;}
             if(!stream.text) {
-                row.note=QObject::tr("Image-based subtitle stream (%1): this build draws text subtitles only.").arg(stream.codec);
+                const bool clientPgs=track>=0 && subtitleTracks_[track].image && subtitleTracks_[track].error.isEmpty()
+                    && !jellyfinSubtitleErrors_.contains(stream.index);
+                if(clientPgs && burning!=stream.index) {
+                    const auto& image=subtitleTracks_[track];
+                    row.index=track;row.enabled=true;row.active=track==subtitleTrackIndex_;
+                    if(image.images)row.note=QObject::tr("From the server as PGS - %1 pictures, drawn over the video").arg(image.images->size());
+                    else if(image.decoding)row.note=QObject::tr("Loading this PGS stream from the server and decoding it.");
+                    else row.note=QObject::tr("PGS: fetched from the server as .sup when chosen and drawn over the video.");
+                } else {
+                    row.command=OptionCommand::SubtitleBurnIn;row.index=stream.index;row.enabled=true;row.active=burning==stream.index;
+                    QString why=jellyfinSubtitleErrors_.value(stream.index);
+                    if(why.isEmpty() && track>=0)why=subtitleTracks_[track].error;
+                    if(why.isEmpty())why=QObject::tr("%1 pictures cannot be fetched from the server").arg(stream.codec);
+                    row.note=row.active
+                        ?QObject::tr("Burned in by the server (transcode). Subtitles Off returns to the original stream.")
+                        :QObject::tr("%1; choosing it re-opens the title with the server burning it in (transcode).").arg(why);
+                }
             } else if(jellyfinSubtitleErrors_.contains(stream.index)) {
                 row.note=jellyfinSubtitleErrors_.value(stream.index);
             } else if(track<0 || subtitleTracks_[track].cues.isEmpty()) {
@@ -3155,15 +3177,25 @@ void Shell::buildPlayerOptions() {
         row.enabled=false;
         row.note=mediaProvider()=="Jellyfin"
             ?QObject::tr("Streamed media: sidecar subtitles are read for local video files only.")
-            :QObject::tr("No .srt or .vtt file beside this video. Embedded subtitle streams are not switched yet.");
+            :QObject::tr("No .srt, .vtt, .sup or .idx/.sub beside this video. Embedded subtitle streams are not switched yet.");
         options_.push_back(row);
     } else {
         for(int i=0;i<subtitleTracks_.size();++i) {
             const auto& track=subtitleTracks_[i];
             MenuOption row{QObject::tr("Subtitles: %1").arg(track.name),OptionCommand::SubtitleTrack};
             row.index=i;row.active=i==subtitleTrackIndex_;
-            row.note=QObject::tr("%1 - %2 cues, %3").arg(QFileInfo(track.path).fileName())
-                .arg(track.cues.size()).arg(track.skipped>0?QObject::tr("%1 block(s) skipped").arg(track.skipped):QObject::tr("all blocks read"));
+            if(track.image) {
+                // Pictures are decoded when the track is chosen; the row says which stage it is in.
+                const QString file=QFileInfo(track.source).fileName();
+                if(!track.error.isEmpty()){row.enabled=false;row.active=false;row.note=QObject::tr("%1: %2").arg(file,track.error);}
+                else if(track.images)row.note=QObject::tr("%1 - %2 pictures%3").arg(file).arg(track.images->size())
+                    .arg(track.note.isEmpty()?QString{}:QStringLiteral(", ")+track.note);
+                else if(track.decoding)row.note=QObject::tr("%1 - decoding the pictures").arg(file);
+                else row.note=QObject::tr("%1 - %2 picture subtitles, decoded when chosen").arg(file,track.format=="sup"?QStringLiteral("PGS"):QStringLiteral("VobSub"));
+            } else {
+                row.note=QObject::tr("%1 - %2 cues, %3").arg(QFileInfo(track.path).fileName())
+                    .arg(track.cues.size()).arg(track.skipped>0?QObject::tr("%1 block(s) skipped").arg(track.skipped):QObject::tr("all blocks read"));
+            }
             options_.push_back(row);
         }
     }
@@ -3239,7 +3271,7 @@ void Shell::refreshPlayerOptions() {
 // against the player's position on demand (so it is right even when the backend's position signals are
 // coarse), and a change is traced only when the cue actually changes.
 void Shell::prepareSubtitles(const QString& path) {
-    subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;subtitleMediaPath_=path;
+    subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;subtitleMediaPath_=path;++subtitleGeneration_;
     audioTracks_.clear();audioRejected_.clear();activeAudioTrack_=-1;
     if(path.isEmpty())return;
     const auto discovery=subtitles::discover(path);
@@ -3248,7 +3280,9 @@ void Shell::prepareSubtitles(const QString& path) {
     if(subtitleLog_) {
         if(subtitleTracks_.isEmpty())qInfo().noquote()<<"subtitle: no sidecar beside"<<QFileInfo(path).fileName();
         for(const auto& track:subtitleTracks_)
-            qInfo().noquote()<<"subtitle: sidecar"<<QFileInfo(track.path).fileName()<<track.format<<track.cues.size()
+            if(track.image)qInfo().noquote()<<"subtitle: image sidecar"<<QFileInfo(track.path).fileName()<<track.format
+                <<track.bytes<<"bytes; name"<<track.name<<"(decoded when chosen)";
+            else qInfo().noquote()<<"subtitle: sidecar"<<QFileInfo(track.path).fileName()<<track.format<<track.cues.size()
                 <<"cues"<<track.bytes<<"bytes; skipped"<<track.skipped<<"; name"<<track.name;
     }
     // The same file plays again: its own choice comes back. A file this session has not seen starts on
@@ -3277,7 +3311,58 @@ void Shell::applySubtitleTrack(int index) {
     if(subtitleLog_)
         qInfo().noquote()<<(index<0?"subtitle: off":QString("subtitle: track %1 (%2)").arg(
             QFileInfo(subtitleTracks_[index].path).fileName(),subtitleTracks_[index].name));
+    // An image track's pictures are produced now, off the GUI thread: a sidecar is read and decoded on a
+    // worker, a server PGS stream is fetched first (its bytes start the same decode when they arrive).
+    if(index>=0 && subtitleTracks_[index].image && !subtitleTracks_[index].images && !subtitleTracks_[index].decoding
+        && subtitleTracks_[index].error.isEmpty()) {
+        auto& track=subtitleTracks_[index];
+        if(!track.source.isEmpty())startImageDecode(index);
+        else if(jellyfinQueue_ && !jellyfinPlayback_.itemId.isEmpty()) {
+            const int stream=track.path.section('#',-1).toInt();
+            track.decoding=true;
+            jellyfinSubtitleRequests_.insert(jellyfin_.subtitleImage(jellyfinPlayback_.itemId,jellyfinPlayback_.mediaSourceId,stream),stream);
+            qInfo().noquote()<<"jellyfin: fetching PGS subtitle stream"<<stream<<"as .sup";
+        }
+    }
     emit changed();
+}
+void Shell::startImageDecode(int index,const QByteArray& bytes) {
+    if(index<0 || index>=subtitleTracks_.size())return;
+    auto& track=subtitleTracks_[index];
+    if(!track.image || track.images || track.decoding || !track.error.isEmpty())return;
+    if(track.source.isEmpty() && bytes.isEmpty())return;   // a server stream decodes once its bytes are here
+    track.decoding=true;
+    const QString key=track.path,format=track.format,source=track.source,aux=track.auxPath;
+    const int vobsub=track.vobsubIndex;
+    const quint64 generation=subtitleGeneration_;
+    auto* watcher=new QFutureWatcher<subtitles::ImageDecode>(this);
+    connect(watcher,&QFutureWatcher<subtitles::ImageDecode>::finished,this,[this,watcher,key,generation]{
+        const auto result=watcher->result();
+        watcher->deleteLater();
+        if(generation!=subtitleGeneration_)return;   // the film (or its track list) changed meanwhile
+        int found=-1;
+        for(int i=0;i<subtitleTracks_.size();++i)if(subtitleTracks_[i].path==key){found=i;break;}
+        if(found<0)return;
+        auto& done=subtitleTracks_[found];
+        done.decoding=false;done.decodeMs=result.milliseconds;
+        if(!result.cues) {
+            done.error=result.error;
+            qWarning().noquote()<<"subtitle: cannot decode"<<done.name<<"-"<<done.error;
+            // The chosen track turned out unusable: nothing is drawn, so the panel must not claim it.
+            if(found==subtitleTrackIndex_){subtitleTrackIndex_=-1;subtitleCueNumber_=0;}
+        } else {
+            done.images=result.cues;done.note=result.note;
+            if(result.bytes>0)done.bytes=result.bytes;
+            qInfo().noquote()<<"subtitle: decoded"<<done.name<<done.images->size()<<"pictures from"<<result.bytes<<"bytes in"
+                <<result.milliseconds<<"ms (worker thread)"<<(result.note.isEmpty()?QString{}:QStringLiteral("; ")+result.note);
+        }
+        refreshPlayerOptions();
+        emit changed();
+    });
+    if(subtitleLog_)qInfo().noquote()<<"subtitle: decoding"<<track.name<<"on a worker thread";
+    watcher->setFuture(QtConcurrent::run([format,source,aux,vobsub,bytes]{
+        return subtitles::decodeImage(format,source,aux,vobsub,bytes);
+    }));
 }
 QString Shell::subtitleFile() const {
     return subtitleTrackIndex_<0?QString{}:subtitleTracks_.value(subtitleTrackIndex_).path;
@@ -3285,8 +3370,29 @@ QString Shell::subtitleFile() const {
 QString Shell::subtitleLabel() const {
     return subtitleTrackIndex_<0?QString{}:subtitleTracks_.value(subtitleTrackIndex_).name;
 }
+const ImageCue* Shell::subtitleImageCue() {
+    if(subtitleTrackIndex_<0 || subtitleTrackIndex_>=subtitleTracks_.size())return nullptr;
+    const auto& track=subtitleTracks_[subtitleTrackIndex_];
+    if(!track.image || !track.images)return nullptr;
+    const qint64 at=player_->position();
+    const ImageCue* cue=xmb::cueAt(*track.images,at);
+    const int number=cue?int(cue-track.images->constData())+1:0;
+    // The same show/hide trace as a text cue, so a scripted run can prove which picture was up.
+    if(number!=subtitleCueNumber_) {
+        subtitleCueNumber_=number;
+        if(subtitleLog_) {
+            if(!cue)qInfo().noquote()<<"subtitle: picture cleared at"<<at<<"ms";
+            else qInfo().noquote()<<"subtitle: picture"<<number<<"at"<<at<<"ms"
+                <<QString("(%1-%2 ms) %3x%4 at %5,%6 on %7x%8%9").arg(cue->startMs).arg(cue->endMs)
+                    .arg(cue->rect.width()).arg(cue->rect.height()).arg(cue->rect.x()).arg(cue->rect.y())
+                    .arg(cue->videoSize.width()).arg(cue->videoSize.height()).arg(cue->forced?" forced":"");
+        }
+    }
+    return cue;
+}
 QString Shell::subtitleCueText() {
     if(subtitleTrackIndex_<0 || subtitleTrackIndex_>=subtitleTracks_.size()){subtitleCueNumber_=0;return {};}
+    if(subtitleTracks_[subtitleTrackIndex_].image){subtitleImageCue();return {};}
     const auto& cues=subtitleTracks_[subtitleTrackIndex_].cues;
     const qint64 at=player_->position();
     const int index=subtitles::cueAt(cues,at);
@@ -3309,6 +3415,13 @@ int Shell::subtitleCueNumber() {
 void Shell::chooseSubtitleTrack(int index) {
     if(!mediaOpen_ || photoOpen())return;
     if(index<-1 || index>=subtitleTracks_.size())return;
+    // Leaving a server burn-in (Off, or a track the client draws) means re-opening the original stream;
+    // the choice is recorded first so the re-opened title comes back on it.
+    if(jellyfinQueue_ && jellyfinPlayback_.burnSubtitleIndex>=0) {
+        subtitleChoice_.insert(subtitleMediaPath_,index<0?QString{}:subtitleTracks_[index].path);
+        chooseJellyfinBurnIn(-1);
+        return;
+    }
     if(index==subtitleTrackIndex_)return; // already the choice: nothing to do, nothing to claim
     applySubtitleTrack(index);
     interactionAudio_.play(index<0?InteractionAudio::Cue::Back:InteractionAudio::Cue::Confirm);
@@ -3600,7 +3713,7 @@ void Shell::back() {
         ++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});
         // Nothing is playing, so no subtitle file or audio track is current. The per-file choice stays in
         // subtitleChoice_, which is what makes reopening the same file come back on the same track.
-        subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;subtitleMediaPath_.clear();
+        subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;subtitleMediaPath_.clear();++subtitleGeneration_;
         audioTracks_.clear();audioRejected_.clear();activeAudioTrack_=-1;}
     // Circle on a sign-in page is the page's Cancel row: it leaves the page and aborts a request still in
     // flight, so Back can never strand an authentication the user has walked away from.

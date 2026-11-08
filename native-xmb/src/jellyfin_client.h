@@ -40,6 +40,7 @@ struct JellyfinPlayback {
     QUrl url;
     QString itemId, mediaSourceId, playSessionId, playMethod;
     bool audio = false;
+    int burnSubtitleIndex = -1;   // the subtitle stream the server burns into this transcode, -1 = none
     QVector<JellyfinTrack> streams;
 };
 
@@ -61,7 +62,10 @@ public:
     quint64 search(QString term, int startIndex = 0);
     // maxBitrateKbps caps what the server may send: above the file's bitrate it direct-plays, below it the
     // server transcodes down (HLS) to fit.
-    quint64 playback(QString itemId, bool audio = false, int maxBitrateKbps = 20000);
+    // burnSubtitleIndex >= 0 asks for that subtitle stream burned into a server transcode
+    // (SubtitleStreamIndex + a SubtitleProfile whose method is Encode; direct play is switched off).
+    quint64 playback(QString itemId, bool audio = false, int maxBitrateKbps = 20000,
+                     int burnSubtitleIndex = -1, QString burnCodec = {});
     // Primary (poster) or Backdrop art for one item, authenticated, bounded, and cached under
     // the directory set by setImageCache(). A failure emits artworkReady with a null image:
     // missing art is not an error the user needs to see.
@@ -71,6 +75,9 @@ public:
     // GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{streamIndex}/Stream.srt. Bounded like every
     // response; subtitleReady carries empty bytes when it fails.
     quint64 subtitle(QString itemId, QString mediaSourceId, int streamIndex);
+    // An image-based (PGS) stream in its own format: GET .../Subtitles/{streamIndex}/Stream.sup.
+    // Bounded at 64 MB with a 120 s deadline; answers through subtitleReady like subtitle().
+    quint64 subtitleImage(QString itemId, QString mediaSourceId, int streamIndex);
     void reportPlayback(const JellyfinPlayback& playback, qint64 positionMs, bool paused, QString event);
     // ---- Remembered sign-in (DPAPI, opt-in) ----------------------------------------------
     // The store keeps one record: server URL, user id and the access token, protected with
@@ -91,7 +98,7 @@ signals:
     void artworkReady(quint64 request, QString itemId, bool backdrop, QImage image);
     void subtitleReady(quint64 request, int streamIndex, QByteArray bytes);
 private:
-    enum class Operation { SignIn, Views, Items, Search, Playback, Artwork, Report, Subtitle };
+    enum class Operation { SignIn, Views, Items, Search, Playback, Artwork, Report, Subtitle, SubtitleImage };
     quint64 send(Operation operation, QNetworkReply* reply, QString context = {}, bool audio = false);
     void finish(QNetworkReply* reply, Operation operation, quint64 request,
                 quint64 generation, QString context = {}, bool audio = false);

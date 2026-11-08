@@ -1466,6 +1466,35 @@ void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect)
     const QSizeF size=QSizeF(bounds.size()).scaled(rect.size(),Qt::KeepAspectRatio);
     p.drawImage(QRectF(rect.center()-QPointF(size.width()/2,size.height()/2),size),image,bounds);
 }
+namespace {
+// An image subtitle (PGS / VobSub picture, image_subtitles.h) over the video. The cue's rect is in the
+// stream's own frame (ImageCue::videoSize); that frame is mapped onto the displayed video rectangle:
+//   - HD streams are scaled by width and centred vertically on the video, so a 1920x1080 PGS frame over
+//     a cropped 1920x1038 (or 1920x800 scope) encode keeps its authored position relative to the picture
+//     centre, the same way a player composites it before the crop;
+//   - SD (DVD, width <= 720) frames are anamorphic, so they are stretched on both axes to the video.
+// When both frames have the same aspect the two rules agree. Only the screen clips the result, so a
+// cue authored in the letterbox area stays visible there.
+void drawImageSubtitle(QPainter& p,const ImageCue& cue,const QRectF& video) {
+    if(cue.image.isNull() || cue.videoSize.isEmpty() || video.isEmpty())return;
+    // The upload is the expensive part (palette -> premultiplied ARGB), so it happens once per picture.
+    static qint64 key=0;
+    static QImage converted;
+    if(key!=cue.image.cacheKey() || converted.isNull()) {
+        converted=cue.image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        key=cue.image.cacheKey();
+    }
+    const double sx=video.width()/cue.videoSize.width();
+    const double sy=cue.videoSize.width()<=720?video.height()/cue.videoSize.height():sx;
+    const double frameTop=cue.videoSize.width()<=720?video.top():video.center().y()-cue.videoSize.height()*sy/2;
+    const QRectF target(video.left()+cue.rect.x()*sx,frameTop+cue.rect.y()*sy,cue.rect.width()*sx,cue.rect.height()*sy);
+    p.save();
+    p.setClipRect(QRectF(0,0,1920,1080));
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.drawImage(target,converted);
+    p.restore();
+}
+}
 void View::drawSubtitle(QPainter& p,const QString& cue) {
     // Console subtitle presentation, in the XMB's own text pipeline: the same GL glyph atlas (shaped by
     // Qt, rasterised through FontRaster/FreeType) the menus use, white on a dark outline so a cue stays
@@ -1982,11 +2011,15 @@ void View::drawScene(QPainter& p) {
         if(!previousMediaOpen_ || previousMediaTitle_!=shell_.mediaTitle())mediaControls_.opened(now);
         previousMediaOpen_=true;previousMediaTitle_=shell_.mediaTitle();
         mediaControls_.setPaused(shell_.mediaPaused() || shell_.busy(),now);
+        // Where the video picture sits on the 1920x1080 frame (letterboxed or pillarboxed); an image
+        // subtitle is placed against this rectangle, not the screen.
+        QRectF videoRect(0,0,1920,1080);
         if(!mediaFrame_.isNull()) {
             p.fillRect(QRectF(0,0,1920,1080),Qt::black);
             const auto size=QSizeF(mediaFrame_.size()).scaled(QSizeF(1920,1080),shell_.photoOpen() && shell_.photoFill()?Qt::KeepAspectRatioByExpanding:Qt::KeepAspectRatio);
+            videoRect=QRectF(QPointF((1920-size.width())/2,(1080-size.height())/2),size);
             p.save();p.setClipRect(QRectF(0,0,1920,1080));
-            p.drawImage(shell_.photoOpen() && photoViewport_.valid()?photoViewport_.imageRect():QRectF(QPointF((1920-size.width())/2,(1080-size.height())/2),size),mediaFrame_);
+            p.drawImage(shell_.photoOpen() && photoViewport_.valid()?photoViewport_.imageRect():videoRect,mediaFrame_);
             p.restore();
         }
         // The active sidecar subtitle cue. Drawn over the video, below the controls in z-order, and only
@@ -1996,6 +2029,7 @@ void View::drawScene(QPainter& p) {
         if(shell_.videoOpen() && shell_.message().isEmpty()) {
             const auto cue=shell_.subtitleCueText();
             if(!cue.isEmpty())drawSubtitle(p,cue);
+            else if(const auto* picture=shell_.subtitleImageCue())drawImageSubtitle(p,*picture,videoRect);
         }
         // Surface B2 owns the bottom band while it is up: the audio player's own chrome (queue line,
         // title, hint sentence, bar, time) fades out with the panel's 150 ms ease, so the panel is not

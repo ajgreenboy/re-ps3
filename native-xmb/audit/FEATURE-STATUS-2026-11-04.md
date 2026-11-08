@@ -44,8 +44,14 @@ release verification, and exact PS3 fidelity.
    full-screen viewer, slideshow, rotation, and zoom/pan are separate native
    features and do not implement the firmware's 3D Gallery app.
 5. **Jellyfin image-based subtitles.** Updated 2026-11-07: text subtitle streams are fetched from the server
-   as SRT and drawn like a sidecar (`audit/JELLYFIN-NATIVE.md`, "Server text subtitles"). Image-based streams
-   (PGS, VobSub) stay listed and disabled with that reason.
+   as SRT and drawn like a sidecar (`audit/JELLYFIN-NATIVE.md`, "Server text subtitles"). Updated 2026-11-08
+   (plan H9): image subtitles play. Local `.sup` (PGS) and `.idx`+`.sub` (VobSub, one track per `.idx`
+   language) sidecars, with or without a language tag, are listed, decoded on a worker thread when chosen
+   (`src/image_subtitles.*`, 64 MB cap) and drawn over the video at their authored position. A Jellyfin PGS
+   stream is fetched as `.sup` and drawn the same way; any other image codec (VobSub/DVB), or a PGS stream the
+   server will not deliver, is offered as server burn-in (re-opens the title as a transcode). Evidence:
+   `audit/JELLYFIN-NATIVE.md`, "Image subtitles". Not verified on the real server: the `.sup` delivery route
+   and the burn-in transcode (no credentials here); both are exercised against the local stub only.
 6. **Jellyfin quality/bitrate selection.** Updated 2026-11-07: done. "Streaming Quality" on a Jellyfin video's
    Triangle menu and "Quality" in the player panel pick a ceiling (Maximum 120 Mbps, 40, 20, 10, 8, 4, 2, 1 Mbps,
    720 kbps; default 20 Mbps, the old fixed value), stored as `jellyfin/maxBitrateKbps` and sent as PlaybackInfo's

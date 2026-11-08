@@ -177,7 +177,10 @@ enum class OptionCommand { Activate, Information,
     SteamLink,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
     // Information with two or more users, Information alone with one. Delete runs the traced two-step ask.
-    UserLogOut, UserAutoLogin, UserDelete };
+    UserLogOut, UserAutoLogin, UserDelete,
+    // A Jellyfin image subtitle the client cannot draw: re-open the title with that stream burned into a
+    // server transcode (MenuOption::index is the server's stream index).
+    SubtitleBurnIn };
 // A label read from the RCO text table: the key plus the English string it should resolve to. The fallback
 // is used only when the local flash image has no table; whenever the RCO is present, its value is the label.
 struct OptionLabel { const char* key=nullptr; QString fallback; };
@@ -468,6 +471,10 @@ public:
     QString subtitleLabel() const;   // its panel label, empty when Off
     QString subtitleCueText();       // the cue covering mediaPosition(), empty when none is showing
     int subtitleCueNumber();         // 1-based cue number at mediaPosition(), 0 when none
+    // The picture of an image track (PGS / VobSub) covering mediaPosition(), or nullptr: none showing, a
+    // text track, or the pictures are still being decoded. Valid until the next track change; the view
+    // scales its rect from ImageCue::videoSize onto the displayed video rectangle.
+    const ImageCue* subtitleImageCue();
     const QVector<AudioTrackInfo>& audioTracks() const { return audioTracks_; }
     int activeAudioTrack() const { return activeAudioTrack_; } // 0-based, -1 = the backend names none
     void chooseSubtitleTrack(int index); // -1 = Off; anything else indexes subtitleTracks()
@@ -599,6 +606,12 @@ private:
         return QStringLiteral("jellyfin:%1#%2").arg(jellyfinPlayback_.itemId).arg(streamIndex);
     }
     void requestJellyfinSubtitles();
+    // Image streams: a PGS stream is fetched as .sup when chosen and drawn by the client; any other image
+    // codec (or a PGS stream the server would not deliver) is offered as a server burn-in, remembered per
+    // item for this session (item id -> stream index and codec).
+    QHash<QString,QPair<int,QString>> jellyfinBurnIn_;
+    static bool jellyfinPgsCodec(const QString& codec);
+    void chooseJellyfinBurnIn(int streamIndex);   // -1 = stop burning in (re-open without it)
     QTimer jellyfinProgress_;
     quint64 jellyfinRequest_=0;
     int jellyfinRequestDepth_=0,jellyfinRootDepth_=0;
@@ -779,6 +792,11 @@ private:
     int activeAudioTrack_=-1;
     void prepareSubtitles(const QString& path); // discover beside a file that is starting to play
     void applySubtitleTrack(int index);
+    // Image tracks decode on a worker thread when chosen (subtitles::decodeImage); the result is matched
+    // back by track path and by this generation, which every rebuild of subtitleTracks_ bumps, so a
+    // decode that finishes after its film was closed is dropped.
+    quint64 subtitleGeneration_=0;
+    void startImageDecode(int index,const QByteArray& bytes={});
     void refreshAudioTracks();
     // Notification queue state. The front entry is the pop-up on screen; its lifetime starts when it is
     // promoted to the front, so a burst of events each gets its full 4 s in turn.
