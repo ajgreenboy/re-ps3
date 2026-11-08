@@ -4,6 +4,7 @@
 #include "host.h"
 #include "pad.h"
 #include "settings_menu.h"
+#include "musicvis.h"
 #include <QPainter>
 #include <QKeyEvent>
 #include <QAbstractNativeEventFilter>
@@ -929,7 +930,7 @@ void View::paintGL() {
     // a 150-unit fade with 0 delay (explore_plugin.prx 0x270a00 / 0x270a04) and a 150/100 move/size
     // animation on the panel base, which drawMusicPanel expresses as the 1.0 -> 1.3 scale (0x270a54). The
     // close has no traced time (the container carries no animations), so it uses the same 150.
-    if(!mediaAudioOnly())musicPanelOpen_=false;
+    if(!mediaAudioOnly()){musicPanelOpen_=false;musicVisualizerOn_=false;}
     musicPanelEase_.retarget(musicPanelOpen_?1.:0.,musicPanelFadeMs);
     musicPanelEase_.advance(dt);
     // The music page's idle style (MUSIC-PLAYER.md): playing, panel closed and no input for musicIdleMs.
@@ -3643,10 +3644,11 @@ void View::drawMusicPanel(QPainter& p,double opacity) {
     const double alpha=std::clamp(opacity,0.,1.);
     if(alpha<=.002)return;
     static const char* const icons[musicPanelButtons]={
-        "tex_cp_prev","tex_cp_next","tex_cp_pause","tex_cp_stop","tex_cp_repeat","tex_cp_shuffle","tex_cp_volume"};
+        "tex_cp_prev","tex_cp_next","tex_cp_pause","tex_cp_stop","tex_cp_repeat","tex_cp_shuffle","tex_cp_volume",nullptr};
+    constexpr int visualPlayerButton=musicPanelButtons-1;   // audioplayer_plugin msg_visualizer_with_icon_button
     const QImage& plate=assets_.image("explore_plugin_full","tex_cp_panel");
     QString missing=plate.isNull()?QStringLiteral("tex_cp_panel"):QString{};
-    for(int i=0;i<musicPanelButtons && missing.isEmpty();++i)
+    for(int i=0;i<visualPlayerButton && missing.isEmpty();++i)
         if(assets_.image("explore_plugin_full",QString::fromLatin1(icons[i])).isNull())
             missing=QString::fromLatin1(icons[i]);
     if(!missing.isEmpty()) {
@@ -3731,7 +3733,28 @@ void View::drawMusicPanel(QPainter& p,double opacity) {
     for(int i=0;i<musicPanelButtons;++i) {
         const QRectF box(contentLeft+i*buttonWidth,contentTop+statusHeight+16.,buttonWidth,buttonHeight);
         if(i==musicPanelFocus_ && !focus.isNull())p.drawImage(box,focus);
+        if(i==visualPlayerButton) {
+            // The Visual Player button's own art (audioplayer_plugin tex_cp_vislizer, 70x70) centred in the 90x60 cell;
+            // it lights while the visualizer is on.
+            const QImage& art=assets_.image("audioplayer_plugin","tex_cp_vislizer");
+            if(!art.isNull()) {
+                p.save();
+                p.setOpacity(alpha*(musicVisualizerOn_||i==musicPanelFocus_?1.:.8));
+                p.drawImage(QRectF(box.center().x()-art.width()/2.,box.center().y()-art.height()/2.,art.width(),art.height()),art);
+                p.restore();
+            }
+            continue;
+        }
         p.drawImage(box,assets_.image("explore_plugin_full",QString::fromLatin1(icons[i])));
+    }
+    // The focused Visual Player button names itself with the plugin's own string, under the plate.
+    if(musicPanelFocus_==visualPlayerButton) {
+        // The string ends in a button gaiji (private-use code point) that only the image font can draw; the label is the words.
+        QString label=assets_.text("audioplayer_plugin","msg_visualizer_with_icon","Visual Player ");
+        label.removeIf([](QChar ch){return ch.unicode()>=0xE000 && ch.unicode()<=0xF8FF;});
+        label=label.trimmed();
+        mediaPanelText(p,QRectF(contentLeft+visualPlayerButton*buttonWidth+buttonWidth/2.-150.,resting.bottom()+6.,300.,30.),
+            label,21,QColor(238,238,238),Qt::AlignHCenter|Qt::AlignVCenter);
     }
     p.restore();
 }
@@ -3742,6 +3765,87 @@ void View::drawMusicPanel(QPainter& p,double opacity) {
 // 74x74 / 98x74 / 72x36) and msg_help_control_panel_home_menu. The container's objects all carry zero
 // position (the plugin places them at run time), so every rect is a FIT (INFERRED) read against the
 // frame's own proportions; the album line is this build's addition for the tag the console's page lacks.
+// The Visual Player stand-in. The firmware's visualizer is a separate engine the container does not carry
+// (audit/MUSIC-PLAYER.md), so this is a faithful-in-spirit simplification driven by real levels: 40 log-spaced
+// spectrum bars on a baseline under the track block, peak caps, and a soft glow behind the cover frame that follows
+// loudness. Bars attack in ~40 ms and fall over ~180 ms; the idle style brightens and heightens them.
+void View::drawMusicVisualizer(QPainter& p,double idle) {
+    QElapsedTimer cost;cost.start();
+    const qint64 now=clock_.elapsed();
+    const double dt=std::clamp((now-musicVisAt_)/1000.,0.,.1);
+    musicVisAt_=now;
+    MusicTap* tap=shell_.musicTap();
+    const bool playing=tap && musicVisualizerOn_ && !shell_.mediaPaused() && !shell_.busy();
+    MusicSpectrum spectrum;
+    bool have=false;
+    // The tap analyses only while the Visual Player is on and playing: no request, no FFT.
+    if(playing) {
+        tap->request();
+        have=tap->sample(shell_.mediaPosition(),spectrum);
+    }
+    const int n=int(musicBars_.size());
+    std::array<float,40> target{};
+    if(have) {
+        for(int i=0;i<n;++i) {   // a 3-tap blend keeps one noisy bin from spiking a lone bar
+            const float l=spectrum.band[std::max(0,i-1)],r=spectrum.band[std::min(n-1,i+1)];
+            target[i]=std::pow(.25f*l+.5f*spectrum.band[i]+.25f*r,1.25f);
+        }
+    }
+    const double up=1.-std::exp(-dt/.04),down=1.-std::exp(-dt/.18);
+    float peakLevel=0.f;
+    for(int i=0;i<n;++i) {
+        const float t=target[i];
+        musicBars_[i]+=float((t>musicBars_[i]?up:down)*(t-musicBars_[i]));
+        musicPeaks_[i]=std::max(musicBars_[i],musicPeaks_[i]-float(dt*.45));
+        peakLevel=std::max(peakLevel,musicBars_[i]);
+    }
+    const float rmsTarget=have?spectrum.rms:0.f;
+    musicLevel_+=float((rmsTarget>musicLevel_?up:down)*(rmsTarget-musicLevel_));
+    // Fade the whole thing in on the first levels and out on pause / stop.
+    const float alphaTarget=playing?1.f:0.f;
+    musicVisAlpha_+=(alphaTarget-musicVisAlpha_)*float(1.-std::exp(-dt/.25));
+    if(musicVisAlpha_<.01f && peakLevel<.01f)return;
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing,false);
+    const double strength=musicVisAlpha_*(.34+.5*idle);
+    // Glow behind the cover frame (frame centre 480,480): loudness widens and brightens it.
+    {
+        const double radius=200.+musicLevel_*110.;
+        QRadialGradient glow(QPointF(480,480),radius);
+        glow.setColorAt(0.,QColor(210,228,255,int(255.*musicVisAlpha_*(.05+.30*musicLevel_)*(1.+.5*idle))));
+        glow.setColorAt(1.,QColor(210,228,255,0));
+        p.setPen(Qt::NoPen);p.setBrush(glow);
+        p.drawEllipse(QPointF(480,480),radius,radius);
+    }
+    const double left=110.,span=1700.,baseline=850.,maxHeight=240.*(1.+.45*idle),pitch=span/n,barWidth=pitch*.72;
+    QLinearGradient fill(0,baseline,0,baseline-maxHeight);
+    fill.setColorAt(0.,QColor(255,255,255,int(255.*strength)));
+    fill.setColorAt(1.,QColor(150,200,255,int(255.*strength*.35)));
+    p.setPen(Qt::NoPen);p.setBrush(fill);
+    for(int i=0;i<n;++i) {
+        const double h=std::max(3.,double(musicBars_[i])*maxHeight);
+        p.drawRect(QRectF(left+i*pitch+(pitch-barWidth)/2.,baseline-h,barWidth,h));
+    }
+    p.setBrush(QColor(255,255,255,int(255.*std::min(1.,strength*1.6))));
+    for(int i=0;i<n;++i) {
+        if(musicPeaks_[i]<.03f)continue;
+        const double y=baseline-double(musicPeaks_[i])*maxHeight-7.;
+        p.drawRect(QRectF(left+i*pitch+(pitch-barWidth)/2.,y,barWidth,3.));
+    }
+    p.restore();
+    if(static const bool trace=qEnvironmentVariableIsSet("XMB_MUSICVIS_TRACE");trace) {
+        const double ms=cost.nsecsElapsed()/1e6;
+        auto& s=musicVisStats_;
+        ++s.frames;s.drawMs+=ms;s.worstMs=std::max(s.worstMs,ms);
+        if(now-s.since>=2000) {
+            float mean=0.f;for(float v:musicBars_)mean+=v;
+            qInfo().noquote()<<QString("musicvis: %1 frames in %2 ms, draw avg %3 ms worst %4 ms, tap analysed %5 dropped %6, mean bar %7 rms %8 sample=%9")
+                .arg(s.frames).arg(now-s.since).arg(s.drawMs/std::max(1,s.frames),0,'f',3).arg(s.worstMs,0,'f',3)
+                .arg(tap?tap->buffersAnalysed():0).arg(tap?tap->buffersDropped():0).arg(mean/n,0,'f',3).arg(musicLevel_,0,'f',3).arg(have?1:0);
+            s={now,0,0,0};
+        }
+    }
+}
 void View::drawMusicPage(QPainter& p) {
     const double idle=std::clamp(musicIdleEase_.value,0.,1.);
     const double chrome=1.-idle;
@@ -3749,6 +3853,7 @@ void View::drawMusicPage(QPainter& p) {
     const QString plugin=QStringLiteral("audioplayer_plugin");
     // back_screen_plane (tex_back_screen 1x1, template alphaScale 0): the black the idle style fades in.
     if(idle>.002)p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,int(std::lround(255.*musicIdleDim*idle))));
+    drawMusicVisualizer(p,idle);
     p.save();p.setRenderHint(QPainter::SmoothPixmapTransform);
     // title_information_group: the 240x240 frame with the cover inside it.
     constexpr qreal frameSize=240.,coverSize=162.,left=360.,top=360.;
@@ -3907,6 +4012,11 @@ void View::musicPanelActivate() {
     case 3:shell_.back();break;                           // msg_stop_button: ends the session like Stop
     case 4:shell_.cycleMediaRepeat();break;               // msg_repeat_button
     case 5:shell_.toggleMediaShuffle();break;             // msg_shuffle_button
+    case 7:                                               // msg_visualizer_with_icon_button: OnVisualizerButtonPush
+        musicVisualizerOn_=!musicVisualizerOn_;
+        if(musicVisualizerOn_ && shell_.musicTap())shell_.musicTap()->reset();   // no stale windows from an earlier on-period
+        qInfo().noquote()<<"media: Visual Player"<<(musicVisualizerOn_?"on":"off");
+        break;
     case 6:                                               // msg_volume_control_button: raise the meter
         if(volumeLevel_>=0)volumeApply(volumeLevel_,QStringLiteral("MusicPanel"));
         else qWarning().noquote()<<"media: the volume button has no endpoint to show";

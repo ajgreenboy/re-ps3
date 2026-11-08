@@ -52,12 +52,78 @@ Idle style (INFERRED throughout): while playing, with the panel closed and no di
 (`Shell::idleMilliseconds()`) the bottom chrome and status planes fade out over 600 ms and a black plane
 (`back_screen_plane`, alpha 0.55) fades in over the background; cover, number, title, artist, album and codec stay.
 Any input restores it. Paused playback never idles. The firmware's own idle timer and its visualizer are **not traced**
-(`audioplayer_plugin.prx` was not disassembled here) and the Visual Player is **not drawn**: it needs a PCM tap from the
-decoder, which this build does not have, and animating levels without one would be invented.
+(`audioplayer_plugin.prx` was not disassembled here); the visualizer is a simplified stand-in, see "Visualizer" below.
 
 Opening the XMB control panel (B2) keeps the cover block and fades the bottom chrome out with the panel's own 150 ms ease.
 
+## Visualizer (S19 follow-up, 2026-11-08)
+
+### What the firmware has (evidence)
+
+| Source | Finding | Tag |
+|---|---|---|
+| `audioplayer_plugin.rco` | one string, `msg_visualizer_with_icon` = "Visual Player" (control-panel button 14 = `msg_visualizer_with_icon_button`, art `tex_cp_vislizer*`, 70x70 measured); no visualizer texture, plane, animation or timing in any page of the container. The same string is in `_dummy`, `_mini`, `_util` and `sacd_plugin` | TRACED |
+| `audioplayer_plugin.prx` (decrypted, `fw493/vsh_module`) | string table (351 strings) holds `AudioPlayerPlugin::OnVisualizerButtonPush` and the module name `soundvisualizer_plugin`; the player hands off to that plugin when the button is pushed. Nothing about an idle timer or a visualizer style list | TRACED (names only; handler not disassembled) |
+| `soundvisualizer_plugin.rco` / `.prx` (31 KB) | 14 objects: `page_soundvisualizer0/1/2`, a seat plane, two blank buttons, a list of four items all titled "SoundvisualizerPage1", strings "SoundvisualizerPage1/2", "LeftBtn Focus", "back/ok/yes/no". Textures: `btn_blank*`, `btn_check*`, `btn_normal`. The `.prx` strings are `OnPageInit`, `OnPushEnter`, `HelpPageExit`, `custom_render_plugin`, `system_plugin`, `vshcommon`: a developer sample page that links the custom renderer, no spectrum code, shaders or parameters. `sv_pseudoaudioplayer_plugin.rco` is its twin | TRACED |
+| Music Settings (`sysconf_plugin`) | `msg_music_setting` rows are crossfade, volume normalisation, character set, audio-CD import: **no visualizer choice**, no visualizer style or idle-timeout setting. Screensaver (`msg_screensaver`) is the console-wide one | TRACED |
+| `vsh/resource` | no visualizer shader/texture files (`qgl/*.qrc` are the XMB's own canyon/earth/lines art; `hknw_plugin/jacket/*.fpo` belong to the Hakkonen jacket plane) | TRACED (negative) |
+| Reference frames | none of the Visual Player | none |
+
+Conclusion: the 4.93 Visual Player is a separate engine reached from the control panel's 14th button; this firmware tree
+carries no description of what it draws (the plugin shipped here is a stub), and no frames exist. So the firmware's look
+and its idle trigger cannot be reproduced from evidence. What the build draws is a **simplified visualizer driven by real
+audio levels**; its look is **INFERRED**, its audio path is real.
+
+### What is drawn (INFERRED look, measured audio)
+
+**Off by default**: the page draws exactly as before (no bars, no glow, no tap). The firmware reaches the visualizer through
+the control panel's Visual Player button (`AudioPlayerPlugin::OnVisualizerButtonPush`), so the build does too:
+
+- **Button**: the XMB music control panel (Triangle, B2) gained an 8th cell after Volume, drawn with audioplayer_plugin's own
+  `tex_cp_vislizer` (70x70, centred in the 90x60 cell under `tex_cp_focus`). Focused, it is named under the plate with the
+  container's `msg_visualizer_with_icon` ("Visual Player"; the string ends in a button gaiji that only the image font can
+  draw, so the label keeps the words). The art is TRACED; the 8th-cell placement is INFERRED (the player's own 14-button
+  `control_panel_page` is not built, B2 stands in for it).
+- **Toggle**: Enter on the button flips `View::musicVisualizerOn_` (log line `media: Visual Player on|off`). The flag lasts
+  for the playback session: it resets to off when playback stops (`mediaAudioOnly()` goes false), not on a track change. INFERRED
+  (the firmware's hand-off to `soundvisualizer_plugin` and its return are not traced).
+- **Tap**: `MusicTap::request()` is called only while the flag is on and playback is running, so with the visualizer off no
+  buffer is queued and no FFT runs (the `QAudioBufferOutput` stays attached but its slot returns at once). Turning it on clears
+  the tap's history.
+
+`View::drawMusicVisualizer` (called from `drawMusicPage` after the idle dim plane, before the cover frame), while it is on
+and playing:
+
+- **40 spectrum bars**, log-spaced 50 Hz .. 16 kHz, x 110 .. 1810, baseline y850, up to 240 px high (x1.45 in the idle
+  style), 72 % of each 42.5 px pitch wide. White at the baseline fading to pale blue, alpha 0.34 normally and 0.84 in the
+  idle style; a 3 px peak cap per bar that falls at 0.45 / s. Bars attack in ~40 ms and fall over ~180 ms.
+- **Cover glow**: a radial white-blue gradient centred on the 240x240 frame whose radius (200 .. 310 px) and alpha follow
+  the track loudness (RMS of the newest 512 frames).
+- Fades in/out over ~250 ms with play / pause; paused or stopped playback shows nothing.
+- Nothing is drawn over the text: the bars end below the codec label even at full height in the idle style.
+
+With the visualizer on, the idle style (chrome fades, black plane dims) makes it the prominent element; whether the firmware shows
+a visualizer after its own idle timeout is not known (not traced), so nothing starts it automatically.
+
+### Audio path (measured on this build)
+
+- `src/musicvis.{h,cpp}`: `MusicTap` attaches a Qt 6.8 `QAudioBufferOutput` to the music `QMediaPlayer` (`Shell::musicTap()`).
+  Its `audioBufferReceived` slot runs on the decoder thread and only counts and forwards the (shared) buffer; a worker
+  thread (low priority) mixes to mono (UInt8 / Int16 / Int32 / Float inputs), keeps a 2048-sample Hann window with a hop
+  of 512, runs a radix-2 FFT and converts band peaks to 0..1 over a -62 .. -8 dB range with a +2 dB/octave tilt.
+- Bounded memory: at most 6 buffers queued to the worker (more are dropped and counted), a history of 96 windows (~1.1 s) under a mutex,
+  nothing allocated per frame on the GUI thread. Analysis runs only while the page asked for levels in the last 500 ms,
+  so video and the XMB cost nothing. The GUI picks the window nearest the player position (newest if none is within 400 ms);
+  a backwards jump in media time clears the history.
+- Timing check (`XMB_MUSICVIS_TRACE=1`, 44.1 kHz stereo WAV, ~90 fps window): draw cost 0.19-0.20 ms avg, 0.58 ms worst;
+  ~20 analysed buffers per second, 0 dropped. Audio / picture alignment is by media timestamp; the output device latency
+  (not measured) shifts it by a few tens of ms at most and is not compensated.
+
 ## Files
+
+- `src/musicvis.h`, `src/musicvis.cpp` (new, in `CMakeLists.txt`): the PCM tap and spectrum analysis.
+- `src/shell.h`, `src/shell.cpp`: `musicTap()` accessor and the tap's construction beside the player (`player_` outlives it).
+- `src/view.h`, `src/view.cpp`: `drawMusicVisualizer` and its smoothing state, called from `drawMusicPage`.
 
 - `src/view.cpp`, `src/view.h`: `drawMusicPage`, the idle ease, the band routing; `drawVideoTimeBar` / `drawTimeCells` gained an
   optional `opacity` (default 1, video draws unchanged).
@@ -79,11 +145,23 @@ Scratch library `C:\dev\out\f9\libA` (three 40 s WAVs with RIFF INFO title/artis
 | `n-panel.png`, `b-panel.png` | Triangle: B2 panel over the page, bottom chrome gone, block intact |
 | `n-idle.png`, `m-idle.png` | after the 8 s timeout (script `idle=12000`): chrome gone, page darkened |
 
+Visualizer frames (`C:/dev/out/vis`, data from `mk.ts`: a 40 s 44.1 kHz stereo WAV with kick, hats, chord and a sweeping lead), scripted:
+
+| Frame | Shows |
+|---|---|
+| `q1-default.png` | default page, playing: no bars, no glow (identical layout to before) |
+| `q2-panel.png` | Triangle, focus on the new 8th button: `tex_cp_vislizer` under the focus plate, "Visual Player" under the panel |
+| `q3-on.png` | after Enter and closing the panel: bars and cover glow moving with the audio |
+| `q4-off.png` | after toggling off again: page back to the default, no bars |
+
+Log of that run: `media: Visual Player on`, `musicvis:` lines at 2 s (draw avg 0.15-0.16 ms, worst 1.0 ms, ~21 buffers/s analysed, 0 dropped), then `media: Visual Player off` and no more `musicvis:` lines (the tap is idle).
+Earlier always-on frames (`p1`/`p2`, `p-idle1`/`p-idle2`) showed the idle style (bars brighter and taller) and are superseded by the default-off behaviour.
+
 Not verified: an MP3 with embedded cover art (the folder-picture path and the default art were exercised; the embedded-picture
 branch is Qt's `CoverArtImage` and reads null for the WAV fixtures), real-time audibility, and any frame against the console.
 
 ## Open
 
 - Positions, the idle timeout and the status-plane timing need console frames or a trace of `audioplayer_plugin.prx`.
-- The 14-button player panel (`control_panel_page`), `del_dialog_page`, the visualizer and the volume page of this plugin are not
-  built; B2 stands in for the panel.
+- The 14-button player panel (`control_panel_page`), `del_dialog_page` and the volume page of this plugin are not
+  built, B2 stands in for the panel (with the Visual Player button added as an 8th cell). The firmware's own visualizer look, its idle trigger and its exit path are untraced.

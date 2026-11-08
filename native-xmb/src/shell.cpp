@@ -44,6 +44,7 @@
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QTransform>
+#include "musicvis.h"
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -1572,6 +1573,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     connect(&profiles_,&Profiles::changed,this,[this]{rebuildUsers();emit changed();});
     connect(&profiles_,&Profiles::failed,this,[this](const QString& error){showMessage(error,MessageKind::Page);emit changed();});
     player_->setAudioOutput(audio_.get());host::followDefaultAudioOutput(audio_.get());player_->setVideoSink(video_.get());
+    musicTap_=std::make_unique<MusicTap>(player_.get());
     connect(&preferences_,&Preferences::failed,this,[this](const QString& error){
         // The store reports its reason on this signal and only keeps it in error() for the read/format cases,
         // so the chain records the latest one: a refused value ("The setting value is invalid.") arrives here.

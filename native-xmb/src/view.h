@@ -392,6 +392,14 @@ private:
     static constexpr double musicIdleFadeMs=600.;    // INFERRED
     static constexpr double musicIdleDim=.55;        // INFERRED: alpha of the black back_screen_plane when idle
     PafEase musicIdleEase_;
+    // Visual Player stand-in (audit/MUSIC-PLAYER.md "Visualizer"): spectrum bars and a cover glow driven by the
+    // PCM tap (musicvis.h). The smoothed state lives here; the analysis is on the tap's worker thread.
+    void drawMusicVisualizer(QPainter& painter,double idle);
+    std::array<float,40> musicBars_{},musicPeaks_{};
+    float musicLevel_=0.f,musicVisAlpha_=0.f;
+    bool musicVisualizerOn_=false;   // the Visual Player toggle: per playback session, off by default, reset when playback stops
+    qint64 musicVisAt_=0;
+    struct MusicVisStats {qint64 since=0;int frames=0;double drawMs=0,worstMs=0;} musicVisStats_;
     QString musicStatusKey_;                         // track + pause state the status plane last changed on
     qint64 musicStatusSince_=0;
     bool mediaAudioOnly() const;          // a local audio item is playing: no video track, not a photo
@@ -399,7 +407,7 @@ private:
     void closeMusicPanel();
     void musicPanelMove(int delta);
     void musicPanelActivate();
-    static constexpr int musicPanelButtons=7;
+    static constexpr int musicPanelButtons=8;        // 7 explore_plugin_full cells + the Visual Player button (audioplayer_plugin art)
     static constexpr double musicPanelFadeMs=150.;    // FD: 0x270a00 (fade) / 0x270a04 (delay 0)
     static constexpr double musicPanelScale=1.3;      // FD: 0x270a54
     bool musicPanelOpen_=false;

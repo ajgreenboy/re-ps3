@@ -40,6 +40,7 @@ class QAudioOutput;
 class QVideoSink;
 
 namespace xmb {
+class MusicTap;
 class Assets;
 class SteamArtwork;
 class RawgArtwork;
@@ -363,6 +364,8 @@ public:
     QString mediaArtist() const { return mediaArtist_; }
     QString mediaAlbum() const { return mediaAlbum_; }
     const QImage& mediaCoverArt() const { return mediaCover_; }
+    // PCM tap behind the Visual Player (audit/MUSIC-PLAYER.md): levels of the music QMediaPlayer's own decoded audio.
+    MusicTap* musicTap() const { return musicTap_.get(); }
     QString mediaCodec() const;           // lower-case suffix of the playing file ("mp3", "wav"), empty when unknown
     int mediaTrackNumber() const;         // 1-based queue position, 0 when no queue
     int mediaTrackCount() const;
@@ -913,6 +916,7 @@ private:
     std::unique_ptr<QMediaPlayer> player_;
     std::unique_ptr<QAudioOutput> audio_;
     std::unique_ptr<QVideoSink> video_;
+    std::unique_ptr<MusicTap> musicTap_;   // declared after player_ so it is destroyed first
     void openDirectory(const QString& path);
     void openFile(const Entry& entry);
     // Set by refreshDirectory() so the scan's result reports itself as a rescan of an already-open page
