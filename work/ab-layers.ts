@@ -678,6 +678,8 @@ async function runStateProcess(t: Thresholds, opts: ReturnType<typeof parseArgs>
     ...process.env,
     XMB_DUMP_ENTRIES: dumpPath,
     XMB_STEAM_ARTWORK: '0',
+    // Steam's play records (localconfig.vdf) change whenever a game is played; captures leave them out.
+    XMB_STEAM_ACTIVITY: '0',
     // The Windows build has no console, so the app's own qInfo/qWarning lines go to
     // XMB_LOG. Recipe log assertions read that file; the grep is unambiguous because
     // every capture gets its own directory.

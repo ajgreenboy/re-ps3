@@ -47,6 +47,8 @@ void walk(const QString& text, Leaf leaf) {
 
 QHash<QString, SteamActivity> scanSteamActivity(const QString& steamRoot, const QString& steamId64) {
     QHash<QString, SteamActivity> result;
+    // Deterministic captures (work/ab-layers.ts) turn the live play records off.
+    if (qEnvironmentVariable("XMB_STEAM_ACTIVITY") == QLatin1String("0")) return result;
     QString account;
     if (steamRoot.isEmpty() || !steamAccountId(steamId64, &account)) return result;
     QFile file(QDir(steamRoot).filePath(QStringLiteral("userdata/%1/config/localconfig.vdf").arg(account)));
