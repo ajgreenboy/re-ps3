@@ -107,7 +107,7 @@
       "expect": {
         "category": "game",
         "depth": 0,
-        "catalogueRowIds": ["steam:*", "steam-store", "steam-folder-all-games", "vita", "data", "memory", "ps2", "psp", "ps3", "store", "content:refresh", "content:import"],
+        "catalogueRowIds": ["steam:*", "steam-store", "steam-folder-all-games", "vita", "data", "memory", "ps2", "psp", "ps3", "store", "artwork-settings", "content:refresh", "content:import"],
         "catalogueDetails": [{ "id": "steam-folder-all-games", "formula": "ownedGames" }],
         "noStoreDump": true
       },

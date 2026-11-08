@@ -1,5 +1,6 @@
 #include "view.h"
 #include "app_editor.h"
+#include "artwork_settings.h"
 #include "host.h"
 #include "pad.h"
 #include "settings_menu.h"
@@ -13,6 +14,7 @@
 #include <QApplication>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QLabel>
 #include <QImageReader>
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
@@ -124,6 +126,11 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         assets_.image(category.container,category.texture);
         for(const auto& entry:category.entries)assets_.image(entry.container,entry.texture);
     }
+    artworkCredit_ = new QLabel("<a style='color:white' href='https://rawg.io/'>Artwork from RAWG</a>", this);
+    artworkCredit_->setOpenExternalLinks(true);
+    artworkCredit_->setFocusPolicy(Qt::NoFocus);
+    artworkCredit_->setStyleSheet("background-color:rgba(0,0,0,110); padding:3px 6px;");
+    artworkCredit_->adjustSize();
     syncColumns();
     // The keyboard layout is resolved once, from the firmware, where the assets are already open: one RCO
     // through the P1.1 reader and one decrypted module (audit/OSK-FIRMWARE.md 12). A failed or absent firmware
@@ -142,6 +149,10 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");shell_.noteActivity();if(!file.isEmpty())shell_.chooseWallpaper(file);});
     connect(&shell_,&Shell::requestTheme,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Theme",{},"PS3 Themes (*.p3t)");shell_.noteActivity();if(!file.isEmpty())shell_.chooseTheme(file);});
     connect(&shell_,&Shell::requestImportApps,this,[this]{AppEditor editor(shell_.appRegistryPath(),this);connect(&editor,&AppEditor::registryChanged,&shell_,&Shell::refreshContent);editor.exec();shell_.noteActivity();});
+    connect(&shell_, &Shell::requestArtworkSettings, this, [this] {
+        if (configureArtwork(this, shell_.artworkStatus())) shell_.retryArtwork();
+        shell_.noteActivity();
+    });
     connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){openOsk("System Name",value,[this](const QString& name){shell_.setSystemName(name);});});
     // Create New User opens user_plugin's page_create first (prompt, prefilled field, OK; drawUserCreatePage), not
     // the keyboard: the keyboard is what Cross on the field opens.
@@ -257,7 +268,14 @@ void View::PafEase::advance(double seconds) {
     else progress_+=(step(progress_)-progress_)*fraction;
     value=from_+(to_-from_)*progress_;
 }
+void View::resizeEvent(QResizeEvent* event) {
+    QOpenGLWidget::resizeEvent(event);
+    if (artworkCredit_) artworkCredit_->move(12, height() - artworkCredit_->height() - 12);
+}
 void View::syncColumns() {
+    const auto& currentRows = shell_.entries();
+    artworkCredit_->setVisible(!shell_.mediaOpen() && std::any_of(currentRows.cbegin(), currentRows.cend(),
+                                [](const Entry& row) { return row.rawgArtworkVisible; }));
     const int depth=shell_.depth();
     if(previousCategory_!=shell_.category()) {
         outgoing_=columns_;outgoingCategory_=previousCategory_;categoryFade_=outgoing_.isEmpty()?0.:1.;columns_.clear();
@@ -266,15 +284,55 @@ void View::syncColumns() {
     }
     // Keep the departed child until the return animation finishes. The shell's
     // actual page stack and selections change immediately and remain canonical.
-    if(const qint64 key=(qint64(shell_.category())*64+depth)*65536+shell_.selectionAt(depth);key!=focusKey_ || !focusClock_.isValid()) {
-        focusKey_=key;focusClock_.restart();
+    const QString entryId=shell_.pageTitle()+QLatin1Char('/')+shell_.entries().value(shell_.selection()).id;
+    if(const qint64 key=(qint64(shell_.category())*64+depth)*65536+shell_.selectionAt(depth);key!=focusKey_ || entryId!=focusedEntryId_ || !focusClock_.isValid()) {
+        focusKey_=key;focusedEntryId_=entryId;focusClock_.restart();
+        if(!focusedBackground_.isNull() && focusedBackgroundOpacity_>0.) {
+            departingBackground_=focusedBackground_;departingBackgroundOpacity_=focusedBackgroundOpacity_;
+        }
+        focusedBackground_={};focusedBackgroundOpacity_=0.;focusedBackgroundPath_.clear();++focusedBackgroundRequest_;
     }
     for(int i=0;i<=depth;++i) {
         if(i>=columns_.size())columns_.push_back(Column{shell_.entriesAt(i),shell_.selectionAt(i),double(shell_.selectionAt(i))});
-        else {columns_[i].entries=shell_.entriesAt(i);columns_[i].selection=shell_.selectionAt(i);}
+        else {
+            const auto& entries=shell_.entriesAt(i);
+            const bool replaced=columns_[i].entries.size()!=entries.size() ||
+                columns_[i].entries.value(columns_[i].selection).id!=entries.value(shell_.selectionAt(i)).id;
+            columns_[i].entries=entries;
+            columns_[i].selection=std::clamp(shell_.selectionAt(i),0,std::max(0,int(entries.size())-1));
+            // A list replacement can invalidate the animated position. Ordinary
+            // moves keep their easing, including a retained departing page.
+            if(replaced && (columns_[i].position<0. || columns_[i].position>std::max(0,int(entries.size())-1))) {
+                columns_[i].position=columns_[i].selection;columns_[i].ease=PafEase();
+            }
+        }
     }
     if(depth>previousDepth_)for(int i=previousDepth_+1;i<=depth;++i){columns_[i].position=columns_[i].selection;columns_[i].ease=PafEase();}
     previousDepth_=depth;
+    syncFocusedBackground();
+}
+void View::syncFocusedBackground() {
+    const QString path=shell_.focusedBackgroundPath();
+    if(path==focusedBackgroundPath_)return;
+    focusedBackgroundPath_=path;const auto request=++focusedBackgroundRequest_;
+    if(path.isEmpty()) {
+        if(!focusedBackground_.isNull() && focusedBackgroundOpacity_>0.) {
+            departingBackground_=focusedBackground_;departingBackgroundOpacity_=focusedBackgroundOpacity_;
+        }
+        focusedBackground_={};focusedBackgroundOpacity_=0.;return;
+    }
+    auto* watcher=new QFutureWatcher<QImage>(this);
+    connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,request]{
+        watcher->deleteLater();if(request!=focusedBackgroundRequest_)return;
+        focusedBackground_=watcher->result();++uiRevision_;update();
+    });
+    watcher->setFuture(QtConcurrent::run([path]{
+        QImageReader reader(path);reader.setDecideFormatFromContent(true);reader.setAutoTransform(true);
+        const QSize size=reader.size();
+        if(!size.isValid() || size.width()>16384 || size.height()>16384 || quint64(size.width())*quint64(size.height())>64ULL*1024*1024)return QImage{};
+        if(size.width()>3840 || size.height()>2160)reader.setScaledSize(size.scaled(3840,2160,Qt::KeepAspectRatio));
+        return reader.read();
+    }));
 }
 void View::loadWallpaper() {
     if(shell_.backgroundMode()!=2)return;
@@ -297,6 +355,30 @@ void View::loadWallpaper() {
         if(size.width()>3840 || size.height()>2160)reader.setScaledSize(size.scaled(3840,2160,Qt::KeepAspectRatio));
         return reader.read();
     }));
+}
+void View::drawBackdrops(QPainter& p) {
+    const QRectF window=p.transform().inverted().mapRect(QRectF(0,0,p.device()->width(),p.device()->height())).united(QRectF(0,0,1920,1080));
+    const auto draw=[&](const QImage& image,double opacity) {
+        if(image.isNull() || opacity<=0.)return;
+        const QSizeF size=QSizeF(image.size()).scaled(window.size(),Qt::KeepAspectRatioByExpanding);
+        p.save();p.setOpacity(opacity);p.drawImage(QRectF(window.center()-QPointF(size.width()/2,size.height()/2),size),image);p.restore();
+    };
+    if(shell_.backgroundMode()==2 && !wallpaperImage_.isNull()) {
+        draw(wallpaperImage_,1.);p.fillRect(window,QColor(0,0,0,35));
+    }
+    draw(departingBackground_,departingBackgroundOpacity_);
+    draw(focusedBackground_,focusedBackgroundOpacity_);
+    // The item menu's plate is a light veil (measured 0.21-0.25 white over a dark console wallpaper). Over bright
+    // game art or a bright user wallpaper the same veil leaves its white text at ~1.2:1, so the art under the
+    // panel is darkened while the menu is open: black up to 0.58, ramping in over 80 px left of the plate
+    // (x 1240..1320) and following the panel's own open ease. INFERRED: the console has no bright-art frame of
+    // this menu; 0.58 brings a 150-200 luma backdrop to the console's measured ~100 ground under the rows.
+    if(optionsDrawn() && !optionsShown_.player) {
+        const double amount=.58*std::clamp(optionsOpenEase_.value,0.,1.);
+        QLinearGradient shade(1240,0,1320,0);
+        shade.setColorAt(0,QColor(0,0,0,0));shade.setColorAt(1,QColor(0,0,0,int(255*amount)));
+        p.fillRect(QRectF(1240,window.top(),window.right()-1240,window.height()),shade);
+    }
 }
 View::~View(){
 #ifdef Q_OS_WIN
@@ -731,6 +813,11 @@ void View::paintGL() {
     const qint64 frameStart=frameTracePath_.isEmpty()?0:clock_.nsecsElapsed();
     const qint64 nowNs=clock_.nsecsElapsed(),now=nowNs/1000000;
     const double dt=std::clamp(double(nowNs-previousFrameNs_)/1.e9,0.,.1);previousFrameNs_=nowNs;
+    const bool showArtwork=!focusedBackground_.isNull() && focusTime()>=artworkDwellMs && !shell_.mediaOpen() && !shell_.psMenuOpen();
+    const double fadeStep=dt*1000./artworkFadeMs;
+    focusedBackgroundOpacity_=std::clamp(focusedBackgroundOpacity_+(showArtwork?fadeStep:-fadeStep),0.,1.);
+    departingBackgroundOpacity_=std::max(0.,departingBackgroundOpacity_-fadeStep);
+    if(departingBackgroundOpacity_==0.)departingBackground_={};
     const double renderSeconds=secondsOverride_>=0.?secondsOverride_:double(nowNs)/1.e9; // fixed for A/B captures
     // Every move is a firmware paf animation (PafEase): 200 ms in accel mode 5 for the category and item moves and
     // the column cross-fade. The page (depth) move runs on two eases because two evidence sets disagree on it and
@@ -761,10 +848,7 @@ void View::paintGL() {
         bool ok=false;const double pinned=std::clamp(pin.toDouble(&ok),0.,double(shell_.depth()));
         if(ok){depthPosition_=pinned;barDepthPosition_=pinned;}
     }
-    // Capture-only pin for the end-of-list overscroll (XMB_OVERSCROLL=<0..8>): it states the press count the
-    // shell will report (see View::setColumnSink) so a deterministic grab can measure the 40 px-per-press
-    // projection before the shell-side count is wired. Unset in every normal run, where the setter is the only
-    // source and the count is 0 at rest.
+    // Preserve the historical diagnostic pin; normal input never increments it.
     if(const QString pin=qEnvironmentVariable("XMB_OVERSCROLL");!pin.isEmpty()) {
         bool ok=false;const int presses=pin.toInt(&ok);
         if(ok)columnSink_=std::clamp(presses,0,8);
@@ -873,6 +957,16 @@ void View::paintGL() {
     // it is resolved, then composited at half scale, where the bilinear fetch averages each 2x2 block. MSAA plus 2x
     // supersampling gives smooth glyph and icon edges. The layer is redrawn only when something visible changed.
     const QSize device(int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF())),pixels=device*2;
+    // PIC1 and wallpaper belong to the scene, below the glass icons and all UI.
+    // Painting them into the UI cache would cover the separately drawn icon pass.
+    if((shell_.backgroundMode()==2 && !wallpaperImage_.isNull()) || focusedBackgroundOpacity_>0. || departingBackgroundOpacity_>0.) {
+        glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
+        QOpenGLPaintDevice backgroundDevice(device);
+        QPainter backdrop(&backgroundDevice);backdrop.setRenderHint(QPainter::SmoothPixmapTransform);
+        const double scale=std::min(device.width()/1920.,device.height()/1080.);
+        backdrop.translate((device.width()-1920*scale)/2,(device.height()-1080*scale)/2);backdrop.scale(scale,scale);
+        drawBackdrops(backdrop);
+    }
     // The keyboard's caret blink. 500 ms is the audit's FIT (OSK-FIRMWARE 5.2: the capture rig tops out near
     // 5 fps, so the period was never traced) and lives in OskCaret::blinkMilliseconds, not here. A pinned
     // --render-clock drives the phase as well as the background, so two captures of one state are identical
@@ -1881,13 +1975,6 @@ void View::drawScene(QPainter& p) {
         }
         p.restore();
     };
-    if(shell_.backgroundMode()==2 && !wallpaperImage_.isNull()) {
-        // Covers the whole window, not just the 16:9 scene, so the bars beside a letterboxed scene show the picture too.
-        const QRectF window=p.transform().inverted().mapRect(QRectF(0,0,p.device()->width(),p.device()->height())).united(QRectF(0,0,1920,1080));
-        const auto size=QSizeF(wallpaperImage_.size()).scaled(window.size(),Qt::KeepAspectRatioByExpanding);
-        p.drawImage(QRectF(window.center()-QPointF(size.width()/2,size.height()/2),size),wallpaperImage_);
-        p.fillRect(window,QColor(0,0,0,35));
-    }
     if(shell_.mediaOpen()) {
         const auto now=clock_.elapsed();
         if(!previousMediaOpen_ || previousMediaTitle_!=shell_.mediaTitle())mediaControls_.opened(now);
@@ -2177,44 +2264,30 @@ void View::drawScene(QPainter& p) {
             // The list under an open options panel stays in place; unfocused rows drop to icons only.
             const double panelAmount=level+1<columns.size() && isChoiceColumn(columns[level+1])?panelOpen:0.;
             if(behind>.999 && level<lastLevel-1)continue;
-            // The focused row's background plate: the item column's own `BG1` plane, and the item column's only
-            // focus cue besides the label glow (FIDELITY-ROOT-BAR I10, which measured nothing here). GEOMETRY-ROOT
-            // 11.1 measures it on five console frames as a hard-edged 319x175 rectangle (x 405-723, y 417-591) and
-            // FIDELITY-ROOT-BAR I10 re-measures it as 405,419 -> 724,594; both give 319x175 centred on the focus
-            // point (565,505), and the rect below takes I10's 419 row origin. It is a fixed-size rectangle centred
-            // on the row, not a row band. The RCO's BG1 planes carry posX/posY/width/height = 0 and a null image
-            // (GEOMETRY-ROOT 2.2/10.1), so the firmware states no rect and ships no texture for it - there is no
-            // firmware art to draw, which is why this is a drawn plane and not an asset. The alpha profile is
-            // measured off the frame's own edge steps (plate minus the column just outside the plate, at the left
-            // edge x405 -> 406 and the right edge x723 -> 724, rows 419..593): 0.17 at the top edge, 0.205-0.22
-            // through the middle (y 443..535), 0.14 at y566 and 0.11 at y588, over white 230 - which reproduces the
-            // frame's +43..+60 luma lift at y 440..540 over its own darker background. It is drawn before every row
-            // (it is a plane behind them, not an overlay) and only at the top level: the settings/page bands carry
-            // no plate (SETTINGS 12.6) and a parent column behind an open page keeps the frame it had, so it fades
-            // with (1-behind). [TRACED: the rect, the edge rows and the per-row alphas. FIT: the stop interpolation
-            // and white 230.]
-            // ICON0 thumbnails are wide. The tile rule is the media album ART, not every texture whose name
-            // contains "album": category_game.xml's folder placeholder is tex_album_icon, and matching that
-            // turned two 50 px folder rows into wide ICON0 cards (-1.20 dB on the canonical frame until the
-            // distinction was measured, FIDELITY-SURFACES 3.1b + 15.8). The media thumbnail names are
-            // *_tex_album_default / *_tex_album_pic. A picture that is not wide (the Photo column's 180x180
-            // hakoniwa.png gallery icon, Entry::iconSized) keeps the icon box the console gives it.
-            const auto isTile=[](const auto& entry){
+            // ICON0 cards and glyphs have separate layout classes. A file-backed
+            // square icon is still an icon; a wide media thumbnail uses a card.
+            const auto isTile=[this](const auto& entry){
+                if(entry.iconSized)return false;
+                if(entry.gameTile)return true;
+                const QImage* image=nullptr;
+                if(!entry.artwork.isNull())image=&entry.artwork;
+                else if(entry.container=="file")image=&assets_.bestImage(entry.container,entry.texture);
+                if(image && !image->isNull())return image->width()>image->height()*1.25;
                 const bool albumArt=entry.texture.contains("album_default") || entry.texture.contains("album_pic");
-                return !entry.iconSized && (entry.gameTile || albumArt || entry.container=="file");
+                return albumArt;
             };
-            // The plate is the empty ICON0 backdrop (GEOMETRY-ROOT 12.7: the BG1 artwork plane with image=null), so it
-            // belongs to a focused tile row only. Glyph rows (folders, the Store bag, settings) have none on the
-            // console (col-game-r00/r03, col-settings-r02, col-photo-r00).
-            const bool plateRow=column.selection>=0 && column.selection<column.entries.size() && isTile(column.entries[column.selection]);
+            // BG1 is an empty ICON0 placeholder (GEOMETRY-ROOT 12.7). It
+            // must not sit behind an already loaded image or a glyph row.
+            const auto focusedEntry=column.entries.value(column.selection);
+            const bool plateRow=focusedEntry.gameTile && focusedEntry.artwork.isNull() && focusedEntry.container!="file";
             if(level==0 && columnAlpha>0. && plateRow) {
                 const double plateDistance=column.selection-column.position;
                 const double plateFocus=std::max(0.,1.-std::abs(plateDistance));
                 const double plateDepth=behind*(1.-plateFocus);
-                const double plateRow=plateDistance*80+std::clamp(plateDistance,0.,1.)*95
+                const double plateRowOffset=plateDistance*80+std::clamp(plateDistance,0.,1.)*95
                     -std::clamp(-plateDistance,0.,1.)*305;
                 const double plateSink=(active && level==int(columns.size())-1)?overscrollStep*columnSink_:0.;
-                const double plateY=540+(505+plateRow-540-15*plateDepth*std::clamp(plateDistance,0.,1.))*(1.-.055*plateDepth)+plateSink;
+                const double plateY=540+(505+plateRowOffset-540-15*plateDepth*std::clamp(plateDistance,0.,1.))*(1.-.055*plateDepth)+plateSink;
                 const QRectF plateRect(kColumnX-160.+ahead*210.+offset,plateY-86.,319.,175.);
                 QLinearGradient plateFill(plateRect.topLeft(),plateRect.bottomLeft());
                 plateFill.setColorAt(0.,QColor(230,230,230,43));   // 0.170 at the top edge (y 419)
@@ -2239,11 +2312,8 @@ void View::drawScene(QPainter& p) {
                 // the focused row stays at 2700 and steps 262 px left, the others 109.46 px (GEOMETRY-ROOT 8: the
                 // measured parent-unfocused offset; the 262 stays the focused row's own step).
                 const double depth=behind*(1.-focus);
-                // End-of-list overscroll (GRAPHICS-INVENTORY #13): the press count sinks the focused column by
-                // 40 px per press. It is added to the row's y, so the icon, its label, value, subtitle and note
-                // all travel with it; the other columns and the category bar do not move. At rest the count is 0
-                // and every y below is exactly what it was. No ease: the inventory gives the step, not its curve
-                // (the frames on disk do not show the sink, see PAGE-MOVE 16), so it is a straight offset.
+                // Only an explicit diagnostic pin offsets a column. Normal
+                // boundary presses leave the selection and projection unchanged.
                 const double sink=(active && level==int(columns.size())-1)?overscrollStep*columnSink_:0.;
                 const double y=540+(505+row-540-15*depth*std::clamp(distance,0.,1.))*(1.-.055*depth)+sink;
                 if(y<-100 || y>1050)continue;
@@ -2283,7 +2353,10 @@ void View::drawScene(QPainter& p) {
                 // there drew a 320x180 placeholder on the same spot as the open category icon (Video Library over the
                 // film strip), so a behind row is drawn at the item-icon box of its own level, art or not.
                 const double quad=itemIconSize(level,bullet,focus)*entryScale;
-                double iconWidth=tile?(155+focus*165)*entryScale:size,iconHeight=tile?(90+focus*90)*entryScale:size;
+                // Neighbour cards must fit the 80 px row pitch. The focused
+                // ICON0 envelope is 320x176; preserve the source aspect ratio.
+                const double cardHeight=72+focus*104;
+                double iconWidth=tile?cardHeight*(320./176.)*entryScale:size,iconHeight=tile?cardHeight*entryScale:size;
                 if(behind>.001 && tile){iconWidth=size;iconHeight=size;}
                 // Captured parent-column brightness (_Ambiant.w 0.698 focused, 0.247 unfocused, RPCS3 fpdump7): it
                 // belongs to the column, not to the glass row class, or the card behind a page stays at full strength.
@@ -2301,8 +2374,12 @@ void View::drawScene(QPainter& p) {
                     const QRectF card(iconX-iconWidth/2,y-iconHeight/2,iconWidth,iconHeight);
                     if(entry.artwork.isNull())drawItemGlyph(p,entry.container,itemTexture,card,iconAlpha);
                     else {
-                        const QSizeF fitted=QSizeF(entry.artwork.size()).scaled(card.size(),Qt::KeepAspectRatio);
-                        p.save();p.setOpacity(iconAlpha);p.drawImage(QRectF(card.center()-QPointF(fitted.width()/2,fitted.height()/2),fitted),entry.artwork);p.restore();
+                        // Every installed game has the same ICON0 canvas,
+                        // independent of the provider's capsule dimensions.
+                        // Crop centrally rather than stretching or letterboxing.
+                        QSizeF crop=QSizeF(card.size()).scaled(entry.artwork.size(),Qt::KeepAspectRatio);
+                        const QRectF source(QPointF((entry.artwork.width()-crop.width())/2.,(entry.artwork.height()-crop.height())/2.),crop);
+                        p.save();p.setOpacity(iconAlpha);p.drawImage(card,entry.artwork,source);p.restore();
                     }
                 }
                 else if(!entry.artwork.isNull()) {
@@ -2353,7 +2430,10 @@ void View::drawScene(QPainter& p) {
                 const bool inlineStandIn=inlineMessage && active && level==shell_.depth() && i==column.selection;
                 // One label column per level, as on the PS3 (GEOMETRY-ROOT 8: icon centre +113 at the top
                 // level - the measured 678 px origin, not the 664 the +99 gave - and +57 inside a page).
-                const double labelX=kColumnX+(level==0?(tile?173:113):60)+ahead*210+offset;
+                // Wide cards need their own label gutter at every depth,
+                // including Continue Watching. Parent rows have receded to
+                // icon size and keep the narrow column gutter.
+                const double labelX=kColumnX+((tile && behind<.001)?173:level==0?113:60)+ahead*210+offset;
                 const double alpha=(.455+.545*focus)*(entry.disabled?.55:1.);
                 // A row's own value wins when it sets one (the sign-in page's fields: server URL, user name and
                 // the password as dots). Every other row leaves Entry::fieldValue empty, so this falls through to

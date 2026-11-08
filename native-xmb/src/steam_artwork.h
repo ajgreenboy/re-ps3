@@ -7,6 +7,7 @@
 #include <QStringList>
 #include <QVector>
 #include <QUrl>
+#include <QSet>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -24,12 +25,15 @@ public:
 
     // Cache path ends in <appId>.image; readers should detect the image format from content.
     static QString cachePath(QString cacheDirectory, QString appId);
+    static QString heroCachePath(QString cacheDirectory, QString appId);
+    void requestHero(const QString& appId);
 
     // Supersedes previous work. At most 32 unique numeric app IDs are fetched.
     void refresh(QStringList appIds);
 
 signals:
     void loaded(QString appId, QImage image);
+    void heroReady(QString appId, QString path);
 
 private:
     using ResponseHandler = std::function<void(const QByteArray&, int, int)>;
@@ -46,11 +50,13 @@ private:
 
     QString cacheDirectory_;
     QNetworkAccessManager* network_ = nullptr;
+    QNetworkAccessManager* heroNetwork_ = nullptr;
     QVector<QNetworkReply*> replies_;
     QStringList pendingAppIds_;
     std::shared_ptr<std::atomic<quint64>> workerGeneration_;
     quint64 generation_ = 0;
     int activeJobs_ = 0;
+    QSet<QString> heroRequests_;
 };
 
 } // namespace xmb

@@ -323,6 +323,34 @@ QString artworkFor(const QString& steamRoot, const QString& appId, const QString
     return existingArtwork(candidates);
 }
 
+QString backgroundArtworkFor(const QString& steamRoot, const QString& appId, const QString& steamId) {
+    const QString cache = QDir(steamRoot).filePath(QStringLiteral("appcache/librarycache"));
+    QStringList candidates;
+    QStringList grids;
+    if (!steamId.isEmpty()) {
+        QStringList ids;
+        bool ok = false;
+        constexpr qulonglong base = 76561197960265728ULL;
+        const qulonglong number = steamId.toULongLong(&ok);
+        if (ok && number >= base) ids.append(QString::number(number - base));
+        ids.append(steamId);
+        for (const auto& id : ids) grids.append(QDir(steamRoot).filePath(QStringLiteral("userdata/%1/config/grid").arg(id)));
+    }
+    for (const auto& grid : grids)
+        candidates << QDir(grid).filePath(appId + QStringLiteral("_hero.jpg"))
+                   << QDir(grid).filePath(appId + QStringLiteral("_hero.png"))
+                   << QDir(grid).filePath(appId + QStringLiteral("_library_hero.jpg"))
+                   << QDir(grid).filePath(appId + QStringLiteral("_library_hero.png"));
+    candidates << QDir(cache).filePath(appId + QStringLiteral("_library_hero_2x.jpg"))
+               << QDir(cache).filePath(appId + QStringLiteral("_library_hero_2x.png"))
+               << QDir(cache).filePath(appId + QStringLiteral("_library_hero.jpg"))
+               << QDir(cache).filePath(appId + QStringLiteral("_library_hero.png"));
+    const QString nested = QDir(cache).filePath(appId);
+    appendArtworkMatches(candidates, nested, {QStringLiteral("*_library_hero_2x.jpg"), QStringLiteral("*_library_hero_2x.png")});
+    appendArtworkMatches(candidates, nested, {QStringLiteral("*_library_hero.jpg"), QStringLiteral("*_library_hero.png")});
+    return existingArtwork(candidates);
+}
+
 struct RootInfo {
     QString path;
     QString steamId;
@@ -541,6 +569,7 @@ void scanLibrary(const QString& steamRoot, const QString& steamId, const QString
         if (game.title.isEmpty()) game.title = appId;
         game.installDirectory = actualDirectory;
         game.artwork = artworkFor(steamRoot, appId, steamId);
+        game.backgroundArtwork = backgroundArtworkFor(steamRoot, appId, steamId);
         result.games.append(std::move(game));
         seenApps.insert(appId);
     }

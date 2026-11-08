@@ -36,7 +36,8 @@ class QVideoSink;
 namespace xmb {
 class Assets;
 class SteamArtwork;
-enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, SteamStoreSection, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps, JellyfinApp, JellyfinFolder, JellyfinPlay, JellyfinMore, JellyfinSignOut, SteamDownloads,
+class RawgArtwork;
+enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditName, CreateUser, SelectUser, Wallpaper, Theme, Information, Library, ChooseLibrary, File, Folder, Launch, LaunchSteam, InstallSteam, SteamFolder, SteamStoreBrowse, SteamStoreSection, LaunchApp, OpenUrl, RefreshContent, RefreshFriends, ImportApps, ArtworkSettings, JellyfinApp, JellyfinFolder, JellyfinPlay, JellyfinMore, JellyfinSignOut, SteamDownloads,
     // A free-text search of the signed-in server's own library: the row asks the view for the XMB
     // keyboard (through requestJellyfinFieldEdit with the field key "search") and pushes a result
     // page whose rows carry the same Play/Resume semantics as a folder.
@@ -84,12 +85,14 @@ struct Entry {
     QString themeIcon; // the PS3 theme (.p3t icontable) id that replaces this icon, e.g. "icon_game_setting"
     QImage artwork; // provider images decoded off the render thread
     QString artworkUrl; // a remote picture still to fetch for `artwork` (Spotify covers); empty elsewhere
+    QString backgroundPath; // local PIC1.PNG or another full-screen item background
     // Where a generated row's title and icon came from: "xmbml" (the view's title_rsc/icon_rsc), "rco"
     // (a label the firmware builds in a plugin, resolved through its own RCO strings), "builtin" (the
     // last-resort literal this build shipped) or "fallback" (the whole column kept its built-in rows).
     // Empty on hand-written rows, so the entry dump stays quiet about the rest of the XMB.
     QString source;
     bool gameTile=false,friendRow=false;
+    bool rawgArtworkVisible=false; // this row displays RAWG artwork and needs provider credit
     int presenceState=0;
     // A row this build cannot act on but still lists, so the reason stays reachable and the state stays
     // visible: drawn dimmed, and only the Continue Watching page sets it today (a remembered title whose
@@ -223,6 +226,8 @@ class Shell final:public QObject {
 public:
     Shell(QString dataDirectory,Assets& assets,QObject* parent=nullptr);
     ~Shell() override;
+    QString artworkStatus() const { return artworkStatus_; }
+    void retryArtwork();
     const QVector<Category>& categories() const { return categories_; }
     const QVector<Entry>& entries() const;
     int category() const { return category_; }
@@ -232,9 +237,8 @@ public:
     bool topPageLoadsPlugin() const { return !pages_.isEmpty() && pages_.back().sysconfPlugin; }
     const QVector<Entry>& entriesAt(int depth) const;
     int selectionAt(int depth) const;
-    // End-of-list overscroll (GRAPHICS-INVENTORY #13): DOWN on the last row does not move the focus; the whole
-    // column sinks 40 px per press and stays sunk. The count lives here because this object knows the move was
-    // clamped; View::setColumnSink() projects it.
+    // Retained for the renderer's historical capture diagnostic. Normal list
+    // navigation clamps at its bounds and never accumulates a column offset.
     int columnSink() const { return columnSink_; }
     QString pageTitle() const { return pages_.isEmpty()?QString{}:pages_.last().title; }
     QString message() const { return message_; }
@@ -590,6 +594,9 @@ private:
     bool ownedInFlight_=false;
     QString ownedSignature_;        // app ids + installed flags + collection ids, to skip unchanged rebuilds
     std::unique_ptr<SteamArtwork> steamArtwork_;
+    std::unique_ptr<RawgArtwork> rawgArtwork_;
+    QHash<QString,QString> rawgArtworkPaths_; // resolved cached RAWG art by row id; read without filesystem I/O while drawing
+    QString artworkStatus_;
     QTimer steamRefresh_;
     QElapsedTimer friendsAge_;
     SteamFriendList steamFriendList_;

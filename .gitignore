@@ -46,6 +46,7 @@ xenon/xmb_switch_tables.toml
 *.key
 console-psid*
 steam_api_key*
+rawg_api_key*
 steam_api_key
 idps*
 !/work/parity-catalogue.json

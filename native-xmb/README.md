@@ -165,6 +165,8 @@ window.
 `<appid>_icon.png` for the square icon and `<appid>_bg.png` for the background (`.jpg/.jpeg/.webp` also work). An
 override wins over the cached Steam header and the manifest icon; `XMB_STEAM_ARTWORK_LOG=1` logs which files are used.
 
+Open **Game → Artwork Settings**, enter a [RAWG API key](https://rawg.io/apidocs), then choose **Fetch Artwork**. XMB looks up installed Steam games and imported games during library scans. Matched artwork supplies the game card and focused background. Explicit local overrides take priority. Games without a confident match keep their existing artwork. Cached matches work offline. The key is saved in the user's application settings directory, separate from the library and repository. You can also set `RAWG_API_KEY` before launching XMB.
+
 **Import Games and Apps** reads a versioned JSON manifest. The same tool is available without opening XMB:
 
 ```powershell

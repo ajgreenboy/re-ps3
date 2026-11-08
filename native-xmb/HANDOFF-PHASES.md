@@ -1,7 +1,7 @@
 # Native XMB — handoff: what remains for an exact match
 
-**Forward plan (2026-10-27): [PHASES-2026-10-27.md](PHASES-2026-10-27.md)** supersedes the phase list below as the
-plan of record; the per-screen 1:1 fidelity plan is [PARITY-PHASES.md](PARITY-PHASES.md). This file remains the record of the 2026-10-25/27 pass, including the RPCS3 capture how-to, the
+**Forward plan (2026-10-27): [PHASES-2026-10-27.md](archive/PHASES-2026-10-27.md)** supersedes the phase list below as the
+plan of record; the per-screen 1:1 fidelity plan is [PARITY-PHASES.md](archive/PARITY-PHASES.md). This file remains the record of the 2026-10-25/27 pass, including the RPCS3 capture how-to, the
 values traced in that pass and the evidence links.
 
 **Goal.** A C++ program whose output is identical to the PS3 4.93 XMB. Every layer comes from the firmware's own
@@ -695,7 +695,7 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
   higure, boot and music overrides), texenv.dds, amb.bmp, `icontex.qrc` normal maps and `dif`.
 - The uniform packing in custom_render_plugin is VMX code that Ghidra decompiles poorly (apply = FUN_000473b4, draw =
   FUN_00040ce8). Read the values instead from a real run. The local RPCS3 build (`C:\dev\rpcs3`, rebuilt with
-  `build-rpcs3.bat`) dumps each distinct fragment program ≥2000 bytes at draw time when `XMB_FP_DUMP=<dir>` is set:
+  `../tools/build-rpcs3.bat`) dumps each distinct fragment program ≥2000 bytes at draw time when `XMB_FP_DUMP=<dir>` is set:
   `.ucode` with patched constants, `.vc` vertex constants and `.txt` texture units. Boot
   `bin\dev_flash\vsh\module\vsh.self`, then run `re-ps3-native --decode-fp icons:lib/icons/icons_full_ss.fpo@<dir>` to
   get the named uniform values per draw.
@@ -790,7 +790,7 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
   `proc_iridescent.tga` plus the untraced colour/alpha terms remain open.
 - Ribbon geometry from spline.elf is done. Next: the particles' `PARTICLES_UI` wind response, which is not wired.
   The same tools apply: `work/spu/` disassembler, the RPCS3 SPU DMA log, buffer watch and local-store snapshots
-  (`rpcs3-rsx-capture.patch`).
+  (`../patches/rpcs3-rsx-capture.patch`).
 - Ribbon presets: the measured boot durations (3.82 s, 2.8 s) differ from the plugin's call arguments (3 s, 7.5 s);
   qgl_base's animation player is not traced.
 - Boot: the cold-boot intro is ported (`src/coldboot.cpp`, audit/PIPELINE.md "Cold boot"): coldboot.raf decoded
@@ -845,3 +845,14 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
 - `src/assets.cpp`: RCO/QRC/GIM/DDS/TGA decoding, `bestImage`, fonts.
 - Local analysis (not committed): `out/native-reference/` holds the decompiles (`lines/*.c`, `icons_vtable.c`), the
   translated shaders (`cg-icons/`), `qrc-inventory.txt` and `icons/` (ICONS.mnu files).
+
+## 2026-11-04 — installed artwork and folder boundary corrections
+
+See [audit/ICON-ARTWORK-SCROLL-2026-11-04.md](audit/ICON-ARTWORK-SCROLL-2026-11-04.md).
+Loaded game artwork no longer receives the empty BG1 placeholder. Installed cards
+use a consistent 320:176 crop, and focused PIC1/Steam hero art fades in beneath the
+icons after a dwell. The 2000/350 ms dwell/fade are native fits pending firmware
+measurement. Repeated presses at either folder boundary remain anchored; the old
+unbounded 40-pixel-per-press sink is removed from normal input. Deeper media cards
+have their own label gutter and neighbour thumbnails fit inside the row pitch.
+Separate raw assets, screenshots and disposable resume records remain under out/.

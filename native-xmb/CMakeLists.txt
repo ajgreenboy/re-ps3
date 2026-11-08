@@ -32,6 +32,8 @@ qt_add_executable(re-ps3-native
     src/steam_downloads.cpp src/steam_downloads.h src/steam_accounts.cpp src/steam_accounts.h src/steam_friends.cpp src/steam_friends.h
     src/steam_artwork.cpp src/steam_artwork.h src/steam_store.cpp src/steam_store.h src/steam_owned.cpp src/steam_owned.h src/steam_collections.cpp src/steam_collections.h src/steam_overrides.cpp src/steam_overrides.h src/steam_family.cpp src/steam_family.h
     src/content_registry.cpp src/content_registry.h src/app_editor.cpp src/app_editor.h
+    src/rawg_client.cpp src/rawg_client.h src/rawg_artwork.cpp src/rawg_artwork.h
+    src/artwork_settings.cpp src/artwork_settings.h
     src/media_controls.cpp src/media_controls.h
     src/subtitles.cpp src/subtitles.h
     src/jellyfin_client.cpp src/jellyfin_client.h src/jellyfin_stream.cpp src/jellyfin_stream.h

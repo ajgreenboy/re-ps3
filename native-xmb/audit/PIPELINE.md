@@ -30,7 +30,7 @@ outside the main XMB.
 
 ## Ribbon geometry (captured 2026-10-25)
 
-The ribbon geometry was captured from RPCS3 with `XMB_VTX_DUMP` (patch: `rpcs3-rsx-capture.patch` at the repo root;
+The ribbon geometry was captured from RPCS3 with `XMB_VTX_DUMP` (patch: `../../patches/rpcs3-rsx-capture.patch` at the repo root;
 the draw is identified by lines1.fpo's 336-byte ucode). Each frame is a single indexed draw:
 
 - 35,306 big-endian u32 indices form triangle strips with primitive restart (1016 strips of 32???34 indices), over
@@ -236,11 +236,11 @@ so its background stays near black until ~2.2 s and ends darker (display level 6
 The native ToneMap path is a separate fidelity gap. Native draws the logo directly onto the frame; the firmware draws it
 on the coldboot_ps3logo plane. The epilepsy notice after ShowGUI is not ported.
 
-**Capture tooling.** `rpcs3-rsx-capture.patch` adds `XMB_FP_SERIES=<file>` / `XMB_SERIES_FP_LENGTH=<ucode bytes>`
+**Capture tooling.** `../../patches/rpcs3-rsx-capture.patch` adds `XMB_FP_SERIES=<file>` / `XMB_SERIES_FP_LENGTH=<ucode bytes>`
 (0 lists lengths): one record per draw of that program with the patched ucode, vertex constants and texture units, and
 the bound textures once (`<file>.texN`). `work/coldboot-series-split.ts` splits a capture for
 `re-ps3-native --decode-fp`. `--dump-cg` prints each program's ucode size (sce01 1344, back_colours0 8608,
-LinesController 368, particles_quads 1968). `build-rpcs3-cap.bat` builds the patched RPCS3 into `C:\dev\rpcs3-cap`
+LinesController 368, particles_quads 1968). `../../tools/build-rpcs3-cap.bat` builds the patched RPCS3 into `C:\dev\rpcs3-cap`
 next to the main build; copy dev_flash, dev_hdd0 and config there and run it with a scratch `--config`.
 
 ## Menu motion (traced 2026-10-25)
@@ -1490,6 +1490,16 @@ Effect: at most 2.3 levels, all at the ribbon highlights (pixels moving by 2 or 
 
 Not traced: the level count this[0x1c4] (the native uses its mip count), the Gaussian weight function
 FUN_00070b20, and what sets this[0x2e0].
+
+## 2026-11-04 — item backdrops and compositing order
+
+A focused installed title's PIC1 (or native Steam library hero equivalent) is a
+separate scene layer above the theme/wave and below the glass icons and UI. View
+loads it asynchronously, discards stale focus completions and applies a native
+2000 ms dwell / 350 ms fade. Wallpaper uses this same ordering. Row ICON0 is drawn
+separately; an already loaded image has no empty BG1 placeholder behind it. See
+[ICON-ARTWORK-SCROLL-2026-11-04.md](ICON-ARTWORK-SCROLL-2026-11-04.md) for evidence,
+remaining firmware-timing uncertainty and the provider fallback order.
 
 ## Ribbon offset closed, 2026-11-04
 

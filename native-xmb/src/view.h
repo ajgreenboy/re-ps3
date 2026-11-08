@@ -24,6 +24,7 @@
 #include <QTimer>
 #include <QOpenGLTexture>
 class QAbstractNativeEventFilter;
+class QLabel;
 
 namespace xmb {
 class View final:public QOpenGLWidget,protected QOpenGLFunctions_3_3_Core {
@@ -120,6 +121,8 @@ protected:
     bool eventFilter(QObject* watched,QEvent* event) override;
 private:
     Shell& shell_;
+    QLabel* artworkCredit_ = nullptr;
+    void resizeEvent(QResizeEvent* event) override;
     Assets& assets_;
     QOpenGLShaderProgram background_;
     GLuint vao_=0;
@@ -230,6 +233,17 @@ private:
     qint64 focusTimeOverride_=-1;
     qint64 focusTime() const { return focusTimeOverride_>=0?focusTimeOverride_:(focusClock_.isValid()?focusClock_.elapsed():0); }
     qint64 focusKey_=-1;
+    QString focusedEntryId_;
+    // ICON0 is row art; PIC1 is a separate, delayed background. Timing is a
+    // native fit until a frame-timed firmware capture establishes the constants.
+    static constexpr qint64 artworkDwellMs=2000;
+    static constexpr double artworkFadeMs=350.;
+    QString focusedBackgroundPath_;
+    QImage focusedBackground_,departingBackground_;
+    quint64 focusedBackgroundRequest_=0;
+    double focusedBackgroundOpacity_=0.,departingBackgroundOpacity_=0.;
+    void syncFocusedBackground();
+    void drawBackdrops(QPainter& painter);
     double depthPosition_=0;
     // The bar layer's own depth progress (barMilliseconds/mode 5) next to the page content's (pageMilliseconds/
     // mode 5). Both are 200 ms mode 5 since the 2026-11-05 trace; they stay separate eases because they are
@@ -240,13 +254,8 @@ private:
     // (the close holds ~49 ms before its first step; `previousDepth_` is already the new depth by paint time).
     int depthSeen_=-1;
     void syncColumns();
-    // ---- End-of-list overscroll (GRAPHICS-INVENTORY #13) ---------------------------------------------
-    // DOWN on the last row does not move the focus: the whole column sinks 40 px per press and stays sunk.
-    // The PRESS COUNT is Shell's (it is the object that knows the move was clamped); this is the projection
-    // half. The returned shell hunk adds `Shell::columnSink()` and feeds it here through this one setter, so
-    // the view never infers input state. `XMB_OVERSCROLL=<0..8>` is the capture-only pin (same idea as
-    // XMB_DEPTH_PIN) that states the count so the offset is measurable before the shell hunk lands; unset in
-    // every normal run, where the setter is the only source and the rest frame is unchanged (count 0).
+    // Historical diagnostic projection only (XMB_OVERSCROLL=<0..8>).
+    // Normal navigation keeps the column anchored at either list boundary.
     void setColumnSink(int presses) {
         if(presses<0)presses=0;
         if(presses==columnSink_)return;

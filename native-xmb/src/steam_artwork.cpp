@@ -118,6 +118,7 @@ DecodeResult decodeArtwork(const QByteArray& bytes, const QString& path,
 SteamArtwork::SteamArtwork(QString cacheDirectory, QObject* parent)
     : QObject(parent), cacheDirectory_(QDir::cleanPath(cacheDirectory.trimmed())),
       network_(new QNetworkAccessManager(this)),
+      heroNetwork_(new QNetworkAccessManager(this)),
       workerGeneration_(std::make_shared<std::atomic<quint64>>(generation_)) {}
 
 SteamArtwork::~SteamArtwork() {
@@ -130,6 +131,63 @@ SteamArtwork::~SteamArtwork() {
 QString SteamArtwork::cachePath(QString cacheDirectory, QString appId) {
     if (!validAppId(appId) || cacheDirectory.trimmed().isEmpty()) return {};
     return QDir::cleanPath(QDir(cacheDirectory).absoluteFilePath(appId + QStringLiteral(".image")));
+}
+
+QString SteamArtwork::heroCachePath(QString cacheDirectory, QString appId) {
+    if (!validAppId(appId) || cacheDirectory.trimmed().isEmpty()) return {};
+    return QDir::cleanPath(QDir(cacheDirectory).absoluteFilePath(appId + QStringLiteral("_hero.image")));
+}
+
+void SteamArtwork::requestHero(const QString& rawAppId) {
+    const QString appId=rawAppId.trimmed();
+    const QString path=heroCachePath(cacheDirectory_,appId);
+    if(path.isEmpty() || heroRequests_.contains(appId) || heroRequests_.size()>=4)return;
+    const QFileInfo cached(path);
+    if(cached.isFile() && cached.size()>0)return;
+    heroRequests_.insert(appId);
+    const QUrl url(QStringLiteral("https://shared.steamstatic.com/store_item_assets/steam/apps/%1/library_hero.jpg").arg(appId));
+    if(!validImageUrl(url)){heroRequests_.remove(appId);return;}
+    QNetworkRequest request(url);
+    request.setTransferTimeout(RequestDeadlineMs);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
+    request.setAttribute(QNetworkRequest::AuthenticationReuseAttribute,QNetworkRequest::Manual);
+    request.setAttribute(QNetworkRequest::CookieLoadControlAttribute,QNetworkRequest::Manual);
+    request.setAttribute(QNetworkRequest::CookieSaveControlAttribute,QNetworkRequest::Manual);
+    auto* reply=heroNetwork_->get(request);
+    reply->setReadBufferSize(MaximumImageBytes+1);
+    auto bytes=std::make_shared<QByteArray>();
+    auto* deadline=new QTimer(reply);deadline->setSingleShot(true);
+    connect(deadline,&QTimer::timeout,reply,&QNetworkReply::abort);deadline->start(RequestDeadlineMs);
+    connect(reply,&QNetworkReply::readyRead,this,[reply,bytes]{
+        const qint64 remaining=MaximumImageBytes+1-bytes->size();
+        if(remaining<=0){reply->abort();return;}
+        bytes->append(reply->read(remaining));
+        if(bytes->size()>MaximumImageBytes)reply->abort();
+    });
+    connect(reply,&QNetworkReply::finished,this,[this,reply,bytes,appId,path]{
+        const int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        bytes->append(reply->readAll());reply->deleteLater();
+        if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300 || bytes->isEmpty() || bytes->size()>MaximumImageBytes) {
+            heroRequests_.remove(appId);return;
+        }
+        auto* watcher=new QFutureWatcher<bool>(this);
+        connect(watcher,&QFutureWatcher<bool>::finished,this,[this,watcher,appId,path]{
+            const bool saved=watcher->result();watcher->deleteLater();heroRequests_.remove(appId);
+            if(saved)emit heroReady(appId,path);
+        });
+        watcher->setFuture(QtConcurrent::run([bytes,path]{
+            QBuffer buffer;buffer.setData(*bytes);if(!buffer.open(QIODevice::ReadOnly))return false;
+            QImageReader reader(&buffer);reader.setDecideFormatFromContent(true);
+            const QSize size=reader.size();
+            if(!size.isValid() || size.width()>MaximumImageDimension || size.height()>MaximumImageDimension ||
+               quint64(size.width())*quint64(size.height())>MaximumImagePixels)return false;
+            reader.setScaledSize(size.scaled(QSize(3840,2160),Qt::KeepAspectRatio));
+            if(reader.read().isNull())return false; // never persist a truncated response as a valid cache entry
+            const QFileInfo info(path);if(!QDir().mkpath(info.absolutePath()))return false;
+            QSaveFile file(path);file.setDirectWriteFallback(false);
+            return file.open(QIODevice::WriteOnly) && file.write(*bytes)==bytes->size() && file.commit();
+        }));
+    });
 }
 
 bool SteamArtwork::isCurrent(quint64 generation) const {

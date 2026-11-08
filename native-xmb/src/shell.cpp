@@ -11,6 +11,7 @@
 #include "p3t.h"
 #include "steam_library.h"
 #include "steam_artwork.h"
+#include "rawg_artwork.h"
 #include "steam_collections.h"
 #include "steam_overrides.h"
 #include "steam_family.h"
@@ -238,6 +239,9 @@ void Shell::addInstalledApps() {
             auto entry=item("app:"+id+":"+QFileInfo(folder).fileName(),sfo.value("TITLE"),QFileInfo::exists(icon)?icon:QString("game_tex_default_ps3"),
                 QFileInfo::exists(icon)?QString("file"):QString("explore_plugin_full"),Action::Information,
                 details+(emulator?"\nThis title has no EBOOT.BIN to start.":"\nNo RPCS3 executable was found next to dev_hdd0, so it cannot be started."));
+            const QString pic1=QDir(content).filePath(QStringLiteral("PIC1.PNG"));
+            if(QFileInfo(pic1).isFile())entry.backgroundPath=pic1;
+            entry.gameTile=true;
             if(emulator && bootable){entry.action=Action::Launch;entry.value=listed.contains(id)?"%RPCS3_GAMEID%:"+id:eboot;}
             category.entries.push_back(std::move(entry));
         }
@@ -654,6 +658,10 @@ void Shell::refreshOwnedGames() {
     ownedInFlight_=true;
     steamOwned_.refresh(steamId_);
 }
+void Shell::retryArtwork() {
+    rawgArtwork_->resetBackoff();
+    refreshContent();
+}
 // Distinct titles the Steam library knows about: installed, owned and family-shared.
 // The Game column and the All Games folder show this as their detail count.
 int Shell::steamTitleCount() const {
@@ -1006,12 +1014,13 @@ void Shell::reloadSteamDownloads() {
 void Shell::refreshContent() {
     if(contentScanning_){contentRefreshPending_=true;return;}
     contentScanning_=true;
-    struct Result { SteamInstallation steam; QVector<ContentApp> apps; QHash<QString,QImage> art; QString error; };
+    struct Result { SteamInstallation steam; QVector<ContentApp> apps; QHash<QString,QImage> art; QHash<QString,QString> rawgPaths; QString error; };
     auto* watcher=new QFutureWatcher<Result>(this);
     connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher]{
         auto result=watcher->result();watcher->deleteLater();contentScanning_=false;
         steamRoot_=result.steam.root;
         steamInstalled_=result.steam;
+        rawgArtworkPaths_=result.rawgPaths;
         family_=scanSteamFamily(steamInstalled_.steamId);
         { QString familyError; familyGames_=scanFamilySharedGames(dataDirectory_,&familyError);
           if(!familyError.isEmpty())qWarning().noquote()<<"steam family:"<<familyError; }
@@ -1036,6 +1045,7 @@ void Shell::refreshContent() {
                     auto e=item("steam:"+game.appId,game.title,"game_tex_default_ps3","explore_plugin_full",
                         Action::LaunchSteam,game.appId);
                     e.artwork=result.art.value("steam:"+game.appId);e.gameTile=true;
+                    e.rawgArtworkVisible=result.rawgPaths.contains(e.id);
                     // The detail line says what Steam itself recorded: time played and the last session.
                     QStringList detail;
                     const QString label=collectionLabel(game.appId);if(!label.isEmpty())detail<<label;
@@ -1078,6 +1088,7 @@ void Shell::refreshContent() {
                     });
                 }
                 providers.push_back(std::move(e));
+                providers.last().rawgArtworkVisible=result.rawgPaths.contains(QStringLiteral("custom:")+app.id);
             }
             category.entries=installed+providers+category.entries;
             selections_[c]=0;
@@ -1085,6 +1096,19 @@ void Shell::refreshContent() {
             if(!contentLoaded_ && category.id=="game" && !providers.isEmpty())selections_[c]=0;
         }
         contentLoaded_=true;
+        QVector<QPair<QString,QString>> rawgTargets;
+        QSet<QString> liveRawgIds;
+        for(const auto& game:result.steam.games) {
+            const QString id=QStringLiteral("steam:")+game.appId;
+            rawgTargets.push_back({id,game.title});liveRawgIds.insert(id);
+        }
+        for(const auto& app:contentApps_)if(app.kind==QStringLiteral("game")) {
+            const QString id=QStringLiteral("custom:")+app.id;
+            rawgTargets.push_back({id,app.title});liveRawgIds.insert(id);
+        }
+        for(auto it=rawgArtworkPaths_.begin();it!=rawgArtworkPaths_.end();)
+            if(!liveRawgIds.contains(it.key()))it=rawgArtworkPaths_.erase(it);else ++it;
+        rawgArtwork_->refresh(rawgTargets);
         if(accountChanged){steamFriendList_.clear();friendsAge_.invalidate();rebuildFriends();}
         if(SteamFriends::available())refreshSteamFriends(false,accountChanged);
         if(stageOwnedForRefresh())refreshOwnedGames();
@@ -1138,18 +1162,28 @@ void Shell::refreshContent() {
             const auto image=reader.read();if(!image.isNull())result.art.insert(key,image);
         };
         const QString cache=QDir(data).filePath("cache/steam");
+        const QString rawgCache=QDir(data).filePath("cache");
         for(const auto& game:result.steam.games) {
             // A user override wins over the cached header and the manifest icon.
             const QString override=steamArtworkOverride(data,game.appId).row;
             if(!override.isEmpty() && qEnvironmentVariableIsSet("XMB_STEAM_ARTWORK_LOG"))qInfo().noquote()<<"artwork override"<<game.appId<<override;
-            read("steam:"+game.appId,!override.isEmpty()?override:(game.artwork.isEmpty()?SteamArtwork::cachePath(cache,game.appId):game.artwork));
+            const QString rowId=QStringLiteral("steam:")+game.appId;
+            const QString rawg=RawgArtwork::cachedArtwork(rawgCache,rowId,game.title);
+            if(override.isEmpty() && !rawg.isEmpty())result.rawgPaths.insert(rowId,rawg);
+            read(rowId,!override.isEmpty()?override:!rawg.isEmpty()?rawg:(game.artwork.isEmpty()?SteamArtwork::cachePath(cache,game.appId):game.artwork));
         }
         for(const auto& appId:ownedIds) {
             const QString override=steamArtworkOverride(data,appId).row;
             if(!override.isEmpty())read("steam:"+appId,override);
             if(!override.isEmpty() && qEnvironmentVariableIsSet("XMB_STEAM_ARTWORK_LOG"))qInfo().noquote()<<"artwork override"<<appId<<override;
         }
-        for(const auto& app:result.apps)read("custom:"+app.id,app.artwork);
+        for(const auto& app:result.apps)if(app.kind==QStringLiteral("game")) {
+            const QString rowId=QStringLiteral("custom:")+app.id;
+            const QString rawg=RawgArtwork::cachedArtwork(rawgCache,rowId,app.title);
+            if(app.artwork.isEmpty() && !rawg.isEmpty())result.rawgPaths.insert(rowId,rawg);
+            read(rowId,!app.artwork.isEmpty()?app.artwork:rawg);
+        }
+        for(const auto& app:result.apps)if(app.kind!=QStringLiteral("game"))read(QStringLiteral("custom:")+app.id,app.artwork);
         return result;
     }));
 }
@@ -1190,6 +1224,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     assets_(assets),preferences_(dataDirectory),library_(),interactionAudio_(assets.root()),profiles_(dataDirectory),
     dataDirectory_(dataDirectory),
     steamArtwork_(std::make_unique<SteamArtwork>(QDir(dataDirectory).filePath("cache/steam"))),
+    rawgArtwork_(std::make_unique<RawgArtwork>(QDir(dataDirectory).filePath("cache"))),
     player_(std::make_unique<QMediaPlayer>()),audio_(std::make_unique<QAudioOutput>()),video_(std::make_unique<QVideoSink>()) {
     QDir().mkpath(dataDirectory);
     // The resume-point format change (audit/MEDIA-CONTROLS.md): a data directory written by the earlier
@@ -1264,7 +1299,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("vita","PS Vita System Application Utility","tex_album_icon","explore_plugin_full"),item("data","Game Data Utility","tex_album_icon","explore_plugin_full"),
             item("memory","Memory Card Utility","item_tex_ps12util","explore_plugin_full"),item("ps2","Saved Data Utility (PS2)","item_tex_ps3util","explore_plugin_full"),
             item("psp","Saved Data Utility (PSP)","item_tex_psputil","explore_category_game"),item("ps3","Saved Data Utility (PS3)","item_tex_ps3util","explore_plugin_full"),
-            item("store","PlayStation Store","item_tex_ps_store","explore_plugin_full")}},
+            item("store","PlayStation Store","item_tex_ps_store","explore_plugin_full"),
+            item("artwork-settings",QObject::tr("Artwork Settings"),"item_tex_plain_folder","explore_plugin_full",Action::ArtworkSettings)}},
         {"network","Network","qgl/icontex","7n",{
             item("manual","Online Instruction Manuals","tex_onlinemanual","explore_category_network"),
             item("remote","Remote Play","tex_premo","explore_category_network"),
@@ -1367,13 +1403,46 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     });
     connect(steamArtwork_.get(),&SteamArtwork::loaded,this,[this](const QString& id,const QImage& image){
         bool touched=false;
-        const auto apply=[&](Entry& e){if(e.id=="steam:"+id){e.artwork=image;touched=true;}};
+        const auto apply=[&](Entry& e){if(e.id=="steam:"+id && !rawgArtworkPaths_.contains(e.id)){
+            const auto override=steamArtworkOverride(dataDirectory_,id);
+            if(!override.row.isEmpty())return;
+            e.artwork=image;touched=true;
+        }};
         for(auto& category:categories_)for(auto& e:category.entries)apply(e);
         // A Steam library folder may be the open page: fill its rows too, so a folder opens with
         // placeholders and the cached headers arrive without a second visit.
         for(auto& page:pages_)for(auto& e:page.entries)apply(e);
         if(!touched)return;
         emit changed();
+    });
+    connect(steamArtwork_.get(),&SteamArtwork::heroReady,this,[this](const QString&,const QString&){emit changed();});
+    connect(rawgArtwork_.get(),&RawgArtwork::ready,this,[this](const QString& id,const QString& title,const QString& path,const QImage& preview){
+        bool touched=false;
+        const auto eligible=[&](const Entry& entry) {
+            if(entry.id!=id || entry.title!=title || !entry.gameTile)return false;
+            if(id.startsWith(QStringLiteral("steam:"))) {
+                const auto override=steamArtworkOverride(dataDirectory_,id.mid(6));
+                return override.row.isEmpty();
+            }
+            if(id.startsWith(QStringLiteral("custom:"))) {
+                const QString appId=id.mid(7);
+                for(const auto& app:contentApps_)if(app.id==appId)return app.kind==QStringLiteral("game") && app.artwork.isEmpty();
+            }
+            return false;
+        };
+        const auto apply=[&](Entry& entry) {
+            if(!eligible(entry))return;
+            entry.artwork=preview;
+            entry.rawgArtworkVisible=true;
+            rawgArtworkPaths_.insert(id,path);
+            touched=true;
+        };
+        for(auto& category:categories_)for(auto& entry:category.entries)apply(entry);
+        for(auto& page:pages_)for(auto& entry:page.entries)apply(entry);
+        if(touched)emit changed();
+    });
+    connect(rawgArtwork_.get(),&RawgArtwork::status,this,[this](const QString& status){
+        artworkStatus_=status;
     });
     // Steam Store: the browse page is an ordinary XMB page, and every row hands off to Steam for
     // the actual purchase/install. No store page is fabricated while a request is in flight.
@@ -1721,9 +1790,8 @@ void Shell::vertical(int delta) {
         if(busy() && message_.isEmpty())qInfo().noquote()<<"busy: navigation refused (Up/Down) while a list loads";
         return;
     }
-    const int previous=selection();currentSelection()=std::clamp(selection()+delta,0,std::max(0,int(entries().size())-1));
+    const int previous=selection();currentSelection()=int(std::clamp(qint64(selection())+qint64(delta),qint64(0),qint64(std::max(0,int(entries().size())-1))));
     if(previous!=selection()){columnSink_=0;interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();}
-    else if(delta>0 && !entries().isEmpty()){++columnSink_;emit changed();}
     else emit changed();
 }
 void Shell::activate() {
@@ -1938,6 +2006,7 @@ void Shell::activate() {
     case Action::RefreshContent:refreshContent();break;
     case Action::RefreshFriends:refreshSteamFriends(true);break;
     case Action::ImportApps:emit requestImportApps();break;
+    case Action::ArtworkSettings:emit requestArtworkSettings();break;
     case Action::SpotifyApp:case Action::SpotifySignIn:case Action::SpotifySignOut:case Action::SpotifyNowPlaying:
     case Action::SpotifyLiked:case Action::SpotifyPlaylist:case Action::SpotifyTrack:case Action::SpotifyDevice:
         activateSpotify(entry);break;
@@ -4566,6 +4635,28 @@ QString Shell::focusedRowId() const {
     const auto& rows=entries();
     if(rows.isEmpty())return {};
     return rows.value(std::clamp(selection(),0,int(rows.size())-1)).id;
+}
+QString Shell::focusedBackgroundPath() {
+    const auto& rows=entries();
+    if(rows.isEmpty())return {};
+    const auto& entry=rows.value(std::clamp(selection(),0,int(rows.size())-1));
+    if(!entry.backgroundPath.isEmpty())return entry.backgroundPath;
+    if(entry.id.startsWith(QStringLiteral("custom:"))) {
+        const QString appId=entry.id.mid(7);
+        for(const auto& app:contentApps_)if(app.id==appId && !app.artwork.isEmpty())return app.artwork;
+        return rawgArtworkPaths_.value(entry.id);
+    }
+    if(!entry.id.startsWith(QStringLiteral("steam:")))return {};
+    const QString appId=entry.id.mid(6);
+    const auto override=steamArtworkOverride(dataDirectory_,appId);
+    if(!override.background.isEmpty())return override.background;
+    for(const auto& game:steamInstalled_.games)
+        if(game.appId==appId && !game.backgroundArtwork.isEmpty())return game.backgroundArtwork;
+    if(const auto rawg=rawgArtworkPaths_.value(entry.id);!rawg.isEmpty())return rawg;
+    const QString cached=SteamArtwork::heroCachePath(QDir(dataDirectory_).filePath(QStringLiteral("cache/steam")),appId);
+    if(QFileInfo::exists(cached))return cached;
+    if(qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0")steamArtwork_->requestHero(appId);
+    return {};
 }
 void Shell::openJellyfinSignInPage(QUrl server) {
     if(jellyfinSignInOpen()){refreshJellyfinSignInPage();emit changed();return;}

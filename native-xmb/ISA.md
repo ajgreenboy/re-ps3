@@ -141,7 +141,7 @@ Use Steam and imported content as explicitly identified native providers for the
 
 ### Reconciliation with the completion ledger (2026-10-27)
 
-The ledger is [PHASES-2026-10-28.md](PHASES-2026-10-28.md) section 1: **88 items - 15 done, 44 partly, 28
+The ledger is [PHASES-2026-10-28.md](archive/PHASES-2026-10-28.md) section 1: **88 items - 15 done, 44 partly, 28
 not started, 1 obsolete**, audited against the tree at `6096dbf`. This ISA is the longer-horizon ideal
 state; it must not read as more complete than the ledger on any surface the ledger rates partly. This pass
 re-read every checked criterion against that ledger and against the commits after it, and made three
@@ -199,7 +199,7 @@ Build logs establish compilation. Requested window observations establish specif
 
 ## Decisions
 
-- 2026-10-27: The plan of record is PHASES-2026-10-28.md, which audits PHASES-2026-10-27.md and PARITY-PHASES.md item by item (15 done / 44 partly / 28 not started / 1 obsolete). Consequence for this ISA: a checked criterion must not cover a surface the ledger rates partly, and evidence that predates a material change is stale evidence. ISC-42/42.1 are re-opened under that rule rather than re-interpreted.
+- 2026-10-27: The plan of record is archive/PHASES-2026-10-28.md, which audits archive/PHASES-2026-10-27.md and archive/PARITY-PHASES.md item by item (15 done / 44 partly / 28 not started / 1 obsolete). Consequence for this ISA: a checked criterion must not cover a surface the ledger rates partly, and evidence that predates a material change is stale evidence. ISC-42/42.1 are re-opened under that rule rather than re-interpreted.
 
 - 2026-10-26: refined: added typed native Jellyfin service registrations and reusable API/stream/player modules. Session tokens stay in memory and authenticated stream requests pass through a loopback gateway. Current routes were verified against the Jellyfin 12.4 schema and a real disposable server. See audit/JELLYFIN-NATIVE.md.
 
@@ -279,7 +279,7 @@ Build logs establish compilation. Requested window observations establish specif
 - 2026-10-27 | evidence recorded for this pass, not re-executed: the product gate's last green run
   (canonical capture 6/6 on the 2026-10-27 19:25 build, `out/native-phase3`) and the fidelity track's
   first scorecard (`0/25` states at A+B+C, Tier A 22, Tier B 0, Tier C 9) are quoted in
-  HANDOFF-2026-10-28.md section 4; the dialogs verification (`6cf54a4`) records its own measured
+  archive/HANDOFF-2026-10-28.md section 4; the dialogs verification (`6cf54a4`) records its own measured
   native-vs-firmware table and deliberately invalidates the old `continue-watching-empty` reference. No
   criterion closes on any of those runs.
 
@@ -372,3 +372,4 @@ Back restoring selection. The broad transition-parity criterion remains unchecke
 > zero image-decode failures in `out/native-reference/store/stability3/stderr.txt`. This is scripted, not
 > human, interaction and covers the XMB surfaces only, so the criterion stays open for a human session
 > that crosses media playback, a launched title and the PS menu.
+- 2026-11-04, ISC-6/8/36 partial: corrected unbounded boundary column displacement, missing focused PIC1/Steam-hero display and loaded-art BG1 rendering. Final candidate's pinned first/last folder frames remain byte-identical after repeated boundary presses; populated Continue Watching and game backgrounds were inspected. Uniform game cards use a 320:176 centre crop. Dwell/fade remain native fits and broad fidelity criteria stay open. Canonical gate passes its five scored layers; the first candidate's named self-baselines report 7/12 with five old changed-layout frames failing. See audit/ICON-ARTWORK-SCROLL-2026-11-04.md.

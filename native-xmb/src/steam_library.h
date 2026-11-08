@@ -12,6 +12,7 @@ struct SteamGame {
     QString title;
     QString installDirectory;
     QString artwork;
+    QString backgroundArtwork;
 };
 
 struct SteamInstallation {
