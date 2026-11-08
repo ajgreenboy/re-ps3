@@ -2,6 +2,9 @@
 #include "assets.h"
 #include <QDebug>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 #include <QtEndian>
 #include <bit>
@@ -589,5 +592,75 @@ QByteArray P3t::vagToWav(const QByteArray& left,const QByteArray& right) {
     w+="data";u32(bytes);
     for(qsizetype i=0;i<frames;++i){u16(quint16(l[i]));if(channels==2)u16(quint16(r[i]));}
     return w;
+}
+}
+
+namespace xmb {
+namespace {
+QJsonArray v3(const P3t::Raf::Vec3& v){return QJsonArray{v.x,v.y,v.z};}
+}
+// --raf-report: the parsed scene graph, for checking a user-supplied theme against what a renderer would need.
+// Everything here is read from the file (M); the "renderer" block states what the native shell does with it.
+QByteArray P3t::rafReportJson() const {
+    QJsonObject root;
+    root["themeContainer"]=container_;
+    root["themeName"]=name();
+    root["dynamic"]=dynamic();
+    root["hasScene"]=scene_.valid;
+    if(scene_.valid) {
+        const auto& s=scene_;
+        QJsonObject o;
+        o["container"]=s.container;o["version"]=int(s.version);o["embedded"]=s.embedded;o["compressed"]=s.compressed;
+        QJsonArray sections;for(const auto& x:s.sections)sections.append(QJsonObject{{"offset",int(x.offset)},{"size",int(x.size)}});
+        o["sections"]=sections;
+        o["treeElements"]=s.treeElements;o["treeAttributes"]=s.treeAttributes;o["sceneCount"]=s.sceneCount;
+        if(s.camera.present)
+            o["camera"]=QJsonObject{{"id",s.camera.id},{"type",s.camera.type},{"yfov",s.camera.yfov},{"ymag",s.camera.ymag},
+                {"znear",s.camera.znear},{"zfar",s.camera.zfar},{"position",v3(s.camera.position)},
+                {"direction",v3(s.camera.direction)},{"up",v3(s.camera.up)}};
+        QJsonArray lights;
+        for(const auto& l:s.lights)lights.append(QJsonObject{{"id",l.id},{"type",l.type},{"color",v3(l.color)},
+            {"position",v3(l.position)},{"direction",v3(l.direction)},{"attenuation",v3(l.attenuation)}});
+        o["lights"]=lights;
+        QJsonArray actors;
+        for(const auto& a:s.actors) {
+            QString colorMap;for(const auto& m:s.materials)if(m.id==a.material)colorMap=m.colorMap;
+            QString effect;for(const auto& m:s.materials)if(m.id==a.material)effect=m.effect;
+            actors.append(QJsonObject{{"id",a.id},{"model",a.model},{"material",a.material},{"effect",effect},{"colorMap",colorMap},
+                {"position",v3(a.position)},{"rotation",v3(a.rotation)},{"scale",v3(a.scale)},
+                {"uvScale",v3(a.uvScale)},{"uvOffset",v3(a.uvOffset)},
+                {"color",QJsonArray{a.color.x,a.color.y,a.color.z,a.color.w}}});
+        }
+        o["actors"]=actors;
+        QJsonArray models;
+        for(const auto& m:s.models) {
+            QJsonArray anims;
+            for(const auto& a:m.animations)anims.append(QJsonObject{{"id",a.id},{"file",a.file},{"start",a.start},{"end",a.end},
+                {"duration",a.duration},{"fps",a.fps},{"frames",a.frames},{"joints",a.joints},{"ea03Header",a.header}});
+            models.append(QJsonObject{{"id",m.id},{"geometry",m.geometry},{"geometryBytes",int(m.geometryBytes)},
+                {"skeleton",m.skeleton},{"skeletonBytes",int(m.skeletonBytes)},{"animations",anims}});
+        }
+        o["models"]=models;
+        QJsonArray textures;
+        for(const auto& t:s.textures)textures.append(QJsonObject{{"id",t.id},{"file",t.file},{"format",t.format},{"type",t.type},
+            {"width",t.width},{"height",t.height},{"bytes",int(t.bytes)}});
+        o["textures"]=textures;
+        QJsonArray materials;
+        for(const auto& m:s.materials)materials.append(QJsonObject{{"id",m.id},{"effect",m.effect},{"colorMap",m.colorMap},
+            {"normalMap",m.normalMap},{"specularMap",m.specularMap}});
+        o["materials"]=materials;
+        o["script"]=QJsonObject{{"present",s.script.present},{"id",s.script.id},{"file",s.script.file},{"bytes",int(s.script.bytes)},
+            {"vsmx",s.script.vsmx},{"version",int(s.script.version)},{"instructions",int(s.script.instructions)},{"names",int(s.script.names)}};
+        o["animationCount"]=s.animationCount;
+        o["timeline"]=QJsonObject{{"start",s.timelineStart},{"end",s.timelineEnd}};
+        QStringList effects;for(const auto& m:s.materials)if(!effects.contains(m.effect))effects<<m.effect;
+        effects.sort();
+        o["effects"]=QJsonArray::fromStringList(effects);
+        root["scene"]=o;
+    }
+    root["renderer"]=QJsonObject{{"drawn",false},
+        {"note","Parse and report only. The theme background stays its still picture; no Edge geometry, skeleton, "
+                 "animation or VSMX interpreter exists yet (audit/RAF-THEMES.md)."}};
+    return QJsonDocument(root).toJson(QJsonDocument::Indented);
 }
 }

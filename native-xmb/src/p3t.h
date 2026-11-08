@@ -126,6 +126,9 @@ public:
     QString container() const { return container_; }
     quint32 containerVersion() const { return containerVersion_; }
     bool hasScene() const { return scene_.valid; }
+    // The scene graph as JSON (container facts, camera, lights, actors with their material/texture bindings, models,
+    // animation headers, script header, and what the renderer does and does not cover). Data only; draws nothing.
+    QByteArray rafReportJson() const;
     const Raf& scene() const { return scene_; }
     // The first image of a GIM, decoded by the same reader RCO images use (RGBA8888, DXT1/3/5, indexed with
     // a palette, and the palette-less indexed coverage masks a user theme may carry). Null when not a GIM.

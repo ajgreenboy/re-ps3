@@ -370,7 +370,19 @@ int main(int argc,char** argv) {
     parser.addOption({"decode-fp","Decode RSX fragment-program captures (archive:lib/x.fpo@dir) into named parameter values and exit","spec"});
     parser.addOption({"dump-cg","Translate the original qgl/lines Cg programs to GLSL into a local folder and exit","directory"});
     parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});
-    parser.addOption({"p3t-dump","List a PS3 theme's elements and write its decoded pictures and sounds to a local folder (theme.p3t@directory) and exit","spec"});parser.process(app);
+    parser.addOption({"p3t-dump","List a PS3 theme's elements and write its decoded pictures and sounds to a local folder (theme.p3t@directory) and exit","spec"});
+    parser.addOption({"raf-report","Write a PS3 theme's (or .raf's) animated-scene graph as JSON (theme.p3t@report.json) and exit; nothing is drawn","spec"});parser.process(app);
+    if(parser.isSet("raf-report")) { // local analysis only: theme-derived facts, keep out of Git
+        const auto spec=parser.value("raf-report").split('@');
+        if(spec.size()!=2){qCritical()<<"use --raf-report theme.p3t@report.json";return 2;}
+        QString error;const auto theme=xmb::P3t::load(spec[0],&error);
+        if(theme.isNull()){qCritical().noquote()<<error;return 2;}
+        QFile out(spec[1]);
+        if(!out.open(QIODevice::WriteOnly)){qCritical()<<out.errorString();return 2;}
+        out.write(theme.rafReportJson());
+        qInfo().noquote()<<"raf-report:"<<(theme.hasScene()?"scene parsed":"no animated scene")<<"->"<<spec[1];
+        return theme.hasScene()?0:3;
+    }
     if(parser.isSet("p3t-dump")) { // local analysis only: theme-derived files, keep out of Git
         const auto spec=parser.value("p3t-dump").split('@');
         if(spec.size()!=2){qCritical()<<"use --p3t-dump theme.p3t@directory";return 2;}
