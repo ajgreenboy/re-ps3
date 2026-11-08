@@ -66,13 +66,10 @@ Game column.
 |---|---|
 | `native-xmb/` | the application: `src/` (94 C++ files), `manager/` (Manager core, CLI, UI, tests), `audit/` (fidelity and firmware audits), `CMakeLists.txt`, current documents |
 | `native-xmb/archive/` | superseded dated handoffs and phase plans, with an index of what each was replaced by |
-| `tools/` | `build-*.bat`, `capture-rpcs3.ps1`, `rebuild.sh`, `iterate-errors.sh` |
-| `patches/` | the RPCS3 patches the capture pipeline needs |
-| `docs/` | earlier-track documentation, phase notes, screenshots, dated reports |
-| `work/` | verification tools (`ab-layers`, `parity`, transition harness, release check) and probe output |
+| `work/` | verification tools (`ab-layers`, `parity`, transition harness, release check) and fidelity probes |
 | `out/` | local build and capture output (gitignored; `out/integration` is the current build) |
-| `fw493/`, `boot/`, `boot_extra/`, `rea/`, `xenon/`, `recomp/`, `xmbrt/` | firmware assets and the earlier recompilation track |
-| `run-native-xmb.ps1`, `run-xmb.ps1`, `status.ps1` | entry points kept at the root because they resolve their own paths from `$PSScriptRoot` |
+| `fw493/vsh_module/`, `rea/`, `ghidra_scripts/` | decrypted VSH modules and RE analysis assets the native fidelity work reads (local only, gitignored or sourced) |
+| `run-native-xmb.ps1` | the launcher, kept at the root because it resolves its own paths from `$PSScriptRoot` |
 
 ## Verification instruments
 
@@ -89,22 +86,21 @@ The project measures itself instead of trusting screenshots:
 ## Documentation
 
 - [Native application README](native-xmb/README.md) - architecture, build, controls.
-- [Active handoff](native-xmb/HANDOFF.md) - gate families with recorded numbers, how to ship.
-- [Phase handoff and ledger](native-xmb/HANDOFF-PHASES.md), [ISA](native-xmb/ISA.md).
+- [Active handoff](native-xmb/HANDOFF-2026-11-08.md) - current state, what landed, open work.
+- [Plan of record](native-xmb/audit/PHASES-2026-11-07.md), [ISA](native-xmb/ISA.md).
 - [Manager](native-xmb/MANAGER.md), [install/packaging](native-xmb/INSTALL.md),
   [write fences](native-xmb/WORKSPACES.md).
 - [Fidelity verdict](native-xmb/audit/FIDELITY-VERDICT.md) and the six domain audits it consolidates.
 - [Audit index](native-xmb/audit/README.md).
 - [Archived dated documents](native-xmb/archive/README.md).
-- [Detailed investigation handoff](HANDOFF.md) - the earlier firmware-recovery track.
 
 ## Source snapshot and honesty
 
-The repository preserves the project history, native runtime, recompilation and analysis tooling,
-dependency patches and documentation. **Local firmware, decrypted/derived images, generated
-firmware C++, analysis databases, console identities, API keys and build outputs are excluded.**
-The XMB needs a local `dev_flash`; the earlier recompilation track additionally needs generated
-firmware code and its analysis inputs (`deps/XenonRecomp`, `deps/clang`, `rpcs3` beside the project).
+The repository preserves the project history, native runtime, analysis tooling, dependency patches
+and documentation. **Local firmware, decrypted/derived images, generated firmware C++, analysis
+databases, console identities, API keys and build outputs are excluded.** The XMB needs a local
+`dev_flash`; the native fidelity work additionally reads the decrypted VSH modules and RE analysis
+assets under `fw493/vsh_module/`, `rea/` and `ghidra_scripts/`, which stay local and gitignored.
 
 Measurements are labelled by provenance throughout the audits: **traced** (from a console frame,
 RCO object, MNU table or decoded program), **fit** (a native approximation with its removal

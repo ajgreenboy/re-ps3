@@ -1,6 +1,5 @@
 # Sony firmware and anything derived from it never goes into git
 fw493/
-boot/
 ghidra_proj/
 ghidra_work/
 ghidra_home/
@@ -22,9 +21,6 @@ build/
 *.log
 *.err
 empty.txt
-
-boot_extra/
-xenon/xmb_switch_tables.toml
 
 # Local investigation outputs; retain source tooling used by the handoff.
 /work/*
