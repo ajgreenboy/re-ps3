@@ -107,6 +107,38 @@ const QImage& tailscale() {
     return icon.isNull()?glyphs::tailscaleLogo():icon;
 }
 
+QImage homeAssistantIcon;
+const QImage& homeAssistant() { return homeAssistantIcon.isNull() ? glyphs::house() : homeAssistantIcon; }
+
+void loadHomeAssistant(QNetworkAccessManager* network, const QUrl& server, const QString& cacheFile, std::function<void()> done) {
+    if (homeAssistantIcon.isNull() && QFileInfo(cacheFile).size() > 0 && QFileInfo(cacheFile).size() <= MaxIconBytes) {
+        QImage cached(cacheFile);
+        if (!cached.isNull()) { homeAssistantIcon = squared(cached);if (done) done();return; }
+    }
+    if (!homeAssistantIcon.isNull() || !network || !server.isValid() ||
+        (server.scheme() != QLatin1String("http") && server.scheme() != QLatin1String("https"))) return;
+    // Home Assistant serves its own icon to its web frontend without sign-in.
+    QUrl url = server;url.setPath(QStringLiteral("/static/icons/favicon-1024x1024.png"));url.setQuery(QString());
+    QNetworkRequest request(url);request.setTransferTimeout(8000);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::SameOriginRedirectPolicy);
+    auto* reply = network->get(request);
+    QObject::connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64) { if (received > MaxIconBytes) reply->abort(); });
+    QObject::connect(reply, &QNetworkReply::finished, reply, [reply, cacheFile, done] {
+        reply->deleteLater();
+        const QByteArray bytes = reply->error() == QNetworkReply::NoError ? reply->read(MaxIconBytes + 1) : QByteArray();
+        QImage decoded;
+        if (bytes.size() <= MaxIconBytes) decoded.loadFromData(bytes);
+        if (decoded.isNull() || decoded.width() < 32) return;
+        homeAssistantIcon = squared(decoded.scaled(256, 256, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        if (!cacheFile.isEmpty() && QDir().mkpath(QFileInfo(cacheFile).absolutePath())) {
+            QSaveFile out(cacheFile);
+            if (out.open(QIODevice::WriteOnly) && out.write(bytes) == bytes.size()) out.commit();
+        }
+        qInfo().noquote() << "service icons: Home Assistant's own icon from the server" << decoded.size();
+        if (done) done();
+    });
+}
+
 const QImage& jellyfin() { return jellyfinIcon.isNull() ? glyphs::jellyfinLogo() : jellyfinIcon; }
 
 void loadJellyfin(QNetworkAccessManager* network, const QUrl& server, const QString& cacheFile, std::function<void()> done) {

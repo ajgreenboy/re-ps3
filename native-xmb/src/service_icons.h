@@ -17,7 +17,9 @@ namespace xmb::serviceIcons {
 const QImage& spotify();
 const QImage& steam(const QString& steamRoot);
 const QImage& jellyfin();
-const QImage& tailscale();   // the Windows client's own icon (tailscale-ipn.exe), else the drawn mark
+const QImage& tailscale();
+const QImage& homeAssistant();   // the user's own HA server's icon once fetched, else a drawn house
+void loadHomeAssistant(QNetworkAccessManager* network, const QUrl& server, const QString& cacheFile, std::function<void()> done);   // the Windows client's own icon (tailscale-ipn.exe), else the drawn mark
 // Loads the cached Jellyfin icon, or fetches it from `server` (same host only, bounded) and caches it.
 // `done` runs on the caller's thread when a new icon is available.
 void loadJellyfin(QNetworkAccessManager* network, const QUrl& server, const QString& cacheFile, std::function<void()> done);

@@ -168,6 +168,40 @@ const QImage& family() {
     return image;
 }
 
+const QImage& powerOn() {
+    static const QImage image=line([](QPainter& p){
+        p.drawArc(QRectF(56,64,144,144),60*16,-300*16);
+        p.drawLine(QPointF(128,44),QPointF(128,128));
+    });
+    return image;
+}
+
+const QImage& house() {
+    static const QImage image=line([](QPainter& p){
+        p.drawPolyline(QPolygonF{{40,126},{128,48},{216,126}});
+        p.drawPolyline(QPolygonF{{68,104},{68,208},{188,208},{188,104}});
+        p.drawRect(QRectF(110,150,36,58));
+    });
+    return image;
+}
+
+const QImage& bulb() {
+    static const QImage image=line([](QPainter& p){
+        QPainterPath b;b.moveTo(104,170);b.cubicTo(104,140,72,124,72,92);b.cubicTo(72,60,98,40,128,40);
+        b.cubicTo(158,40,184,60,184,92);b.cubicTo(184,124,152,140,152,170);p.drawPath(b);
+        p.drawLine(QPointF(104,170),QPointF(152,170));p.drawLine(QPointF(108,192),QPointF(148,192));p.drawLine(QPointF(116,212),QPointF(140,212));
+    });
+    return image;
+}
+
+const QImage& play() {
+    static const QImage image=line([](QPainter& p){
+        p.drawEllipse(QPointF(128,128),84,84);
+        p.drawPolygon(QPolygonF{{110,92},{110,164},{168,128}});
+    });
+    return image;
+}
+
 const QImage& library(const QString& collectionType) {
     static const QImage none;
     static const QImage movies=line([](QPainter& p){

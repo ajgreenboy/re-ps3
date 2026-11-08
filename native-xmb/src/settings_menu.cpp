@@ -171,6 +171,16 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
     if(key=="host/keyRepeatSpeed")return {{"Fast",0},{"Normal",1},{"Slow",2}};
     if(key=="host/mouseButtons")return {{"Right-Handed",0},{"Left-Handed",1}};
     if(key=="host/pointerSpeed")return {{"Fast",0},{"Normal",1},{"Slow",2}};
+    // H8: Audio Output Settings lists the active Windows render endpoints by friendly name, in Core Audio's
+    // enumeration order; the value is the item's index (host::setHostChoice). The console's own page lists its
+    // output jacks, which this PC does not have, so the items are the host's devices. The default endpoint is
+    // marked the console's way: the list opens focused on it (openChoices' selection, the band's focus).
+    if(key=="host/audioOutput") {
+        QVector<Choice> result;
+        for(const auto& device:host::snapshot().audioOutputs)result.push_back({device.name,int(result.size())});
+        if(result.isEmpty())result.push_back({QStringLiteral("No playback device"),kInertValue});
+        return result;
+    }
     if(key=="photo/interval")return {{"5 seconds",5000},{"10 seconds",10000},{"15 seconds",15000},{"30 seconds",30000}};
     if(key=="photo/fit")return {{"Fit",0},{"Fill",1}};
     if(key=="media/repeatMode")return {{"Off",0},{"Repeat One",1},{"Repeat All",2}};
@@ -279,7 +289,8 @@ const QVector<RowSpec>* firmwareRows(const QString& id) {
         {"information","msg_console_info","msg_console_info_explanation",Action::Information,nullptr,nullptr,"System Information"},
         {"aboutps3","msg_aboutps3","msg_aboutps3_explanation",Action::Information,nullptr,nullptr,"About PlayStation 3"}};
     static const QVector<RowSpec> sound{
-        {"sound_output_setting","msg_sound_output_setting","msg_sound_output_setting_explanation",Action::Information,nullptr,"host:audio","Audio Output Settings"},
+        // H8: the console's output-jack page becomes the Windows playback endpoint chooser (host/audioOutput).
+        {"sound_output_setting","msg_sound_output_setting","msg_sound_output_setting_explanation",Action::SettingChoices,"host/audioOutput",nullptr,"Audio Output Settings"},
         {"audio_multi_output","msg_audio_multi_output","msg_audio_multi_output_explanation",Action::Information,nullptr,nullptr,"Audio Multi-Output"},
         {"keytone","msg_sound_key","msg_sound_key_explanation",Action::SettingChoices,"audio/keyTone",nullptr,"Key Tone"}};
     static const QVector<RowSpec> display{
@@ -1411,7 +1422,8 @@ QString settingsChoiceLabel(const QString& key,const QVariant& value,Assets& ass
         return level<0?QString{}:QString::number(level)+QStringLiteral("%");
     }
     if(key=="host/muted")return host::snapshot().muted?QStringLiteral("On"):QStringLiteral("Off");
-    if(key=="host/keyRepeatDelay" || key=="host/keyRepeatSpeed" || key=="host/mouseButtons" || key=="host/pointerSpeed") {
+    if(key=="host/keyRepeatDelay" || key=="host/keyRepeatSpeed" || key=="host/mouseButtons" || key=="host/pointerSpeed" ||
+       key=="host/audioOutput") {
         const int index=host::hostChoiceIndex(key);
         for(const auto& choice:choices(key,assets))if(choice.value==index)return choice.title;
         return {};
@@ -1995,7 +2007,7 @@ void Shell::openSettings(const QString& id) {
         if(key=="host/volume")return int(std::lround(host::masterVolume()/10.)*10);
         if(key=="host/muted")return host::masterMuted();
         if(key=="host/keyRepeatDelay" || key=="host/keyRepeatSpeed" || key=="host/mouseButtons" ||
-           key=="host/pointerSpeed")return host::hostChoiceIndex(key);
+           key=="host/pointerSpeed" || key=="host/audioOutput")return host::hostChoiceIndex(key);
         if(key=="media/repeatMode")return mediaRepeatMode();
         return preferences_.value(key);
     };
@@ -2064,6 +2076,11 @@ void Shell::openSettings(const QString& id) {
 void Shell::openChoices(const QString& key,const QString& title) {
     if(pages_.size()>=32)return;
     Page page;page.title=title;
+    // H8: the media player's QAudioOutput follows the Windows default endpoint from the first time the chooser
+    // opens (a choice made here retargets it at once; a change made elsewhere arrives through
+    // QMediaDevices::audioOutputsChanged). Idempotent. The constructor is the better home for this call
+    // (shell.cpp, owned elsewhere), after which this line can go.
+    if(key=="host/audioOutput")host::followDefaultAudioOutput(audio_.get());
     // host/ keys are read from the computer each time (another app may have changed them), never stored.
     const QVariant current=key=="host/volume"?QVariant(int(std::lround(host::masterVolume()/10.)*10)):
         key=="host/muted"?QVariant(host::masterMuted()):

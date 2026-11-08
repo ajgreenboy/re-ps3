@@ -18,6 +18,10 @@ const QImage& search();
 const QImage& more();
 const QImage& download();   // an arrow into a tray
 const QImage& family();     // two figures
+const QImage& powerOn();    // the power symbol
+const QImage& house();      // a house outline
+const QImage& bulb();       // a light bulb
+const QImage& play();       // a play triangle in a ring
 // A Jellyfin library by its CollectionType ("movies", "tvshows", "music", ...); null for unknown kinds.
 const QImage& library(const QString& collectionType);
 }

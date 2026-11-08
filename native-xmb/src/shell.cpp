@@ -1539,7 +1539,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     QTimer::singleShot(0,this,&Shell::refreshContent);
     connect(&profiles_,&Profiles::changed,this,[this]{rebuildUsers();emit changed();});
     connect(&profiles_,&Profiles::failed,this,[this](const QString& error){showMessage(error,MessageKind::Page);emit changed();});
-    player_->setAudioOutput(audio_.get());player_->setVideoSink(video_.get());
+    player_->setAudioOutput(audio_.get());host::followDefaultAudioOutput(audio_.get());player_->setVideoSink(video_.get());
     connect(&preferences_,&Preferences::failed,this,[this](const QString& error){
         // The store reports its reason on this signal and only keeps it in error() for the read/format cases,
         // so the chain records the latest one: a refused value ("The setting value is invalid.") arrives here.
@@ -1665,6 +1665,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     initSpotify();
     initDlna();
     initTailscale();
+    initHome();
     // The sign-in surface is this shell's own page, not a modal dialog: openJellyfin() emits
     // requestJellyfinSignIn, which used to reach a QDialog in the view. Connecting it here keeps one sign-in
     // surface and leaves jellyfin_shell.cpp (outside this change's fence) as the owner of the app entry.
@@ -2080,6 +2081,9 @@ void Shell::activate() {
     case Action::TailscaleApp:case Action::TailscaleToggle:case Action::TailscaleExitNodes:case Action::TailscaleExitNode:
     case Action::TailscalePeer:
         activateTailscale(entry);break;
+    case Action::WolApp:case Action::WolWake:case Action::WolAddPage:case Action::WolAdd:
+    case Action::HaApp:case Action::HaGroup:case Action::HaEntity:
+        activateHome(entry);break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
     case Action::JellyfinPlay:openJellyfinMedia(entry);break;

@@ -10,6 +10,8 @@
 #include "dlna_client.h"
 #include "steam_activity.h"
 #include "tailscale_client.h"
+#include "wol_client.h"
+#include "homeassistant_client.h"
 #include "steam_friends.h"
 #include "content_registry.h"
 #include "jellyfin_client.h"
@@ -81,7 +83,11 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     DlnaScan, DlnaServer, DlnaFolder, DlnaPhoto,
     // Network > Tailscale (tailscale_shell.cpp, audit/TAILSCALE.md): the column row, On/Off (value "up"/"down"),
     // the exit-node page, one exit-node choice (value = its IP, empty for none), one tailnet device (value = its IP).
-    TailscaleApp, TailscaleToggle, TailscaleExitNodes, TailscaleExitNode, TailscalePeer };
+    TailscaleApp, TailscaleToggle, TailscaleExitNodes, TailscaleExitNode, TailscalePeer,
+    // Network > Wake on LAN and Home Assistant (home_shell.cpp, audit/HOME-SERVICES.md): the column rows, one machine
+    // (value = its id), the add page, one neighbour to add (value = its MAC), one HA group (value = its index) and one
+    // HA entity (value = its entity id).
+    WolApp, WolWake, WolAddPage, WolAdd, HaApp, HaGroup, HaEntity };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -536,7 +542,25 @@ private:
     bool activateTailscale(const Entry& entry);
     QString tailscaleSummary() const;
     QVector<Entry> tailscaleRows(const QString& kind) const;
-    void refreshTailscalePages();   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
+    void refreshTailscalePages();
+    WolClient wol_;
+    QVector<WolDevice> wolDevices_,wolCandidates_;
+    QStringList wolErrors_;
+    QHash<QString,bool> wolOnline_;
+    QHash<QString,QString> wolWaking_;
+    HomeAssistantClient ha_;
+    QVector<HaEntity> haEntities_;
+    QVector<HaGroup> haGroups_;
+    quint64 haRequest_=0;
+    QString haError_;
+    void initHome();
+    bool activateHome(const Entry& entry);
+    QVector<Entry> wolRows(const QString& kind) const;
+    QVector<Entry> haRows(const QString& kind) const;
+    void refreshWolPages();
+    void refreshHaPages();
+    void reloadWolDevices();
+    bool addWolDevice(const QString& mac,const QString& host);   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
     void spotifyCommand(OptionCommand command);
     PlaylistStore playlists_;   // the active user's playlists (playlists.h); reopened on a user switch
     QString dataDirectory_,steamRoot_,steamId_;
@@ -662,7 +686,7 @@ private:
     int columnSink_=0;
     // `grouped` is a page the item menu's Group Content level rebuilt into letter folders: `groupedSource` keeps
     // the ungrouped rows so All can put them back without a rescan, and the folders' rows are the same entries.
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; QString dlna; int dlnaServer=-1; QString tailscale; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; QString dlna; int dlnaServer=-1; QString tailscale; QString wol,ha; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step

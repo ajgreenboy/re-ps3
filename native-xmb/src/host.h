@@ -7,6 +7,8 @@
 #include <QVector>
 #include <functional>
 
+class QAudioOutput;
+
 namespace xmb::host {
 // The machine the XMB runs on, for the settings that map onto it (System Information, Network status, Video
 // Output, Volume). Everything here reads or writes the real host; nothing is simulated.
@@ -93,6 +95,17 @@ QJsonObject networkTest(bool probe=true);
 int hostChoiceIndex(const QString& key);
 bool setHostChoice(const QString& key,int index);
 QString hostChoiceName(const QString& key);
+// H8, Sound Settings > Audio Output Settings: `host/audioOutput` is a host choice whose items are the active
+// Windows render endpoints (snapshot().audioOutputs, in Core Audio's enumeration order) and whose index is the
+// default one. setHostChoice("host/audioOutput",i) makes endpoint i the default for eConsole, eMultimedia and
+// eCommunications through the undocumented IPolicyConfig COM interface (the one Windows' own Sound settings
+// use); when no known IPolicyConfig variant answers it fails, logs why and changes nothing.
+// XMB_AUDIO_DRY_RUN=1 logs "audio: would set default endpoint <name>" instead of calling SetDefaultEndpoint, and
+// reports the chosen endpoint as the default for the rest of the process so the write's read-back can be tested.
+// followDefaultAudioOutput() keeps a QAudioOutput on whatever endpoint is the default: it is retargeted after a
+// write made here, and on QMediaDevices::audioOutputsChanged for a change made anywhere else. Idempotent; the
+// output is held by QPointer, so its owner may delete it at any time. GUI thread only.
+void followDefaultAudioOutput(QAudioOutput* output);
 
 // ---- the machine ---------------------------------------------------------------------------------
 struct Volume {

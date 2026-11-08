@@ -22,6 +22,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMediaDevices>
+#include <QAudioDevice>
+#include <QAudioOutput>
+#include <QPointer>
 #include <QCameraDevice>
 #include <QTcpSocket>
 #include <QDebug>
@@ -916,8 +919,194 @@ QStringList privilegeNotes() {
 // Right-Handed/Left-Handed). This is the whole mapping, and it is the same table the read uses, so the row's
 // value and the write cannot disagree. Every write is a documented SystemParametersInfo call (or
 // SwapMouseButton), applies to this user, takes effect immediately and is undone by picking another item.
+
+// ---- H8: the default playback endpoint (Sound Settings > Audio Output Settings) --------------------
+// Windows has no documented call that sets the default audio endpoint. The Sound control panel and the
+// Settings app use the PolicyConfig client COM object, whose IPolicyConfig interface is undocumented; its
+// CLSID, the IIDs and the vtable order below are the ones public tools (EarTrumpet, SoundSwitch,
+// AudioDeviceCmdlets) declare (INFERRED from that public reverse engineering, not from a Microsoft header).
+// The three IIDs share this vtable from IUnknown through SetEndpointVisibility; the Vista-era variant has a
+// different slot order and is deliberately not tried. Only SetDefaultEndpoint is ever called.
+namespace {
+#ifdef Q_OS_WIN
+struct IPolicyConfigShared : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE GetMixFormat(PCWSTR,WAVEFORMATEX**)=0;
+    virtual HRESULT STDMETHODCALLTYPE GetDeviceFormat(PCWSTR,INT,WAVEFORMATEX**)=0;
+    virtual HRESULT STDMETHODCALLTYPE ResetDeviceFormat(PCWSTR)=0;
+    virtual HRESULT STDMETHODCALLTYPE SetDeviceFormat(PCWSTR,WAVEFORMATEX*,WAVEFORMATEX*)=0;
+    virtual HRESULT STDMETHODCALLTYPE GetProcessingPeriod(PCWSTR,INT,PINT64,PINT64)=0;
+    virtual HRESULT STDMETHODCALLTYPE SetProcessingPeriod(PCWSTR,PINT64)=0;
+    virtual HRESULT STDMETHODCALLTYPE GetShareMode(PCWSTR,void*)=0;
+    virtual HRESULT STDMETHODCALLTYPE SetShareMode(PCWSTR,void*)=0;
+    virtual HRESULT STDMETHODCALLTYPE GetPropertyValue(PCWSTR,const PROPERTYKEY&,PROPVARIANT*)=0;
+    virtual HRESULT STDMETHODCALLTYPE SetPropertyValue(PCWSTR,const PROPERTYKEY&,PROPVARIANT*)=0;
+    virtual HRESULT STDMETHODCALLTYPE SetDefaultEndpoint(PCWSTR,ERole)=0;
+    virtual HRESULT STDMETHODCALLTYPE SetEndpointVisibility(PCWSTR,INT)=0;
+};
+// CLSID_PolicyConfigClient {870AF99C-171D-4F9E-AF0D-E63DF40C2BC9}
+constexpr CLSID kPolicyConfigClient{0x870af99c,0x171d,0x4f9e,{0xaf,0x0d,0xe6,0x3d,0xf4,0x0c,0x2b,0xc9}};
+struct PolicyVariant { const char* name; IID iid; };
+const PolicyVariant kPolicyVariants[]{
+    {"IPolicyConfig {F8679F50-850A-41CF-9C72-430F290290C8}",
+        {0xf8679f50,0x850a,0x41cf,{0x9c,0x72,0x43,0x0f,0x29,0x02,0x90,0xc8}}},
+    {"IPolicyConfig10 {CA286FC3-91FD-42C3-8E9B-CAAFA66242E3}",
+        {0xca286fc3,0x91fd,0x42c3,{0x8e,0x9b,0xca,0xaf,0xa6,0x62,0x42,0xe3}}},
+    {"IPolicyConfig10_1 {6BE54BE8-A068-4875-A49D-0C2966473B11}",
+        {0x6be54be8,0xa068,0x4875,{0xa4,0x9d,0x0c,0x29,0x66,0x47,0x3b,0x11}}}};
+struct PolicyHandle {
+    IPolicyConfigShared* config=nullptr;
+    QString variant,error;
+};
+// The caller has COM initialised. The first IID the object answers wins; every refusal is in `error`.
+PolicyHandle openPolicyConfig() {
+    PolicyHandle handle;
+    IUnknown* object=nullptr;
+    const HRESULT created=CoCreateInstance(kPolicyConfigClient,nullptr,CLSCTX_ALL,IID_IUnknown,
+                                           reinterpret_cast<void**>(&object));
+    if(FAILED(created) || !object) {
+        handle.error=QStringLiteral("CoCreateInstance(PolicyConfigClient) 0x%1").arg(quint32(created),8,16,QLatin1Char('0'));
+        return handle;
+    }
+    QStringList refused;
+    for(const auto& variant:kPolicyVariants) {
+        void* config=nullptr;
+        const HRESULT asked=object->QueryInterface(variant.iid,&config);
+        if(SUCCEEDED(asked) && config) {
+            handle.config=static_cast<IPolicyConfigShared*>(config);
+            handle.variant=QString::fromLatin1(variant.name);
+            break;
+        }
+        refused<<QStringLiteral("%1 0x%2").arg(QString::fromLatin1(variant.name)).arg(quint32(asked),8,16,QLatin1Char('0'));
+    }
+    object->Release();
+    if(!handle.config)handle.error=QStringLiteral("no IPolicyConfig variant answered: ")+refused.join(QStringLiteral("; "));
+    return handle;
+}
+#endif
+QString gDryRunEndpoint;   // XMB_AUDIO_DRY_RUN: the endpoint id the dry run reports as the default (GUI thread)
+bool audioDryRun() { return qEnvironmentVariable("XMB_AUDIO_DRY_RUN")==QLatin1String("1"); }
+// The app's own outputs that follow the default endpoint, and the one QMediaDevices that reports changes.
+struct AudioFollow {
+    QPointer<QMediaDevices> devices;
+    QList<QPointer<QAudioOutput>> outputs;
+};
+AudioFollow& audioFollow() { static AudioFollow state;return state; }
+// The Qt device for a Core Audio endpoint: Qt's Windows backend uses the endpoint id as QAudioDevice::id; the
+// friendly name is the fallback when it does not.
+QAudioDevice qtAudioDeviceFor(const QString& endpointId,const QString& name) {
+    const auto outputs=QMediaDevices::audioOutputs();
+    for(const auto& device:outputs)if(!endpointId.isEmpty() && QString::fromUtf8(device.id())==endpointId)return device;
+    for(const auto& device:outputs)if(!name.isEmpty() && device.description()==name)return device;
+    return {};
+}
+void retargetAudioOutputs(const QAudioDevice& device,const QString& why) {
+    auto& follow=audioFollow();
+    follow.outputs.removeAll(QPointer<QAudioOutput>{});
+    if(device.isNull()) {
+        if(!follow.outputs.isEmpty())
+            qWarning().noquote()<<QStringLiteral("audio: app output not retargeted (%1): Qt lists no matching device").arg(why);
+        return;
+    }
+    for(const auto& output:std::as_const(follow.outputs)) {
+        if(!output || output->device().id()==device.id())continue;
+        const QString was=output->device().description();
+        output->setDevice(device);
+        qInfo().noquote()<<QStringLiteral("audio: app output -> \"%1\" (was \"%2\", %3)").arg(device.description(),was,why);
+    }
+}
+int audioOutputIndex(const Snapshot& state) {
+    if(!gDryRunEndpoint.isEmpty())
+        for(int i=0;i<state.audioOutputs.size();++i)if(state.audioOutputs[i].id==gDryRunEndpoint)return i;
+    for(int i=0;i<state.audioOutputs.size();++i)if(state.audioOutputs[i].isDefault)return i;
+    return -1;
+}
+bool setDefaultAudioOutput(int index) {
+    const QVector<AudioInfo> devices=snapshot().audioOutputs;   // the list the band showed (same 2 s reading)
+    if(index<0 || index>=devices.size()) {
+        qWarning().noquote()<<QStringLiteral("audio: no playback endpoint at item %1 (%2 listed)").arg(index).arg(devices.size());
+        return false;
+    }
+    const AudioInfo target=devices[index];
+    const int previousIndex=audioOutputIndex(snapshot());
+    const QString previous=previousIndex>=0?devices.value(previousIndex).name:QStringLiteral("none");
+#ifdef Q_OS_WIN
+    const HRESULT init=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
+    PolicyHandle policy=openPolicyConfig();
+    bool ok=false;
+    const bool dry=audioDryRun();
+    if(!policy.config) {
+        qWarning().noquote()<<QStringLiteral("audio: cannot set the default endpoint to \"%1\": %2; nothing changed")
+            .arg(target.name,policy.error);
+    } else if(dry) {
+        qInfo().noquote()<<QStringLiteral("audio: would set default endpoint %1 [%2] for eConsole, eMultimedia, "
+            "eCommunications via %3 (XMB_AUDIO_DRY_RUN=1; SetDefaultEndpoint not called, was \"%4\")")
+            .arg(target.name,target.id,policy.variant,previous);
+        gDryRunEndpoint=target.id;
+        ok=true;
+    } else {
+        const std::wstring id=target.id.toStdWString();
+        struct RoleCall { ERole role; const char* name; bool required; };
+        // Console and multimedia are what players use; communications is the call-app default, which Windows'
+        // own "Set as Default Device" also moves. Its refusal is logged but does not fail the write.
+        static const RoleCall roles[]{{eConsole,"eConsole",true},{eMultimedia,"eMultimedia",true},
+                                      {eCommunications,"eCommunications",false}};
+        ok=true;
+        QStringList results;
+        for(const auto& call:roles) {
+            const HRESULT hr=policy.config->SetDefaultEndpoint(id.c_str(),call.role);
+            results<<QStringLiteral("%1=0x%2").arg(QString::fromLatin1(call.name)).arg(quint32(hr),8,16,QLatin1Char('0'));
+            if(FAILED(hr) && call.required)ok=false;
+        }
+        gDryRunEndpoint.clear();
+        if(ok)qInfo().noquote()<<QStringLiteral("audio: default endpoint -> \"%1\" (was \"%2\") via %3 [%4]")
+            .arg(target.name,previous,policy.variant,results.join(QLatin1Char(' ')));
+        else qWarning().noquote()<<QStringLiteral("audio: SetDefaultEndpoint refused \"%1\" via %2 [%3]")
+            .arg(target.name,policy.variant,results.join(QLatin1Char(' ')));
+    }
+    if(policy.config)policy.config->Release();
+    if(SUCCEEDED(init))CoUninitialize();
+    if(ok) {
+        invalidateSnapshot();
+        retargetAudioOutputs(qtAudioDeviceFor(target.id,target.name),
+                             dry?QStringLiteral("dry-run choice"):QStringLiteral("default endpoint set here"));
+    }
+    return ok;
+#else
+    Q_UNUSED(target);Q_UNUSED(previous);return false;
+#endif
+}
+}
+
+void followDefaultAudioOutput(QAudioOutput* output) {
+    if(!output)return;
+    auto& follow=audioFollow();
+    follow.outputs.removeAll(QPointer<QAudioOutput>{});
+    for(const auto& known:std::as_const(follow.outputs))if(known==output)return;
+    follow.outputs.push_back(output);
+    if(!follow.devices) {
+        // One watcher for the process: a default change made in Windows' own Sound settings (or by another
+        // tool) moves the app's outputs as well. The dry run's simulated default wins over the system's.
+        follow.devices=new QMediaDevices(QCoreApplication::instance());
+        QObject::connect(follow.devices.data(),&QMediaDevices::audioOutputsChanged,follow.devices.data(),[] {
+            invalidateSnapshot();
+            const QAudioDevice device=gDryRunEndpoint.isEmpty()?QMediaDevices::defaultAudioOutput()
+                :qtAudioDeviceFor(gDryRunEndpoint,QString{});
+            retargetAudioOutputs(device,QStringLiteral("QMediaDevices::audioOutputsChanged"));
+        });
+    }
+    // Start on the current default (or the dry run's choice), in case it moved before this call.
+    const auto& state=snapshot();
+    const int index=audioOutputIndex(state);
+    const QAudioDevice device=index>=0?qtAudioDeviceFor(state.audioOutputs[index].id,state.audioOutputs[index].name)
+        :QMediaDevices::defaultAudioOutput();
+    qInfo().noquote()<<QStringLiteral("audio: app output follows the default endpoint (now \"%1\")")
+        .arg(device.isNull()?QStringLiteral("none"):device.description());
+    retargetAudioOutputs(device,QStringLiteral("follow start"));
+}
+
 int hostChoiceIndex(const QString& key) {
     const auto& state=snapshot();
+    if(key==QLatin1String("host/audioOutput"))return audioOutputIndex(state);
     if(key==QLatin1String("host/keyRepeatDelay")) {
         // SPI_GETKEYBOARDDELAY is 0..3 (250/500/750/1000 ms); the console's list has three items.
         if(state.keyboard.repeatDelay<=0)return 0;
@@ -940,6 +1129,7 @@ int hostChoiceIndex(const QString& key) {
     return -1;
 }
 QString hostChoiceName(const QString& key) {
+    if(key==QLatin1String("host/audioOutput"))return QStringLiteral("Audio Output Settings");
     if(key==QLatin1String("host/keyRepeatDelay"))return QStringLiteral("Key Repeat Interval");
     if(key==QLatin1String("host/keyRepeatSpeed"))return QStringLiteral("Key Repeat Speed");
     if(key==QLatin1String("host/mouseButtons"))return QStringLiteral("Mouse Type");
@@ -947,6 +1137,7 @@ QString hostChoiceName(const QString& key) {
     return {};
 }
 bool setHostChoice(const QString& key,int index) {
+    if(key==QLatin1String("host/audioOutput"))return setDefaultAudioOutput(index);
 #ifdef Q_OS_WIN
     if(index<0 || index>3)return false;
     const auto& before=snapshot();
@@ -1623,8 +1814,12 @@ Reading rowValue(const QString& pageId,const QString& rowId) {
     // ---- sound ------------------------------------------------------------------------------------
     if(pageId==QLatin1String("sound")) {
         if(rowId==QLatin1String("sound_output_setting")) {
-            const QString name=firstOutputName(state);
-            return value(name.isEmpty()?QStringLiteral("no output device"):name,"com","read-only");
+            // H8: the row is the endpoint chooser (host/audioOutput); the value is the endpoint it marks.
+            const int index=audioOutputIndex(state);
+            const QString name=index>=0?state.audioOutputs[index].name:firstOutputName(state);
+            return value(name.isEmpty()?QStringLiteral("no output device"):name,"com","live",
+                QStringLiteral("Cross lists the active playback endpoints; a choice sets the Windows default "
+                               "endpoint through IPolicyConfig"));
         }
         if(rowId==QLatin1String("audio_multi_output"))
             return noValue(QStringLiteral("the console row sends one stream to several outputs at once; this "
