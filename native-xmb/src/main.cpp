@@ -972,6 +972,23 @@ int main(int argc,char** argv) {
             .arg(parser.isSet("script")?QStringLiteral("--script")
                 :scriptOnlyEnv?QStringLiteral("XMB_INPUT_SCRIPT_ONLY"):QStringLiteral("none"));
     xmb::Shell shell(data,assets);
+    // Game boot and the Auto-Off guide (coldboot.h GameBoot): the sequence reads its textures from the assets, and the
+    // guide is fed the shell's idle time and the Auto-Off setting four times a second. The setting is read from the
+    // preferences file (a shared key, so a bare "power/idleMinutes"); Shell has no accessor for it.
+    xmb::GameBoot::attach(assets);
+    auto* guideFeed=new QTimer(&app);
+    QObject::connect(guideFeed,&QTimer::timeout,&app,[&shell,data]{
+        static qint64 stamp=-1;static int minutes=0;
+        QFile file(QDir(data).filePath("preferences.json"));
+        const qint64 modified=QFileInfo(file).lastModified().toMSecsSinceEpoch()^file.size();
+        if(modified!=stamp && file.open(QIODevice::ReadOnly)) {
+            stamp=modified;
+            minutes=QJsonDocument::fromJson(file.readAll()).object().value("values").toObject().value("power/idleMinutes").toInt();
+        }
+        xmb::GameBoot::setAutoOff(shell.idleMilliseconds(),minutes,minutes>0 && shell.idleDisplayAllowed() && !xmb::host::displayOffRequested(),
+                                  shell.fontFamily());
+    });
+    guideFeed->start(250);
     // ---- Kiosk / launcher mode (Phase 4.2) ----
     // --kiosk is the appliance recipe: one frameless fullscreen window on one display, straight to the XMB. It
     // writes no preference, so leaving the flag (or starting without it) restores the stored window state.
@@ -1051,6 +1068,8 @@ int main(int argc,char** argv) {
         }
         if(!xmb::host::displayOffRequested())
             qInfo().noquote()<<QString("power: Auto-Off at idle %1 ms; the XMB stays running").arg(shell.idleMilliseconds());
+        // XMB_POWER_DRY_RUN=1 keeps a test from blanking the panel: the request is logged and not made.
+        if(xmb::powerDryRun()){qInfo()<<"power: display-off for Auto-Off (dry run)";return;}
         xmb::host::requestDisplayOff();
     });
     // Auto-Off's only honest read-back: subscribe to the console display state before the first request.

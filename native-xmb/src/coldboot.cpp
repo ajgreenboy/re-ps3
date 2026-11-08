@@ -1,4 +1,5 @@
 #include "coldboot.h"
+#include "view.h"
 #include <QAudioDecoder>
 #include <QAudioSink>
 #include <QBuffer>
@@ -8,11 +9,13 @@
 #include <QMediaDevices>
 #include <QFontMetricsF>
 #include <QOpenGLPaintDevice>
+#include <QTimer>
 #include <QPainter>
 #include <QTextLayout>
 #include <QtEndian>
 #include <QUrl>
 #include <QtMath>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -263,6 +266,7 @@ void Coldboot::start() {
 }
 
 void Coldboot::skip() {
+    if(GameBoot::active()){GameBoot::skip();return;}
     const double t=seconds();
     if(noticeShown() && t>=showGui && t<1e8) {
         // 0x5ab6c / 0x5abcc: ignored while the lock flag is set, else cancel the auto-close timer and hide (200 ms).
@@ -276,6 +280,7 @@ void Coldboot::skip() {
 }
 
 bool Coldboot::holdsGui() const {
+    if(GameBoot::active())return true;
     if(!ready_)return false;
     const double t=seconds();
     return t<showGui || (noticeShown() && t<noticeCloseAt_+noticeFade);
@@ -352,6 +357,8 @@ void Coldboot::state(double t,std::array<QVector4D,3>& colours,QVector3D& lightP
 // _Material[0..2] = (1, 1, 0, .12), (1, .7, 6, 3), (1, 40, 0, 0): diffuse white, kd 1, ks .7, power 40 (constant in the
 // capture), _Material[3].x = the actor colour's alpha. The colour attribute is white (the logo renders white).
 void Coldboot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight,GLuint targetFbo) {
+    GameBoot::render(gl,pixelWidth,pixelHeight,targetFbo);
+    if(GameBoot::active())return;
     if(!started_ || pixelWidth<=0 || pixelHeight<=0)return;
     if(const double alpha=noticeAlpha(seconds());alpha>0)renderNotice(gl,pixelWidth,pixelHeight,targetFbo,alpha);
     if(!logoVisible())return;
@@ -432,6 +439,171 @@ void Coldboot::renderNotice(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pix
     painter.setOpacity(alpha);painter.setPen(Qt::white);
     // Line k's top is k * pitch in its layout, so its baseline lands on firstBaseline + k * pitch.
     for(const auto& layout:layouts)layout->draw(&painter,{left,firstBaseline-metrics.ascent()});
+    painter.end();
+}
+
+// ---- Game boot and the Auto-Off guide -------------------------------------------------------------------------
+namespace {
+struct GameBootState {
+    Assets* assets=nullptr;
+    bool active=false;
+    QElapsedTimer clock;
+    quint64 generation=0;
+    std::function<void()> launch;
+    // Auto-Off guide: the feed (main.cpp, 4 times a second) and the hide ramp's start.
+    qint64 idleMs=0;int minutes=0;bool allowed=false;QString family;
+    bool guideShown=false;QElapsedTimer guideHidden;
+    QString guideKey;QImage guideImage;
+    double guideAmount() {
+        const bool want=allowed && GameBoot::guideDue(idleMs,minutes);
+        if(want){guideShown=true;return 1;}
+        if(guideShown){guideShown=false;guideHidden.start();}
+        if(!guideHidden.isValid())return 0;
+        return std::max(0.,1-double(guideHidden.elapsed())/GameBoot::guideHideMs);
+    }
+};
+GameBootState& gameBoot() { static GameBootState state;return state; }
+bool gameBootDisabled() { static const bool off=qEnvironmentVariableIntValue("XMB_NO_GAMEBOOT")!=0;return off; }
+float bits(quint32 v) { return std::bit_cast<float>(v); }
+}
+
+// anim_gameboot's Fade and Resize on the ps3logo plane (offsets 2604..3260 of custom_render_plugin.rco): at 0 the plane
+// is at alpha 0, scale 0.93835 (0x3f7020c5); at 0.5 s it fades to 1 over 863 ms (mode 3) while it scales to 1 (mode 4,
+// 863 ms); at 1.6 s it fades to 0 over 174 ms (mode 1) while it scales to 1.28402 (0x3fa45a1d, 174 ms). The modes are
+// run on View::PafEase's two curves (mode 4's table, every other mode's reciprocal ramp): the RCO's accelMode is not
+// decoded further than that, so the curve shapes are INFERRED; the times and end values are TRACED.
+GameBoot::Logo GameBoot::logoAt(double t) {
+    View::PafEase fade,scale;
+    fade.retarget(0);scale.retarget(bits(0x3f7020c5u));
+    if(t>=fadeInAt) {
+        fade.retarget(1,fadeInMs,3);scale.retarget(1,fadeInMs,4);
+        const double first=std::min(t,fadeOutAt)-fadeInAt;
+        fade.advance(first);scale.advance(first);
+    }
+    if(t>=fadeOutAt) {
+        fade.retarget(0,fadeOutMs,1);scale.retarget(bits(0x3fa45a1du),fadeOutMs,1);
+        fade.advance(t-fadeOutAt);scale.advance(t-fadeOutAt);
+    }
+    return {std::clamp(fade.value,0.,1.),scale.value};
+}
+
+// FUN_000c3bb4 (vsh.elf) runs every frame: with the Auto-Off setting S seconds and the time since the last input E
+// (both against the timebase), it raises system_plugin's page_autooff_guide text msg_help_system_off_soon_by_setting
+// once S - E <= 600 s, and hides it again when input pushes S - E back over 600 s.
+bool GameBoot::guideDue(qint64 idleMs,int minutes) {
+    return minutes>0 && double(idleMs)>=minutes*60000.-guideWindowSeconds*1000.;
+}
+
+void GameBoot::attach(Assets& assets) { gameBoot().assets=&assets; }
+bool GameBoot::active() { return gameBoot().active; }
+double GameBoot::seconds() { auto& s=gameBoot();return s.active?s.clock.nsecsElapsed()/1e9:-1; }
+
+void GameBoot::begin(std::function<void()> launch) {
+    auto& s=gameBoot();
+    if(gameBootDisabled() || s.active || !s.assets) {
+        if(launch)launch();
+        return;
+    }
+    s.active=true;s.launch=std::move(launch);s.clock.start();
+    const quint64 generation=++s.generation;
+    qInfo().noquote()<<"gameboot: anim_gameboot started (the title launches when it ends or on a press after 0.4 s)";
+    QTimer::singleShot(int(finished*1000),qApp,[generation]{
+        auto& state=gameBoot();
+        if(!state.active || state.generation!=generation)return;
+        qInfo().noquote()<<"gameboot: Finished event at 2.8 s; launching";
+        state.active=false;auto go=std::move(state.launch);state.launch=nullptr;if(go)go();
+    });
+}
+
+void GameBoot::skip() {
+    auto& s=gameBoot();
+    if(!s.active || s.clock.nsecsElapsed()<400000000)return;
+    qInfo().noquote()<<QString("gameboot: skipped at %1 s; launching").arg(s.clock.nsecsElapsed()/1e9,0,'f',3);
+    s.active=false;auto go=std::move(s.launch);s.launch=nullptr;if(go)go();
+}
+
+void GameBoot::setAutoOff(qint64 idleMs,int minutes,bool allowed,const QString& fontFamily) {
+    auto& s=gameBoot();
+    s.idleMs=idleMs;s.minutes=minutes;s.allowed=allowed;s.family=fontFamily;
+}
+
+void GameBoot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight,GLuint targetFbo) {
+    auto& s=gameBoot();
+    if(pixelWidth<=0 || pixelHeight<=0 || !s.assets)return;
+    const bool boot=s.active;
+    const double guide=boot?0.:s.guideAmount();
+    if(!boot && guide<=.002)return;
+    gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.glViewport(0,0,pixelWidth,pixelHeight);
+    QOpenGLPaintDevice device(QSize(pixelWidth,pixelHeight));
+    QPainter painter(&device);
+    painter.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing|QPainter::SmoothPixmapTransform);
+    if(boot) {
+        // game_plugin page_gameboot_bg: ps3logo_back_color, a black plane at alpha 1 (INFERRED to sit under the logo,
+        // as gamelib_plugin's page does); custom_render_plugin's ps3logo plane is the RCO's tex_ps3logo, centred.
+        painter.fillRect(QRect(0,0,pixelWidth,pixelHeight),Qt::black);
+        const double scale=std::min(pixelWidth/1920.,pixelHeight/1080.);
+        painter.translate((pixelWidth-1920*scale)/2,(pixelHeight-1080*scale)/2);painter.scale(scale,scale);
+        const Logo logo=logoAt(s.clock.nsecsElapsed()/1e9);
+        const QImage& image=s.assets->image(QStringLiteral("custom_render_plugin"),QStringLiteral("tex_ps3logo"));
+        if(!image.isNull() && logo.alpha>0) {
+            painter.setOpacity(logo.alpha);
+            painter.translate(960,540);painter.scale(logo.scale,logo.scale);
+            painter.drawImage(QPointF(-image.width()/2.,-image.height()/2.),image);
+        }
+        painter.end();
+        return;
+    }
+    // The guide: the operation-guide plate (tex_operation_guide_base over its shadow, 12 px corners) at the style-4
+    // anchor the Options hint uses (right edge 1816, bottom 995), growing left with the text and up with extra lines;
+    // shown at once, hidden over 200 ms (the show is FUN_00345b08 with a 0 s fade; the hide curve is not traced, linear).
+    // It is painted once into a raster image at the output's scale (Qt's GL text path garbles 10 px glyphs) and drawn
+    // 1:1 with the amount as opacity.
+    const double scale=std::min(pixelWidth/1920.,pixelHeight/1080.);
+    const QString text=s.assets->text(QStringLiteral("system_plugin"),QStringLiteral("msg_help_system_off_soon_by_setting"),
+        QStringLiteral("The system will turn off soon because the [System Auto-Off] setting is enabled.\n"
+                       "This setting can be adjusted under [Settings] > [Power Save Settings]."));
+    // The string is two paragraphs (a newline in the RCO). The plate keeps the one-line plate's bottom edge and right
+    // anchor and grows up by one line pitch per extra line and left to the widest line (INFERRED: the widget's text
+    // layout is not traced beyond the one-line Options hint).
+    QFont font(s.family);font.setPixelSize(21);
+    const QFontMetricsF metrics(font);
+    const QStringList lines=text.trimmed().split(QLatin1Char('\n'));
+    double advance=0;
+    for(const QString& line:lines)advance=std::max(advance,metrics.horizontalAdvance(line.trimmed()));
+    const double plateRight=1816.,bottom=995.,pitch=metrics.lineSpacing();
+    const double height=41.+pitch*double(lines.size()-1),top=bottom-height;
+    const double textLeft=plateRight-22.-advance,plateLeft=textLeft-21.;
+    const QRectF plate(plateLeft,top,plateRight-plateLeft,height);
+    const QRectF cover=plate.adjusted(-1.,-1.,1.,1.);   // the shadow plate is 2 px larger
+    const QString key=text+QLatin1Char('|')+s.family+QLatin1Char('|')+QString::number(scale,'f',4);
+    if(s.guideKey!=key) {
+        s.guideKey=key;
+        s.guideImage=QImage(QSize(int(std::ceil(cover.width()*scale)),int(std::ceil(cover.height()*scale))),QImage::Format_ARGB32_Premultiplied);
+        s.guideImage.fill(Qt::transparent);
+        QPainter raster(&s.guideImage);
+        raster.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing|QPainter::SmoothPixmapTransform);
+        raster.scale(scale,scale);raster.translate(-cover.topLeft());
+        const auto nineSlice=[&](const char* name,const QRectF& rect){
+            const QImage& image=s.assets->image(QStringLiteral("system_plugin"),QLatin1String(name));
+            if(image.isNull())return;
+            const qreal i=std::min<qreal>(12.,std::min(image.width(),image.height())/2.);
+            const qreal sx[4]={0,i,qreal(image.width())-i,qreal(image.width())};
+            const qreal sy[4]={0,i,qreal(image.height())-i,qreal(image.height())};
+            const qreal dx[4]={rect.left(),rect.left()+i,rect.right()-i,rect.right()};
+            const qreal dy[4]={rect.top(),rect.top()+i,rect.bottom()-i,rect.bottom()};
+            for(int row=0;row<3;++row)for(int col=0;col<3;++col)
+                raster.drawImage(QRectF(dx[col],dy[row],dx[col+1]-dx[col],dy[row+1]-dy[row]),image,
+                                 QRectF(sx[col],sy[row],sx[col+1]-sx[col],sy[row+1]-sy[row]));
+        };
+        nineSlice("tex_operation_guide_base_shadow",cover);
+        nineSlice("tex_operation_guide_base",plate);
+        raster.setFont(font);raster.setPen(Qt::white);
+        for(int i=0;i<lines.size();++i)
+            raster.drawText(QRectF(textLeft,top+(height-pitch*double(lines.size()))/2.+pitch*i,advance+6.,pitch),
+                            Qt::AlignLeft|Qt::AlignVCenter,lines[i].trimmed());
+    }
+    painter.setOpacity(guide);
+    painter.drawImage(QPointF(std::round((pixelWidth-1920*scale)/2+cover.left()*scale),std::round((pixelHeight-1080*scale)/2+cover.top()*scale)),s.guideImage);
     painter.end();
 }
 }

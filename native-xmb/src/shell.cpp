@@ -2,6 +2,7 @@
 #include "glyphs.h"
 #include "service_icons.h"
 #include "system_power.h"
+#include "coldboot.h"
 #include <QPainter>
 #include "settings_menu.h"
 #include "media_controls.h"
@@ -2100,8 +2101,15 @@ void Shell::activate() {
         else emit requestPlaylistName(entry.value);
         break;
     case Action::Playlist:openPlaylist(entry.value);break;
-    case Action::Launch:launch(entry);break;
-    case Action::LaunchSteam:startSteamTracked(entry.value,entry.title);break;
+    // A title starts after the console's game boot (coldboot.h GameBoot); web, service and media entries do not. While
+    // a title already runs there is nothing to boot: startTracked answers with its own message at once.
+    case Action::Launch:
+        if(gameRunning())launch(entry);else GameBoot::begin([this,entry]{launch(entry);});
+        break;
+    case Action::LaunchSteam:
+        if(gameRunning())startSteamTracked(entry.value,entry.title);
+        else GameBoot::begin([this,entry]{startSteamTracked(entry.value,entry.title);});
+        break;
     case Action::SteamFolder:openSteamFolder(entry.value);break;
     case Action::SteamDownloads:openSteamDownloads();break;
     case Action::SteamStoreBrowse: {
@@ -2141,7 +2149,10 @@ void Shell::activate() {
         // error-code page carrying the OS's own reason; overwriting it here would throw that away.
         if(app==contentApps_.cend() || !QFileInfo(app->executable).isFile())
             showMessage(entry.title,"This application could not be started.",MessageKind::Page);
-        else startTracked(app->executable,app->arguments,app->workingDirectory,entry.title);
+        else if(app->kind==QLatin1String("game") && !gameRunning()) {
+            const auto copy=*app;
+            GameBoot::begin([this,copy,title=entry.title]{startTracked(copy.executable,copy.arguments,copy.workingDirectory,title);});
+        } else startTracked(app->executable,app->arguments,app->workingDirectory,entry.title);
         break;
     }
     case Action::OpenUrl:

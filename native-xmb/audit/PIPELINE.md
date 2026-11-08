@@ -159,6 +159,8 @@ gameboot1-5 run when a game launches (pages page_gameboot / anim_gameboot, 0xe95
 music_1 run during first-time setup and music playback. Updated 2026-10-26: the native app now launches games
 (`Shell::startTracked`) but still does not schedule gameboot1-5; it has no
 first-time-setup or background-music flow, so welcome_1/2 and music_1 are not scheduled either.
+Updated 2026-11-08: the launch sequence itself is now played ("Game boot and the Auto-Off guide" below); the
+gameboot1-5 background presets it triggers are still not scheduled.
 
 ## Cold boot (ported 2026-10-25)
 
@@ -242,6 +244,82 @@ the bound textures once (`<file>.texN`). `work/coldboot-series-split.ts` splits 
 `re-ps3-native --decode-fp`. `--dump-cg` prints each program's ucode size (sce01 1344, back_colours0 8608,
 LinesController 368, particles_quads 1968). `../../tools/build-rpcs3-cap.bat` builds the patched RPCS3 into `C:\dev\rpcs3-cap`
 next to the main build; copy dev_flash, dev_hdd0 and config there and run it with a scratch `--config`.
+
+## Game boot and the Auto-Off guide (2026-11-08)
+
+Both live in `GameBoot` (`src/coldboot.h/.cpp`) and draw from `Coldboot::render`, which the view calls every frame;
+while the game boot plays `Coldboot::holdsGui()` is true, so the view hides the UI exactly as it does for the intro and
+every press reaches `Coldboot::skip()`, which forwards to `GameBoot::skip()`. Tags: **TRACED** (read from the RCO or
+vsh.elf this session), **measured** (read from a frame of this build), **INFERRED** (reasoned, no firmware read).
+
+**Game boot (S31).** Evidence:
+- `custom_render_plugin.rco` holds `page_gameboot` (a `ps3logo` Plane, texture `tex_ps3logo`) and `anim_gameboot`
+  (@2520), `anim_otherboot` (@3308); `game_plugin.rco` / `game_ext_plugin.rco` hold `page_gameboot_bg` with a
+  `ps3logo_back_color` Plane (RGB scale 0, alpha 1: black), `gamelib_plugin.rco` holds the same black plane plus a
+  `ps3logo` and its own `anim_gameboot`. TRACED (`work/rco-tree-dump.ts --grep gameboot --all`).
+- `anim_gameboot` on the logo plane, TRACED from the Fade/Resize/Delay entries: t 0 alpha 0 and scale 0.93835
+  (0x3f7020c5), event BG2; t 0.5 s Fade to 1 over 863 ms (accelMode 3) and Resize to 1 over 863 ms (mode 4), event BG3;
+  t 1.6 s Fade to 0 over 174 ms (mode 1) and Resize to 1.28402 (0x3fa45a1d) over 174 ms; Finished at 2.8 s (500 + 1100 +
+  1000 + 200 ms). `gamelib_plugin`'s animation has the same numbers and ends with its own event at 2.8 s.
+- The event ids in the RCO (0xc4, 0xe0, 0xfc) are label offsets minus 0xd8, i.e. `native:/anim_gameboot_BG2` (0x19c),
+  `_BG3` (0x1b8) and `_Finished` (0x1d4). The plugin's event table (custom_render_plugin.prx 0x9cc20..0x9cc4c, name,
+  opd, 0) routes BG2 to 0xf444 (`override/gameboot2`, 0.25 s), BG3 to 0xf214 (`override/gameboot3`, 1.25 s), BG1 to 0xf6cc
+  (`gameboot1`, 0 s), BG4 to 0xefe4 (`gameboot4`, 0.5 s), BG5 to 0xedb4 (`gameboot5`, 0.5 s) and Finished to 0x3bcc (the
+  page closes). `anim_gameboot` fires only BG2, BG3 and Finished; BG1/4/5 and MoyouZoom are fired by other plugins'
+  animations. TRACED (Ghidra on the decrypted PRX, durations from the float table at 0x91d88).
+- No gameboot sound exists in the firmware tree: `vsh/resource` holds only `coldboot_stereo.ac3` and
+  `coldboot_multi.ac3` (and the store's `.vag` set), and no RCO string names a game-boot sound. The sequence is silent here.
+
+What this build does: a press on a game row (`Action::Launch` RPCS3, `Action::LaunchSteam`, `Action::LaunchApp` of kind
+`game`) calls `GameBoot::begin(launch)`; the XMB UI is hidden, the screen goes black and `tex_ps3logo` runs the timeline
+above (`GameBoot::logoAt`, pure; the two curves are `View::PafEase`'s, INFERRED because the RCO accelModes are not decoded
+beyond "4 is the table curve"); at the end (2.8 s, the Finished event) or on any press after 0.4 s the title launches, so
+focus goes to the title only after the splash. Web, service, Jellyfin and media rows never call `begin`. A title already
+running skips the splash and gets `startTracked`'s own message. `XMB_NO_GAMEBOOT=1` turns it off.
+INFERRED: black behind the logo (the black planes are `game_plugin`'s and `gamelib_plugin`'s, and `custom_render_plugin`'s
+own page has none, so the ribbon may show through on the console); the 0.4 s press guard (a held Enter repeats); UI hidden
+from t 0 (the explore plugin's hide is not in `custom_render_plugin`).
+Not modelled: the `gameboot1-5` background presets (the ribbon, HDR, particles and background blends the BG events start;
+hidden under the black plane in the reading above) and any sound.
+
+**Auto-Off guide (S29).** `FUN_000c3bb4` (vsh.elf 0xc3bb4), per frame, TRACED:
+- The settings (`FUN_000c357c`, 0xc357c) are read from the registry-style table: ids 0x32 / 0x33 give hours, stored as
+  hours x 3600 (0xe10) s into `DAT_0070ea98` / `DAT_0070ea94` (the code 0x10000014 means 1200 s; a debug flag 0x34 swaps
+  in 30 / 300 / 780 / 960 s tables). The two are the Auto-Off timers of the two states (the idle XMB and playback), the
+  second baseline is `DAT_0070eab0` (reset every frame while the playback flag `DAT_0070ea90` is clear, `FUN_000c316c`).
+- Elapsed = timebase now - `DAT_0070eaa8` (set to now by every input, `FUN_000c3280`). Guide shown when
+  `S x T - elapsed <= 600 x T` (T = `DAT_0070eaa0`, which the timebase compares need to be ticks per second: the
+  settings are in seconds; that identity is INFERRED), i.e. in the last 600 s, and not while `DAT_0070eab8` already holds it.
+- The guide: `FUN_0036555c("system_plugin")`, `FUN_0035da88(.., "page_autooff_guide")` and
+  `FUN_00346294(page, msg_help_system_off_soon_by_setting, 4, 0)`, shown by `FUN_00345b08` with a 0.0 s fade
+  (`DAT_0066a8e0` = 0.0). `FUN_00346294` is the operation-guide widget (`FUN_00345d24`: `tex_operation_guide_base_shadow`
+  under `tex_operation_guide_base`, a text object, style slot 4 = the Options hint's bottom-right anchor).
+  `page_autooff_guide` itself is an empty page in `system_plugin.rco`. Text (system_plugin, English):
+  "The system will turn off soon because the [System Auto-Off] setting is enabled."
+- Hidden (`FUN_000c3078`) when `S x T - elapsed > 600 x T` again, which is what input does (elapsed resets). No
+  countdown is drawn: it is one static text for up to 600 s.
+- When elapsed exceeds S x T (and the guard `DAT_0070eac0` is clear) it calls impose_plugin's slot -0x13 (the power-off
+  request).
+
+What this build does: `GameBoot::guideDue(idle, minutes)` is true from `minutes x 60 - 600` s of idle (so the
+build's 15-minute setting shows it at 5 minutes; with the 1-minute test value it is up at once); `main.cpp` feeds the
+shell's idle time, the `power/idleMinutes` value (read from `preferences.json`; the shell has no accessor) and whether the
+shell would act at all (`Shell::idleDisplayAllowed()`) four times a second. The guide draws at once at the Options hint's
+anchor (plate right edge 1816, y 954..995, growing left with the text) and hides over 200 ms (INFERRED: the hide curve is
+not traced). Any input resets the idle time and hides it; the Auto-Off itself is unchanged (`Shell` idle timer ->
+`requestQuit` -> `host::requestDisplayOff`). `XMB_POWER_DRY_RUN=1` now also stops that display-off request (it was
+unguarded). Open: the unit of T and the plate's width cap and wrap (single line here, INFERRED).
+
+**Checked (measured, this build, 960x540 grabs under `C:\dev\out\f9b\`):** with the stub game imported as kind `game`,
+Enter on its row: `t00` is black (first frame after the press; the XMB is gone), `t03` is the "PLAYSTATION 3" wordmark on
+black at about full opacity, `t06` is black again after the 1.6 s fade-out; the log reads `gameboot: anim_gameboot started`,
+`gameboot: Finished event at 2.8 s; launching`, then `launch: ...stubgame.exe (tracked)` and the stub's own log shows it
+started only after that line. A second press 0.9 s in (`skip` run) logged `skipped at 1.835 s; launching` and the stub
+started. The Auto-Off guide, `power/idleMinutes` 11 (due at 60 s idle): at 70.4 s idle the two-line plate is at the
+bottom right (right edge 1816, text legible in a crop), at 73 s unchanged, and one Right press later (`idleMilliseconds`
+934) it is gone. With `power/idleMinutes` 1 and `XMB_POWER_DRY_RUN=1` the log shows `Auto-Off at idle 60993 ms` then
+`display-off for Auto-Off (dry run)` and no display-off request. Frame times of the grabs are coarse (a grab costs a few
+frames), so the timeline's curve shape was not measured, only its order and end states.
 
 ## Menu motion (traced 2026-10-25)
 

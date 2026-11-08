@@ -5,10 +5,12 @@
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <QMatrix4x4>
+#include <QString>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QVector4D>
 #include <array>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -89,5 +91,35 @@ private:
     bool noticeShown() const { return noticeEnabled_ && !noticeText_.isEmpty(); }
     double noticeAlpha(double t) const;
     void renderNotice(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight,GLuint targetFbo,double alpha);
+};
+
+// Game boot (S31) and the Auto-Off guide (S29), audit/PIPELINE.md "Game boot and the Auto-Off guide".
+// Both draw from Coldboot::render's call (the view calls it every frame), and the game boot rides the cold boot's
+// input path: Coldboot::holdsGui() is true while it plays, so the view hides the UI and a press reaches
+// Coldboot::skip(), which forwards here.
+class GameBoot {
+public:
+    // anim_gameboot (custom_render_plugin.rco, animation @2520), ms from its start. TRACED.
+    static constexpr double fadeInAt=.5,fadeInMs=863,fadeOutAt=1.6,fadeOutMs=174,finished=2.8;
+    // The guide shows once the time left to Auto-Off is at most 600 s (FUN_000c3bb4, vsh.elf).
+    static constexpr double guideWindowSeconds=600,guideHideMs=200;
+    struct Logo { double alpha=0,scale=1; };
+    // The logo plane's opacity and scale at t seconds. Pure: the same call answers a capture and a live frame.
+    static Logo logoAt(double t);
+    // Auto-Off guide: true when idleMs is within the window before minutes elapse (and Auto-Off is on and allowed).
+    static bool guideDue(qint64 idleMs,int minutes);
+    // Titles and fonts come from the firmware tree; the assets outlive the process's frames.
+    static void attach(Assets& assets);
+    // Runs launch() after the sequence (at once when it is disabled with XMB_NO_GAMEBOOT=1 or already running).
+    static void begin(std::function<void()> launch);
+    static bool active();
+    static double seconds();
+    // Ends the sequence now and runs the pending launch. Ignored for the first 0.4 s: that is the press which
+    // started the title (a held Enter repeats), not a request to skip.
+    static void skip();
+    // The Auto-Off state the view's frames read: idle time, the setting, whether the shell would act at all.
+    static void setAutoOff(qint64 idleMs,int minutes,bool allowed,const QString& fontFamily);
+    // Draws the sequence (a black plane and the PS3 logo) or the guide into targetFbo.
+    static void render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight,GLuint targetFbo);
 };
 }
