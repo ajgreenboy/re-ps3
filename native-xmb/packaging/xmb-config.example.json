@@ -1,0 +1,5 @@
+{
+  "devFlash": "C:\\path\\to\\dev_flash",
+  "dataDir": "C:\\path\\to\\xmb-data",
+  "vshModules": "C:\\path\\to\\decrypted\\vsh_module"
+}

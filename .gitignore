@@ -5,6 +5,7 @@ ghidra_work/
 ghidra_home/
 rea/
 out/
+dist/
 *.elf
 *.prx
 *.sprx
