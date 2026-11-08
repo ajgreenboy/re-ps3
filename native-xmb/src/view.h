@@ -220,6 +220,23 @@ private:
     // renameId set: the page renames that user (Information on a user row) instead of creating one.
     struct UserCreatePage { bool open=false; QString name; int focus=0; QString renameId; };
     UserCreatePage userCreate_;
+    // playlist_plugin's two-pane editor (expage_select_list / expage_edit_list; audit/PLAYLIST-EDITOR.md). Pane 0
+    // lists every local file of the playlist's kind (edit_src_lst), pane 1 the playlist (edit_dst_lst). Cross
+    // adds from pane 0, picks a row up in pane 1 and drops it; Square deletes in pane 1; Triangle in pane 0
+    // opens the Options plate (Add All); Circle asks msg_quit_playlist_edit_ask. Every change saves through
+    // Shell::playlistEdit* at once; a pick-up is previewed in `work` and saved as one move on the drop.
+    struct PlaylistEditor {
+        bool open=false;QString id,name,type;QStringList library,items,work;
+        int pane=0,libSel=0,libTop=0,listSel=0,listTop=0;
+        bool picked=false;int pickFrom=-1;
+        bool optionsOpen=false,confirmQuit=false;int confirmFocus=0;   // confirmFocus 0 = No, 1 = Yes
+        QString status;
+    };
+    PlaylistEditor plEdit_;
+    void openPlaylistEditor(const QString& id);
+    void drawPlaylistEditor(QPainter& painter);
+    // 0 up, 1 down, 2 left, 3 right, 4 cross, 5 circle, 6 triangle, 7 square; true when the editor took it.
+    bool playlistEditorInput(int action);
     void drawUserCreatePage(QPainter& painter);
     bool userCreateInput(int action); // 0 up, 1 down, 2 cross, 3 circle; true when the page took it
     void drawOptionHint(QPainter& painter,double amount);

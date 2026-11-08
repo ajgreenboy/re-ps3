@@ -1088,7 +1088,7 @@ int main(int argc,char** argv) {
                 {"ENTER",Qt::Key_Return},{"ESC",Qt::Key_Escape},{"PGUP",Qt::Key_PageUp},{"PGDN",Qt::Key_PageDown},{"BACKSPACE",Qt::Key_Backspace},
                 {"PREV",Qt::Key_BracketLeft},{"NEXT",Qt::Key_BracketRight},{"SHUFFLE",Qt::Key_M},{"REPEAT",Qt::Key_R},
                 {"ZOOMIN",Qt::Key_Plus},{"ZOOMOUT",Qt::Key_Minus},{"RESETVIEW",Qt::Key_0},{"ROTATELEFT",Qt::Key_Q},{"ROTATERIGHT",Qt::Key_E},{"REFRESH",Qt::Key_F5},
-                {"F10",Qt::Key_F10},{"TRIANGLE",Qt::Key_T}}; // Triangle: the selected entry's options panel (T is its keyboard binding)
+                {"F10",Qt::Key_F10},{"TRIANGLE",Qt::Key_T},{"SQUARE",Qt::Key_Delete}}; // Square: Delete in the playlist editor. Triangle: the selected entry's options panel (T is its keyboard binding)
             if(token=="full")shell.setFullscreen(true);
             else if(token.startsWith("size=")) {
                 const auto dimensions=token.mid(5).split('x');bool widthOk=false,heightOk=false;

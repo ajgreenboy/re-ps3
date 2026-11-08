@@ -24,8 +24,14 @@ release verification, and exact PS3 fidelity.
    local music/photo folder with more than one file offers Add All (playlist_plugin `msg_add_all_playlist`) into
    a chosen playlist, skipping files already listed (`PlaylistStore::addAll`, one save). Scripted run: Add All
    added 1 of 3 files to a playlist already holding two of them; Move Down reordered Alpha, Charlie, Bravo to
-   Charlie, Alpha, Bravo on disk. Still open: the two-pane editor itself (expage_select_list /
-   expage_edit_list, Cross to pick a row up) is not drawn.
+   Charlie, Alpha, Bravo on disk. Updated 2026-11-08 (F3): the two-pane editor is drawn
+   (`audit/PLAYLIST-EDITOR.md`: evidence, layout marked INFERRED, verification). Edit (`msg_edit`) on a playlist row
+   or one of its items opens `edit_src_lst` (every local file of the kind) beside `edit_dst_lst` (the playlist):
+   Cross adds from the left and picks up / drops in the right, Square deletes, Triangle on the left offers Add All,
+   Circle asks `msg_quit_playlist_edit_ask`; each change saves at once. The Move Up / Move Down rows are removed;
+   the folder-level Add All stays. Scripted run: `[Alpha, Charlie, Bravo]` became `[Alpha, Bravo, Delta, Charlie,
+   Echo, Foxtrot]` through add, pick-up move, delete and Add All. Still open: Start (Play/View/Pause) from inside the
+   editor, and the positions, which are not in the RCO and were not traced in Ghidra.
 2. **Avatar editing.** Updated 2026-11-07: rename and delete are implemented from explore_plugin's own user-row
    menu (`audit/FIDELITY-SURFACES-MAP.md`; `Profiles::rename/remove`, `Shell::renameUser/deleteUser`): Delete runs the
    traced two Yes/No asks and drops that user's settings, Information renames with the firmware's duplicate-name

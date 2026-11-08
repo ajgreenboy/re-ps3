@@ -34,6 +34,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QSet>
+#include <QDirIterator>
 #include <QSysInfo>
 #include <QUrl>
 #include <QImageReader>
@@ -2489,6 +2490,9 @@ void Shell::buildOptions() {
     // A stored playlist row opens like a folder and can be deleted; the files it lists are never touched.
     if(entry.action==Action::Playlist) {
         addOption({"msg_open","Open"},OptionCommand::Activate,"playlist");
+        // msg_edit: opens the two-pane editor (expage_select_list / expage_edit_list); explore_plugin's
+        // msg_to_add_content_playlist_select_edit names it as where content is added.
+        addOption({"msg_edit","Edit"},OptionCommand::PlaylistEdit,"playlist");
         addOption({"msg_del","Delete"},OptionCommand::PlaylistDelete,"playlist",true,
                   tr("Deletes this playlist. The files it lists stay on disk."));
         addOption({"msg_info","Information"},OptionCommand::Information,"always-last");
@@ -2580,12 +2584,9 @@ void Shell::buildOptions() {
     // pairs Delete with the playlist editor), so the file commands give way to it there.
     const bool inPlaylist=!pages_.isEmpty() && !pages_.last().playlistId.isEmpty();
     if(inPlaylist && entry.id.startsWith(QLatin1String("playlistitem:"))) {
-        // Move: the editor's reorder, one step per choice (this build's two rows; the firmware picks the row up
-        // with Cross in its two-pane editor, which is not drawn).
-        const int at=entry.id.mid(QStringLiteral("playlistitem:").size()).toInt();
-        int count=0;for(const auto& row:entries())if(row.id.startsWith(QLatin1String("playlistitem:")))++count;
-        addOption({"","Move Up"},OptionCommand::PlaylistMoveUp,"playlist-item",at>0,at>0?QString():tr("This item is already first."));
-        addOption({"","Move Down"},OptionCommand::PlaylistMoveDown,"playlist-item",at+1<count,at+1<count?QString():tr("This item is already last."));
+        // Move lives in the editor (Cross picks the row up in its playlist pane), so the item menu offers the
+        // editor instead of a Move Up / Move Down pair.
+        addOption({"msg_edit","Edit"},OptionCommand::PlaylistEdit,"playlist-item");
         addOption({"msg_del","Delete"},OptionCommand::PlaylistRemoveItem,"playlist-item",true,
                   tr("Removes this item from the playlist. The file stays on disk."));
     }
@@ -3013,20 +3014,22 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     }
-    case OptionCommand::PlaylistMoveUp:case OptionCommand::PlaylistMoveDown: {
+    case OptionCommand::PlaylistEdit: {
         resetOptions();
-        const QString id=pages_.isEmpty()?QString{}:pages_.last().playlistId;
-        const int from=entry.id.mid(QStringLiteral("playlistitem:").size()).toInt();
-        const int to=from+(option.command==OptionCommand::PlaylistMoveUp?-1:1);
-        const auto result=playlists_.moveItem(id,from,to);
-        if(result==PlaylistStore::Result::Ok) {
-            qInfo().noquote()<<"playlists: moved item"<<from<<"to"<<to<<"in"<<id;
-            interactionAudio_.play(InteractionAudio::Cue::Confirm);
-            refreshPlaylistPages();
-            // Focus follows the moved item.
-            if(!pages_.isEmpty())for(int i=0;i<pages_.last().entries.size();++i)
-                if(pages_.last().entries[i].id==QStringLiteral("playlistitem:%1").arg(to)){pages_.last().selection=i;break;}
-        } else showPlaylistResult(result);
+        const QString id=entry.action==Action::Playlist?entry.value:(pages_.isEmpty()?QString{}:pages_.last().playlistId);
+        const auto* playlist=playlists_.find(id);
+        if(!playlist)break;
+        // explore_plugin refuses the editor when there is nothing of that kind to pick from.
+        if(playlistLibraryFiles(playlist->type).isEmpty()) {
+            interactionAudio_.play(InteractionAudio::Cue::Error);
+            showMessage(playlist->type=="photo"
+                ?assets_.text("explore_plugin_full","msg_error_cannot_edit_playlist_no_image","There are no images on the system storage. The playlist cannot be edited.")
+                :assets_.text("explore_plugin_full","msg_error_cannot_edit_playlist_no_track","There are no tracks on the system storage. The playlist cannot be edited."),MessageKind::Inline);
+        } else {
+            qInfo().noquote()<<"playlists: editor opened for"<<playlist->name;
+            interactionAudio_.play(InteractionAudio::Cue::Options);
+            emit requestPlaylistEdit(id);
+        }
         emit changed();
         break;
     }
@@ -4997,7 +5000,8 @@ void Shell::openPlaylist(const QString& id) {
     if(pages_.size()>=32){showMessage(QObject::tr("The maximum folder depth has been reached."),MessageKind::Page);return;}
     auto rows=playlistRows(id);
     if(rows.isEmpty()) {
-        showMessage(assets_.text("playlist_plugin","msg_error_no_content","There are no content items."),MessageKind::Inline);
+        // explore_plugin's hint for an empty playlist names the Edit option as the way to add content.
+        showMessage(assets_.text("explore_plugin_full","msg_to_add_content_playlist_select_edit","To add content to this playlist, select [Edit] from the options menu."),MessageKind::Inline);
         emit changed();
         return;
     }
@@ -5031,10 +5035,70 @@ void Shell::createPlaylist(const QString& type,const QString& name) {
     interactionAudio_.play(InteractionAudio::Cue::Confirm);
     emit changed();
 }
+bool Shell::playlistInfo(const QString& id,QString* name,QString* type,QStringList* items) const {
+    const auto* playlist=playlists_.find(id);
+    if(!playlist)return false;
+    if(name)*name=playlist->name;
+    if(type)*type=playlist->type;
+    if(items)*items=playlist->items;
+    return true;
+}
+// Every local file of one kind under the chosen library folders (Preferences library/<kind>), for the editor's
+// source pane: sorted by name, bounded at 5000 files, links not followed.
+QStringList Shell::playlistLibraryFiles(const QString& type) const {
+    static const QSet<QString> music{QStringLiteral("mp3"),QStringLiteral("flac"),QStringLiteral("wav"),QStringLiteral("m4a"),
+        QStringLiteral("ogg"),QStringLiteral("aac"),QStringLiteral("wma"),QStringLiteral("opus")};
+    static const QSet<QString> photo{QStringLiteral("png"),QStringLiteral("jpg"),QStringLiteral("jpeg"),QStringLiteral("bmp"),
+        QStringLiteral("webp"),QStringLiteral("gif"),QStringLiteral("tif"),QStringLiteral("tiff")};
+    const auto& suffixes=type=="photo"?photo:music;
+    const QString root=preferences_.value(QStringLiteral("library/")+type).toString();
+    QStringList files;
+    if(root.isEmpty() || !QFileInfo(root).isDir())return files;
+    constexpr int fileLimit=5000;
+    QDirIterator it(root,QDir::Files|QDir::NoSymLinks,QDirIterator::Subdirectories);
+    while(it.hasNext() && files.size()<fileLimit) {
+        const QFileInfo info(it.next());
+        if(!suffixes.contains(info.suffix().toLower()))continue;
+        files<<QDir::cleanPath(QDir::fromNativeSeparators(info.absoluteFilePath()));
+    }
+    std::sort(files.begin(),files.end(),[](const QString& a,const QString& b){
+        const int byName=QFileInfo(a).completeBaseName().compare(QFileInfo(b).completeBaseName(),Qt::CaseInsensitive);
+        return byName!=0?byName<0:a<b;});
+    return files;
+}
+PlaylistStore::Result Shell::playlistEditAdd(const QString& id,const QStringList& paths,int* added) {
+    const auto result=playlists_.addAll(id,paths,added);
+    if(result==PlaylistStore::Result::Ok) {
+        qInfo().noquote()<<"playlists: editor added"<<(added?*added:0)<<"of"<<paths.size()<<"to"<<id;
+        refreshPlaylistPages();emit changed();
+    }
+    return result;
+}
+PlaylistStore::Result Shell::playlistEditMove(const QString& id,int from,int to) {
+    const auto result=playlists_.moveItem(id,from,to);
+    if(result==PlaylistStore::Result::Ok) {
+        qInfo().noquote()<<"playlists: editor moved item"<<from<<"to"<<to<<"in"<<id;
+        refreshPlaylistPages();emit changed();
+    }
+    return result;
+}
+PlaylistStore::Result Shell::playlistEditRemove(const QString& id,int index) {
+    const auto result=playlists_.removeItem(id,index);
+    if(result==PlaylistStore::Result::Ok) {
+        qInfo().noquote()<<"playlists: editor removed item"<<index<<"from"<<id;
+        refreshPlaylistPages();emit changed();
+    }
+    return result;
+}
 void Shell::showPlaylistResult(PlaylistStore::Result result) {
+    if(result==PlaylistStore::Result::Ok)return;
+    interactionAudio_.play(InteractionAudio::Cue::Error);
+    showMessage(playlistResultText(result),MessageKind::Box);
+}
+QString Shell::playlistResultText(PlaylistStore::Result result) const {
     QString text;
     switch(result) {
-    case PlaylistStore::Result::Ok:return;
+    case PlaylistStore::Result::Ok:return {};
     case PlaylistStore::Result::DuplicateName:
         text=assets_.text("playlist_plugin","msg_error_same_name_cannot_use","This name is already in use.\nEnter another name.");break;
     case PlaylistStore::Result::TooManyPlaylists:
@@ -5046,8 +5110,7 @@ void Shell::showPlaylistResult(PlaylistStore::Result result) {
     case PlaylistStore::Result::NotFound:text=tr("That playlist or item no longer exists.");break;
     case PlaylistStore::Result::WriteFailed:text=playlists_.error();break;
     }
-    interactionAudio_.play(InteractionAudio::Cue::Error);
-    showMessage(text,MessageKind::Box);
+    return text;
 }
 void Shell::renameUser(const QString& id,const QString& name) {
     // FUN_0008f5ec: a name another user already has raises msg_error_other_username_create_pls (TRACED); the

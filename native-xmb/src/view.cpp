@@ -169,6 +169,8 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         openOsk(assets_.text("playlist_plugin","msg_input_playlist_name","Enter a name for the playlist."),QString(),
             [this,type](const QString& name){if(!name.trimmed().isEmpty())shell_.createPlaylist(type,name);});
     });
+    // Edit on a playlist row or one of its items opens the two-pane editor (drawPlaylistEditor).
+    connect(&shell_,&Shell::requestPlaylistEdit,this,[this](QString id){openPlaylistEditor(id);});
     // Information on a user row renames it on the same page (Shell::requestRenameUser), prefilled with the name.
     connect(&shell_,&Shell::requestRenameUser,this,[this](QString id,QString name){
         userCreate_=UserCreatePage{};userCreate_.open=true;userCreate_.name=name;userCreate_.renameId=id;
@@ -1480,6 +1482,231 @@ bool View::userCreateInput(int action) {
     update();
     return true;
 }
+// ---- playlist_plugin's two-pane editor (audit/PLAYLIST-EDITOR.md) -------------------------------------------
+// Evidence. The RCO (playlist_plugin, 11 objects) carries expage_select_list (one Text, msg_select_playlist) and
+// expage_edit_list (no children): the two lists are built by plugin code, whose own strings name them edit_src_lst
+// and edit_dst_lst, so every position below is INFERRED, not read from the RCO or measured on a frame. The
+// textures are the plugin's (tex_playlist, tex_info_playlist, tex_cate_music/photo, tex_split_line, tex_arrow_r,
+// tex_arrow_u); the help lines are its strings. Source pane = left, playlist pane = right (INFERRED from the
+// order of the names and of msg_playlist_pane).
+namespace {
+constexpr int kEditorRows=12;
+constexpr double kEditorRowHeight=56.;
+constexpr double kEditorListTop=252.;
+}
+void View::openPlaylistEditor(const QString& id) {
+    PlaylistEditor next;
+    if(!shell_.playlistInfo(id,&next.name,&next.type,&next.items))return;
+    next.id=id;next.library=shell_.playlistLibraryFiles(next.type);
+    next.work=next.items;next.open=true;
+    plEdit_=std::move(next);
+    qInfo().noquote()<<"playlists: editor"<<plEdit_.name<<plEdit_.library.size()<<"source file(s)"<<plEdit_.items.size()<<"item(s)";
+    update();
+}
+void View::drawPlaylistEditor(QPainter& p) {
+    auto& e=plEdit_;
+    const bool photo=e.type=="photo";
+    const auto rco=[&](const char* key,const char* fallback){return assets_.text("playlist_plugin",key,fallback);};
+    QFont font(shell_.fontFamily());font.setPixelSize(24);
+    const auto label=[&](const QRectF& r,const QString& value,int size,int flags,const QColor& colour=Qt::white,bool shadow=true) {
+        QFont f(shell_.fontFamily());f.setPixelSize(size);
+        const QString shown=QFontMetricsF(f).elidedText(value,Qt::ElideRight,r.width());
+        if(textRenderer_.ready()){textRenderer_.draw(*this,p,r,shown,f,colour,flags,0,shadow);return;}
+        p.save();p.setFont(f);p.setPen(colour);p.drawText(r,flags,shown);p.restore();
+    };
+    const auto countText=[&](int n){
+        return rco(photo?(n==1?"msg_image_count_value":"msg_images_count_value"):(n==1?"msg_track_count_value":"msg_tracks_count_value"),"%1").arg(n);
+    };
+    p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,120));   // the wallpaper stays; the wash keeps the lists legible
+    const QRectF panes[2]={{140,0,760,0},{1020,0,760,0}};
+    const bool working=e.picked;
+    const QStringList& rightRows=working?e.work:e.items;
+    // Headers: the source pane's kind icon and count; the playlist pane's icon, "Playlist (name)" and count.
+    drawImage(p,"playlist_plugin",photo?"tex_cate_photo":"tex_cate_music",{140,138,64,64});
+    label({220,140,640,34},rco(photo?"msg_images_count_value":"msg_tracks_count_value","%1").arg(e.library.size()),26,Qt::AlignLeft|Qt::AlignVCenter);
+    drawImage(p,"playlist_plugin","tex_info_playlist",{1020,142,56,56});
+    label({1096,140,684,34},rco("msg_playlist_playlist_name","Playlist (%1)").arg(e.name),26,Qt::AlignLeft|Qt::AlignVCenter);
+    label({1096,176,684,28},countText(int(rightRows.size())),20,Qt::AlignLeft|Qt::AlignVCenter,QColor(255,255,255,170));
+    // tex_split_line is 43x1 and fades at its ends, so it is stretched whole rather than fitted to its ink.
+    for(const auto& pane:panes)p.drawImage(QRectF(pane.left(),230,pane.width(),2),assets_.image("playlist_plugin","tex_split_line"));
+    drawImage(p,"playlist_plugin","tex_arrow_r",{937,520,46,43});   // 31x29 at the 1.5x layout scale, from the source pane towards the playlist
+    const QSet<QString> listed(e.items.begin(),e.items.end());
+    const auto drawPane=[&](int index,const QStringList& rows,int sel,int top,bool listedDim) {
+        const QRectF pane=panes[index];
+        const bool active=e.pane==index;
+        for(int row=0;row<kEditorRows;++row) {
+            const int at=top+row;
+            if(at>=rows.size())break;
+            QRectF r(pane.left(),kEditorListTop+row*kEditorRowHeight,pane.width(),kEditorRowHeight-6);
+            const bool focus=at==sel;
+            const bool lifted=focus && active && e.picked && index==1;
+            if(lifted)r.translate(10,0);
+            if(focus) {
+                p.save();p.setPen(Qt::NoPen);
+                // The label's own firmware text shadow (textRenderer_, 4/5 px right/down) is what read as a second
+                // copy on a bright plate, so the lifted row is told apart by an outline over a plate no brighter
+                // than the focus plate.
+                p.setBrush(QColor(255,255,255,active?72:26));
+                if(lifted)p.setPen(QPen(QColor(255,255,255,200),2));
+                p.drawRoundedRect(r,6,6);p.restore();
+            }
+            const QString path=rows[at];
+            const bool missing=index==1 && !QFileInfo::exists(path);
+            const bool dim=(listedDim && listed.contains(path)) || missing;
+            QString title=QFileInfo(path).completeBaseName();
+            if(missing)title+=QStringLiteral("  (")+tr("missing")+QLatin1Char(')');
+            label(r.adjusted(18,0,-14,0),title,24,Qt::AlignLeft|Qt::AlignVCenter,QColor(255,255,255,dim?110:255),!focus);   // the firmware text shadow reads as a second copy on the light focus plate
+        }
+        // More rows above / below: tex_arrow_u (25x12), flipped for the lower edge (INFERRED use).
+        if(top>0)drawImage(p,"playlist_plugin","tex_arrow_u",{pane.center().x()-13,236,26,12});
+        if(top+kEditorRows<rows.size()) {
+            p.save();p.translate(pane.center().x(),kEditorListTop+kEditorRows*kEditorRowHeight+8);p.scale(1,-1);
+            drawImage(p,"playlist_plugin","tex_arrow_u",{-13,-6,26,12});p.restore();
+        }
+    };
+    drawPane(0,e.library,e.libSel,e.libTop,true);
+    drawPane(1,rightRows,e.listSel,e.listTop,false);
+    // The picked-up row's own arrows: it moves up and down until Cross drops it.
+    if(e.picked && e.listSel>=e.listTop && e.listSel<e.listTop+kEditorRows) {
+        const double y=kEditorListTop+(e.listSel-e.listTop)*kEditorRowHeight;
+        drawImage(p,"playlist_plugin","tex_arrow_u",{1780-30,y-12,26,12});
+        p.save();p.translate(1780-17,y+kEditorRowHeight-2);p.scale(1,-1);drawImage(p,"playlist_plugin","tex_arrow_u",{-13,-6,26,12});p.restore();
+    }
+    if(rightRows.isEmpty())
+        label({1020,kEditorListTop,760,kEditorRowHeight},rco("msg_error_no_content","There are no content items."),22,Qt::AlignHCenter|Qt::AlignVCenter,QColor(255,255,255,150));
+    // Hint line from the plugin's own strings: its first glyph is Cross as %E, Square U+F882 and Triangle U+F883
+    // (the same code points explore_plugin pairs with Group Content and Options). U+F88F, the Play/View/Pause line, is
+    // not drawn: starting playback from the editor is not implemented here.
+    const QString key=e.picked?QStringLiteral("msg_help_enter")
+        :e.pane==0?(photo?QStringLiteral("msg_help_add_option_view_playlist"):QStringLiteral("msg_help_add_option_play_playlist"))
+                  :(photo?QStringLiteral("msg_help_move_delete_view_playlist"):QStringLiteral("msg_help_move_delete_play_playlist"));
+    QString help=assets_.text("playlist_plugin",key.toUtf8().constData(),"");
+    help.replace(QStringLiteral("\\n"),QStringLiteral("\n"));
+    double x=640;
+    for(const QString& line:help.split(QLatin1Char('\n'),Qt::SkipEmptyParts)) {
+        const int colon=line.indexOf(QLatin1Char(':'));
+        if(colon<0)continue;
+        const QString glyph=line.left(colon).trimmed(),words=line.mid(colon+1).trimmed();
+        const QChar g=glyph.isEmpty()?QChar():glyph.at(glyph.size()-1);
+        const char* texture=glyph.startsWith(QLatin1String("%E"))?"tex_cross":g.unicode()==0xF882?"tex_rectangle":g.unicode()==0xF883?"tex_triangle":nullptr;
+        if(!texture)continue;
+        drawImage(p,"system_plugin",texture,{x,978,22,22});
+        QFont f(shell_.fontFamily());f.setPixelSize(21);
+        const double w=QFontMetricsF(f).horizontalAdvance(words);
+        label({x+32,972,w+8,34},words,21,Qt::AlignLeft|Qt::AlignVCenter);
+        x+=32+w+48;
+    }
+    drawImage(p,"system_plugin","tex_circle",{x,978,22,22});
+    label({x+32,972,200,34},assets_.text("explore_plugin_full","msg_back","Back"),21,Qt::AlignLeft|Qt::AlignVCenter);
+    if(!e.status.isEmpty())
+        label({140,908,1640,40},e.status,22,Qt::AlignHCenter|Qt::AlignVCenter,QColor(255,224,160));
+    // Options plate (Triangle in the source pane): one row, Add All (msg_add_all_playlist). INFERRED look.
+    if(e.optionsOpen) {
+        const QRectF plate(560,330,340,84);
+        drawNineSlice(p,"system_plugin","tex_operation_guide_base",plate.adjusted(-6,-6,6,6),12.,1.);
+        p.save();p.setPen(Qt::NoPen);p.setBrush(QColor(255,255,255,80));p.drawRoundedRect(plate.adjusted(10,14,-10,-14),6,6);p.restore();
+        label(plate.adjusted(28,0,-20,0),rco("msg_add_all_playlist","Add All"),24,Qt::AlignLeft|Qt::AlignVCenter);
+    }
+    // msg_quit_playlist_edit_ask with msg_yes / msg_no; No is the default, as showConfirm's boxes start.
+    if(e.confirmQuit) {
+        p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,140));
+        const QRectF plate(560,400,800,240);
+        p.save();p.setPen(Qt::NoPen);p.setBrush(QColor(22,20,18,242));p.drawRect(plate);p.restore();   // opaque: the lists must not read through the question
+        drawNineSlice(p,"system_plugin","tex_operation_guide_base",plate,12.,1.);
+        label(plate.adjusted(30,26,-30,-110),rco("msg_quit_playlist_edit_ask","Do you want to quit editing?"),26,Qt::AlignHCenter|Qt::AlignVCenter);
+        const QString answers[2]={rco("msg_no","No"),rco("msg_yes","Yes")};
+        for(int i=0;i<2;++i) {
+            const QRectF button(plate.left()+160+i*270,plate.bottom()-98,220,56);
+            const int idx=i==0?0:1;   // left button No, right button Yes
+            if(e.confirmFocus==idx){p.save();p.setPen(Qt::NoPen);p.setBrush(QColor(255,255,255,90));p.drawRoundedRect(button,6,6);p.restore();}
+            label(button,answers[i],24,Qt::AlignHCenter|Qt::AlignVCenter);
+        }
+    }
+}
+bool View::playlistEditorInput(int action) {
+    auto& e=plEdit_;
+    if(!e.open)return false;
+    e.status.clear();
+    const auto clampView=[](int sel,int& top,int count) {
+        sel=std::clamp(sel,0,std::max(0,count-1));
+        if(sel<top)top=sel;
+        if(sel>=top+kEditorRows)top=sel-kEditorRows+1;
+        top=std::clamp(top,0,std::max(0,count-kEditorRows));
+        return sel;
+    };
+    const auto reload=[&] {
+        QStringList items;
+        if(shell_.playlistInfo(e.id,nullptr,nullptr,&items))e.items=items;
+        e.work=e.items;
+        e.listSel=clampView(e.listSel,e.listTop,int(e.items.size()));
+    };
+    const auto say=[&](PlaylistStore::Result r){e.status=shell_.playlistResultText(r);};
+    if(e.confirmQuit) {
+        switch(action) {
+        case 2:e.confirmFocus=0;break;case 3:e.confirmFocus=1;break;
+        case 4:
+            if(e.confirmFocus==1){e=PlaylistEditor{};qInfo()<<"playlists: editor closed";}
+            else e.confirmQuit=false;
+            break;
+        case 5:e.confirmQuit=false;break;
+        default:break;
+        }
+        update();return true;
+    }
+    if(e.optionsOpen) {
+        if(action==4) {
+            int added=0;
+            const auto result=shell_.playlistEditAdd(e.id,e.library,&added);
+            e.optionsOpen=false;
+            if(result==PlaylistStore::Result::Ok){reload();e.status=tr("Added %1 of %2 files.").arg(added).arg(e.library.size());}
+            else say(result);
+        } else if(action==5 || action==6)e.optionsOpen=false;
+        update();return true;
+    }
+    switch(action) {
+    case 0:case 1: {
+        const int step=action==0?-1:1;
+        if(e.pane==0)e.libSel=clampView(e.libSel+step,e.libTop,int(e.library.size()));
+        else if(e.picked) {
+            // The picked row travels through the working order; nothing is saved until the drop.
+            const int to=std::clamp(e.listSel+step,0,int(e.work.size())-1);
+            if(to!=e.listSel){e.work.move(e.listSel,to);e.listSel=clampView(to,e.listTop,int(e.work.size()));}
+        } else e.listSel=clampView(e.listSel+step,e.listTop,int(e.items.size()));
+        break;
+    }
+    case 2:if(!e.picked)e.pane=0;break;
+    case 3:if(!e.picked && !e.items.isEmpty()){e.pane=1;e.listSel=clampView(e.listSel,e.listTop,int(e.items.size()));}break;
+    case 4:
+        if(e.pane==0) {
+            if(e.library.isEmpty())break;
+            int added=0;
+            const auto result=shell_.playlistEditAdd(e.id,{e.library[e.libSel]},&added);
+            if(result==PlaylistStore::Result::Ok)reload();else say(result);
+        } else if(e.picked) {
+            // Drop: one saved move from where the row was picked up to where it now stands.
+            if(e.listSel!=e.pickFrom) {
+                const auto result=shell_.playlistEditMove(e.id,e.pickFrom,e.listSel);
+                if(result!=PlaylistStore::Result::Ok)say(result);
+            }
+            e.picked=false;reload();
+        } else if(!e.items.isEmpty()){e.picked=true;e.pickFrom=e.listSel;e.work=e.items;}
+        break;
+    case 5:
+        if(e.picked){e.picked=false;e.listSel=clampView(e.pickFrom,e.listTop,int(e.items.size()));e.work=e.items;}
+        else{e.confirmQuit=true;e.confirmFocus=0;}
+        break;
+    case 6:if(e.pane==0 && !e.library.isEmpty())e.optionsOpen=true;break;
+    case 7:
+        if(e.pane==1 && !e.picked && !e.items.isEmpty()) {
+            const auto result=shell_.playlistEditRemove(e.id,e.listSel);
+            if(result==PlaylistStore::Result::Ok){reload();if(e.items.isEmpty())e.pane=0;}else say(result);
+        }
+        break;
+    default:return false;
+    }
+    update();
+    return true;
+}
 void View::drawCategory(QPainter& p,const Category& category,const QRectF& rect) {
     const auto& original=assets_.bestImage(category.container,category.texture);
     if(original.isNull())return;
@@ -1859,7 +2086,7 @@ void View::drawScene(QPainter& p) {
     // replace - the wash below is the measurement - while the box and the table page dim nothing (14.1).
     // user_plugin's name page also replaces the list, the category band and the info bar (page-user-create.png
     // has neither icons nor the clock).
-    const bool messageScreen=(messageUp && !inlineMessage) || userCreate_.open;
+    const bool messageScreen=(messageUp && !inlineMessage) || userCreate_.open || plEdit_.open;
     auto text=[&](const QRectF& r,const QString& value,int size,QColor colour,int flags=Qt::AlignLeft|Qt::AlignVCenter){
         if(textRenderer_.ready()) {QFont f(shell_.fontFamily());f.setPixelSize(size);textRenderer_.draw(*this,p,r,value,f,colour,flags);return;}
         QFont f(shell_.fontFamily());f.setPixelSize(size);f.setStyleStrategy(QFont::PreferAntialias);f.setHintingPreference(QFont::PreferNoHinting);p.setFont(f);p.setPen(QColor(0,0,0,38));p.drawText(r.translated(1,1),flags,value);p.setPen(colour);p.drawText(r,flags,value);
@@ -2835,6 +3062,7 @@ void View::drawScene(QPainter& p) {
     else if(busyPageUp())drawBusySurface(p,shell_.busyProgress(),shell_.busySpinnerPhase());
     else if(messageShown_.kind==MessageKind::Box && (dialogEase_.value>.002 || dialogPlateEase_.value>.002))drawMessageBox(p);
     if(userCreate_.open)drawUserCreatePage(p);
+    if(plEdit_.open)drawPlaylistEditor(p);
     if(osk_.open)drawOsk(p);
     // The transient volume HUD. It is a timed composite, not a panel: it appears on every change and fades on
     // the MediaControls model, takes no input (nothing here reads a key or a button), and draws only in the
@@ -2865,7 +3093,7 @@ void View::drawScene(QPainter& p) {
     // The operation guide sits on the same system_plugin page as the notification, under it. It belongs to
     // the XMB's own focus, so no overlay that takes the focus (PS menu, item menu, media, a message) shows it.
     if(!shell_.psMenuOpen() && !shell_.optionsOpen() && !optionsDrawn() && !shell_.mediaOpen() &&
-       shell_.message().isEmpty() && !osk_.open && !userCreate_.open)
+       shell_.message().isEmpty() && !osk_.open && !userCreate_.open && !plEdit_.open)
         if(const double hint=optionHintAmount();hint>.002)drawOptionHint(p,hint);
     if(!shell_.psMenuOpen() && notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
         drawNotification(p,notificationEase_.value);
@@ -3104,7 +3332,7 @@ bool View::remoteKeyAction(RemoteKey key,const QString& source) {
         pressKey(Qt::Key_Escape);
         return decide(true,QString("Circle (back); depth %1 mediaOpen %2").arg(shell_.depth()).arg(shell_.mediaOpen()?1:0));
     case RemoteKey::ChannelUp:case RemoteKey::ChannelDown: {
-        if(osk_.open || userCreate_.open)return decide(false,"declined (a text page owns input)");
+        if(osk_.open || userCreate_.open || plEdit_.open)return decide(false,"declined (a text page owns input)");
         const int before=shell_.selection();
         pressKey(key==RemoteKey::ChannelUp?Qt::Key_PageUp:Qt::Key_PageDown);
         return decide(true,QString("page %1; selection %2 -> %3").arg(key==RemoteKey::ChannelUp?"up":"down").arg(before).arg(shell_.selection()));
@@ -3112,7 +3340,7 @@ bool View::remoteKeyAction(RemoteKey key,const QString& source) {
     case RemoteKey::Info:
         return triangleAction(source);
     case RemoteKey::Home:
-        if(osk_.open || userCreate_.open)return decide(false,"declined (a text page owns input)");
+        if(osk_.open || userCreate_.open || plEdit_.open)return decide(false,"declined (a text page owns input)");
         if(shell_.psMenuOpen()){shell_.psMenuClose();update();return decide(true,"closed the system menu");}
         psPressAt_=0;   // no PS press precedes it: the menu is drawn in its steady state, not the hold envelope
         shell_.psHeld();update();
@@ -3124,7 +3352,7 @@ bool View::remoteKeyAction(RemoteKey key,const QString& source) {
     if(!shell_.mediaOpen())return decide(false,"declined (no media is open)");
     // With media open the key is meant for this player even while another surface owns input: it is taken and
     // does nothing, rather than handed to Windows, which would route it to some other media application.
-    if(osk_.open || userCreate_.open || shell_.psMenuOpen())return decide(true,"ignored (another surface owns input)");
+    if(osk_.open || userCreate_.open || plEdit_.open || shell_.psMenuOpen())return decide(true,"ignored (another surface owns input)");
     QString what;
     switch(key) {
     case RemoteKey::PlayPause:shell_.togglePlayback();what="toggle playback";break;
@@ -3170,7 +3398,7 @@ bool View::triangleAction(const QString& source) {
         return taken;
     };
     if(shell_.psMenuOpen())return decide(false,"declined (the system menu binds no Triangle)");
-    if(osk_.open || userCreate_.open)return decide(false,"declined (a text page owns input)");
+    if(osk_.open || userCreate_.open || plEdit_.open)return decide(false,"declined (a text page owns input)");
     if(shell_.optionsOpen()){shell_.toggleOptions();update();return decide(true,"Triangle: options closed");}
     if(musicPanelOpen_){closeMusicPanel();update();return decide(true,"Triangle: music panel closed");}
     if(shell_.photoOpen()){shell_.rotatePhoto(1);update();return decide(true,"Triangle: photo rotated");}
@@ -3946,6 +4174,18 @@ void View::keyPressEvent(QKeyEvent* e) {
         }
         return;
     }
+    if(plEdit_.open) { // the playlist editor owns input until it closes (arrows reach here only from a script)
+        switch(e->key()) {
+        case Qt::Key_Up:playlistEditorInput(0);break;case Qt::Key_Down:playlistEditorInput(1);break;
+        case Qt::Key_Left:playlistEditorInput(2);break;case Qt::Key_Right:playlistEditorInput(3);break;
+        case Qt::Key_Return:case Qt::Key_Enter:playlistEditorInput(4);break;
+        case Qt::Key_Escape:case Qt::Key_Backspace:playlistEditorInput(5);break;
+        case Qt::Key_T:playlistEditorInput(6);break;
+        case Qt::Key_Delete:playlistEditorInput(7);break;   // Square
+        default:break;
+        }
+        e->accept();return;
+    }
     if(userCreate_.open) { // the name page owns input until it closes
         switch(e->key()) {
         case Qt::Key_Up:userCreateInput(0);break;case Qt::Key_Down:userCreateInput(1);break;
@@ -4088,6 +4328,14 @@ void View::pollController() {
         if(edge&XINPUT_GAMEPAD_B){if(osk_.paletteOpen){osk_.paletteOpen=false;update();}else oskClose(false);}
         if(edge&XINPUT_GAMEPAD_X)oskBackspace();if(edge&XINPUT_GAMEPAD_Y)oskInsert(" ");
         if(edge&XINPUT_GAMEPAD_START)oskClose(true);
+        if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
+        buttons_=buttons;return;
+    }
+    if(plEdit_.open) {
+        if(movement&XINPUT_GAMEPAD_DPAD_UP)playlistEditorInput(0);if(movement&XINPUT_GAMEPAD_DPAD_DOWN)playlistEditorInput(1);
+        if(edge&XINPUT_GAMEPAD_DPAD_LEFT)playlistEditorInput(2);if(edge&XINPUT_GAMEPAD_DPAD_RIGHT)playlistEditorInput(3);
+        if(edge&XINPUT_GAMEPAD_A)playlistEditorInput(4);if(edge&XINPUT_GAMEPAD_B)playlistEditorInput(5);
+        if(edge&XINPUT_GAMEPAD_Y)playlistEditorInput(6);if(edge&XINPUT_GAMEPAD_X)playlistEditorInput(7);
         if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
         buttons_=buttons;return;
     }

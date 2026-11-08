@@ -174,9 +174,11 @@ enum class OptionCommand { Activate, Information,
     SpotifyPlayAll, SpotifyShuffleAll,
     // Jellyfin's streaming ceiling: the list (from an item row or the player panel) and one choice in it.
     JellyfinQuality, JellyfinQualityTarget,
-    // The playlist editor's Move (playlist_plugin msg_help_move_delete_*), as two option rows, and its Add All
-    // (msg_add_all_playlist): every local file of the column's kind on the page into one chosen playlist.
-    PlaylistMoveUp, PlaylistMoveDown, AddAllToPlaylist, AddAllToPlaylistTarget,
+    // Edit (explore_plugin msg_edit) on a playlist row or an item inside one opens the two-pane editor
+    // (View's playlist editor; audit/PLAYLIST-EDITOR.md), where Move lives. Add All (msg_add_all_playlist, a
+    // string explore_plugin carries too): every local file of the column's kind on the page into one chosen
+    // playlist.
+    PlaylistEdit, AddAllToPlaylist, AddAllToPlaylistTarget,
     // Copy's destination level (file_ops.h): one library folder (MenuOption::index into copyTargets_).
     CopyTarget,
     // A Steam game row's hand-offs to the Steam client (steam:// links); MenuOption::index picks which.
@@ -454,6 +456,16 @@ public:
     void deleteUser(const QString& id);
     // Playlists (playlists.h): create from the keyboard's name, with playlist_plugin's own error strings.
     void createPlaylist(const QString& type,const QString& name);
+    // The two-pane playlist editor's data (View::drawPlaylistEditor). Items are the playlist's file paths in
+    // order; libraryFiles is every local file of the playlist's kind under the chosen library folders, sorted
+    // by name and bounded. The three edits save through PlaylistStore at once and refresh any open playlist page;
+    // a failure is returned, not shown, so the editor can say it on its own surface.
+    bool playlistInfo(const QString& id,QString* name,QString* type,QStringList* items) const;
+    QStringList playlistLibraryFiles(const QString& type) const;
+    PlaylistStore::Result playlistEditAdd(const QString& id,const QStringList& paths,int* added);
+    PlaylistStore::Result playlistEditMove(const QString& id,int from,int to);
+    PlaylistStore::Result playlistEditRemove(const QString& id,int index);
+    QString playlistResultText(PlaylistStore::Result result) const;
     int userCount() const { return int(profiles_.profiles().size()); }
     // PS button (DualSense/DualShock over HID, keyboard substitute): a tap shows the controller indicator
     // and returns focus to the XMB; a hold opens the system menu the console shows (captured in RPCS3:
@@ -533,6 +545,8 @@ signals:
     void requestRenameUser(QString id,QString name);
     // Create New Playlist: the view asks for the name with the XMB keyboard, then calls createPlaylist().
     void requestPlaylistName(QString type);
+    // Edit on a playlist: the view opens the two-pane editor on that playlist id.
+    void requestPlaylistEdit(QString id);
     void requestImportApps();
     void requestArtworkSettings();
     void requestJellyfinSignIn(QUrl server);
