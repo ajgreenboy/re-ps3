@@ -45,6 +45,8 @@ The document is limited to 1 MiB and 1000 entries. Imports validate the complete
 source before writing, merge entries by `id` (source entries replace matches),
 and replace the target atomically.
 
+Updated 2026-11-07: Spotify now also has a native page in the Music column (audit/SPOTIFY.md); the registry's Spotify entry remains a browser shortcut.
+
 `examples/media-apps.json` seeds media services (Jellyfin, Plex, YouTube, Spotify) with the
 native Jellyfin kind plus browser `kind: "web"` entries. How these entries surface inside the XMB, next to the owned Steam
 library, is described in [XMB-TOOLING.md](XMB-TOOLING.md).

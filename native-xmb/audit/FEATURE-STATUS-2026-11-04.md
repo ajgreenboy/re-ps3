@@ -1,5 +1,8 @@
 # Native XMB feature status — 2026-11-04
 
+> Updated 2026-11-07: the items below carry their own dated updates (playlists, users, DLNA, Jellyfin subtitles and quality).
+> The plan of record for what to do next is [PHASES-2026-11-07.md](PHASES-2026-11-07.md).
+
 This is a current product-gap summary, cross-checked against source after the older
 `FEATURE-COVERAGE.md` audit. That audit is useful historical context, but several
 of its statements have since been superseded. This document separates definite
@@ -81,10 +84,18 @@ release verification, and exact PS3 fidelity.
   switching and launch/install handoffs have native surfaces and providers
   (`src/steam_*.cpp`, `src/shell.cpp`; `audit/STEAM-INTEGRATION.md`). They are
   not missing features; active real-client lifecycle coverage is still needed.
-- **Artwork:** current artwork sources and local overrides are supported. RAWG
-  automatic artwork lookup is being implemented in parallel; provider-key
-  configuration and end-to-end verification are pending, so it is not counted
-  as complete here.
+- **Artwork:** current artwork sources and local overrides are supported. Updated 2026-11-07: RAWG
+  automatic artwork lookup landed in commit d9e2af8 (`src/rawg_client.*`, `src/rawg_artwork.*`, `src/artwork_settings.*`): Game >
+  Artwork Settings takes the RAWG key (or `RAWG_API_KEY`), library scans match installed Steam and imported games, matches are
+  cached for offline use, and explicit local overrides win. Real-key end-to-end coverage is not recorded in this file.
+- **Spotify (Updated 2026-11-07):** Music > Spotify browses the account and controls a Spotify Connect device
+  (`src/spotify_client.*`, `src/spotify_shell.cpp`; `audit/SPOTIFY.md`). Verified on a real Premium account; the free-account
+  path and the Liked Songs queue on a real device are not.
+- **Tailscale (Updated 2026-11-07):** Network > Tailscale (`src/tailscale_client.*`, `src/tailscale_shell.cpp`; `audit/TAILSCALE.md`),
+  verified on this PC's real tailnet except turning it off/on and exit-node selection, which were left alone on purpose.
+- **Steam activity and actions (Updated 2026-11-07):** play time and last played from `localconfig.vdf` on the Game rows,
+  installed titles ordered by last played, and Open in Steam Library / Store Page / Screenshots / Verify Game Files / Delete as
+  `steam://` hand-offs (`src/steam_activity.*`, `src/shell.cpp`; commits aff3cb6, 4e64c31).
 
 ## Verification still needed
 

@@ -10,6 +10,16 @@ than by line where the working tree is dirty. Note that `shell.cpp`, `shell.h`,
 cleared; `src/icons.cpp` is also committed. The document was written when
 that direction is already in flight and does not recommend it again.
 
+**Status update 2026-11-07 (checked against `src/`):** most of the ranked top five has landed since this was written, so the
+"one gap" in section 1 (controller-complete operation) is largely closed. Landed: row 1, Jellyfin signs in on an XMB page with a
+masked keyboard; row 2, the remembered sign-in (DPAPI session, `src/jellyfin_client.*`); row 4, Auto-Off darkens the display
+instead of quitting (`audit/SESSION-POWER.md`; `displayOff` in `src/host.cpp`); row 5, keep-awake while playing
+(`SetThreadExecutionState` in `src/host.cpp`); row 6, the volume HUD; row 7, the subtitle and audio-track panel (plus Jellyfin
+server text subtitles); row 10, Continue Watching; and the PS-button menu. Still open: row 3's last step, because the committed
+"Turn Off the System" only quits the XMB (`Shell::requestQuit` in `src/main.cpp`; a real shutdown path is an item in
+`audit/PHASES-2026-11-07.md`, H1, and was in progress in the working tree when this note was written, so check `git log`).
+The current backlog is `audit/PHASES-2026-11-07.md`; the dated text below is the 2026-10-26 brainstorm.
+
 ## 1. What this is, HTPC-wise, and the one gap
 
 Read as an HTPC front end, this is already the rare kind: an XMB that is not a skin. The

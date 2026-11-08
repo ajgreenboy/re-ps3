@@ -5,6 +5,10 @@ RPCS3 VSH recording. Project goal: a complete native C++ recreation.
 
 ## Read this set
 
+Plan of record (2026-11-07): [PHASES-2026-11-07.md](PHASES-2026-11-07.md) - done work, ranked backlog, parallel workstreams. Newer
+feature audits: [SPOTIFY.md](SPOTIFY.md), [DLNA.md](DLNA.md), [TAILSCALE.md](TAILSCALE.md) and the dated updates in
+[FEATURE-STATUS-2026-11-04.md](FEATURE-STATUS-2026-11-04.md).
+
 Current handoff (2026-10-28): [HANDOFF-2026-10-28.md](../archive/HANDOFF-2026-10-28.md) - the tree at `49acac6`,
 what ships after the firmware-recovery week and the layout/text/Theme/composite waves, the four gate
 instruments with their last recorded numbers, the 2026-10-28 baselines correction and the canonical pin

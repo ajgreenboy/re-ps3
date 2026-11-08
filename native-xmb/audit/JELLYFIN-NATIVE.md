@@ -52,6 +52,7 @@ All server binaries, generated media, test accounts, tokens, logs and disposable
 
 ## Next phases and practical limits
 
+- Updated 2026-11-07: of the items in the next two lines, posters, search, resume rows, audio/subtitle selection (including server text subtitles), a Streaming Quality ceiling and remembered sign-in are done (section 13 and "Streaming quality" below; commits 66e0f4b, ce8a33e). Still open: the page/hero backdrop draw (`Shell::pageBackdrop()` has no caller in `src/*.cpp`), image-based subtitles, Quick Connect/SSO. The two lines are the 2026-10-26 state.
 - Posters/backdrops, detailed episode metadata, search and resume UI remain open. Playback currently starts at zero; the server still receives progress/stop positions.
 - Subtitle and audio-track selection, quality selection, Quick Connect/SSO and remembered sign-in remain open.
 - Audio routing exists but was not part of the real-server playback checks. Live TV and off-origin external-media redirects were not validated.

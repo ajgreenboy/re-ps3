@@ -126,6 +126,12 @@ family-shared, alongside the 10 installed titles inline). The earlier **Installe
 folder rows are gone. Opening **Not Installed** pushes an ordinary XMB page of rows; OK hands `steam://install/<id>`
 to Steam, which performs the download.
 
+Updated 2026-11-07 (`src/shell.cpp`, `src/steam_activity.*`; commit 4e64c31): the Game column is now the installed titles inline (most
+recently played first), a **Steam Store** row and one **All Games** folder. The All Games page lists an **All Titles** folder,
+one folder per Steam collection (icon: a 2x2 mosaic of its first titles' headers), then **Not Installed** and **Family Shared**
+(the latter only when `family-shared.json` has titles). The paragraph above is still right about what Not Installed holds, but
+the separate Family Shared folder is back and the folders sit inside All Games. See "Steam play activity and actions" below.
+
 A **Steam Store** row sits above the folder and opens a browse page of live top sellers with prices (public,
 keyless endpoint); its rows hand the same `steam://install/<id>` to Steam. Nothing is bought or downloaded inside
 the XMB - the store page only lists, and Steam owns purchase, download and launch.
@@ -181,9 +187,67 @@ Open **Game → Artwork Settings**, enter a [RAWG API key](https://rawg.io/apido
 Edit `examples/jellyfin.json` (or `examples/media-apps.json` for Jellyfin, Plex, YouTube and Spotify) for your
 setup before importing it. This adds a TV/Video Services app: Jellyfin is a native service with library/folder
 pages, direct play and server-negotiated HLS, and it signs in on an XMB page with a masked keyboard
-(audit/JELLYFIN-NATIVE.md); the Plex, YouTube and Spotify entries are URL apps that still open in your browser.
+(audit/JELLYFIN-NATIVE.md); the Plex, YouTube and Spotify entries are URL apps that still open in your browser. Updated 2026-11-07: Spotify also has a native page in the Music column (see "Spotify" below); the example's Spotify entry is only a browser shortcut.
 See [content schema](audit/CONTENT-REGISTRY.md) and
 [Steam handoff, verification and limits](audit/STEAM-INTEGRATION.md). No firmware or installed game files are changed.
+
+## Network services and media sources (added 2026-11-05 to 11-07)
+
+These are modern rows in the XMB's own presentation, not firmware surfaces.
+
+### Spotify (Music column)
+
+Music > Spotify signs in through the browser (PKCE, no client secret; the refresh token is sealed with DPAPI), lists Liked
+Songs and playlists, and plays on a Spotify Connect device (Triangle on a playlist: Play, Shuffle Play, Open). Spotify only
+streams to its own clients, so the track plays on the Spotify app on this PC, a phone or a speaker; Now Playing shows it and
+has Play/Pause/Next/Previous. Playback control needs Premium. Setup: create an app at the Spotify developer dashboard, add the
+redirect URI `http://127.0.0.1:8888/callback`, and put the client id in `<native-data>/spotify.json`:
+
+```json
+{ "clientId": "<32 hex characters>", "redirectPort": 8888 }
+```
+
+`SPOTIFY_CLIENT_ID` / `SPOTIFY_REDIRECT_PORT` override the file. Without a client id the page shows one "Set Up Spotify" row
+with these steps. Code: `src/spotify_client.*`, `src/spotify_shell.cpp`; details, limits and the real-account run:
+[audit/SPOTIFY.md](audit/SPOTIFY.md).
+
+### Search for Media Servers (DLNA / UPnP)
+
+The first row of the Video, Music and Photo columns runs a native DLNA/UPnP client (`src/dlna_client.*`,
+`src/dlna_shell.cpp`): SSDP discovery, then ContentDirectory browsing. Audio and video play in the normal player (resume and
+controls included); photos open in the viewer. A server that multicast cannot reach (a Docker bridge, another subnet) goes in
+`<native-data>/dlna.json`:
+
+```json
+{ "locations": ["http://192.168.1.10:8200/rootDesc.xml"], "unicast": ["192.168.1.10"] }
+```
+
+Only private, link-local or loopback addresses are accepted. Verified against a local mock; no real DLNA server has been tried
+yet. Details: [audit/DLNA.md](audit/DLNA.md).
+
+### Tailscale (Network column)
+
+Network > Tailscale shows this PC's tailnet state ("Connected as <host> - <tailnet IP>", "Off", "Sign-in needed" or "Not
+installed"). The page switches Tailscale on or off (off asks first), picks an exit node, lists the devices (Cross pings one) and
+offers Sign In when the client needs a login. It drives the installed `tailscale.exe` CLI (`src/tailscale_client.*`,
+`src/tailscale_shell.cpp`) and never logs in, out or switches accounts. Details and the run on a real tailnet:
+[audit/TAILSCALE.md](audit/TAILSCALE.md).
+
+### Steam play activity and actions
+
+An installed Steam title's detail line shows what Steam recorded, read from `userdata/<account>/config/localconfig.vdf`
+(`src/steam_activity.*`; "12 h 5 min played - Last played ..." in the date order of the Clock setting), and installed titles
+are ordered by last played. Triangle on a Steam title adds Open in Steam Library, Store Page and, for installed titles,
+Screenshots, Verify Game Files and Delete; each is a `steam://` hand-off, so Steam performs (and for Delete, confirms) the
+action. Row icons for the Steam, Jellyfin, Tailscale and Spotify services come from `src/service_icons.*` (the installed
+client's own icon, or a drawn mark). See [audit/STEAM-INTEGRATION.md](audit/STEAM-INTEGRATION.md).
+
+### Playlists and Jellyfin quality
+
+Music and Photo > Playlists are real (Create New Playlist, Add to Playlist, Add All, Move Up/Down, Delete; stored per user under
+`<native-data>/playlists/`, `src/playlists.*`): [audit/FEATURE-STATUS-2026-11-04.md](audit/FEATURE-STATUS-2026-11-04.md) item 1.
+Jellyfin video has a Streaming Quality ceiling (row menu and player panel) and server text subtitles:
+[audit/JELLYFIN-NATIVE.md](audit/JELLYFIN-NATIVE.md).
 
 ## PS3 themes
 
@@ -264,6 +328,10 @@ be claimed.
 
 See the [forward phase plan](archive/PHASES-2026-10-28.md), the [full feature/presentation audit and handoff](audit/README.md),
 [handoff](HANDOFF.md) and [completion criteria](ISA.md).
+
+**Plan of record (2026-11-07):** [audit/PHASES-2026-11-07.md](audit/PHASES-2026-11-07.md) - what is done, the ranked backlog and the
+parallel workstreams; it supersedes the "Next steps" list in [HANDOFF-PHASES.md](HANDOFF-PHASES.md) and the open-gap list in
+[audit/FEATURE-STATUS-2026-11-04.md](audit/FEATURE-STATUS-2026-11-04.md) where they disagree.
 
 **Current handoff (2026-10-28):** [HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md) - supersedes [HANDOFF-2026-10-27.md](archive/HANDOFF-2026-10-27.md) (the tree at `0c8faee`),
 with build/run/verify, today's gate result, the known gaps by surface, the config migration policy, the

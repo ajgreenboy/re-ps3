@@ -1,3 +1,8 @@
+> Updated 2026-11-07: this first pass (its "page move is 300 ms in mode 4, not traced" conclusion and section 5 open items) is
+> superseded. The runtime trace of 2026-11-05 (section "Runtime trace of the page move (same day): the content channel is mode 5,
+> 200 ms", further down) found no mode-4 call on a page open or close; `pageMilliseconds` is 200, mode 5 (`src/view.h`,
+> `src/view.cpp`). Read the later sections first.
+
 # Page-move duration and info-bar clock: Phase 4 trace notes
 
 Written 2026-10-25 by phase4-motion. Scope: trace the five explore_plugin float constants behind the
@@ -214,6 +219,9 @@ Conclusion for the clock:
   resolution as the strong constraint.
 
 ## 5. Open items and suggested next traces
+
+(Updated 2026-11-07: item 1 is closed by the 2026-11-05 runtime trace, see the note at the top of this file; item 2, the clock writer, is
+tracked in audit/INFO-BAR.md.)
 
 1. Page move: find the depth/page transition call in xmb_plugin or vsh.elf's XMB page code and resolve
    the mode argument by disassembly (the decompiler's float/int split is not reliable). Only a call

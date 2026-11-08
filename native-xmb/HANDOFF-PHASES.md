@@ -24,7 +24,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 
 ## Native Jellyfin continuation (2026-10-26)
 
-[Native service/player and verification handoff](audit/JELLYFIN-NATIVE.md): local authentication, native library pages, direct and server-transcoded HLS playback, queue/seek/pause/return, session reporting and sign out. Real Jellyfin 12.4 verified with generated media. Posters, selectors, resume UI and remembered sign-in remain open.
+[Native service/player and verification handoff](audit/JELLYFIN-NATIVE.md): local authentication, native library pages, direct and server-transcoded HLS playback, queue/seek/pause/return, session reporting and sign out. Real Jellyfin 12.4 verified with generated media. Posters, selectors, resume UI and remembered sign-in remain open. Updated 2026-11-07: remembered sign-in (DPAPI), posters, audio/subtitle selectors, resume rows, server text subtitles and a Streaming Quality ceiling are done; the page backdrop draw (`Shell::pageBackdrop()` has no caller in `src/*.cpp`) and image-based subtitles are still open (audit/JELLYFIN-NATIVE.md, audit/FEATURE-STATUS-2026-11-04.md).
 
 ## Latest broader continuation (2026-10-26)
 
@@ -48,6 +48,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 | Steam Friends | Signed-in local client helper reads 46 real friends/presence without changing profile privacy; Web API remains optional fallback. See audit/STEAM-CLIENT-FRIENDS.md |
 | Imported apps | Native editor and versioned importer add executables, browser apps and authenticated Jellyfin services. Jellyfin direct/HLS playback verified; see audit/JELLYFIN-NATIVE.md |
 | Host settings | System Information, network list, video/audio output and master volume read and write the real PC |
+| Network and media services (2026-11-07) | Spotify in Music (PKCE, Connect control; audit/SPOTIFY.md), Search for Media Servers (DLNA/UPnP client, `<data>/dlna.json`; audit/DLNA.md), Network > Tailscale (CLI-driven; audit/TAILSCALE.md), playlists, Jellyfin quality and text subtitles, Steam play activity and actions, RAWG artwork. Plan of record: audit/PHASES-2026-11-07.md |
 
 ## In flight (2026-10-25; updated 2026-10-26)
 
@@ -619,6 +620,8 @@ re-baseline.
 
 ## Next steps (recommended order)
 
+Updated 2026-11-07: the plan of record is now [audit/PHASES-2026-11-07.md](audit/PHASES-2026-11-07.md); the list below is the 2026-10-26/27 order, kept as history. Since it was written these landed: Spotify (Music column), native DLNA/UPnP discovery, a Network > Tailscale page, playlists (Create, Add, Add All, Move Up/Down, Delete), Jellyfin streaming quality and server text subtitles, Steam play activity and actions, official service icons, RAWG game artwork (Game > Artwork Settings), user management from explore_plugin and the traced screensaver. Item 2 below is closed (see its note).
+
 Latest user direction adds Steam games/Friends and future content tooling. The implemented first slice and its
 remaining requirements are in `audit/STEAM-INTEGRATION.md`: prioritize a recorded launch-return capture, permitted friends
 connection, per-game ICON0/PIC1 overrides and the importer editor (now integrated; see the latest continuation). Updated 2026-10-26:
@@ -647,7 +650,7 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
    media playback, and an end-to-end install -> launch -> return capture.
 1. **Phase 7 harness first:** RPCS3 reference captures of named states plus `work/ab-shot.ts` scores, so every later
    change has a number.
-2. **Phase 4 leftovers:** the page move's animate call is still not traced. The five explore_plugin constants at
+2. **Phase 4 leftovers:** Updated 2026-11-07: closed. The 2026-11-05 runtime trace (RPCS3 PC-watch hook; audit/PAGE-MOVE.md, "Runtime trace of the page move") shows a page open and close set up eases in mode 5 (mostly 200 ms) or mode 0 and never mode 4, so `pageMilliseconds` is 200 and the depth ease mode 5 (`src/view.h`, `src/view.cpp`); the "300 ms mode 4" fit below was the ease's own tail, not the duration. The rest of this item is the 2026-10-26 state, kept for the record: the page move's animate call is still not traced. The five explore_plugin constants at
    DAT_00270674 / DAT_002706c0 / DAT_00270658 / DAT_00270d30 / DAT_00271d0c are exactly 300.0f but drive content and
    dialog transitions, NOT the page move, so they cannot be cited as its evidence; the page move lives in vsh.elf paf
    PhXmBar (genuine 0.3 s bar constant DAT_0068f020). 300 ms at mode 4 remains a fit - the only model matching the
@@ -813,7 +816,7 @@ fidelity thresholds remain open. Do not follow the RPCS3 capture/input workaroun
 - Media playback UI (photo/music/video controls from photoviewer/videoplayer/audioplayer RCOs).
 - Folder playback queues, repeat modes, shuffle, bounded failed-file skipping and photo zoom/pan/reset are now
   implemented and observed in local replays (audit/MEDIA-CONTINUATION.md). Original player panels and broader
-  library/playlist semantics remain open.
+  library/playlist semantics remain open. Updated 2026-11-07: playlists exist (`src/playlists.*`, audit/FEATURE-STATUS-2026-11-04.md item 1); the firmware's two-pane playlist editor and tag-driven library semantics remain open.
 - PSN-dependent indicators stay off unless a real state exists; don't fake online features.
 
 ### Phase 7: verification harness

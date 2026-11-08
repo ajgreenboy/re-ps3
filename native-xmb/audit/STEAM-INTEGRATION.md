@@ -1,5 +1,12 @@
 # Steam and native content handoff — 2026-10-25
 
+> Updated 2026-11-07: the Game column's current shape is installed titles inline (most recently played first, each with Steam's recorded
+> play time and last-played date in its detail line, `src/steam_activity.*`), a Steam Store row and one All Games folder
+> (All Titles, one folder per collection with a mosaic icon, Not Installed, Family Shared). Triangle on a Steam title offers
+> Open in Steam Library, Store Page, and for installed titles Screenshots, Verify Game Files and Delete, all `steam://`
+> hand-offs (`steam://nav/games/details/<id>`, `store/<id>`, `open/screenshots/<id>`, `validate/<id>`, `uninstall/<id>`) that
+> Steam itself carries out and confirms. Commits aff3cb6 and 4e64c31. The text below is the 2026-10-25 handoff.
+
 The Game column now discovers installed Steam titles directly. The Friends column is backed by a separate Steam service. Imported executables and service apps share a versioned native registry. Steam remains the owner of installation, DRM and game launch; Steam data is read-only.
 
 ## Installed-PKG presentation

@@ -116,6 +116,7 @@ Use Steam and imported content as explicitly identified native providers for the
 - [x] ISC-46.4: Sign-out/reconnect keeps the new session usable and cancels stale browse results.
 - [x] ISC-46.5: Anti: native player logs contain no Jellyfin token query parameters after nested HLS playback.
 - [ ] ISC-46.6: Native Jellyfin posters, track/subtitle selectors and resume UI are verified.
+  (Updated 2026-11-07: posters, selectors, resume rows, server text subtitles and a streaming-quality ceiling exist; the box stays unchecked because the page/hero backdrop is fetched and cached but `Shell::pageBackdrop()` has no draw call site, and image-based subtitles are disabled. audit/JELLYFIN-NATIVE.md.)
 
 > Criteria state note (2026-10-26): an unchecked box means the whole criterion is unmet, not that the
 > behaviour is absent. ISC-20 has a tracked launch/return lifecycle for RPCS3 and imported apps and a
@@ -134,10 +135,12 @@ Use Steam and imported content as explicitly identified native providers for the
 >   real; since 2026-10-26 Back stores a position in `media/resume` and the Video column lists it in Continue
 >   Watching (`Shell::migrateResumePoints()`, `openContinueWatching()`; audit/MEDIA-CONTROLS.md). Unchecked
 >   because library rows still carry no tags and playlists do not exist.
+>   Updated 2026-11-07: playlists now exist (`src/playlists.*`: create, add, Add All, Move Up/Down, delete, per-user JSON; audit/FEATURE-STATUS-2026-11-04.md item 1), so the remaining reasons are the missing library tags and the firmware's two-pane playlist editor. The box stays unchecked.
 > - **ISC-17** (video browsing, playback, subtitles, controls): sidecar SRT/WebVTT subtitles, the in-player
 >   Triangle panel and resume now exist (`src/subtitles.cpp`, `Shell::buildPlayerOptions()`,
 >   `View::drawSubtitle()`; audit/SUBTITLES.md). Unchecked because embedded/disc subtitle streams and Jellyfin
 >   subtitles are not read and a switch between real alternative audio tracks is unproven.
+>   Updated 2026-11-07: Jellyfin server text subtitles are read (`src/jellyfin_shell.cpp`, audit/JELLYFIN-NATIVE.md; commit 66e0f4b); embedded/disc and image-based subtitles are still not, so the box stays unchecked.
 
 ### Reconciliation with the completion ledger (2026-10-27)
 

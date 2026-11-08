@@ -414,7 +414,7 @@ void Shell::resolveMediaColumns() {
             "no Blu-ray drive and no PS3 BD data store, so there is nothing to manage."}},
         {"video:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_video",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
-            "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
+            "This build runs it natively (src/dlna_client.*, audit/DLNA.md): SSDP discovery, then ContentDirectory browsing."}},
         {"video:seg_editingvideo_mgmt",{"video-editor",Action::Unavailable,"msg_video_editor_and_upload","item_tex_upload","explore_category_video",
             "Video Editor & Uploader is the console's own scene editor (scenefolder_plugin) for clips recorded on the "
             "system. No capture device and no editor exist in this build, so the row lists the firmware's function "
@@ -422,12 +422,12 @@ void Shell::resolveMediaColumns() {
         // Music (category_music.xml)
         {"music:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_music",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
-            "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
+            "This build runs it natively (src/dlna_client.*, audit/DLNA.md): SSDP discovery, then ContentDirectory browsing."}},
         {"music:seg_playlist_mgmt",{"playlists",Action::PlaylistFolder,"msg_playlists","tex_playlist","explore_category_music",""}},
         // Photo (category_photo.xml)
         {"photo:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_photo",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
-            "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
+            "This build runs it natively (src/dlna_client.*, audit/DLNA.md): SSDP discovery, then ContentDirectory browsing."}},
         {"photo:seg_hakoniwa",{"gallery",Action::Unavailable,"msg_photo_gallery","","file",
             "Photo Gallery is the console's own 3D gallery application (hakoniwa). This build's photo viewer is the "
             "full-screen slideshow Photo Library opens."}},
