@@ -1351,3 +1351,54 @@ title). No threshold or reference file was edited.
 - this section.
 - no CMake change (`src/osk_layout.cpp` was already listed), no change to `osk_layout.*`, `assets.*`,
   `shell.*` or `main.cpp`.
+
+## 14. Captured OSK variants (2026-11-08): full-key, tenkey, symbol
+
+Captured the three firmware OSK layouts live in RPCS3 (driven and grabbed via `CopyFromScreen`; the frames are the
+evidence for FIDELITY-SURFACES-MAP S24). The three shapes:
+
+| Variant | Source container | Trigger |
+|---|---|---|
+| full-key qwerty | `oskfullkeypanel_plugin` | the default (Users > Create New User > name > Edit) |
+| tenkey (phone keypad) | `oskpanel_plugin` | the **grid-of-dots icon** (full-key row 6 col 5 / tenkey row 6 col 1) |
+| symbol punctuation | the full-key module's symbol palette (`sym_btn01..sym_btn49`, the 7x7 `symbol_palette`) | the **`@#:` key** (full-key row 5 col 1 / tenkey row 4 col 1) |
+
+### 14.1 Full-key (default)
+
+Rows: `1234567890` / `qwertyuiop` / `asdfghjkl'` / `zxcvbnm,.?`, then two function rows. Function row 5:
+`@#:` (col 1), blank, `a/à` (L2), `a/A` (R2), Backspace, Space, Prediction, `a`/`0` indicators. Function row 6:
+Up, Down, Left(L1), Right(R1), grid-of-dots, Input Mode, Enter, overlapping-squares, clipboard.
+
+### 14.2 Tenkey (phone keypad)
+
+`.@1 ABC2 DEF3` / `GHI4 JKL5 MNO6` / `PQRS7 TUV8 WXYZ9` / `@#: a/A /=0`, then the arrow/backspace/space row and a
+control row (grid-of-dots, wrench, Input Mode, Enter, ...).
+
+### 14.3 Symbol punctuation (7-column grid, overlaid)
+
+`! " # $ % & '` / `( ) * + , - .` / `/ : ; < = > ?` / `@ [ \ ] ^ \` _` / `{ | } ~ ¡ ¿ ´` / `‘ ’ , “ ” „ °` /
+`< > « » ª º ×`. This is the symbol palette rendered as a full 7-column keyboard, opened by `@#:`.
+
+### 14.4 Mode-switching map
+
+| From | Key (row, col) | To |
+|---|---|---|
+| full-key | grid-of-dots (6,5) | tenkey |
+| full-key | `@#:` (5,1) | symbol |
+| tenkey | grid-of-dots (6,1) | full-key |
+| tenkey | `@#:` (4,1) | symbol |
+
+### 14.5 Implementation scope (native)
+
+`src/osk_layout.cpp` today loads only `oskfullkeypanel_plugin` (lower/caps + the 7x7 palette as `OskPalette`). S24
+still needs, in the native app:
+
+1. **Tenkey** - load `oskpanel_plugin` (its `.prx` keypad rows at file 0x36048, RCO `tenkey_list_window_focus`) into a
+   second `OskLayout`; add a variant axis to `OskLayout` and draw it in `drawOsk`.
+2. **Symbol** - render the already-loaded 49-symbol palette as the 7-column full keyboard the `@#:` key shows, and wire
+   `@#:`/grid-of-dots/Input Mode to switch variants.
+
+Both touch `view.cpp` (`drawOsk`, `openOsk`, `oskMove`) - a write-fenced hot file - so the draw/switch wiring is
+deferred until that file is free. The data-model part (`osk_layout.cpp`, adding the tenkey loader) can land first.
+
+Frames: `C:\dev\out\rpcs3-cap\u4.png` (full-key), `grid1.png` (tenkey), `sym5.png` (symbol). Local only.
