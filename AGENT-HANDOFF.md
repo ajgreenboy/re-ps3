@@ -59,9 +59,6 @@ $env:PATH="C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH"
 - **Tooling:** Bun/TypeScript for scripts (`~/.bun/bin/bun.exe`; never npm, no Python without
   approval) and C++ for application code.
 - **Online features must never fake anything:** no sign-in, purchases, trophies or messages.
-- **You can't capture or drive RPCS3.** The capture/control tool is blocked on `rpcs3.exe` ("product
-  policy blocks this app"), so firmware reference frames come from the user's own rig only. Don't work
-  around the block with another capture or input method.
 
 ## 5. Current state (from the 2026-11-08 handoff; re-verify before relying on it)
 

@@ -105,14 +105,11 @@ These source implementations must be distinguished from observed behavior.
   textures and RSX/SPU programs. Their existence is recorded for the next phase;
   the procedural wave has not been replaced by that simulation.
 
-## Reference observation constraint
+## Reference observation constraint (retired 2026-11-08)
 
-RPCS3 VSH was launched and its window title reported around60 FPS. Computer Use
-returns `product policy blocks this app: rpcs3.exe` when capture/control is
-attempted. Do not bypass this restriction through another capture/input method.
-Use screenshots or recordings attached by the user. Supplied references now
-include the October23,19:28 Game screenshot and19:35 navigation recording.
-Automated RPCS3 navigation/recording is not established.
+The earlier rule that blocked capturing or driving RPCS3 ("product policy blocks this app") is retired.
+RPCS3 can now be captured and driven directly for reference frames. The October 23, 19:28 Game
+screenshot and 19:35 navigation recording were the pre-capture route.
 
 ## Next phases
 

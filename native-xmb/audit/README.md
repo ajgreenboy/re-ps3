@@ -130,10 +130,9 @@ The documents explicitly retain unmeasured and inaccessible reference details.
   online integration.
 - Local 4.93 XML, RCO and QRC files supply installed resource evidence. They are
   read without modifying the firmware or emulated-console data.
-- The user supplied the screenshot and recording. Computer Use blocks RPCS3;
-  analysis uses those supplied files, without another capture/control route.
-  Dated note (2026-10-27/28): the [capture batch](CAPTURE-BATCH-2026-10-28.md) drove RPCS3
-  directly with a scripted key/grab/burst runner, so that sentence describes the 2026-10-24 route.
+- RPCS3 can be driven and captured directly for reference frames (the 2026-10-27/28 capture batches
+  drove it with a scripted key/grab/burst runner); the earlier 2026-10-24 route used user-supplied
+  screenshots and recordings.
 - [RCOMage layouts](https://github.com/kakaroto/RCOMage/blob/master/src/rcofile.h),
   [object definitions](https://github.com/kakaroto/RCOMage/blob/master/data/objattribdef-ps3.ini)
   and [animation definitions](https://github.com/kakaroto/RCOMage/blob/master/data/animattribdef-ps3.ini)

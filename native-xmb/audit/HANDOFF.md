@@ -207,7 +207,6 @@ conditional variants. Unchecked project criteria remain open until observed.
 - No new formal test suite unless the user asks.
 - Never upload firmware/raw extracted assets, console identities, recordings or
   private runtime state. Source/docs and approved UI screenshots can be committed.
-- Computer Use blocks RPCS3. Do not bypass it using another capture/input route.
 - Physical Escape can stop Computer Use; prefer Backspace for native Back.
 
 ## Definition of completion
