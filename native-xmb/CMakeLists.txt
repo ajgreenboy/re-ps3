@@ -31,6 +31,7 @@ qt_add_executable(re-ps3-native
     src/self_check.cpp src/self_check.h src/system_check_shell.cpp
     src/wol_client.cpp src/wol_client.h src/homeassistant_client.cpp src/homeassistant_client.h src/home_shell.cpp
     src/photo_viewport.cpp src/photo_viewport.h
+    src/gallery_params.cpp src/gallery_params.h src/gallery_model.cpp src/gallery_model.h src/gallery_thumbs.cpp src/gallery_thumbs.h
     src/interaction_audio.cpp src/interaction_audio.h
     src/text_renderer.cpp src/text_renderer.h
     src/font_raster.cpp src/font_raster.h

@@ -8,7 +8,9 @@
 #include <memory>
 #include <QSettings>
 #include "catalog.h"
+#include "gallery_model.h"
 #include "system_power.h"
+#include "coldboot.h"
 #include "rsx_program.h"
 #include "p3t.h"
 #include "rco_objects.h"
@@ -360,6 +362,11 @@ int main(int argc,char** argv) {
     parser.addOption({"settings-page","Limit --settings-report's pages array to one page id (system, video, theme, ...)","page-id"});
     parser.addOption({"month-sheet","Write a local contact sheet of the qgl/lines month_bg day/night textures and exit","image-file"});
     parser.addOption({"font-report","Write which firmware font renders each sample string's glyphs and exit","text-file"});
+    parser.addOption({"gallery-params","Write the Photo Gallery's parsed hknw_plugin/parameters.txt table as JSON, then exit","json-file"});
+    parser.addOption({"gallery-layout","Index the Photo library recursively, write the gallery's piles and floor layout as JSON, then exit (uses --data-dir)","json-file"});
+    parser.addOption({"gallery-root","Photo folder for --gallery-layout (repeatable; default: the Photo library folder preference)","directory"});
+    parser.addOption({"gallery-sort","Pile order for --gallery-layout: newest (default), oldest or random","order"});
+    parser.addOption({"gallery-thumbs","With --gallery-layout: also warm the thumbnail LOD cache under <data>/cache/gallery/thumbs and report it"});
     parser.addOption({"decode-fp","Decode RSX fragment-program captures (archive:lib/x.fpo@dir) into named parameter values and exit","spec"});
     parser.addOption({"dump-cg","Translate the original qgl/lines Cg programs to GLSL into a local folder and exit","directory"});
     parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});
@@ -855,6 +862,13 @@ int main(int argc,char** argv) {
         painter.end();
         if(!sheet.save(parser.value("icon-sheet"))){qCritical()<<"Cannot save icon sheet";return 2;}
         return assets.failedImages()?1:0;
+    }
+    if(parser.isSet("gallery-params") || parser.isSet("gallery-layout")) {
+        xmb::GalleryReportRequest request;request.devFlash=parser.value("dev-flash");request.dataDir=data;
+        request.layout=parser.isSet("gallery-layout");request.outputPath=parser.value(request.layout?"gallery-layout":"gallery-params");
+        request.roots=parser.values("gallery-root");if(parser.isSet("gallery-sort"))request.sort=parser.value("gallery-sort");
+        request.warmThumbs=parser.isSet("gallery-thumbs");
+        return xmb::runGalleryReport(request);
     }
     if(parser.isSet("font-report")) {
         QFile out(parser.value("font-report"));
