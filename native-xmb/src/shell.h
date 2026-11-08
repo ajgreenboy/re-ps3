@@ -14,6 +14,7 @@
 #include "homeassistant_client.h"
 #include "file_ops.h"
 #include "weather_client.h"
+#include "self_check.h"
 #include "steam_friends.h"
 #include "content_registry.h"
 #include "jellyfin_client.h"
@@ -91,7 +92,9 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // HA entity (value = its entity id).
     WolApp, WolWake, WolAddPage, WolAdd, HaApp, HaGroup, HaEntity,
     // Network > Weather (weather_shell.cpp): the column row and the Units toggle.
-    WeatherApp, WeatherUnits };
+    WeatherApp, WeatherUnits,
+    // Settings > System Settings > System Check (system_check_shell.cpp).
+    SystemCheck };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -578,7 +581,9 @@ private:
     bool activateWeather(const Entry& entry);
     QString weatherSummary() const;
     QVector<Entry> weatherRows() const;
-    void refreshWeatherRows();   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
+    void refreshWeatherRows();
+    SelfCheck* systemCheck_=nullptr;
+    void openSystemCheck();   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
     void spotifyCommand(OptionCommand command);
     PlaylistStore playlists_;   // the active user's playlists (playlists.h); reopened on a user switch
     QString dataDirectory_,steamRoot_,steamId_;
@@ -704,7 +709,7 @@ private:
     int columnSink_=0;
     // `grouped` is a page the item menu's Group Content level rebuilt into letter folders: `groupedSource` keeps
     // the ungrouped rows so All can put them back without a rescan, and the folders' rows are the same entries.
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; QString dlna; int dlnaServer=-1; QString tailscale; QString wol,ha; bool weather=false; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; QString dlna; int dlnaServer=-1; QString tailscale; QString wol,ha; bool weather=false; bool systemCheck=false; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step

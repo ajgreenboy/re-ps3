@@ -2095,6 +2095,7 @@ void Shell::activate() {
     case Action::HaApp:case Action::HaGroup:case Action::HaEntity:
         activateHome(entry);break;
     case Action::WeatherApp:case Action::WeatherUnits:activateWeather(entry);break;
+    case Action::SystemCheck:openSystemCheck();break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
     case Action::JellyfinPlay:openJellyfinMedia(entry);break;

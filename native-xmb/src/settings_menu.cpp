@@ -287,6 +287,8 @@ const QVector<RowSpec>* firmwareRows(const QString& id) {
         {"init_console","msg_init_console","msg_init_console_explanation",Action::Information,nullptr,nullptr,"Restore PS3 System"},
         {"ex_os_install","msg_ex_os_install","msg_ex_os_install_explanation",Action::Information,nullptr,nullptr,"Install Other OS"},
         {"information","msg_console_info","msg_console_info_explanation",Action::Information,nullptr,nullptr,"System Information"},
+        // Native: a read-only check of this PC (self_check.h), after the console's own System Information.
+        {"system_check",nullptr,nullptr,Action::SystemCheck,nullptr,nullptr,"System Check","Checks this PC's files, network and services."},
         {"aboutps3","msg_aboutps3","msg_aboutps3_explanation",Action::Information,nullptr,nullptr,"About PlayStation 3"}};
     static const QVector<RowSpec> sound{
         // H8: the console's output-jack page becomes the Windows playback endpoint chooser (host/audioOutput).

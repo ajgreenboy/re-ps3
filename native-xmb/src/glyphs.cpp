@@ -202,6 +202,24 @@ const QImage& play() {
     return image;
 }
 
+const QImage& check() {
+    static const QImage image=line([](QPainter& p){p.drawPolyline(QPolygonF{{56,132},{108,184},{204,80}});});
+    return image;
+}
+
+const QImage& warning() {
+    static const QImage image=line([](QPainter& p){
+        p.drawPolygon(QPolygonF{{128,40},{224,212},{32,212}});
+        p.drawLine(QPointF(128,100),QPointF(128,152));p.drawPoint(QPointF(128,184));
+    });
+    return image;
+}
+
+const QImage& cross() {
+    static const QImage image=line([](QPainter& p){p.drawLine(QPointF(64,64),QPointF(192,192));p.drawLine(QPointF(192,64),QPointF(64,192));});
+    return image;
+}
+
 const QImage& library(const QString& collectionType) {
     static const QImage none;
     static const QImage movies=line([](QPainter& p){

@@ -22,6 +22,9 @@ const QImage& powerOn();    // the power symbol
 const QImage& house();      // a house outline
 const QImage& bulb();       // a light bulb
 const QImage& play();       // a play triangle in a ring
+const QImage& check();      // a tick
+const QImage& warning();    // a triangle with an exclamation mark
+const QImage& cross();      // an X
 // A Jellyfin library by its CollectionType ("movies", "tvshows", "music", ...); null for unknown kinds.
 const QImage& library(const QString& collectionType);
 }
