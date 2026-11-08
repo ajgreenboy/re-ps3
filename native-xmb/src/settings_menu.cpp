@@ -2102,7 +2102,7 @@ void Shell::openChoices(const QString& key,const QString& title) {
 }
 QString Shell::valueText(const Entry& entry) const {
     if(entry.setting=="media/repeatMode")return QStringList{"Off","Repeat One","Repeat All"}.value(mediaRepeatMode());
-    if(entry.action==Action::SelectUser)return entry.value==profiles_.activeId()?QString(QChar(0x25cf)):QString{};
+    if(entry.action==Action::SelectUser)return !loggedOut_ && entry.value==profiles_.activeId()?QString(QChar(0x25cf)):QString{};
     // ---- the Settings pages ------------------------------------------------------------------------
     // A row on a Settings page shows the machine's own value first (host::rowValue) and the app's stored
     // value second (settingsChoiceLabel), and either one is a real reading. A row with neither is an action

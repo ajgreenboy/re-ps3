@@ -52,6 +52,22 @@ public:
     QImage iconImage(const Profile& profile, const QString& flashRoot) const;
     static QImage readIcon(const QString& path);
     static constexpr int IconSize = 162; // the firmware icons' own size (explore/user/*.png are 162x162)
+    // Automatic Login (explore_plugin_full msg_auto_login; the user-row menu's On/Off level, table 0x27dc50).
+    // One user at most: "From now on, "%1" will be logged in automatically when the PS3 system is started"
+    // (msg_auto_login_set) names a single user, so turning it on for one user turns it off for the others
+    // (INFERRED from that wording; the console's storage is not traced).
+    // Stored as the optional top-level "autoLogin" key of profiles.json:
+    //   absent     a file written before this option existed: the build starts as the last selected user,
+    //              exactly as before (legacy; autoLoginId() reports that user so the menu shows On for it);
+    //   ""         nobody logs in automatically: with two or more users the XMB starts logged out;
+    //   "<id>"     that user is signed in at start.
+    QString autoLoginId() const { return autoLoginStored_?autoLogin_:activeId_; }
+    bool setAutoLogin(QString id, bool on);
+    // The start decision. True: start signed in as startupUser(). False: start logged out (the console's
+    // category_user_login.xml column). One user always starts signed in (INFERRED: with one user the
+    // firmware's user-row menu has no Log Out/Automatic Login rows, table 0x27dc58).
+    bool startsSignedIn() const;
+    QString startupUser() const;
     QString error() const { return error_; }
 
 signals:
@@ -64,10 +80,13 @@ private:
     QString activeId_;
     QString error_;
     QVector<Profile> profiles_;
+    QString autoLogin_;            // see autoLoginId(); meaningful only when autoLoginStored_
+    bool autoLoginStored_ = false; // the file carries the "autoLogin" key
     bool writable_ = true;
 
     bool fail(QString message);
     bool commit(const QVector<Profile>& profiles, const QString& activeId);
+    bool commit(const QVector<Profile>& profiles, const QString& activeId, bool autoLoginStored, const QString& autoLogin);
 };
 
 }

@@ -103,7 +103,8 @@ Profiles::Profiles(const QString& dataDirectory, QObject* parent)
     const auto root = document.object();
     const auto version = root.value("version");
     if (!version.isDouble() || version.toDouble() != 1.0 ||
-        !hasOnlyKeys(root, {"version", "profiles", "activeId"}) ||
+        !hasOnlyKeys(root, {"version", "profiles", "activeId", "autoLogin"}) ||
+        (root.contains("autoLogin") && !root.value("autoLogin").isString()) ||
         !root.value("profiles").isArray() || !root.value("activeId").isString()) {
         preserve(QStringLiteral("Profiles use an unknown, newer or invalid schema."));
         return;
@@ -140,8 +141,15 @@ Profiles::Profiles(const QString& dataDirectory, QObject* parent)
         preserve(QStringLiteral("The profiles file selects an unknown user."));
         return;
     }
+    const auto autoLogin = root.value("autoLogin").toString();
+    if (!autoLogin.isEmpty() && !ids.contains(autoLogin)) {
+        preserve(QStringLiteral("The profiles file sets Automatic Login for an unknown user."));
+        return;
+    }
     profiles_ = std::move(loaded);
     activeId_ = active;
+    autoLoginStored_ = root.contains("autoLogin");
+    autoLogin_ = autoLogin;
 }
 
 QString Profiles::activeName() const {
@@ -158,6 +166,11 @@ bool Profiles::fail(QString message) {
 }
 
 bool Profiles::commit(const QVector<Profile>& profiles, const QString& activeId) {
+    return commit(profiles, activeId, autoLoginStored_, autoLogin_);
+}
+
+bool Profiles::commit(const QVector<Profile>& profiles, const QString& activeId, bool autoLoginStored,
+                      const QString& autoLogin) {
     if (!writable_) { emit failed(error_); return false; }
     if (!QDir().mkpath(directory_)) return fail(QStringLiteral("The local profiles directory could not be created."));
     QJsonArray users;
@@ -167,7 +180,11 @@ bool Profiles::commit(const QVector<Profile>& profiles, const QString& activeId)
         if (!profile.icon.isEmpty()) user.insert("icon", profile.icon);
         users.append(user);
     }
-    const auto bytes = QJsonDocument(QJsonObject{{"version", 1}, {"profiles", users}, {"activeId", activeId}}).toJson();
+    QJsonObject root{{"version", 1}, {"profiles", users}, {"activeId", activeId}};
+    // "autoLogin" is written only once the option has been used, so an untouched file keeps its exact bytes'
+    // meaning (start as the last selected user) for this and older builds.
+    if (autoLoginStored) root.insert("autoLogin", autoLogin);
+    const auto bytes = QJsonDocument(root).toJson();
     QSaveFile file(path_);
     file.setDirectWriteFallback(false);
     if (!file.open(QIODevice::WriteOnly))
@@ -180,6 +197,8 @@ bool Profiles::commit(const QVector<Profile>& profiles, const QString& activeId)
     if (!file.commit()) return fail(QStringLiteral("Profiles could not be committed: %1").arg(file.errorString()));
     profiles_ = profiles;
     activeId_ = activeId;
+    autoLoginStored_ = autoLoginStored;
+    autoLogin_ = autoLogin;
     error_.clear();
     emit changed();
     return true;
@@ -243,12 +262,40 @@ bool Profiles::remove(QString id) {
     const auto before = next.size();
     next.erase(std::remove_if(next.begin(), next.end(), [&](const Profile& p) { return p.id == id; }), next.end());
     if (next.size() == before) return fail(QStringLiteral("The selected local user does not exist."));
-    if (!commit(next, activeId_)) return false;
+    // A deleted user cannot stay the automatic one; nobody logs in automatically after that.
+    const bool wasAuto = autoLoginStored_ && autoLogin_ == id;
+    if (!commit(next, activeId_, autoLoginStored_, wasAuto ? QString() : autoLogin_)) return false;
     // The record is gone; its copied picture (if any) goes with it.
     const QString picture = picturePath(id);
     if (QFileInfo::exists(picture) && !QFile::remove(picture))
         qWarning().noquote() << "profiles: deleted" << id << "but its icon picture stays:" << picture;
     return true;
+}
+
+bool Profiles::setAutoLogin(QString id, bool on) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (!writable_) { emit failed(error_); return false; }
+    bool found = false;
+    for (const auto& profile : profiles_) if (profile.id == id) { found = true; break; }
+    if (!found) return fail(QStringLiteral("The selected local user does not exist."));
+    const QString current = autoLoginId();
+    QString next;
+    if (on) next = id;
+    else if (current == id) next.clear();
+    else { error_.clear(); return true; }  // Off on a user who is not the automatic one changes nothing
+    if (autoLoginStored_ && next == autoLogin_) { error_.clear(); return true; }
+    return commit(profiles_, activeId_, true, next);
+}
+
+bool Profiles::startsSignedIn() const {
+    if (profiles_.size() <= 1) return true;
+    return !autoLoginId().isEmpty();
+}
+
+QString Profiles::startupUser() const {
+    if (!startsSignedIn()) return {};
+    if (profiles_.size() <= 1) return activeId_;
+    return autoLoginId();
 }
 
 QString Profiles::picturePath(const QString& id) const {

@@ -184,6 +184,8 @@ enum class OptionCommand { Activate, Information,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
     // Information with two or more users, Information alone with one. Delete runs the traced two-step ask.
     UserLogOut, UserAutoLogin, UserDelete,
+    // Automatic Login's On/Off level (table 0x27dc50): MenuOption::index 1 = On, 0 = Off.
+    UserAutoLoginTarget,
     // A Jellyfin image subtitle the client cannot draw: re-open the title with that stream burned into a
     // server transcode (MenuOption::index is the server's stream index).
     SubtitleBurnIn };
@@ -256,7 +258,10 @@ public:
     ~Shell() override;
     QString artworkStatus() const { return artworkStatus_; }
     void retryArtwork();
-    const QVector<Category>& categories() const { return categories_; }
+    // Logged out (P3), the XMB is the console's category_user_login.xml: the Users column alone. The view reads
+    // the bar through this accessor, so the other columns are absent there while category_ stays 0 (Users).
+    const QVector<Category>& categories() const { return loggedOut_?loginCategories_:categories_; }
+    bool loggedOut() const { return loggedOut_; }
     const QVector<Entry>& entries() const;
     int category() const { return category_; }
     int selection() const { return pages_.isEmpty()?selections_[category_]:pages_.last().selection; }
@@ -922,6 +927,14 @@ private:
     void stepPhoto(int delta);
     void showPhoto();
     void rebuildUsers();
+    // P3 Log Out / Automatic Login. loggedOut_ is the session state only (never stored): a restart applies
+    // Profiles::startsSignedIn() again. loginCategories_ is the one-column set categories() returns meanwhile.
+    bool loggedOut_=false;
+    QVector<Category> loginCategories_;
+    void logOut();
+    // Ends everything the signed-in user had open (playback, pages, panels, messages). Shared by a user switch
+    // and Log Out: the console reloads the XMB in both cases.
+    void endUserSurfaces();
     // P4 avatar editing: the user's Information page (step 1), the icon page (2), the Pictures page (3).
     void openUserInfo(const QString& id);
     void openUserIcons(const QString& id);

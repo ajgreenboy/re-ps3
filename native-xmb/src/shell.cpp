@@ -1288,6 +1288,22 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     // build holds {id: milliseconds} with no path, so those entries are resolved or dropped here, once,
     // before anything can list or resume them.
     migrateResumePoints();
+    // P3 start: Automatic Login signs its user in directly; without it (and with two or more users) the XMB
+    // starts logged out on the console's login column. A file without the autoLogin key starts as the last
+    // selected user, as every earlier build did (Profiles::autoLoginId).
+    if(profiles_.startsSignedIn()) {
+        const QString start=profiles_.startupUser();
+        if(!start.isEmpty() && start!=profiles_.activeId()) {
+            const QString previous=profiles_.activeId();
+            if(profiles_.select(start) && !preferences_.setProfile(start))profiles_.select(previous);
+        }
+        qInfo().noquote()<<"profiles: start signed in as"<<profiles_.activeId()
+            <<(profiles_.autoLoginId()==profiles_.activeId()?"(automatic login, or the last user of a file without the autoLogin key)":"(only user)");
+    } else {
+        loggedOut_=true;
+        category_=0;
+        qInfo().noquote()<<"profiles: start logged out (no automatic login user); last user"<<profiles_.activeId();
+    }
     playlists_.open(dataDirectory_,profiles_.activeId());
     const QString sys="explore_category_sysconf",full="explore_plugin_full";
     const auto friendText=[&assets](const QString& id,const QString& fallback){return assets.text("explore_category_friend",id,fallback);};
@@ -1846,6 +1862,7 @@ void Shell::horizontal(int delta) {
         qInfo().noquote()<<"busy: navigation refused (Left/Right at the root) while a list loads";
         return;
     }
+    if(loggedOut_)return;   // P3: the login column is the only column (category_user_login.xml)
     const int previous=category_;category_=std::clamp(category_+delta,0,int(categories_.size())-1);
     if(previous!=category_ && categories_[category_].id=="friends" && SteamOwned::hasApiKey()
        && (!friendsAge_.isValid() || friendsAge_.elapsed()>30000))refreshSteamFriends();
@@ -1983,10 +2000,11 @@ void Shell::activate() {
         // XMB. Playback ends, pages/panels/messages close, and the columns and settings are rebuilt
         // against the new profile's values. rebuildUsers() also runs through Profiles::changed; it is
         // called again because selecting the already-active user emits nothing.
-        ++mediaRequest_;++photoRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;
-        mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};photoRotation_=0;player_->stop();player_->setSource(QUrl{});
-        resumePath_.clear();resumePending_=0;mediaDisplayPinned_=false;loading_=false;status_.clear();
-        pages_.clear();resetOptions();clearMessage();
+        // P3: from the logged-out login column this is Log In - the same switch, then the full XMB returns.
+        const bool loggingIn=loggedOut_;
+        loggedOut_=false;loginCategories_.clear();
+        endUserSurfaces();
+        if(loggingIn)qInfo().noquote()<<"profiles: logged in as"<<id;
         playlists_.open(dataDirectory_,id);
         applyPreferences();
         rebuildUsers();
@@ -2407,12 +2425,13 @@ void Shell::buildOptions() {
     // level, table 0x27dc50), msg_del, msg_info. With one user it is table 0x27dc58: msg_info alone.
     if(entry.action==Action::SelectUser) {
         if(userCount()>=2) {
-            // This build has no logged-out state and no login screen: it always starts as the last selected
-            // user. The two rows are listed and cannot be chosen, with that reason on screen.
-            addOption({"msg_logout","Log Out"},OptionCommand::UserLogOut,"user-row",false,
-                      tr("This native build has no logged-out state; select another user to switch."));
-            addOption({"msg_auto_login","Automatic Login"},OptionCommand::UserAutoLogin,"user-row",false,
-                      tr("This native build always starts as the last selected user."));
+            // P3. Log Out logs the signed-in user out whichever user row the menu was opened on (INFERRED: the
+            // table carries no per-row condition); on the login column nobody is signed in, so it is listed
+            // and cannot be chosen. Automatic Login opens its On/Off level (table 0x27dc50).
+            addOption({"msg_logout","Log Out"},OptionCommand::UserLogOut,"user-row",!loggedOut_,
+                      loggedOut_?tr("No user is logged in."):QString());
+            addOption({"msg_auto_login","Automatic Login"},OptionCommand::UserAutoLogin,"user-row");
+            options_.last().submenu=true;
             // Delete: the logged-in user's settings are in use, so this build refuses to delete that user
             // (Preferences::forgetProfile has the same rule). Whether the console offers the row for the
             // logged-in user is not traced.
@@ -3077,8 +3096,47 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     }
-    case OptionCommand::UserLogOut:
-    case OptionCommand::UserAutoLogin:
+    case OptionCommand::UserLogOut: {
+        // msg_logout_ask, then the login column (P3).
+        resetOptions();
+        if(loggedOut_)break;
+        showConfirm(assets_.text("explore_plugin_full","msg_logout_ask","Do you want to log out?"),QString(),
+                    [this]{logOut();});
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        emit changed();
+        break;
+    }
+    case OptionCommand::UserAutoLogin: {
+        // The On/Off level (table 0x27dc50). The current value is the focused one and carries `active`.
+        const bool on=profiles_.autoLoginId()==entry.value && !entry.value.isEmpty();
+        optionsParent_=options_;optionsNested_=true;optionsTitle_=optionLabel({"msg_auto_login","Automatic Login"});
+        options_.clear();
+        addOption({"msg_on","On"},OptionCommand::UserAutoLoginTarget,"auto-login",true,QString(),1);
+        addOption({"msg_off","Off"},OptionCommand::UserAutoLoginTarget,"auto-login",true,QString(),0);
+        options_[0].active=on;options_[1].active=!on;
+        optionsSelection_=on?0:1;
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        emit changed();
+        break;
+    }
+    case OptionCommand::UserAutoLoginTarget: {
+        const QString id=entry.value;
+        const bool on=option.index==1;
+        resetOptions();
+        if(!profiles_.setAutoLogin(id,on))break;   // failed() raised the store's reason
+        qInfo().noquote()<<"profiles: automatic login"<<(on?"on for":"off for")<<id
+            <<"- stored autoLogin="<<profiles_.autoLoginId();
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        if(on) {
+            QString name;
+            for(const auto& profile:profiles_.profiles())if(profile.id==id)name=profile.name;
+            showMessage(assets_.text("explore_plugin_full","msg_auto_login_set",
+                            QString::fromUtf8("From now on, \"%1\" will be logged in automatically when the PS3™ system is started."))
+                            .replace(QStringLiteral("%1"),name),MessageKind::Page);
+        }
+        emit changed();
+        break;
+    }
     // Listed but not choosable (the copy/delete backend does not exist yet), so this is unreachable until a
     // future backend enables the row and opens its own page here.
     case OptionCommand::Copy:
@@ -4547,6 +4605,11 @@ void Shell::refreshDirectory(){
 }
 void Shell::rebuildUsers(){
     auto& users=categories_[0].entries;
+    // A rebuild from a store change (Automatic Login, a rename) keeps the cursor on the user row it was on; any
+    // other state lands on the logged-in user, as before.
+    QString keepFocus;
+    if(const int at=selections_.isEmpty()?-1:selections_[0];at>=0 && at<users.size() && users[at].action==Action::SelectUser)
+        keepFocus=users[at].value;
     // category_user.xml's root view: #seg_poweroff, then user://localhost/create, then the users (console frame
     // col-users-r00 / users-row1-turn-off-system). The power row's art is explore_category_user:tex_power_off.
     users={item("poweroff",QObject::tr("Turn Off System"),"tex_power_off","explore_category_user",Action::TurnOffSystem),
@@ -4587,6 +4650,40 @@ void Shell::rebuildUsers(){
         steam.themeIcon="icon_accountmanage";
         users.push_back(std::move(steam));
     }
+    // P3 logged out: the console's category_user_login.xml root is #seg_poweroff then user://localhost/users -
+    // the power row and the user list, without Create New User (user://localhost/create is only in the signed-in
+    // category_user.xml). The host Restart/Sleep rows stay with the power row; the native Steam Account row,
+    // which belongs to a signed-in session, is left out (INFERRED placement for both native rows). Focus rests
+    // on the last user (INFERRED: no login-column frame exists).
+    if(loggedOut_) {
+        users.erase(std::remove_if(users.begin(),users.end(),[](const Entry& e){
+            return e.id==QStringLiteral("new-user") || e.id==QStringLiteral("steam-accounts");}),users.end());
+    }
+    const QString focused=keepFocus.isEmpty()?profiles_.activeId():keepFocus;
+    for(int i=0;i<users.size();++i)if(users[i].action==Action::SelectUser && users[i].value==focused)selections_[0]=i;
+    if(loggedOut_)loginCategories_={categories_[0]};
+    else loginCategories_.clear();
+}
+// The surfaces a signed-in user owns end on a switch and on Log Out: playback, pages, panels and messages.
+void Shell::endUserSurfaces(){
+    ++mediaRequest_;++photoRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;
+    mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};photoRotation_=0;player_->stop();player_->setSource(QUrl{});
+    resumePath_.clear();resumePending_=0;mediaDisplayPinned_=false;loading_=false;status_.clear();
+    pages_.clear();resetOptions();clearMessage();
+}
+// Log Out (explore_plugin_full msg_logout, asked with msg_logout_ask). The session's surfaces end and the XMB
+// becomes the login column; profiles.json keeps the last user as activeId, and the settings stay that user's
+// until another is picked (INFERRED: nothing on the login column reads them but volume and key tones).
+void Shell::logOut(){
+    if(loggedOut_)return;
+    const QString was=profiles_.activeId();
+    endUserSurfaces();
+    loggedOut_=true;
+    category_=0;
+    selections_[0]=-1;   // the login column opens on the user who just logged out (INFERRED, no frame)
+    rebuildUsers();
+    qInfo().noquote()<<"profiles: logged out"<<was<<"- login column rows="<<categories_[0].entries.size();
+    emit changed();
 }
 // --- Users > Steam Account (FIDELITY-BEHAVIOUR U4) -------------------------------------------------
 // The data layer has carried the account list and the honest two-step handoff since audit/STEAM-ACCOUNTS.md

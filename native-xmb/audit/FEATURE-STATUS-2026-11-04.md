@@ -58,6 +58,47 @@ release verification, and exact PS3 fidelity.
    Not done: the console's own default for a new user appears to be `explore/user/000.png` (the path user_plugin
    carries, and the look of `col-users-r02`), but the build keeps `tex_Avatar_Default` as the default so that existing
    frames do not change. The info-bar avatar slot (-376) is `view.cpp`'s and is still not drawn.
+   Updated 2026-11-08 (P3): Log Out and Automatic Login are implemented; the two user-row rows are no longer disabled.
+   Firmware evidence: explore_plugin_full (and user_plugin) strings `msg_logout` "Log Out", `msg_logout_ask` "Do you
+   want to log out?", `msg_login` "Log In", `msg_login_ask`, `msg_auto_login` "Automatic Login" and
+   `msg_auto_login_set` "From now on, "%1" will be logged in automatically when the PS3 system is started."
+   (`out/native-reference/rco-text.txt`); the user-row menu tables already cited in `shell.cpp` (0x27dc40 with
+   two or more users, the On/Off level 0x27dc50, 0x27dc58 Information alone with one user); and the logged-out XMB
+   definition `category_user_login.xml`, whose root view is `#seg_poweroff` then `user://localhost/users`
+   (`out/native-xmb/xmbml-inventory.json`) - the power row and the user list, without Create New User. The login
+   indicator (`indicator_login`/`tex_indi_Me`) is cleared when `user.id` is -1 (`explore_plugin_all.c`, the
+   function at line ~51160), so no user carries the diamond while logged out.
+   Behaviour: Automatic Login opens an On/Off level on a user row; On stores that user as the only automatic one
+   and shows `msg_auto_login_set`; Off clears it. Log Out asks `msg_logout_ask`, ends the session's surfaces (the
+   same teardown a user switch runs: playback, pages, panels, messages) and shows the login column: the Users column
+   alone (the bar shows one category, Left/Right do nothing) with Turn Off System, the host Restart/Sleep rows and
+   the users, focus on the user who logged out. Cross on a user there logs in through the existing switch path
+   (`Profiles::select` + `Preferences::setProfile`, playlists and settings reloaded). At start, the automatic user is
+   signed in directly; with no automatic user and two or more users the XMB starts on the login column.
+   Storage: `profiles.json` gains an optional top-level `"autoLogin"` (`""` = nobody, or a user id; validated: a
+   non-string or an unknown id preserves the file read-only like any other invalid profiles file). It is written
+   only after the option is first used, so a file without it behaves exactly as before (start as the last selected
+   user). Deleting the automatic user clears it.
+   Code: `Profiles::setAutoLogin/autoLoginId/startsSignedIn/startupUser`; `Shell` start selection (constructor),
+   `logOut`, `endUserSurfaces`, `rebuildUsers` (login row set, focus kept on the same user row across a store
+   change), `categories()` (one column while logged out), the `UserLogOut`/`UserAutoLogin`/`UserAutoLoginTarget`
+   options; `Shell::valueText` (settings_menu.cpp) drops the login diamond while logged out.
+   **INFERRED:** one automatic user at most (from the single-user wording of `msg_auto_login_set`); one user always
+   starts signed in (the one-user menu has no Log Out/Automatic Login); Log Out acts on the signed-in user from any
+   user row; the login column's focus (the last user) and keeping the host Restart/Sleep rows there while dropping
+   the native Steam Account row; the confirmation is shown as a message page with Back (the build's Box kind always
+   draws Yes/No). No console frame of the login column or of these dialogs exists. The PS-button menu has no Log Out
+   in the RPCS3 capture (Turn Off the System / Turn Off the Controller), so none was added there. Switching users
+   while signed in still does not ask `msg_login_ask`.
+   Verified with scripted runs on a scratch `--data-dir` (a copy of `out/native-dlna/data` with a second user "Beta").
+   Frames in `C:\dev\out\p3\f\`: `r1-menu-beta.png` (Log Out and Automatic Login enabled), `r1-autologin-level.png`
+   (On/Off, Off focused), `r2-start-beta.png` (restart: Beta signed in automatically), `r2-logout-ask.png`,
+   `r2-login-column.png` (login column: Users only, five rows; taken before the diamond fix, so it still marks Beta),
+   `r2-login-right.png` (Right does nothing),
+   `r2-logged-in-user.png` (User picked: full XMB, User signed in), `r3a-off.png` then `r3b-start-loggedout.png`
+   (Automatic Login Off: the next start is logged out; no diamond), `r3b-menu-user.png` (Log Out disabled with "No user is logged
+   in."), `r3b-auto-set-page.png` (`msg_auto_login_set`), `r3c-start-user.png` (restart: User signed in). An unknown
+   or non-string `autoLogin` was preserved with the profiles warning.
 3. **DLNA/UPnP discovery.** Updated 2026-11-07: implemented (`audit/DLNA.md`). Search for Media Servers runs SSDP
    discovery and ContentDirectory browsing (`src/dlna_client.*`, `src/dlna_shell.cpp`); audio/video play through the
    existing player, photos open in the viewer; `<data>/dlna.json` lists servers multicast cannot reach. Verified on a
