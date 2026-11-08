@@ -8,6 +8,8 @@
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QHash>
+#include <QSet>
 #include <QStandardPaths>
 #include <QtDebug>
 #ifdef Q_OS_WIN
@@ -105,6 +107,105 @@ const QImage& tailscale() {
         return image;
     }();
     return icon.isNull()?glyphs::tailscaleLogo():icon;
+}
+
+QHash<QString, QImage> siteIcons;
+QSet<QString> siteIconsAsked;
+
+const QImage& siteIcon(const QUrl& url) {
+    static const QImage none;
+    const auto found = siteIcons.constFind(url.host().toLower());
+    return found == siteIcons.cend() ? none : *found;
+}
+
+namespace {
+// Tries the candidates in order and keeps the largest picture; stops early at 180 px (an apple-touch-icon).
+void fetchIconCandidate(QNetworkAccessManager* network, QStringList candidates, const QString& host, const QString& cacheFile,
+                        QImage best, std::function<void()> done) {
+    const auto finish = [&](const QImage& image) {
+        if (image.isNull()) { qInfo().noquote() << "service icons: no icon found for" << host;return; }
+        siteIcons.insert(host, squared(image.scaled(256, 256, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+        if (QDir().mkpath(QFileInfo(cacheFile).absolutePath())) siteIcons.value(host).save(cacheFile, "PNG");
+        qInfo().noquote() << "service icons:" << host << "icon" << image.size();
+        if (done) done();
+    };
+    if (candidates.isEmpty() || best.width() >= 180) { finish(best);return; }
+    const QUrl url(candidates.takeFirst());
+    QNetworkRequest request(url);request.setTransferTimeout(8000);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    auto* reply = network->get(request);
+    QObject::connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64) { if (received > MaxIconBytes) reply->abort(); });
+    QObject::connect(reply, &QNetworkReply::finished, reply, [network, reply, candidates, host, cacheFile, best, done] {
+        reply->deleteLater();
+        const QByteArray bytes = reply->error() == QNetworkReply::NoError ? reply->read(MaxIconBytes + 1) : QByteArray();
+        QImage image;
+        if (bytes.size() <= MaxIconBytes) image.loadFromData(bytes);
+        const QImage keep = (!image.isNull() && image.width() >= 32 && image.width() > best.width()) ? image : best;
+        fetchIconCandidate(network, candidates, host, cacheFile, keep, done);
+    });
+}
+
+// The <link> icons a page declares, largest first (an apple-touch-icon without sizes counts as 180).
+QStringList declaredIcons(const QString& html, const QUrl& base) {
+    const QRegularExpression link(QStringLiteral("<link\\b[^>]*>"), QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpression rel(QStringLiteral("rel=[\"']([^\"']+)[\"']"), QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpression href(QStringLiteral("href=[\"']([^\"']+)[\"']"), QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpression sizes(QStringLiteral("sizes=[\"'](\\d+)x"), QRegularExpression::CaseInsensitiveOption);
+    QVector<QPair<int, QString>> found;
+    for (auto it = link.globalMatch(html); it.hasNext();) {
+        const QString tag = it.next().captured(0);
+        const QString r = rel.match(tag).captured(1).toLower(), h = href.match(tag).captured(1);
+        if (h.isEmpty() || h.startsWith(QLatin1String("data:"))) continue;
+        const bool touch = r.contains(QLatin1String("apple-touch-icon"));
+        if (!touch && !r.split(QLatin1Char(' ')).contains(QLatin1String("icon"))) continue;
+        int size = sizes.match(tag).captured(1).toInt();
+        if (size == 0) size = touch ? 180 : 16;
+        found.push_back({size, base.resolved(QUrl(h)).toString()});
+    }
+    std::stable_sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    QStringList out;for (const auto& f : found) out << f.second;
+    return out;
+}
+
+void readPage(QNetworkAccessManager* network, const QUrl& url, const QString& host, const QString& cacheFile, bool rootTried,
+              std::function<void()> done, QStringList extra = {}) {
+    QNetworkRequest request(url);request.setTransferTimeout(8000);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    auto* reply = network->get(request);
+    QObject::connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64) { if (received > MaxIconBytes) reply->abort(); });
+    QObject::connect(reply, &QNetworkReply::finished, reply, [network, reply, url, host, cacheFile, rootTried, done, extra] {
+        reply->deleteLater();
+        const QString html = QString::fromUtf8(reply->read(MaxIconBytes));
+        const QUrl base = reply->url().isValid() ? reply->url() : url;
+        QStringList candidates = declaredIcons(html, base);
+        qInfo().noquote() << "service icons:" << host << "page" << base.toString() << html.size() << "chars," << candidates.size() << "declared icon(s)";
+        // An app page (/tv, /web) often declares only a small favicon; the site's root page declares the real sizes, so
+        // it is read too and its icons are tried first.
+        if (!rootTried) {
+            QUrl root = base;root.setPath(QStringLiteral("/"));root.setQuery(QString());root.setFragment(QString());
+            if (root != base) { readPage(network, root, host, cacheFile, true, done, candidates);return; }
+        }
+        candidates << extra;
+        QUrl conventional = base;conventional.setQuery(QString());
+        conventional.setPath(QStringLiteral("/apple-touch-icon.png"));candidates << conventional.toString();
+        conventional.setPath(QStringLiteral("/favicon.ico"));candidates << conventional.toString();
+        candidates.removeDuplicates();
+        fetchIconCandidate(network, candidates.mid(0, 6), host, cacheFile, QImage(), done);
+    });
+}
+}
+
+void loadSiteIcon(QNetworkAccessManager* network, const QUrl& url, const QString& cacheDirectory, std::function<void()> done) {
+    const QString host = url.host().toLower();
+    if (host.isEmpty() || siteIcons.contains(host) || siteIconsAsked.contains(host)) return;
+    siteIconsAsked.insert(host);
+    const QString cacheFile = QDir(cacheDirectory).filePath(QString(host).replace(QLatin1Char(':'), QLatin1Char('_')) + QStringLiteral(".png"));
+    if (QFileInfo(cacheFile).size() > 0 && QFileInfo(cacheFile).size() <= MaxIconBytes) {
+        QImage cached(cacheFile);
+        if (!cached.isNull()) { siteIcons.insert(host, cached);if (done) done();return; }
+    }
+    if (!network || (url.scheme() != QLatin1String("http") && url.scheme() != QLatin1String("https"))) return;
+    readPage(network, url, host, cacheFile, false, done);
 }
 
 QImage homeAssistantIcon;

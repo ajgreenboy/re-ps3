@@ -1121,6 +1121,20 @@ void Shell::refreshContent() {
                 e.detail=app.kind=="game"?QString{}:app.kind=="jellyfin"?QStringLiteral("Jellyfin"):QStringLiteral("Service app ")+QChar(0x00B7)+QStringLiteral(" Opens in your browser");
                 e.artwork=result.art.value("custom:"+app.id);e.gameTile=app.kind=="game";
                 // Jellyfin's row wears Jellyfin's mark unless the user gave the app its own picture.
+                // A web app wears its site's own icon once fetched (cached per site under the data folder).
+                if(app.kind=="web" && e.artwork.isNull()) {
+                    const QUrl site(app.url);
+                    // Spotify's web player wears the installed Spotify client's own icon (the site only declares 48 px).
+                    if(site.host().endsWith(QLatin1String("spotify.com"))){e.artwork=serviceIcons::spotify();e.iconSized=true;}
+                    else if(!serviceIcons::siteIcon(site).isNull()){e.artwork=serviceIcons::siteIcon(site);e.iconSized=true;}
+                    else serviceIcons::loadSiteIcon(dlnaNetwork_,site,QDir(dataDirectory_).filePath("cache/site-icons"),[this]{
+                        for(auto& column:categories_)for(auto& row:column.entries)
+                            if(row.action==Action::OpenUrl && row.artwork.isNull() && !serviceIcons::siteIcon(QUrl(row.value)).isNull()) {
+                                row.artwork=serviceIcons::siteIcon(QUrl(row.value));row.iconSized=true;
+                            }
+                        emit changed();
+                    });
+                }
                 if(app.kind=="jellyfin" && e.artwork.isNull()) {
                     e.artwork=serviceIcons::jellyfin();e.iconSized=true;
                     // The server's own icon, once: cached under the data folder, then fetched from the server.

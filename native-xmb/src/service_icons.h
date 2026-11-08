@@ -19,6 +19,10 @@ const QImage& steam(const QString& steamRoot);
 const QImage& jellyfin();
 const QImage& tailscale();
 const QImage& homeAssistant();   // the user's own HA server's icon once fetched, else a drawn house
+// A web app's own icon (the site's apple-touch-icon or largest declared icon, else /favicon.ico), cached per host
+// under cacheDirectory. siteIcon() is null until loaded; loadSiteIcon() calls done once when one arrives.
+const QImage& siteIcon(const QUrl& url);
+void loadSiteIcon(QNetworkAccessManager* network, const QUrl& url, const QString& cacheDirectory, std::function<void()> done);
 void loadHomeAssistant(QNetworkAccessManager* network, const QUrl& server, const QString& cacheFile, std::function<void()> done);   // the Windows client's own icon (tailscale-ipn.exe), else the drawn mark
 // Loads the cached Jellyfin icon, or fetches it from `server` (same host only, bounded) and caches it.
 // `done` runs on the caller's thread when a new icon is available.
