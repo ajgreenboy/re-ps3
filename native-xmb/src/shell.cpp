@@ -1666,6 +1666,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     initDlna();
     initTailscale();
     initHome();
+    initWeather();
     connect(&fileOps_,&FileOperations::finished,this,[this](quint64 request,bool ok,const QString& message,const QStringList&){
         if(request!=fileOpsRequest_)return;
         fileOpsRequest_=0;loading_=false;status_.clear();
@@ -2093,6 +2094,7 @@ void Shell::activate() {
     case Action::WolApp:case Action::WolWake:case Action::WolAddPage:case Action::WolAdd:
     case Action::HaApp:case Action::HaGroup:case Action::HaEntity:
         activateHome(entry);break;
+    case Action::WeatherApp:case Action::WeatherUnits:activateWeather(entry);break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
     case Action::JellyfinPlay:openJellyfinMedia(entry);break;
