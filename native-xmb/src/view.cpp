@@ -920,6 +920,13 @@ void View::paintGL() {
     if(!mediaAudioOnly())musicPanelOpen_=false;
     musicPanelEase_.retarget(musicPanelOpen_?1.:0.,musicPanelFadeMs);
     musicPanelEase_.advance(dt);
+    // The music page's idle style (MUSIC-PLAYER.md): playing, panel closed and no input for musicIdleMs.
+    {
+        const bool musicIdle=mediaAudioOnly() && !shell_.mediaPaused() && !shell_.busy() && !musicPanelOpen_
+            && shell_.message().isEmpty() && shell_.idleMilliseconds()>musicIdleMs;
+        musicIdleEase_.retarget(musicIdle?1.:0.,musicIdleFadeMs);
+        musicIdleEase_.advance(dt);
+    }
     if(static const bool panelLog=qEnvironmentVariableIsSet("XMB_MEDIA_TRACE");panelLog && musicPanelEase_.running())
         qInfo().noquote()<<"media: music panel fade"<<QString::number(musicPanelEase_.value,'f',3);
     // The notification pop-up: Shell decides when one exists (queue + 4 s lifetime); here it slides and fades
@@ -2078,10 +2085,10 @@ void View::drawScene(QPainter& p) {
         // The title sits above the hint row. Only the video player needs 984: its 16x16 digit row ends at
         // 979. The photo viewer and the audio player have no such row and keep the 970 this build had, so
         // surface D and the audio chrome are unchanged down to the pixel of their text layout.
-        text({110,shell_.videoOpen()?984.:970.,1500,38},shell_.mediaTitle(),27,Qt::white);
+        if(!mediaAudioOnly())text({110,shell_.videoOpen()?984.:970.,1500,38},shell_.mediaTitle(),27,Qt::white);
         if(shell_.photoOpen())
             text({110,1020,1700,35},QString("Circle Back   Cross ")+(shell_.slideshowActive()?"Pause":"Slideshow")+"   L1/R1 or +/- Zoom   Square/0 Reset   Triangle/Q/E Rotate   Arrows Pan when zoomed   [/] Photo",21,QColor(230,230,230));
-        else if(!shell_.videoOpen())
+        else if(!shell_.videoOpen() && !mediaAudioOnly())
             text({110,1020,1700,35},"Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle   R Repeat   Triangle Control Panel",21,QColor(230,230,230));
         if(shell_.busy())text({110,910,1000,45},"Loading…",26,Qt::white);
         else if(!shell_.photoOpen()) {
@@ -2095,7 +2102,7 @@ void View::drawScene(QPainter& p) {
             // shell side is fixed.
             QString queueLine=shell_.mediaQueueSummary();
             queueLine.replace(QString(QChar(0x00C2))+QChar(0x00B7),QString(QChar(0x00B7)));
-            text({110,895,1700,36},queueLine,21,QColor(230,230,230));
+            if(!mediaAudioOnly())text({110,895,1700,36},queueLine,21,QColor(230,230,230));
         }
         else if(photoViewport_.valid())text({110,895,1700,36},QString("Zoom %1%").arg(photoViewport_.zoomPercent(),0,'f',0),21,QColor(230,230,230));
         if(shell_.videoOpen() && !shell_.photoOpen()) {
@@ -2103,16 +2110,9 @@ void View::drawScene(QPainter& p) {
             if(shell_.mediaDuration()>0)
                 drawVideoTimeBar(p,shell_.mediaPosition(),shell_.mediaDuration());
             drawVideoHelpStrip(p);
-        } else if(!shell_.photoOpen() && shell_.mediaDuration()>0) {
-            // The audio player's own progress page (audioplayer_plugin.rco play_progress_page, audit 4.1) is
-            // a different object set that this change does not rebuild, so the bar and the time string this
-            // build already had stay exactly as they were until that surface is done.
-            const double ratio=std::clamp(double(shell_.mediaPosition())/shell_.mediaDuration(),0.,1.);
-            p.fillRect(QRectF(110,941,1700,4),QColor(255,255,255,60));
-            p.fillRect(QRectF(110,941,1700*ratio,4),Qt::white);
-            mediaPanelText(p,QRectF(1450,963,360,45),
-                MediaControls::formatTime(shell_.mediaPosition())+" / "+MediaControls::formatTime(shell_.mediaDuration()),
-                23,Qt::white,Qt::AlignRight|Qt::AlignVCenter);
+        } else if(mediaAudioOnly()) {
+            // Surface B1: the music player's own page replaces the generic bar, time string and hint sentence.
+            drawMusicPage(p);
         }
         p.restore();
         // The in-player panel (Triangle): the same right-hand options panel, over the video and over the
@@ -3291,7 +3291,7 @@ void View::mediaPanelText(QPainter& p,const QRectF& rect,const QString& value,in
 // the screen rect here is a FIT: it keeps this build's bottom band (x 110, 1700 wide) at the texture's own
 // 20 px height. The readout keeps the firmware's per-glyph unit - 16x16 cells, one glyph per cell - with the
 // digits from MediaControls::formatTime.
-void View::drawVideoTimeBar(QPainter& p,qint64 position,qint64 duration) {
+void View::drawVideoTimeBar(QPainter& p,qint64 position,qint64 duration,double opacity) {
     const QImage& base=assets_.image("videoplayer_plugin","tex_progress_bar");
     const QImage& fill=assets_.image("videoplayer_plugin","tex_progress_bar_in");
     const QRectF bar(110,941,1700,20);                                  // FIT
@@ -3311,11 +3311,11 @@ void View::drawVideoTimeBar(QPainter& p,qint64 position,qint64 duration) {
         return;
     }
     // The track: the 30x20 progression tile nine-sliced (8 px caps keep the end caps at their own width).
-    drawNineSlice(p,"videoplayer_plugin","tex_progress_bar",bar,8.,1.);
+    drawNineSlice(p,"videoplayer_plugin","tex_progress_bar",bar,8.,opacity);
     if(ratio>0.) {
         const QRectF played(bar.left(),bar.top(),bar.width()*ratio,bar.height());
-        if(played.width()>=16.)drawNineSlice(p,"videoplayer_plugin","tex_progress_bar_in",played,8.,1.);
-        else p.drawImage(played,fill);
+        if(played.width()>=16.)drawNineSlice(p,"videoplayer_plugin","tex_progress_bar_in",played,8.,opacity);
+        else{p.save();p.setOpacity(opacity);p.drawImage(played,fill);p.restore();}
     }
     // The jump indicator marks a position on the bar (its own 20x12 art). This build seeks
     // instantaneously and has no scrub state, so there is no pending jump target to mark: it marks the
@@ -3324,14 +3324,16 @@ void View::drawVideoTimeBar(QPainter& p,qint64 position,qint64 duration) {
     if(!marker.isNull()) {
         const double x=std::clamp(bar.left()+bar.width()*ratio-marker.width()/2.,
             bar.left(),bar.right()-marker.width());
+        p.save();p.setOpacity(opacity);
         p.drawImage(QRectF(x,bar.top()+(bar.height()-marker.height())/2.,marker.width(),marker.height()),marker);
+        p.restore();
     }
     // Two 8-cell groups, as the firmware lays them out (videoplayer_display_playing_time_h1..c2 and
     // play_time_h1..c2, all 16x16): the playing time on the left, the duration on the right.
-    drawTimeCells(p,MediaControls::formatTime(position),bar.left(),bar.bottom()+2.,false);
-    drawTimeCells(p,MediaControls::formatTime(duration),bar.right(),bar.bottom()+2.,true);
+    drawTimeCells(p,MediaControls::formatTime(position),bar.left(),bar.bottom()+2.,false,opacity);
+    drawTimeCells(p,MediaControls::formatTime(duration),bar.right(),bar.bottom()+2.,true,opacity);
 }
-void View::drawTimeCells(QPainter& p,const QString& value,qreal edge,qreal top,bool rightAligned) {
+void View::drawTimeCells(QPainter& p,const QString& value,qreal edge,qreal top,bool rightAligned,double opacity) {
     constexpr qreal cell=16.;                 // FC: every time digit cell is 16x16
     constexpr int cellSize=19;                // FIT: RCO size=10 has no px equivalent (audit 9.5); 19 px
                                               // puts the digit cap (about 0.82 x the size) inside 16 px
@@ -3339,7 +3341,7 @@ void View::drawTimeCells(QPainter& p,const QString& value,qreal edge,qreal top,b
     if(count<=0)return;
     const qreal left=rightAligned?edge-count*cell:edge;
     for(int i=0;i<count;++i)
-        mediaPanelText(p,QRectF(left+i*cell,top,cell,cell),value.mid(i,1),cellSize,Qt::white,Qt::AlignCenter);
+        mediaPanelText(p,QRectF(left+i*cell,top,cell,cell),value.mid(i,1),cellSize,QColor(255,255,255,int(std::lround(255.*opacity))),Qt::AlignCenter);
 }
 // Surface A, the direct-key hint strip. The firmware's panel hint is one 86x30 tex_cp_help_* key icon plus
 // the focused control's own name from videoplayer_plugin's text table (videoplayer_cp_help and
@@ -3491,6 +3493,135 @@ void View::drawMusicPanel(QPainter& p,double opacity) {
         const QRectF box(contentLeft+i*buttonWidth,contentTop+statusHeight+16.,buttonWidth,buttonHeight);
         if(i==musicPanelFocus_ && !focus.isNull())p.drawImage(box,focus);
         p.drawImage(box,assets_.image("explore_plugin_full",QString::fromLatin1(icons[i])));
+    }
+    p.restore();
+}
+// Surface B1 (audit/MUSIC-PLAYER.md). Every object name and size below is audioplayer_plugin's own (tree
+// dump): title_information_group (plane_jacket_music_cover over tex_track_frame 240x240 with a 162x162
+// cover, plane_track_number1/2 at 46x68, text_contents_title_name, text_artist_name), play_progress_group
+// (text_track_number, audioplayer_display_time_bar height 20, plane_codec), play_status_group (planes of
+// 74x74 / 98x74 / 72x36) and msg_help_control_panel_home_menu. The container's objects all carry zero
+// position (the plugin places them at run time), so every rect is a FIT (INFERRED) read against the
+// frame's own proportions; the album line is this build's addition for the tag the console's page lacks.
+void View::drawMusicPage(QPainter& p) {
+    const double idle=std::clamp(musicIdleEase_.value,0.,1.);
+    const double chrome=1.-idle;
+    const qint64 now=clock_.elapsed();
+    const QString plugin=QStringLiteral("audioplayer_plugin");
+    // back_screen_plane (tex_back_screen 1x1, template alphaScale 0): the black the idle style fades in.
+    if(idle>.002)p.fillRect(QRectF(0,0,1920,1080),QColor(0,0,0,int(std::lround(255.*musicIdleDim*idle))));
+    p.save();p.setRenderHint(QPainter::SmoothPixmapTransform);
+    // title_information_group: the 240x240 frame with the cover inside it.
+    constexpr qreal frameSize=240.,coverSize=162.,left=360.,top=360.;
+    const QRectF frame(left,top,frameSize,frameSize);
+    const QRectF coverBox(frame.center().x()-coverSize/2.,frame.center().y()-coverSize/2.,coverSize,coverSize);
+    const auto blit=[&](const char* name,const QRectF& rect,double amount=1.) {
+        // The firmware draws each plane at its texture's own size, transparent margin included, so this is a
+        // plain draw (View::drawImage would refit the alpha bounds to the rect and enlarge the art).
+        const QImage& art=assets_.image(plugin,QString::fromLatin1(name));
+        if(art.isNull())return;
+        p.save();p.setOpacity(amount);p.drawImage(rect,art);p.restore();
+    };
+    p.setOpacity(1.);
+    blit("tex_track_frame",frame);
+    const QImage& jacket=shell_.mediaCoverArt();
+    if(!jacket.isNull()) {
+        const QSizeF fitted=QSizeF(jacket.size()).scaled(coverBox.size(),Qt::KeepAspectRatio);
+        p.drawImage(QRectF(coverBox.center().x()-fitted.width()/2.,coverBox.center().y()-fitted.height()/2.,
+            fitted.width(),fitted.height()),jacket);
+    } else blit("tex_default_music_cover",coverBox);
+    // plane_track_number1/2: the queue position in the firmware's 46x68 digit art.
+    const int number=shell_.mediaTrackNumber();
+    constexpr qreal textLeft=660.,digitW=46.,digitH=68.;
+    if(number>0) {
+        const QString digits=QString::number(number%100);
+        for(int i=0;i<digits.size();++i)
+            blit((QStringLiteral("tex_track_number")+digits[i]).toLatin1().constData(),
+                QRectF(textLeft+i*(digitW+2.),top,digitW,digitH));
+    }
+    const auto elided=[&](const QString& value,int size,qreal width) {
+        QFont font(shell_.fontFamily());font.setPixelSize(size);
+        return QFontMetricsF(font).elidedText(value,Qt::ElideRight,width);
+    };
+    constexpr qreal textWidth=1100.;
+    p.setOpacity(1.);
+    mediaPanelText(p,QRectF(textLeft,top+84.,textWidth,46.),elided(shell_.mediaTrackTitle(),36,textWidth),36,Qt::white,
+        Qt::AlignLeft|Qt::AlignVCenter);                                          // text_contents_title_name
+    if(!shell_.mediaArtist().isEmpty())
+        mediaPanelText(p,QRectF(textLeft,top+134.,textWidth,36.),elided(shell_.mediaArtist(),27,textWidth),27,
+            QColor(240,240,240),Qt::AlignLeft|Qt::AlignVCenter);                  // text_artist_name
+    if(!shell_.mediaAlbum().isEmpty())
+        mediaPanelText(p,QRectF(textLeft,top+174.,textWidth,32.),elided(shell_.mediaAlbum(),24,textWidth),24,
+            QColor(220,220,220),Qt::AlignLeft|Qt::AlignVCenter);
+    // plane_codec: the container's codec labels, chosen by file suffix (wav/aiff are linear PCM here).
+    const QString codec=shell_.mediaCodec();
+    const char* codecTexture=codec==QLatin1String("mp3")?"tex_codec_mp3":
+        (codec==QLatin1String("wav")||codec==QLatin1String("aif")||codec==QLatin1String("aiff"))?"tex_pcm":
+        (codec==QLatin1String("aac")||codec==QLatin1String("m4a"))?"tex_aac":
+        codec==QLatin1String("wma")?"tex_wma":nullptr;
+    if(codecTexture) {
+        const QImage& art=assets_.image(plugin,QString::fromLatin1(codecTexture));
+        if(!art.isNull())p.drawImage(QRectF(textLeft,top+frameSize-art.height(),art.width(),art.height()),art);
+    }
+    p.restore();
+    // The bottom chrome and the status planes belong to the page's own control state: they fade with the idle
+    // style and with the XMB panel (B2) that takes the band over, which the caller's opacity already carries.
+    const double chromeOpacity=chrome*(1.-std::clamp(musicPanelEase_.value,0.,1.));
+    if(chromeOpacity<=.002)return;
+    p.save();p.setOpacity(chromeOpacity);
+    // play_status_group: the pause plane while paused; the play plane for 1.5 s after a start or track change,
+    // then it fades over 400 ms (INFERRED timing: the container carries no animations). Repeat / shuffle show
+    // while their mode is on.
+    const bool paused=shell_.mediaPaused()||shell_.busy();
+    const QString key=QString::number(shell_.mediaTrackNumber())+(paused?QLatin1Char('p'):QLatin1Char('r'));
+    if(key!=musicStatusKey_){musicStatusKey_=key;musicStatusSince_=now;}
+    const double playFade=paused?1.:std::clamp(1.-double(now-musicStatusSince_-1500)/400.,0.,1.);
+    qreal cursor=1810.;
+    const auto statusPlane=[&](const char* name,double amount) {
+        if(amount<=.002)return;
+        const QImage& art=assets_.image(plugin,QString::fromLatin1(name));
+        if(art.isNull())return;
+        cursor-=art.width();
+        p.save();p.setOpacity(chromeOpacity*amount);
+        p.drawImage(QRectF(cursor,top+(74.-art.height())/2.,art.width(),art.height()),art);
+        p.restore();
+        cursor-=10.;
+    };
+    statusPlane(paused?"tex_pause_status":"tex_play_status",playFade);
+    if(shell_.mediaShuffle())statusPlane("tex_shuffle_status",1.);
+    if(shell_.mediaRepeatMode()==1)statusPlane("tex_1repeat_status",1.);
+    else if(shell_.mediaRepeatMode()==2)statusPlane("tex_repeat_status",1.);
+    // play_progress_group: text_track_number ("Track %1", msg_track_number_value) and the track count, over the bar.
+    const auto tr=[&](const char* name,const char* fallback){return assets_.text(plugin,name,fallback);};
+    if(number>0) {
+        mediaPanelText(p,QRectF(110,895,700,36),tr("msg_track_number_value","Track %1").arg(number),21,
+            QColor(230,230,230),Qt::AlignLeft|Qt::AlignVCenter);
+        const int count=shell_.mediaTrackCount();
+        mediaPanelText(p,QRectF(1110,895,700,36),
+            (count==1?tr("msg_track_count_value","%1 Track"):tr("msg_tracks_count_value","%1 Tracks")).arg(count),21,
+            QColor(230,230,230),Qt::AlignRight|Qt::AlignVCenter);
+    }
+    if(shell_.mediaDuration()>0)drawVideoTimeBar(p,shell_.mediaPosition(),shell_.mediaDuration(),chromeOpacity);
+    // msg_help_control_panel_home_menu: two lines, each led by a button gaiji (Triangle: Control Panel,
+    // PS: Home Menu), drawn from the image font like the XMB's own Options hint.
+    const QStringList lines=tr("msg_help_control_panel_home_menu",": Control Panel\n: Home Menu").split(QLatin1Char('\n'));
+    qreal x=110.;
+    QFont font(shell_.fontFamily());font.setPixelSize(21);
+    for(QString line:lines) {
+        const ushort code=line.isEmpty()?0:line.front().unicode();
+        const bool gaiji=code>=0xE000 && code<=0xF8FF;
+        if(gaiji) {
+            line=line.mid(1);
+            const QImage glyph=imageFontGlyph(assets_.root(),code);
+            if(!glyph.isNull()) {
+                const qreal gh=21.,gw=glyph.width()*gh/glyph.height();
+                p.drawImage(QRectF(x,1041.-gh/2.,gw,gh),glyph);   // the painter's opacity is chromeOpacity
+                x+=gw+4.;
+            }
+        }
+        const qreal width=QFontMetricsF(font).horizontalAdvance(line)+8.;
+        mediaPanelText(p,QRectF(x,1026,width,30),line,21,QColor(238,238,238),Qt::AlignLeft|Qt::AlignVCenter);
+        x+=width+56.;
     }
     p.restore();
 }

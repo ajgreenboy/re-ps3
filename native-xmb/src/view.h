@@ -352,8 +352,8 @@ private:
     // Surface A, the time bar: videoplayer_display_time_bar's Progress stack drawn with the container's
     // progression pair tex_progress_bar / tex_progress_bar_in (30x20) plus the tex_progress_bar_jump_indi
     // marker (20x12), and the 16x16 time-digit cells with the digits from MediaControls::formatTime.
-    void drawVideoTimeBar(QPainter& painter,qint64 position,qint64 duration);
-    void drawTimeCells(QPainter& painter,const QString& value,qreal edge,qreal top,bool rightAligned);
+    void drawVideoTimeBar(QPainter& painter,qint64 position,qint64 duration,double opacity=1.);
+    void drawTimeCells(QPainter& painter,const QString& value,qreal edge,qreal top,bool rightAligned,double opacity=1.);
     // Surface A, the direct-key hint: the eight tex_cp_help_* 86x30 icons paired with the container's own
     // msg_*_with_icon strings, in place of the advice sentence this build wrote out in ASCII.
     void drawVideoHelpStrip(QPainter& painter);
@@ -362,6 +362,18 @@ private:
     // and the 7-button group at 90x60 over the shared tex_cp_focus. Triangle opens it (audit 7.2); R keeps
     // the Repeat binding. Fade in 150 ms with 0 delay; the traced 150/100 base move is the 1.0->1.3 scale.
     void drawMusicPanel(QPainter& painter,double opacity);
+    // Surface B1, the music player's own full-screen page (audit/MUSIC-PLAYER.md): audioplayer_plugin's
+    // title_information_page (cover, track number, title, artist), play_progress_page (track number, time
+    // bar, codec label), play_status_page (the status planes) and the control-panel hint, laid out by FITS
+    // because the container carries no positions. After musicIdleMs without input the chrome fades and
+    // the back_screen_plane darkens the page (INFERRED).
+    void drawMusicPage(QPainter& painter);
+    static constexpr double musicIdleMs=8000.;       // INFERRED: no idle timer is traced in audioplayer_plugin
+    static constexpr double musicIdleFadeMs=600.;    // INFERRED
+    static constexpr double musicIdleDim=.55;        // INFERRED: alpha of the black back_screen_plane when idle
+    PafEase musicIdleEase_;
+    QString musicStatusKey_;                         // track + pause state the status plane last changed on
+    qint64 musicStatusSince_=0;
     bool mediaAudioOnly() const;          // a local audio item is playing: no video track, not a photo
     void toggleMusicPanel();
     void closeMusicPanel();

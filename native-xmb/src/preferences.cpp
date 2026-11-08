@@ -28,6 +28,7 @@ QStringList Preferences::sharedKeys() {
     // Settings the console keeps once for the whole system rather than once per user: the system
     // name, the time zone, fullscreen and the two power/idle timers. Everything else is per user.
     return {QStringLiteral("system/name"),QStringLiteral("clock/timeZone"),QStringLiteral("display/fullscreen"),
+            QStringLiteral("system/notificationMessages"),QStringLiteral("system/notificationTrophy"),
             QStringLiteral("power/idleMinutes"),QStringLiteral("display/screensaverMinutes")};
 }
 bool Preferences::isSharedKey(const QString& key) {
@@ -89,7 +90,8 @@ QVariant Preferences::defaultValue(const QString& key) {
     if(key=="jellyfin/maxBitrateKbps")return 20000;
     if(key=="photo/interval")return 5000;
     if(key=="media/repeatMode")return 0;
-    if(key=="audio/keyTone")return true;
+    // /setting/system/notification and /setting/system/notificationTrophy (vsh.elf): both classes default to shown.
+    if(key=="audio/keyTone" || key=="system/notificationMessages" || key=="system/notificationTrophy")return true;
     if(key=="power/idleMinutes" || key=="display/screensaverMinutes")return 0;
     if(key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return false;
     if(key=="system/name")return QSysInfo::machineHostName().left(64);
@@ -114,7 +116,8 @@ bool Preferences::validBare(const QString& key,const QVariant& value) {
     if(key=="media/repeatMode")return integer(0,2);
     if(key=="power/idleMinutes")return integer(0,120);
     if(key=="display/screensaverMinutes")return integer(0,30) && (value.toInt()==0 || value.toInt()==5 || value.toInt()==10 || value.toInt()==20 || value.toInt()==30);
-    if(key=="audio/keyTone" || key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return value.metaType().id()==QMetaType::Bool;
+    if(key=="audio/keyTone" || key=="system/notificationMessages" || key=="system/notificationTrophy" ||
+       key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return value.metaType().id()==QMetaType::Bool;
     if(value.metaType().id()!=QMetaType::QString)return false;
     const auto text=value.toString();
     if(text.contains(QChar(0)))return false;

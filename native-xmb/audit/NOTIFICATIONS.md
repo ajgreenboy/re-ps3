@@ -103,6 +103,9 @@ a glyph-rasterisation cache, not a visible element, and is not reproduced.
 
 ## 3. Queue and lifetime (Shell)
 
+> Superseded by section 11 (F2, 2026-11-08): the 4000 ms lifetime and the 4-entry cap below were fits; the
+> module's own 2100 ms + 3000 ms timing, the early-hide rule and the 16-waiting cap replaced them.
+
 `src/shell.h` declares the model and `src/shell.cpp:823-872` implements it:
 
 ```
@@ -408,7 +411,7 @@ touched.
 2. **The plaque growth rule.** `min(lines,3) * 0.5` and `+1 per row past three` are traced constants, but
    the unit they scale (icon width? 0.5 px?) is not; the native composite therefore grows in pixels by
    content, and never shows more than two text lines (title + detail) of the three firmware label slots.
-3. **The `2100` argument** on the show and teardown paths is untraced in meaning. If it is a hold time,
+3. **[CLOSED by section 11, F2]** The `2100` argument on the show and teardown paths is the show-phase timer; it was untraced in meaning. If it is a hold time,
    the native 4000 ms lifetime is a deliberate deviation, not parity.
 4. **The icon shadow plane** (`notification_icon_shadow_a/_b`) is not drawn: no matching texture exists in
    `system_plugin.rco`'s image list and the Plane's image binding is not in the object dump. If a texture
@@ -417,12 +420,12 @@ touched.
    with the plaque's own left margin - the composite is built from whatever is present, never from
    invented artwork. The textures were inspected from a local export
    (`out/native-reference/notify-tex`, produced with the app's own `--export-image`) that is not committed.
-5. **The notification sound** is not played. `system_plugin` carries the cue (the interaction-audio pass
+5. **[CLOSED by section 11, F2: no default cue; only the trophy descriptor carries one]** The notification sound was not played. `system_plugin` carries the cue (the interaction-audio pass
    decodes five cues plus `snd_trophy`), but the notification's own cue and its mixing are not traced, and
    inventing a mapping would be a claim this build cannot support.
 6. **`notification_prerender_*`** (nine prerendered Text objects) is a rasterisation cache. The native
    text renderer draws the strings directly; reproducing the prerender cache would change nothing visible.
-7. **Per-type suppression.** The console lets the user disable message and trophy notifications
+7. **[CLOSED by section 11, F2: rows and gate wired]** Per-type suppression. The console lets the user disable message and trophy notifications
    (`msg_notification_message`, `msg_trophy_notification` in `sysconf_plugin` text). This build has no
    settings row for either, and its producers are the native ones above, so nothing is suppressed.
 
@@ -439,5 +442,94 @@ touched.
 - `native-xmb/src/main.cpp`: the `NOTIFY=` script token and the notification fields in the grab sidecar.
 - `native-xmb/audit/NOTIFICATIONS.md`: this document.
 
-Not touched: `settings_menu.cpp`, `preferences.cpp`, `view`'s existing draw paths, the verification
+Not touched in the first pass (F2 touches them, section 11): `settings_menu.cpp`, `preferences.cpp`, `view`'s existing draw paths, the verification
 harness (`work/ab-layers.ts`, its thresholds and references), and any other audit file.
+
+## 11. F2: notification sound, overlap policy, per-type suppression (2026-11-08)
+
+Evidence labels: **TRACED** = read from the 4.93 modules this session (decrypted `fw493/vsh_module`, Ghidra
+projects `ghidra_proj/vsh493` for `vsh.elf` and the boot project for `basic_plugins.prx`, scripts
+`DecompileStringRefs`, `DecompileAt`, `DecompileContaining`, `RefsTo`). **INFERRED** = reasoning, stated.
+Addresses are Ghidra VAs; the file offset of `basic_plugins.prx` data is VA + 0xf0.
+
+### 11.1 Sound - TRACED: the plaque has no cue of its own
+
+- `basic_plugins.prx` `FUN_00005af0` is the show path (builds `notification_a/b`, icon, labels). Its last block
+  plays a sound **only if the descriptor carries a sound**: `if (*(desc+0x40) != 0)` (plugin-name string
+  non-empty) then `plugin = paf_F21655F3(desc+0x30)` (the same call that resolves `"system_plugin"`) and
+  `paf_B93AFE7E((float)desc+0x64, plugin, desc+0x4c)` (gain, plugin, sound name). No `snd_*` literal appears
+  in the function and none in the page's setup: `basic_plugins.prx` names `snd_decide/cancel/cursor/
+  category_decide` only in the button-navigation block next to `page_btnnavi`, not in the notification code.
+- The sound is therefore a field of the **poster's descriptor** (plugin name at +0x30, sound name at +0x4c).
+  Posters seen: `np_trophy_util.prx` passes `system_plugin` + `snd_trophy` (string VA 0x53380, used at code
+  0x92c4, descriptor call 0x92e4; INTERACTION-AUDIO 10.4). `vsh.elf` `FUN_000cf368` (HDD free-space notice,
+  `tex_notification_info`) posts through `FUN_000cf31c` -> `FUN_003458ec` -> `FUN_003457a0` ->
+  `system_plugin` vtable +0x74 with both strings initialised empty (`FUN_000c4250(..,0)`): no sound.
+  Across the 22 modules that name a `tex_notification_*` texture, `snd_*` literals sit near one only in
+  `np_trophy_util.prx`.
+- Result: the only notification cue is the trophy one, already wired in `Shell::promoteNotification`. It plays at
+  the moment the plaque is promoted (the firmware plays inside the show path), through `interactionAudio_`, so
+  `audio/keyTone` and `audio/muted` gate it exactly as they gate the other cues (the firmware's
+  `/setting/system/soundEffect` is the console's counterpart of that preference). Gain is the unity constant.
+  Confirmed by log: `interaction audio: cue Trophy ... decision=play source=snd_trophy` fires once for a
+  `trophy_gold` pop-up and for none of the info/music ones. The gain field (+0x64) value is poster-supplied
+  and not traced per poster (INFERRED unity).
+
+### 11.2 Overlap and duration - TRACED
+
+`FUN_00008248` (post), `FUN_00005af0` (show), `FUN_00004fb8` (end of show phase), `FUN_00004f5c` and
+`FUN_00004ec0` (hide), `FUN_00006070` (hide done -> next). Float constants read from `.data` (file = VA + 0xf0):
+`DAT_00047fcc = DAT_00048014 = 2100.0`, `DAT_00047f9c = 3000.0`, `DAT_00047f98 = 8000.0`, `DAT_00047f94 = 100.0`.
+
+- **Queue**: a pointer vector (`DAT_0004fe0c..`), the visible one held separately in `DAT_0004fe1c`. A posted
+  descriptor with priority (`desc[0]`) >= 0 is inserted after every entry whose priority is <= its own:
+  **FIFO among equals**. After insertion, `while (size > 0x10)` the **oldest waiting** entry is deleted (owner
+  callback gets code 3). So: one shown + at most 16 waiting; overflow drops the oldest waiting, not the newcomer.
+  (The earlier native rule, drop the arriving event at 4 total, was an invention and is replaced.)
+- **Urgent** (priority < 0): replaces the visible plaque; an identical one (same text and icon) only restarts
+  its 2100 ms timer. No native producer sets a priority, so this path is **not implemented** (no caller).
+- **Show phase**: `FUN_00007210` (layout) and the duplicate path register `FUN_00004fb8` (opd 0x4ee14+8,
+  referenced from 0x76e0 and 0x8314) on a **2100 ms** timer. This closes gap 3 of section 9.
+- **Hold decision at the end of the show phase** (`FUN_00004fb8`): if flags&4 is clear and (queue empty or
+  flags&2 set) the plaque stays for **3000 ms** (8000 ms with flag 0x10), then hides (100 ms); otherwise it is
+  hidden **at once**. Concretely: alone, a plaque lives 2100 + 3000 = **5100 ms**; if anything is waiting when
+  the 2100 ms mark arrives it leaves at 2100 ms and the next is promoted. The hold is decided once, at that
+  mark: a notification that arrives during the hold waits for it to finish. Native producers carry no flags,
+  so the default branch is the only one implemented; flags 2/4/0x10 are noted, not wired.
+- Native: `Shell::notificationShowMs = 2100`, `notificationHoldMs = 3000`, `notificationWaitingLimit = 16`
+  (was a 4000 ms fit and a 4-entry cap). `expireNotifications()` makes the decision at `decideAt`.
+  The 100 ms hide is **not** applied: the view's shared 200 ms mode-5 ease still draws the slide-out (and the
+  slide-in) as before; shortening only the hide is a view change with no gate state to measure it
+  (INFERRED that the 100 ms is the fade length; the 2100 ms and 3000 ms are the timers).
+
+Log evidence (scripted, `XMB_NOTIFY_LOG=1`): one pop-up `show 2100 ms + hold 3000 ms` then `expire`; a burst
+A, B, T printed `no hold, 2 waiting` -> `expire A` -> `show B` -> `no hold, 1 waiting` -> `expire B` -> `show T`.
+
+### 11.3 Per-type suppression - TRACED keys, INFERRED mapping
+
+- `vsh.elf` carries two keys in its system setting table: `/setting/system/notification` and
+  `/setting/system/notificationTrophy` (the `/setting/system/*` table between `buttonAssign` and `region`;
+  `/setting/system/notification` is repeated in the second table). The sysconf rows are
+  `msg_notification_message` ("notify when Friends are online or a message has been received from a Friend")
+  and `msg_trophy_notification` ("notify when you earn a trophy"); each opens a two-item page
+  (`page_console_notification_0/_1`, `page_console_trophy_notification_0/_1`) labelled `msg_display_on`
+  ("Display") and `msg_display_off` ("Do Not Display").
+- `basic_plugins.prx`'s queue (11.2) has no setting read, so the gate is at the **poster** (INFERRED); the
+  consumers of the keys were not traced (the keys sit in a pointer table with no direct code reference).
+- Before F2 both rows were `Action::Information` (read-only, showed the page's list). Now:
+  `system/notificationMessages` and `system/notificationTrophy` are Bool preferences (default true = Display,
+  shared keys like the console's `/setting/system`), the two rows are `SettingChoices` with the Display / Do Not
+  Display choices (item order INFERRED: Display first), and Restore Default Settings resets them.
+  `Shell::notify` drops a notification before it enters the queue when its class is off: an icon
+  containing `trophy_` is the trophy class, `friend` the message class (INFERRED: `tex_notification_friend` is
+  what the friend/chat modules use). Suppressed = no plaque and no `snd_trophy`.
+- Log evidence: with both off, `notify: suppressed T (Trophy Notifications off)`, `notify: suppressed F
+  (Notification Messages off)`, and the info notification still shows. The native producers (launch return,
+  library update, copy/delete) use the info/caution/music icons, so nothing the build raises today is suppressed.
+
+### 11.4 Files touched by F2
+
+`src/shell.h` / `src/shell.cpp` (constants, `Notification` fields, `notify`, `promoteNotification`,
+`expireNotifications`), `src/settings_menu.cpp` (two rows, choices, restore defaults), `src/preferences.cpp`
+(defaults, bool validation, shared keys). `interaction_audio.*` needed no change: `Cue::Trophy` and the
+preference gating already existed.

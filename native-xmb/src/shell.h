@@ -231,6 +231,8 @@ struct Notification {
     QString detail;  // notification_label1_b; empty for the one-line variant
     QString icon;    // a system_plugin texture name: tex_notification, tex_notification_<kind>
     qint64 expiresAt=0; // Shell's notification clock, milliseconds
+    qint64 decideAt=0;  // the end of the show phase, where the hold-or-hide decision is made
+    bool decided=false;
 };
 // The surface a message is drawn on. The firmware assembles each of the five from a different set of
 // pieces (audit/DIALOGS-FIRMWARE.md section 2), so the kind is a decision the shell makes where it sets
@@ -349,6 +351,18 @@ public:
     bool idleDisplayAllowed() const;
     bool mediaOpen() const { return mediaOpen_; }
     QString mediaTitle() const { return mediaTitle_; }
+    // ---- Music player page (audit/MUSIC-PLAYER.md): the tags the full-screen page draws ----------------
+    // Title / artist / album are the loaded track's own tags, each empty when untagged (mediaTitle() keeps
+    // its "title - artist" form for the other surfaces); the cover is the embedded picture or a folder.jpg /
+    // cover.jpg beside the file, null when neither exists (the page then draws tex_default_music_cover).
+    QString mediaTrackTitle() const;
+    QString mediaArtist() const { return mediaArtist_; }
+    QString mediaAlbum() const { return mediaAlbum_; }
+    const QImage& mediaCoverArt() const { return mediaCover_; }
+    QString mediaCodec() const;           // lower-case suffix of the playing file ("mp3", "wav"), empty when unknown
+    int mediaTrackNumber() const;         // 1-based queue position, 0 when no queue
+    int mediaTrackCount() const;
+    bool mediaShuffle() const;
     QString mediaProvider() const { return jellyfinQueue_?QString("Jellyfin"):QString("Local"); }
     QString mediaPlayMethod() const { return jellyfinQueue_?jellyfinPlayback_.playMethod:QString{}; }
     QString mediaQueueSummary() const;
@@ -491,10 +505,14 @@ public:
     int activeAudioTrack() const { return activeAudioTrack_; } // 0-based, -1 = the backend names none
     void chooseSubtitleTrack(int index); // -1 = Off; anything else indexes subtitleTracks()
     void chooseAudioTrack(int index);    // set the track, then verify the backend's own read-back
-    // The notification queue: one pop-up at a time, each shown for a fixed lifetime, the rest waiting in
-    // order behind it. Bounded, so a failing producer cannot grow it without limit.
-    static constexpr qint64 notificationLifetimeMs=4000;
-    static constexpr int notificationQueueLimit=4;
+    // The notification queue: one pop-up at a time, the rest waiting in order behind it (basic_plugins.prx
+    // FUN_00008248 / FUN_00004fb8; audit/NOTIFICATIONS.md section 11). The timing is the module's own:
+    // a 2100 ms show phase (DAT_00047fcc), then a 3000 ms hold (DAT_00047f9c), taken only if nothing is
+    // waiting when the show phase ends; otherwise the pop-up is hidden at once. At most 16 wait behind the
+    // one on screen (the module trims the OLDEST waiting entry past 0x10).
+    static constexpr qint64 notificationShowMs=2100;
+    static constexpr qint64 notificationHoldMs=3000;
+    static constexpr int notificationWaitingLimit=16;
     void notify(const QString& title,const QString& detail={},const QString& icon={});
     const Notification* notification() const { return notifications_.isEmpty()?nullptr:&notifications_.first(); }
     int notificationCount() const { return notifications_.size(); }
@@ -674,6 +692,9 @@ private:
     SteamStore steamStore_;          // public storefront browser (browse + install handoff)
     QHash<int,QString> mediaTags_;   // per queue index, track tags read from the player
     QString mediaAlbum_;             // album of the loaded track, when tagged
+    QString mediaArtist_,mediaTagTitle_; // artist / title tags of the loaded track (music page)
+    QImage mediaCover_;              // embedded or folder cover of the loaded track (music page)
+    void readMediaTags();            // fills the above from the player and the file's folder
     QString resumePath_;             // file whose playback may resume
     qint64 resumePending_=0;         // milliseconds to seek once the media reports Loaded
     QPointer<QProcess> game_;        // the launched title, kept so a return is observable

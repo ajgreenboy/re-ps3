@@ -186,6 +186,9 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
     if(key=="media/repeatMode")return {{"Off",0},{"Repeat One",1},{"Repeat All",2}};
     if(key=="display/screensaverMinutes")return {{"After 5 Minutes",5},{"After 10 Minutes",10},{"After 20 Minutes",20},{"After 30 Minutes",30},{"Do Not Use",0}};
     if(key=="power/idleMinutes")return {{"Off",0},{"15 minutes",15},{"30 minutes",30},{"1 hour",60},{"2 hours",120}};
+    // The console's Notification Messages / Trophy Notifications pages are a two-item Display / Do Not Display list.
+    if(key=="system/notificationMessages" || key=="system/notificationTrophy")
+        return {{text("msg_display_on","Display"),true},{text("msg_display_off","Do Not Display"),false}};
     return {{"Off",false},{"On",true}};
 }
 // One row of a settings list page. The row class is this build's: the glass settings bullet
@@ -269,8 +272,8 @@ const QVector<RowSpec>* firmwareRows(const QString& id) {
         {"dictionary_type","msg_dictionary_type","msg_dictionary_type_explanation",Action::Information,nullptr,nullptr,"Dictionary Type"},
         {"dict_edit","msg_word_register","msg_word_register_explanation",Action::Information,nullptr,nullptr,"Add/Edit Term"},
         {"dict_delete","msg_del_studyhistory","msg_del_studyhistory_explanation",Action::Information,nullptr,nullptr,"Delete Predictive Text Dictionary"},
-        {"notification_message","msg_notification_message","msg_notification_message_explanation",Action::Information,nullptr,nullptr,"Notification Messages"},
-        {"trophy_notification","msg_trophy_notification","msg_trophy_notification_info",Action::Information,nullptr,nullptr,"Trophy Notifications"},
+        {"notification_message","msg_notification_message","msg_notification_message_explanation",Action::SettingChoices,"system/notificationMessages",nullptr,"Notification Messages"},
+        {"trophy_notification","msg_trophy_notification","msg_trophy_notification_info",Action::SettingChoices,"system/notificationTrophy",nullptr,"Trophy Notifications"},
         {"whats_new","msg_your_channel_display","msg_your_channel_display_explanation",Action::Information,nullptr,nullptr,"Display [What's New]"},
         {"disc_auto_start","msg_disc_auto_start","msg_disc_auto_start_explanation",Action::Information,nullptr,nullptr,"Disc Auto-Start"},
         {"control_hdmi","msg_control_for_hdmi","msg_control_for_hdmi_explanation",Action::Information,nullptr,nullptr,"Control for HDMI"},
@@ -2260,6 +2263,7 @@ void Shell::restoreDefaultSettings() {
         {"appearance/theme",QString{}},{"appearance/wallpaper",QString{}},
         {"clock/dateFormat",1},{"clock/hourFormat",1},
         {"audio/volume",60},{"audio/keyTone",true},{"audio/muted",false},
+        {"system/notificationMessages",true},{"system/notificationTrophy",true},
         {"media/repeatMode",0},{"media/repeat",false},{"media/shuffle",false},
         {"power/idleMinutes",0},{"display/screensaverMinutes",0},{"display/fullscreen",false},
         {"photo/interval",5000},{"photo/fit",0}};

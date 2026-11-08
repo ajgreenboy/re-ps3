@@ -1632,6 +1632,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
                 mediaAlbum_=tags.value(QMediaMetaData::AlbumTitle).toString().trimmed();
                 if(!title.isEmpty()){mediaTitle_=artist.isEmpty()?title:title+" - "+artist;mediaTags_[mediaQueue_.currentIndex()]=mediaTitle_;}
             }
+            if(state==QMediaPlayer::LoadedMedia)readMediaTags();
             if(state==QMediaPlayer::LoadedMedia) {
                 // Sidecar subtitles belong to a local video file: the Video column's own library. Streamed
                 // Jellyfin media has no directory of the user's beside it, and a photo never reaches the
@@ -1674,6 +1675,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     if(!profiles_.error().isEmpty())showMessage(profiles_.error(),MessageKind::Page);
     connect(video_.get(),&QVideoSink::videoFrameChanged,this,[this](const QVideoFrame& frame){emit mediaFrame(frame.toImage());});
     connect(player_.get(),&QMediaPlayer::positionChanged,this,[this](qint64 at){if(at>0)mediaFailures_=0;});
+    // Embedded cover art can arrive after LoadedMedia on some backends; re-read the page's tags then.
+    connect(player_.get(),&QMediaPlayer::metaDataChanged,this,[this]{if(mediaOpen_ && !photoOpen()){readMediaTags();emit changed();}});
     connect(player_.get(),&QMediaPlayer::errorOccurred,this,[this](QMediaPlayer::Error,const QString& error){
         if(!mediaOpen_ || photoOpen())return;
         const auto request=mediaRequest_;
@@ -1735,6 +1738,19 @@ Shell::~Shell(){host::holdDisplayAwake(false);jellyfinRequest_=0;finishJellyfinP
 // front, so a burst of events each gets its own 4 s instead of the last one starving the others.
 void Shell::notify(const QString& title,const QString& detail,const QString& icon) {
     if(title.isEmpty())return;
+    // Per-type suppression: the console keeps /setting/system/notification (friend online / message received)
+    // and /setting/system/notificationTrophy (a trophy earned) and its sysconf rows say exactly that. The
+    // check sits with the producer in the firmware (basic_plugins.prx's queue has no setting read), so a
+    // suppressed notification never reaches the queue and never sounds.
+    {
+        const bool trophyClass=icon.contains("trophy_");
+        const bool messageClass=icon.contains("friend");
+        if((trophyClass && !preferences_.value("system/notificationTrophy").toBool()) ||
+           (messageClass && !preferences_.value("system/notificationMessages").toBool())) {
+            if(notificationLog_)qInfo().noquote()<<"notify: suppressed"<<title<<(trophyClass?"(Trophy Notifications off)":"(Notification Messages off)");
+            return;
+        }
+    }
     static const QStringList firmwareIcons{
         "tex_notification","tex_notification_caution","tex_notification_friend","tex_notification_headset",
         "tex_notification_info","tex_notification_keypad","tex_notification_mediasever","tex_notification_music",
@@ -1746,37 +1762,49 @@ void Shell::notify(const QString& title,const QString& detail,const QString& ico
     if(!texture.isEmpty() && !texture.startsWith("tex_notification"))
         texture="tex_notification_"+texture;
     if(!firmwareIcons.contains(texture))texture="tex_notification_info";
-    if(notifications_.size()>=notificationQueueLimit) {
-        // Drop the arriving event, not the pop-up already on screen: cutting a visible notification short
-        // would be a worse lie than losing the newest one under a burst.
+    // Firmware overflow rule (FUN_00008248): once more than 16 are waiting, the oldest WAITING entry is
+    // dropped (its owner is told "3"); the pop-up on screen is never the one trimmed.
+    notifications_.push_back(Notification{title,detail.isEmpty()?QString{}:detail,texture,0,0,false});
+    while(notifications_.size()>1+notificationWaitingLimit) {
+        const auto dropped=notifications_.takeAt(1);
         if(notificationLog_)
-            qInfo().noquote()<<"notify: drop"<<title<<(detail.isEmpty()?QString():QString("| ")+detail)
-                <<"(queue full,"<<notificationQueueLimit<<"shown or waiting)";
-        return;
+            qInfo().noquote()<<"notify: drop oldest waiting"<<dropped.title<<"(more than"<<notificationWaitingLimit<<"waiting)";
     }
-    notifications_.push_back(Notification{title,detail.isEmpty()?QString{}:detail,texture,0});
     if(notificationLog_)
         qInfo().noquote()<<"notify: enqueue"<<title<<(detail.isEmpty()?QString():QString("| ")+detail)
-            <<texture<<"queue"<<notifications_.size()<<"/"<<notificationQueueLimit;
+            <<texture<<"queue"<<notifications_.size();
     if(notifications_.size()==1)promoteNotification();
     emit changed();
 }
 void Shell::promoteNotification() {
     if(notifications_.isEmpty()){notificationTimer_.stop();return;}
     auto& front=notifications_.first();
-    front.expiresAt=notificationClock_.elapsed()+notificationLifetimeMs;
+    // Show phase first; the hold is added (or refused) when the show phase ends, in expireNotifications().
+    front.decideAt=notificationClock_.elapsed()+notificationShowMs;
+    front.expiresAt=front.decideAt+notificationHoldMs;
+    front.decided=false;
     if(!notificationTimer_.isActive())notificationTimer_.start();
     // Firmware: the trophy notification carries sound "snd_trophy" (np_trophy_util.prx builds the
     // descriptor with plugin=system_plugin, sound=snd_trophy; audit/INTERACTION-AUDIO.md section 10).
     if(front.icon.startsWith("tex_notification_trophy_"))
         interactionAudio_.play(InteractionAudio::Cue::Trophy);
-    if(notificationLog_)qInfo().noquote()<<"notify: show"<<front.title<<front.icon<<notificationLifetimeMs<<"ms";
+    if(notificationLog_)qInfo().noquote()<<"notify: show"<<front.title<<front.icon<<"show"<<notificationShowMs<<"ms + hold"<<notificationHoldMs<<"ms";
 }
 void Shell::expireNotifications() {
     // Exactly one entry per tick: a queued entry carries no expiry until it reaches the front, so a loop that
     // popped every due entry would drop the whole queue the moment the first one timed out.
     if(notifications_.isEmpty()){notificationTimer_.stop();return;}
-    if(notificationClock_.elapsed()<notifications_.first().expiresAt)return;
+    auto& front=notifications_.first();
+    // FUN_00004fb8 at the end of the show phase: hold for 3000 ms only when nothing is waiting; with a
+    // successor queued the pop-up is hidden immediately and the next one is promoted.
+    if(!front.decided && notificationClock_.elapsed()>=front.decideAt) {
+        front.decided=true;
+        if(notifications_.size()>1) {
+            front.expiresAt=front.decideAt;
+            if(notificationLog_)qInfo().noquote()<<"notify: no hold,"<<notifications_.size()-1<<"waiting";
+        }
+    }
+    if(notificationClock_.elapsed()<front.expiresAt)return;
     const auto done=notifications_.takeFirst();
     if(notificationLog_)qInfo().noquote()<<"notify: expire"<<done.title;
     if(notifications_.isEmpty())notificationTimer_.stop();
@@ -4325,6 +4353,7 @@ void Shell::startQueuedMedia() {
     const auto* selected=mediaQueue_.current();if(!selected)return;
     const auto item=*selected; // player callbacks must not invalidate the selected queue entry
     ++mediaRequest_;mediaOpen_=true;mediaTitle_=item.title;loading_=true;status_.clear();
+    mediaArtist_.clear();mediaTagTitle_.clear();mediaAlbum_.clear();mediaCover_=QImage();
     // A saved position resumes here; the seek itself happens on LoadedMedia. msg_play_begin set the one-shot
     // flag that skips this row's own record, and it is consumed here so the next title resumes normally.
     resumePath_=item.path;
@@ -4382,6 +4411,51 @@ void Shell::toggleMediaShuffle() {
     touch();
     if(mediaOpen_ && !photoOpen() && message_.isEmpty())preferences_.setValue("media/shuffle",!preferences_.value("media/shuffle").toBool());
 }
+// The music page's tag accessors (audit/MUSIC-PLAYER.md). Qt reports the tags on the player's metaData; the
+// cover is the embedded CoverArtImage / ThumbnailImage, else a folder/cover picture beside a local file.
+void Shell::readMediaTags() {
+    if(jellyfinQueue_)return;
+    const auto tags=player_->metaData();
+    mediaTagTitle_=tags.value(QMediaMetaData::Title).toString().trimmed();
+    mediaArtist_=tags.value(QMediaMetaData::ContributingArtist).toString().trimmed();
+    if(mediaArtist_.isEmpty())mediaArtist_=tags.value(QMediaMetaData::AlbumArtist).toString().trimmed();
+    mediaAlbum_=tags.value(QMediaMetaData::AlbumTitle).toString().trimmed();
+    QImage cover;
+    for(const auto key:{QMediaMetaData::CoverArtImage,QMediaMetaData::ThumbnailImage}) {
+        const auto value=tags.value(key);
+        if(value.canConvert<QImage>())cover=value.value<QImage>();
+        if(!cover.isNull())break;
+    }
+    if(cover.isNull()) {
+        const QFileInfo file(player_->source().toLocalFile());
+        const auto folderCover=[&]()->QImage {
+            if(!file.isFile())return {};
+            for(const char* stem:{"folder","cover","front","albumart"})
+                for(const char* suffix:{".jpg",".jpeg",".png"}) {
+                    QImage candidate;
+                    if(candidate.load(file.absoluteDir().filePath(QString::fromLatin1(stem)+QString::fromLatin1(suffix))))
+                        return candidate;
+                }
+            return {};
+        };
+        cover=folderCover();
+    }
+    if(!cover.isNull() && (cover.width()>512||cover.height()>512))
+        cover=cover.scaled(512,512,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+    mediaCover_=cover;
+}
+QString Shell::mediaTrackTitle() const {
+    if(!mediaTagTitle_.isEmpty())return mediaTagTitle_;
+    const auto* item=mediaQueue_.current();
+    return item?item->title:mediaTitle_;
+}
+QString Shell::mediaCodec() const {
+    const auto* item=mediaQueue_.current();
+    return item?QFileInfo(item->path).suffix().toLower():QString{};
+}
+int Shell::mediaTrackNumber() const { return mediaQueue_.empty()?0:mediaQueue_.currentIndex()+1; }
+int Shell::mediaTrackCount() const { return int(mediaQueue_.items().size()); }
+bool Shell::mediaShuffle() const { return preferences_.value("media/shuffle").toBool(); }
 QString Shell::mediaQueueSummary() const {
     if(!mediaOpen_ || photoOpen() || mediaQueue_.empty())return {};
     QString result=QString("Track %1 of %2").arg(mediaQueue_.currentIndex()+1).arg(mediaQueue_.items().size());
