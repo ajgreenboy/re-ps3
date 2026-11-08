@@ -52,7 +52,7 @@ All server binaries, generated media, test accounts, tokens, logs and disposable
 
 ## Next phases and practical limits
 
-- Updated 2026-11-07: of the items in the next two lines, posters, search, resume rows, audio/subtitle selection (including server text subtitles), a Streaming Quality ceiling and remembered sign-in are done (section 13 and "Streaming quality" below; commits 66e0f4b, ce8a33e). Still open: the page/hero backdrop draw (`Shell::pageBackdrop()` has no caller in `src/*.cpp`), image-based subtitles, Quick Connect/SSO. The two lines are the 2026-10-26 state.
+- Updated 2026-11-07: of the items in the next two lines, posters, search, resume rows, audio/subtitle selection (including server text subtitles), a Streaming Quality ceiling and remembered sign-in are done (section 13 and "Streaming quality" below; commits 66e0f4b, ce8a33e). Still open: image-based subtitles (the page backdrop draw landed 2026-11-08, section 13), Quick Connect/SSO. The two lines are the 2026-10-26 state.
 - Posters/backdrops, detailed episode metadata, search and resume UI remain open. Playback currently starts at zero; the server still receives progress/stop positions.
 - Subtitle and audio-track selection, quality selection, Quick Connect/SSO and remembered sign-in remain open.
 - Audio routing exists but was not part of the real-server playback checks. Live TV and off-origin external-media redirects were not validated.
@@ -512,28 +512,43 @@ compatible stream.` - the exit criterion "a failed stream shows the client's err
   `GET /Items/2222...9999/Images/Primary auth=yes bytes=1826`,
   `GET /Items/1111...8888/Images/Backdrop auth=yes bytes=2199`; the three cache files are on disk under
   `data-final/jellyfin/images` at exactly those sizes.
-- **Backdrops are fetched, cached and exposed, but nothing draws them.** There is no page-level artwork surface
-  in the view: `Entry::artwork` is a row icon, and a grep for `backdrop`/`hero` in `view.cpp`, `view.h`,
-  `shell.cpp` and `shell.h` matches nothing before this change. The shell side is done
-  (`Shell::pageBackdrop()`, the fetch, the cache), so the remaining hunk is the draw - and
-  `view.cpp` is outside this change's fence, so it is reported here instead of applied (illustrative hunk; the
-  surrounding paint path is the one that draws the background and the columns):
-
-      --- a/native-xmb/src/view.cpp
-      +++ b/native-xmb/src/view.cpp
-      @@ View::paintGL(), after the background and before the columns are composited
-      +    // The open Jellyfin page's own Backdrop, full-bleed under the columns. Shell owns the
-      +    // authenticated fetch and the cache; this is the only surface that draws it.
-      +    if(const QImage& hero=shell_.pageBackdrop(); !hero.isNull() && shell_.depth()>0) {
-      +        const QSizeF cover=QSizeF(hero.size()).scaled(QSizeF(width(),height()),Qt::KeepAspectRatioByExpanding);
-      +        p.save();p.setOpacity(.55);
-      +        p.drawImage(QRectF(QPointF((width()-cover.width())/2.,(height()-cover.height())/2.),cover),hero);
-      +        p.restore();
-      +    }
-
-  With that hunk the backdrop is already warm from the run that produced `11-rows.png`; no client or shell
-  change would be needed. Until then the honest statement is: posters render, backdrops are fetched and cached
-  but not drawn.
+- **Backdrops are drawn (H4, 2026-11-08).** Up to 2026-11-07 they were fetched, cached and exposed but nothing
+  drew them (`Shell::pageBackdrop()` had no caller). The draw now reuses the focused-art path that already
+  shows game PIC1 / Steam hero art behind the icons, rather than a separate surface:
+  - `View::focusedBackgroundKey()` (new, `view.cpp`): the focused row's own background file
+    (`Shell::focusedBackgroundPath()`) wins; else the open Jellyfin page's backdrop, keyed by
+    `QImage::cacheKey()`. `View::syncFocusedBackground()` takes the page backdrop straight from the shell (already
+    decoded, no `QtConcurrent` load) and sets `focusedBackgroundIsPage_`.
+  - Same dwell (2000 ms) and fade (350 ms) as game art, through `drawBackdrops()`, and the item menu's dark scrim
+    still applies over it. One difference, on purpose: the backdrop belongs to the page, not to the row, so a
+    row move inside the page keeps it (the reset in `View::syncColumns()` is skipped when the new focus resolves to
+    the same page backdrop) and its dwell counts from when the art arrived (`pageBackdropClock_`), not from the
+    last row move. A `--focus-time` override still pins it for captures.
+  - `Shell::pageBackdrop()` (now defined in `jellyfin_shell.cpp`) returns a null image unless the page on top is
+    the Jellyfin page that requested the art (`jellyfinBackdropPage_`, set in the `pageReady` handler from
+    depth, kind, parent and offset) and no media is open. Back pops pages without reloading them, so before this a
+    parent library page would have kept its child's backdrop. Leaving Jellyfin, going Back, or starting playback
+    therefore turns the key empty and the art fades out as departing art.
+- Evidence (scripted run against the stub, `C:\dev\out\h4-jf\run.ps1`, build `C:/dev/out/h4-build`; frames in
+  `C:\dev\out\h4-jf\captures-after`, the same script on the pre-change build in `captures-base`):
+  - `h1-library.png`: library page (`jellyfinViews`, no backdrop requested): XMB background only.
+  - `h2-items-early.png`: folder page right after load (`folder page with 2 row(s); 2 poster request(s) and one
+    backdrop`; stub `GET /Items/1111...8888/Images/Backdrop auth=yes bytes=2199`): backdrop mid-fade over the ribbon.
+  - `h3-items-backdrop.png`: same page 3 s later: the fixture backdrop (stripes and disc) full-bleed behind the
+    rows. Base vs after on this frame: PSNR 12.08 dB, SSIM 0.6439 (the change).
+  - `h4-items-moved.png`: DOWN to Stub Movie Two: backdrop still fully up, no fade-out/fade-in on the row move.
+  - `h5-back-library.png` (Back to the library page) and `h6-left-jellyfin.png` (Back out to the TV column): no
+    backdrop. `h7-items-again.png`: re-entering the folder page brings it back. `h8-playing.png`: playback covers
+    the screen (the page backdrop is nulled while `mediaOpen`).
+  - Outside Jellyfin, fixed-clock A/B with `bun work/ab-shot.ts` (`--ui-clock 2026-11-08T07:00:00 --focus-time
+    5000`, render clock 30 s), pre-change build as reference: home column `full,wait,wait,wait` PSNR 103.28 dB,
+    SSIM 1.0000; TV column `full,LEFT,UP,wait,wait` PSNR 73.69 dB, SSIM 1.0000. (The real-time scripted frames
+    differ only by the live ribbon: PSNR 24-26 dB on h0/h1/h5/h6.)
+  - Gate: `bun work/ab-layers.ts --all --exe C:/dev/out/h4-build/re-ps3-native.exe` -> 6/6 layers within
+    budget, 6/6 layers (5 pass, 1 informative), states 12/12 pass, whole set PASS (log
+    `C:\dev\out\h4-ab-layers.log`). The build also carried another workstream's uncommitted profile edits.
+  - Not checked: a real Jellyfin server's backdrop (only the stub fixture), and the fade under playback is not
+    visible because the player covers the frame.
 
 ### 14. 1.3 Search, driven by the existing OSK
 
@@ -701,8 +716,7 @@ thresholds/references. The stub server, the runner, the captures and the logs ar
 
 ### 19. What remains
 
-- **The backdrop draw** (section 13): the hunk above is the only missing piece; the fetch, cache and accessor
-  are working.
+- ~~The backdrop draw~~ (section 13): done 2026-11-08 (H4), on the view's focused-art path.
 - **A real Jellyfin 12 server.** This pass proves the client against a stub whose payloads match the documented
   schema; the 2026-10-26 section above is still the only real-server pass, and it predates resume, played
   state, search, tracks and DPAPI. Re-running those four scripts against a real library is the next honest step,

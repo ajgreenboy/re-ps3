@@ -94,7 +94,11 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // Network > Weather (weather_shell.cpp): the column row and the Units toggle.
     WeatherApp, WeatherUnits,
     // Settings > System Settings > System Check (system_check_shell.cpp).
-    SystemCheck };
+    SystemCheck,
+    // A user's Information page (P4): its Icon row (opens the icon page) and User Name row (the name page); one
+    // icon choice (value = Profile::icon key), the "From a File" row, and one picture in the Pictures folder
+    // (value = its path). The page's user id is Page::userInfo.
+    UserInfoIcon, UserInfoName, UserIconChoice, UserIconFromFile, UserIconFile };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -411,10 +415,11 @@ public:
     bool steamAccountsOpen() const;
     // The accounts on the open page, for the dump and the scripted check.
     int steamAccountCount() const { return steamAccounts_.size(); }
-    // The open Jellyfin page's backdrop, fetched through the authenticated image route and kept for
-    // the view's hero surface. Nothing draws it yet: the view has no page-level artwork slot, so the
-    // hunk that would use it is reported in audit/JELLYFIN-NATIVE.md instead of being written here.
-    const QImage& pageBackdrop() const { return jellyfinBackdrop_; }
+    // The open Jellyfin page's backdrop, fetched through the authenticated image route. Null unless the
+    // page on top is the Jellyfin page that fetched it (a parent page reached with Back, or any non-Jellyfin
+    // page, has none). View::syncFocusedBackground() draws it on the focused-art path when the focused row
+    // has no background file of its own.
+    const QImage& pageBackdrop() const;
     // True while a DPAPI session record exists for this installation (the "stay signed in" opt-in).
     bool jellyfinRemembered() const;
     QString focusedRowId() const;
@@ -629,8 +634,9 @@ private:
     bool jellyfinRestoring_=false;    // a remembered session's first page is loading
     bool signInRemember_=false;       // the sign-in page's opt-in row
     QString jellyfinSearchTerm_;      // the last accepted search term, prefilled into the keyboard
-    QImage jellyfinBackdrop_;         // the open page's hero image (no view surface yet)
+    QImage jellyfinBackdrop_;         // the open page's hero image (drawn by View, see pageBackdrop())
     QString jellyfinBackdropId_;
+    QString jellyfinBackdropPage_;    // jellyfinPageKey() of the page that requested it
     // In-XMB sign-in page state (audit/JELLYFIN-NATIVE.md). The server comes from the registration; the user
     // name and password are typed on the XMB's own keyboard and stay in memory for this process only, and the
     // password is cleared when the page closes. signInError_ is the client's own message, shown on the page.
@@ -722,7 +728,7 @@ private:
     int columnSink_=0;
     // `grouped` is a page the item menu's Group Content level rebuilt into letter folders: `groupedSource` keeps
     // the ungrouped rows so All can put them back without a rescan, and the folders' rows are the same entries.
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; QString dlna; int dlnaServer=-1; QString tailscale; QString wol,ha; bool weather=false; bool systemCheck=false; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; QString dlna; int dlnaServer=-1; QString tailscale; QString wol,ha; bool weather=false; bool systemCheck=false; QString userInfo; int userInfoStep=0; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step
@@ -911,6 +917,13 @@ private:
     void stepPhoto(int delta);
     void showPhoto();
     void rebuildUsers();
+    // P4 avatar editing: the user's Information page (step 1), the icon page (2), the Pictures page (3).
+    void openUserInfo(const QString& id);
+    void openUserIcons(const QString& id);
+    void openUserIconFiles(const QString& id);
+    void chooseUserIcon(QString id,QString icon,QString picture={}); // copies: it pops the page the row lives on
+    void refreshUserInfoPages();
+    QImage userIconImage(const Profile& profile) const;
     void addInstalledApps();
     // Builds the Network column's rows from the firmware's own category_network.xml (audit/XMBML-NETWORK.md),
     // keeping the built-in rows when the definition cannot be read.

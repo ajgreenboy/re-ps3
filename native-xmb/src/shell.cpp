@@ -37,6 +37,7 @@
 #include <QSysInfo>
 #include <QUrl>
 #include <QImageReader>
+#include <QStandardPaths>
 #include <QLoggingCategory>
 #include <QDateTime>
 #include <QFutureWatcher>
@@ -2150,6 +2151,21 @@ void Shell::activate() {
     // A letter folder of a page the item menu's Group Content rebuilt: it opens that key's rows as an ordinary
     // page, so Circle returns to the letter list and the item menu's All puts the page back together.
     case Action::GroupFolder:openGroupFolder(entry);break;
+    // P4: a user's Information page and its icon pages (openUserInfo and below).
+    case Action::UserInfoIcon:openUserIcons(entry.value);break;
+    case Action::UserInfoName: {
+        QString name;
+        for(const auto& profile:profiles_.profiles())if(profile.id==entry.value)name=profile.name;
+        if(!name.isEmpty())emit requestRenameUser(entry.value,name);
+        break;
+    }
+    case Action::UserIconChoice:
+        if(!pages_.isEmpty())chooseUserIcon(pages_.last().userInfo,entry.value);
+        break;
+    case Action::UserIconFromFile:openUserIconFiles(entry.value);break;
+    case Action::UserIconFile:
+        if(!pages_.isEmpty())chooseUserIcon(pages_.last().userInfo,QStringLiteral("file"),entry.value);
+        break;
     }
     emit changed();
 }
@@ -2323,7 +2339,7 @@ bool Shell::optionGroupable() const {
     if(pages_.isEmpty() || entries().size()<2)return false;
     const auto& page=pages_.last();
     if(page.signIn || page.downloads || page.jellyfin || page.jellyfinViews || page.jellyfinSearch
-       || page.steamAccounts || page.continuePage)return false;
+       || page.steamAccounts || page.continuePage || page.userInfoStep)return false;
     for(const auto& entry:entries())if(entry.title.trimmed().isEmpty())return false;
     return true;
 }
@@ -2725,10 +2741,11 @@ void Shell::optionsActivate() {
     case OptionCommand::Information:
         resetOptions();
         // A user row's Information is where the firmware edits the name (FUN_0008f42c builds a msg_user_name
-        // field from user.info; FUN_0008f5ec checks and saves it). This build edits it on user_plugin's name
-        // page instead of drawing that information page.
+        // field from user.info; FUN_0008f5ec checks and saves it). The same page is where user_plugin's icon
+        // choice (msg_icon_image_select) is reached, so this build opens a page with the two fields: Icon opens
+        // the icon page, User Name opens user_plugin's name page (P4, openUserInfo).
         if(entry.action==Action::SelectUser) {
-            emit requestRenameUser(entry.value,entry.title);
+            openUserInfo(entry.value);
             interactionAudio_.play(InteractionAudio::Cue::Confirm);
             emit changed();
             break;
@@ -4498,8 +4515,12 @@ void Shell::rebuildUsers(){
         // explore_plugin_full's same-named art is the house-on-a-disc.
         users.push_back(item(profile.id,profile.name,"tex_Avatar_Default","explore_plugin_full",Action::SelectUser,profile.id));
         users.last().themeIcon="icon_user";
+        // P4: a chosen icon (a firmware explore/user picture or the user's own copied picture) replaces that art.
+        // The row keeps the icon box (iconSized), and the view draws artwork before a theme's icon_user.
+        if(const auto icon=userIconImage(profile);!icon.isNull()){users.last().artwork=icon;users.last().iconSized=true;}
         if(profile.id==profiles_.activeId())selections_[0]=int(users.size())-1;
     }
+    refreshUserInfoPages();
     // The Steam account surface (FIDELITY-BEHAVIOUR U4). It is a native-only row: the 4.93 console's account
     // story is the PSN binding, which has no local implementation, and the data layer's two-step switch prompt
     // had no UI at all. It sits last in the column, after the users, because it is about the Steam client on
@@ -4815,6 +4836,135 @@ void Shell::deleteUser(const QString& id) {
     if(!preferences_.forgetProfile(id))
         qWarning().noquote()<<"profiles: deleted"<<id<<"but its settings stay:"<<preferences_.error();
     else qInfo().noquote()<<"profiles: deleted"<<id<<"and its settings";
+}
+// ---- P4: avatar editing (user_plugin msg_icon_image_select) -------------------------------------------------------
+// Evidence: user_plugin.prx, explore_plugin.prx, explore_category_user.prx and np_multisignin_plugin.prx (fw 4.93,
+// decrypted) each carry the literal path /dev_flash/vsh/resource/explore/user/000.png, and that directory of the local
+// dev_flash holds 000.png..026.png (27 pictures, 162x162 RGBA). Those are the firmware's local-user icons, so they are
+// the choices here, read from dev_flash at run time. user_plugin's English table has msg_icon_image_select
+// ("Select an image to use as an icon."), its prompt for choosing a picture; this build's equivalent is the
+// "From a File" row, which lists the Windows Pictures folder. No RCO page lays the choice out (user_plugin's tree has
+// page_create and page_create_dialog only; user_info_plugin's page_userinfo has no children), so the pages here are
+// this build's ordinary row pages: INFERRED layout. The row labels "Icon", "Default", "Icon N" and "From a File" are
+// this build's own; "User Name" is explore_plugin_full's msg_user_name.
+QImage Shell::userIconImage(const Profile& profile) const {
+    return profiles_.iconImage(profile,assets_.root());
+}
+void Shell::refreshUserInfoPages() {
+    // Keep an open Information page in step with the record (a new icon, a rename from the name page).
+    const auto users=profiles_.profiles();
+    for(auto& page:pages_) {
+        if(page.userInfoStep!=1)continue;
+        const auto it=std::find_if(users.cbegin(),users.cend(),[&](const Profile& p){return p.id==page.userInfo;});
+        if(it==users.cend())continue;
+        page.title=it->name;
+        const auto icon=userIconImage(*it);
+        for(auto& row:page.entries) {
+            row.artwork=icon;row.iconSized=!icon.isNull();
+            if(row.action==Action::UserInfoName)row.fieldValue=it->name;
+        }
+    }
+}
+void Shell::openUserInfo(const QString& id) {
+    const auto users=profiles_.profiles();
+    const auto it=std::find_if(users.cbegin(),users.cend(),[&](const Profile& p){return p.id==id;});
+    if(it==users.cend())return;
+    Page page;page.title=it->name;page.userInfo=id;page.userInfoStep=1;
+    auto icon=item("user-info:icon",QObject::tr("Icon"),"tex_Avatar_Default","explore_plugin_full",Action::UserInfoIcon,id);
+    icon.detail=assets_.text("user_plugin","msg_icon_image_select","Select an image to use as an icon.");
+    auto name=item("user-info:name",assets_.text("explore_plugin_full","msg_user_name","User Name"),"tex_Avatar_Default",
+                   "explore_plugin_full",Action::UserInfoName,id);
+    page.entries={icon,name};
+    pages_.push_back(std::move(page));
+    refreshUserInfoPages();
+    qInfo().noquote()<<"profiles: information page"<<id<<"icon="<<(it->icon.isEmpty()?QStringLiteral("default"):it->icon);
+    emit changed();
+}
+void Shell::openUserIcons(const QString& id) {
+    const auto users=profiles_.profiles();
+    const auto it=std::find_if(users.cbegin(),users.cend(),[&](const Profile& p){return p.id==id;});
+    if(it==users.cend())return;
+    Page page;page.title=QObject::tr("Icon");page.userInfo=id;page.userInfoStep=2;
+    const auto current=QString(QChar(0x25cf));
+    auto fallback=item("user-icon:default",QObject::tr("Default"),"tex_Avatar_Default","explore_plugin_full",Action::UserIconChoice,QString());
+    if(it->icon.isEmpty())fallback.fieldValue=current;
+    page.entries.push_back(fallback);
+    const auto keys=Profiles::firmwareIcons(assets_.root());
+    for(int i=0;i<keys.size();++i) {
+        auto row=item("user-icon:"+keys[i],QObject::tr("Icon %1").arg(i+1),"tex_Avatar_Default","explore_plugin_full",
+                      Action::UserIconChoice,keys[i]);
+        row.artwork=Profiles::readIcon(Profiles::firmwareIconPath(assets_.root(),keys[i]));
+        row.iconSized=true;
+        if(row.artwork.isNull())continue; // a file that does not decode is not offered
+        if(it->icon==keys[i])row.fieldValue=current;
+        page.entries.push_back(std::move(row));
+    }
+    auto file=item("user-icon:file",QObject::tr("From a File"),"tex_Avatar_Default","explore_plugin_full",Action::UserIconFromFile,id);
+    file.detail=assets_.text("user_plugin","msg_icon_image_select","Select an image to use as an icon.");
+    if(it->icon==QStringLiteral("file")){file.artwork=userIconImage(*it);file.iconSized=!file.artwork.isNull();file.fieldValue=current;}
+    page.entries.push_back(file);
+    for(int i=0;i<page.entries.size();++i)if(page.entries[i].fieldValue==current)page.selection=i;
+    qInfo().noquote()<<QStringLiteral("profiles: icon page user=%1 firmwareIcons=%2 current=%3")
+        .arg(id).arg(keys.size()).arg(it->icon.isEmpty()?QStringLiteral("default"):it->icon);
+    pages_.push_back(std::move(page));
+    emit changed();
+}
+void Shell::openUserIconFiles(const QString& id) {
+    // The user's Pictures folder (XMB_PICTURES_DIR overrides it for scripted runs), its top level and one level of
+    // subfolders, at most 64 pictures by name. Each row is a bounded thumbnail decode, never the full picture.
+    QString root=qEnvironmentVariable("XMB_PICTURES_DIR");
+    if(root.isEmpty())root=QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    const QString title=assets_.text("user_plugin","msg_icon_image_select","Select an image to use as an icon.");
+    QStringList files;
+    const QStringList filters{"*.png","*.jpg","*.jpeg","*.bmp","*.gif","*.webp"};
+    const QDir base(root);
+    constexpr int MaximumPictures=64;
+    if(!root.isEmpty() && base.exists()) {
+        for(const auto& name:base.entryList(filters,QDir::Files,QDir::Name|QDir::IgnoreCase))files<<base.filePath(name);
+        for(const auto& sub:base.entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name|QDir::IgnoreCase)) {
+            if(files.size()>=MaximumPictures)break;
+            const QDir dir(base.filePath(sub));
+            for(const auto& name:dir.entryList(filters,QDir::Files,QDir::Name|QDir::IgnoreCase))files<<dir.filePath(name);
+        }
+    }
+    if(files.size()>MaximumPictures)files.resize(MaximumPictures);
+    Page page;page.title=title;page.userInfo=id;page.userInfoStep=3;
+    for(const auto& path:files) {
+        const QFileInfo info(path);
+        if(info.size()<=0 || info.size()>32ll*1024*1024)continue;
+        QImageReader reader(path);
+        reader.setAutoTransform(true);
+        reader.setAllocationLimit(256);
+        const QSize size=reader.size();
+        if(!size.isValid() || size.width()>8192 || size.height()>8192)continue;
+        reader.setScaledSize(size.scaled(160,160,Qt::KeepAspectRatioByExpanding));
+        const QImage thumb=reader.read();
+        if(thumb.isNull())continue;
+        const int side=std::min(thumb.width(),thumb.height());
+        auto row=item("user-picture:"+path,info.fileName(),"tex_Avatar_Default","explore_plugin_full",Action::UserIconFile,path);
+        row.artwork=thumb.copy((thumb.width()-side)/2,(thumb.height()-side)/2,side,side); // the square that will be kept
+        row.iconSized=true;
+        row.detail=QDir::toNativeSeparators(info.absolutePath());
+        page.entries.push_back(std::move(row));
+    }
+    qInfo().noquote()<<QStringLiteral("profiles: picture page user=%1 folder=\"%2\" pictures=%3")
+        .arg(id,QDir::toNativeSeparators(root)).arg(page.entries.size());
+    if(page.entries.isEmpty()) {
+        showMessage(title,QObject::tr("No pictures were found in %1.").arg(QDir::toNativeSeparators(root)),MessageKind::Page);
+        emit changed();
+        return;
+    }
+    pages_.push_back(std::move(page));
+    emit changed();
+}
+void Shell::chooseUserIcon(QString id,QString icon,QString picture) {
+    const bool ok=picture.isEmpty()?profiles_.setIcon(id,icon):profiles_.importPicture(id,picture);
+    if(!ok)return; // Profiles::failed already raised the store's reason
+    qInfo().noquote()<<QStringLiteral("profiles: icon set user=%1 icon=%2%3").arg(id,icon.isEmpty()?QStringLiteral("default"):icon,
+        picture.isEmpty()?QString():QStringLiteral(" from=\"%1\"").arg(QDir::toNativeSeparators(picture)));
+    // Back to that user's Information page, which refreshUserInfoPages (through Profiles::changed) already updated.
+    while(!pages_.isEmpty() && pages_.last().userInfoStep>1)pages_.removeLast();
+    emit changed();
 }
 QString Shell::subtitleText(const Entry& entry) const {
     // The returned hunk from the render pass (audit/FIDELITY-SURFACES.md 14.10 A). A user-scoped row's second

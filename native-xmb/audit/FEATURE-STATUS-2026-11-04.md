@@ -29,8 +29,35 @@ release verification, and exact PS3 fidelity.
 2. **Avatar editing.** Updated 2026-11-07: rename and delete are implemented from explore_plugin's own user-row
    menu (`audit/FIDELITY-SURFACES-MAP.md`; `Profiles::rename/remove`, `Shell::renameUser/deleteUser`): Delete runs the
    traced two Yes/No asks and drops that user's settings, Information renames with the firmware's duplicate-name
-   error. Avatar editing (user_plugin `msg_icon_image_select`) and the Log Out / Automatic Login rows (listed
-   disabled: this build has no logged-out state) remain.
+   error. The Log Out / Automatic Login rows (listed disabled: this build has no logged-out state) remain.
+   Updated 2026-11-08 (P4): avatar editing is implemented. Information on a user row now opens that user's
+   Information page with two rows, Icon and User Name (`msg_user_name`; it opens the existing name page). Icon opens a
+   page of choices: Default (`explore_plugin_full:tex_Avatar_Default`, the art users had before), the firmware's 27
+   local-user icons and From a File. Firmware evidence: the decrypted 4.93 `user_plugin.prx`, `explore_plugin.prx`,
+   `explore_category_user.prx` and `np_multisignin_plugin.prx` each carry the literal
+   `/dev_flash/vsh/resource/explore/user/000.png`. That local dev_flash folder holds `000.png`..`026.png` (162x162
+   RGBA). They are listed and read from dev_flash at run time and are never copied into the repo or the data folder.
+   From a File lists the Windows Pictures folder (its top level and one level of subfolders, at most 64 pictures,
+   each shown as a bounded thumbnail decode) under user_plugin's `msg_icon_image_select` ("Select an image to use as
+   an icon."). A chosen picture (at most 32 MB and 8192 px a side, orientation applied) is centre-cropped to a square,
+   scaled to 162x162 and saved atomically to `<data>/avatars/<id>.png`. The choice is stored per profile as
+   `profiles.json` `"icon"` (`""` / `"fw:NNN"` / `"file"`; validated on load; written only when set, so a record
+   without an icon is unchanged). Deleting a user, or switching away from `"file"`, removes the copied picture. The
+   Users column draws the chosen icon in place of `tex_Avatar_Default`.
+   Code: `Profiles::setIcon/importPicture/firmwareIcons/iconImage`; `Shell::openUserInfo/openUserIcons/
+   openUserIconFiles/chooseUserIcon/refreshUserInfoPages`; `rebuildUsers`.
+   **INFERRED:** the page layout. No RCO page lays the choice out: `--rco-tree user_plugin,user_info_plugin` shows only
+   `page_create`, `page_create_dialog` and a childless `page_userinfo`. The pages are this build's ordinary row pages,
+   and the labels Icon, Default, Icon N and From a File are this build's own.
+   Verified with scripted runs on a scratch `--data-dir` (a copy of `out/native-dlna/data`), with `XMB_PICTURES_DIR`
+   pointing at a scratch folder. Frames are in `C:\dev\out\p4\f\`: `r1-info.png` (the Information page),
+   `r1-icons-focus2.png` (the icon page), `r1-users-after.png` (the Users column with `fw:001`), `r2-users-restart.png`
+   (the icon persists after a restart), `r2-pictures.png` (the Pictures page), `r2-users-after.png` and
+   `r3-users-restart-file.png` (a wide 1920x1080 picture, centre-cropped, persists after a restart). The saved picture
+   is 162x162.
+   Not done: the console's own default for a new user appears to be `explore/user/000.png` (the path user_plugin
+   carries, and the look of `col-users-r02`), but the build keeps `tex_Avatar_Default` as the default so that existing
+   frames do not change. The info-bar avatar slot (-376) is `view.cpp`'s and is still not drawn.
 3. **DLNA/UPnP discovery.** Updated 2026-11-07: implemented (`audit/DLNA.md`). Search for Media Servers runs SSDP
    discovery and ContentDirectory browsing (`src/dlna_client.*`, `src/dlna_shell.cpp`); audio/video play through the
    existing player, photos open in the viewer; `<data>/dlna.json` lists servers multicast cannot reach. Verified on a

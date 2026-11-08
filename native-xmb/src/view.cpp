@@ -289,10 +289,16 @@ void View::syncColumns() {
     const QString entryId=shell_.pageTitle()+QLatin1Char('/')+shell_.entries().value(shell_.selection()).id;
     if(const qint64 key=(qint64(shell_.category())*64+depth)*65536+shell_.selectionAt(depth);key!=focusKey_ || entryId!=focusedEntryId_ || !focusClock_.isValid()) {
         focusKey_=key;focusedEntryId_=entryId;focusClock_.restart();
-        if(!focusedBackground_.isNull() && focusedBackgroundOpacity_>0.) {
-            departingBackground_=focusedBackground_;departingBackgroundOpacity_=focusedBackgroundOpacity_;
+        QString path;
+        // A row move inside a Jellyfin page whose backdrop is already up leaves it in place.
+        const bool keepPage=focusedBackgroundIsPage_ && focusedBackgroundKey(path)==focusedBackgroundPath_;
+        if(!keepPage) {
+            if(!focusedBackground_.isNull() && focusedBackgroundOpacity_>0.) {
+                departingBackground_=focusedBackground_;departingBackgroundOpacity_=focusedBackgroundOpacity_;
+            }
+            focusedBackground_={};focusedBackgroundOpacity_=0.;focusedBackgroundPath_.clear();++focusedBackgroundRequest_;
+            focusedBackgroundIsPage_=false;
         }
-        focusedBackground_={};focusedBackgroundOpacity_=0.;focusedBackgroundPath_.clear();++focusedBackgroundRequest_;
     }
     for(int i=0;i<=depth;++i) {
         if(i>=columns_.size())columns_.push_back(Column{shell_.entriesAt(i),shell_.selectionAt(i),double(shell_.selectionAt(i))});
@@ -313,15 +319,31 @@ void View::syncColumns() {
     previousDepth_=depth;
     syncFocusedBackground();
 }
+// The focused art's identity: the row's own background file when the shell has one (game PIC1, Steam hero,
+// RAWG art), else the open Jellyfin page's backdrop, which the shell already holds decoded. Empty = none.
+QString View::focusedBackgroundKey(QString& path) {
+    path=shell_.focusedBackgroundPath();
+    if(!path.isEmpty())return path;
+    const QImage& page=shell_.pageBackdrop();
+    return page.isNull()?QString{}:QStringLiteral("jellyfin-page:%1").arg(page.cacheKey());
+}
 void View::syncFocusedBackground() {
-    const QString path=shell_.focusedBackgroundPath();
-    if(path==focusedBackgroundPath_)return;
-    focusedBackgroundPath_=path;const auto request=++focusedBackgroundRequest_;
-    if(path.isEmpty()) {
+    QString path;
+    const QString key=focusedBackgroundKey(path);
+    if(key==focusedBackgroundPath_)return;
+    focusedBackgroundPath_=key;const auto request=++focusedBackgroundRequest_;
+    if(key.isEmpty() || focusedBackgroundIsPage_) {
         if(!focusedBackground_.isNull() && focusedBackgroundOpacity_>0.) {
             departingBackground_=focusedBackground_;departingBackgroundOpacity_=focusedBackgroundOpacity_;
         }
-        focusedBackground_={};focusedBackgroundOpacity_=0.;return;
+        focusedBackground_={};focusedBackgroundOpacity_=0.;focusedBackgroundIsPage_=false;
+        if(key.isEmpty())return;
+    }
+    if(path.isEmpty()) {
+        // Jellyfin page backdrop: no decode, and its dwell starts now (leaving the page or starting playback
+        // nulls pageBackdrop(), which lands in the branch above and fades it out as departing art).
+        focusedBackground_=shell_.pageBackdrop();focusedBackgroundIsPage_=true;pageBackdropClock_.restart();
+        ++uiRevision_;update();return;
     }
     auto* watcher=new QFutureWatcher<QImage>(this);
     connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,request]{
@@ -370,6 +392,9 @@ void View::drawBackdrops(QPainter& p) {
     }
     draw(departingBackground_,departingBackgroundOpacity_);
     draw(focusedBackground_,focusedBackgroundOpacity_);
+    // A Jellyfin page backdrop is a film still behind readable rows, so it is veiled (black 0.4, following its fade), as
+    // Jellyfin's own clients dim theirs. Game hero art (PIC1, Steam heroes) is drawn as the console draws it.
+    if(focusedBackgroundIsPage_ && focusedBackgroundOpacity_>0.)p.fillRect(window,QColor(0,0,0,int(255*.4*focusedBackgroundOpacity_)));
     // The item menu's plate is a light veil (measured 0.21-0.25 white over a dark console wallpaper). Over bright
     // game art or a bright user wallpaper the same veil leaves its white text at ~1.2:1, so the art under the
     // panel is darkened while the menu is open: black up to 0.58, ramping in over 80 px left of the plate
@@ -815,7 +840,8 @@ void View::paintGL() {
     const qint64 frameStart=frameTracePath_.isEmpty()?0:clock_.nsecsElapsed();
     const qint64 nowNs=clock_.nsecsElapsed(),now=nowNs/1000000;
     const double dt=std::clamp(double(nowNs-previousFrameNs_)/1.e9,0.,.1);previousFrameNs_=nowNs;
-    const bool showArtwork=!focusedBackground_.isNull() && focusTime()>=artworkDwellMs && !shell_.mediaOpen() && !shell_.psMenuOpen();
+    const qint64 artworkTime=focusedBackgroundIsPage_ && focusTimeOverride_<0?pageBackdropClock_.elapsed():focusTime();
+    const bool showArtwork=!focusedBackground_.isNull() && artworkTime>=artworkDwellMs && !shell_.mediaOpen() && !shell_.psMenuOpen();
     const double fadeStep=dt*1000./artworkFadeMs;
     focusedBackgroundOpacity_=std::clamp(focusedBackgroundOpacity_+(showArtwork?fadeStep:-fadeStep),0.,1.);
     departingBackgroundOpacity_=std::max(0.,departingBackgroundOpacity_-fadeStep);

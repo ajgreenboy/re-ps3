@@ -243,6 +243,12 @@ private:
     QImage focusedBackground_,departingBackground_;
     quint64 focusedBackgroundRequest_=0;
     double focusedBackgroundOpacity_=0.,departingBackgroundOpacity_=0.;
+    // A Jellyfin page's backdrop (Shell::pageBackdrop()) rides the same slot when the focused row has no
+    // background file. It belongs to the page, not the row, so moving between rows keeps it: its dwell runs
+    // from when the page's art arrived instead of from the last row move.
+    bool focusedBackgroundIsPage_=false;
+    QElapsedTimer pageBackdropClock_;
+    QString focusedBackgroundKey(QString& path);
     void syncFocusedBackground();
     void drawBackdrops(QPainter& painter);
     double depthPosition_=0;

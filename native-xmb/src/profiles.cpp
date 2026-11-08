@@ -4,6 +4,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImageReader>
+#include <QRegularExpression>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -44,6 +46,15 @@ bool normalizeName(const QString& input, QString& normalized) {
     }
     return characters > 0;
 }
+
+// "" (default), "fw:NNN" (a firmware explore/user icon) or "file" (the copied picture).
+bool validIconKey(const QString& icon) {
+    static const QRegularExpression firmware(QStringLiteral("^fw:[0-9]{3}$"));
+    return icon.isEmpty() || icon == QStringLiteral("file") || firmware.match(icon).hasMatch();
+}
+
+constexpr qint64 MaximumPictureBytes = 32 * 1024 * 1024;
+constexpr int MaximumPictureSide = 8192;
 
 bool hasOnlyKeys(const QJsonObject& object, const QSet<QString>& allowed) {
     for (auto it = object.constBegin(); it != object.constEnd(); ++it)
@@ -106,8 +117,9 @@ Profiles::Profiles(const QString& dataDirectory, QObject* parent)
     QSet<QString> ids, names;
     for (const auto& value : stored) {
         const auto object = value.toObject();
-        if (!value.isObject() || !hasOnlyKeys(object, {"id", "name"}) ||
-            !object.value("id").isString() || !object.value("name").isString()) {
+        if (!value.isObject() || !hasOnlyKeys(object, {"id", "name", "icon"}) ||
+            !object.value("id").isString() || !object.value("name").isString() ||
+            (object.contains("icon") && (!object.value("icon").isString() || !validIconKey(object.value("icon").toString())))) {
             preserve(QStringLiteral("The profiles file contains an invalid user record."));
             return;
         }
@@ -121,7 +133,7 @@ Profiles::Profiles(const QString& dataDirectory, QObject* parent)
         }
         ids.insert(id);
         names.insert(name.toCaseFolded());
-        loaded.push_back({id, name});
+        loaded.push_back({id, name, object.value("icon").toString()});
     }
     const auto active = root.value("activeId").toString();
     if (!ids.contains(active)) {
@@ -149,7 +161,12 @@ bool Profiles::commit(const QVector<Profile>& profiles, const QString& activeId)
     if (!writable_) { emit failed(error_); return false; }
     if (!QDir().mkpath(directory_)) return fail(QStringLiteral("The local profiles directory could not be created."));
     QJsonArray users;
-    for (const auto& profile : profiles) users.append(QJsonObject{{"id", profile.id}, {"name", profile.name}});
+    for (const auto& profile : profiles) {
+        // "icon" is written only when set, so a profile without one keeps the exact record older builds read.
+        QJsonObject user{{"id", profile.id}, {"name", profile.name}};
+        if (!profile.icon.isEmpty()) user.insert("icon", profile.icon);
+        users.append(user);
+    }
     const auto bytes = QJsonDocument(QJsonObject{{"version", 1}, {"profiles", users}, {"activeId", activeId}}).toJson();
     QSaveFile file(path_);
     file.setDirectWriteFallback(false);
@@ -226,7 +243,95 @@ bool Profiles::remove(QString id) {
     const auto before = next.size();
     next.erase(std::remove_if(next.begin(), next.end(), [&](const Profile& p) { return p.id == id; }), next.end());
     if (next.size() == before) return fail(QStringLiteral("The selected local user does not exist."));
-    return commit(next, activeId_);
+    if (!commit(next, activeId_)) return false;
+    // The record is gone; its copied picture (if any) goes with it.
+    const QString picture = picturePath(id);
+    if (QFileInfo::exists(picture) && !QFile::remove(picture))
+        qWarning().noquote() << "profiles: deleted" << id << "but its icon picture stays:" << picture;
+    return true;
+}
+
+QString Profiles::picturePath(const QString& id) const {
+    return QDir(directory_).filePath(QStringLiteral("avatars/%1.png").arg(id));
+}
+
+bool Profiles::setIcon(QString id, QString icon) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (!writable_) { emit failed(error_); return false; }
+    if (!validIconKey(icon)) return fail(QStringLiteral("That icon is not one this build can use."));
+    if (icon == QStringLiteral("file") && !QFileInfo(picturePath(id)).isFile())
+        return fail(QStringLiteral("The user's icon picture is missing."));
+    auto next = profiles_;
+    Profile* target = nullptr;
+    for (auto& profile : next) if (profile.id == id) { target = &profile; break; }
+    if (!target) return fail(QStringLiteral("The selected local user does not exist."));
+    const bool samePicture = icon == QStringLiteral("file") && target->icon == icon;
+    if (target->icon == icon && !samePicture) { error_.clear(); return true; }
+    target->icon = std::move(icon);
+    // A new picture under the same key still has to redraw, so commit (and emit changed) either way.
+    if (!commit(next, activeId_)) return false;
+    // Leaving "file" drops the copied picture; the key no longer names it.
+    if (target->icon != QStringLiteral("file") && QFileInfo::exists(picturePath(id))) QFile::remove(picturePath(id));
+    return true;
+}
+
+QImage Profiles::readIcon(const QString& path) {
+    const QFileInfo info(path);
+    if (!info.isFile() || info.size() <= 0 || info.size() > MaximumPictureBytes) return {};
+    QImageReader reader(path);
+    reader.setAutoTransform(true);
+    reader.setAllocationLimit(int(qint64(MaximumPictureSide) * MaximumPictureSide * 4 / (1024 * 1024)) + 1);
+    const QSize size = reader.size();
+    if (size.isValid() && (size.width() > MaximumPictureSide || size.height() > MaximumPictureSide)) return {};
+    return reader.read();
+}
+
+bool Profiles::importPicture(QString id, const QString& sourcePath) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (!writable_) { emit failed(error_); return false; }
+    bool found = false;
+    for (const auto& profile : profiles_) if (profile.id == id) { found = true; break; }
+    if (!found) return fail(QStringLiteral("The selected local user does not exist."));
+    const QFileInfo info(sourcePath);
+    if (!info.isFile()) return fail(QStringLiteral("The picture could not be found."));
+    if (info.size() > MaximumPictureBytes) return fail(QStringLiteral("The picture is larger than 32 MB."));
+    const QImage decoded = readIcon(sourcePath);
+    if (decoded.isNull()) return fail(QStringLiteral("The picture could not be read, or is larger than 8192 pixels on a side."));
+    // Centre square crop, then the firmware icon size; the alpha channel is kept for PNG sources.
+    const int side = std::min(decoded.width(), decoded.height());
+    const QImage square = decoded.copy((decoded.width() - side) / 2, (decoded.height() - side) / 2, side, side)
+        .scaled(IconSize, IconSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+        .convertToFormat(QImage::Format_ARGB32);
+    if (!QDir().mkpath(QDir(directory_).filePath(QStringLiteral("avatars"))))
+        return fail(QStringLiteral("The icon folder could not be created."));
+    QSaveFile file(picturePath(id));
+    file.setDirectWriteFallback(false);
+    if (!file.open(QIODevice::WriteOnly) || !square.save(&file, "PNG") || !file.commit())
+        return fail(QStringLiteral("The icon picture could not be saved: %1").arg(file.errorString()));
+    return setIcon(id, QStringLiteral("file"));
+}
+
+QStringList Profiles::firmwareIcons(const QString& flashRoot) {
+    if (flashRoot.isEmpty()) return {};
+    const QDir dir(QDir(flashRoot).filePath(QStringLiteral("vsh/resource/explore/user")));
+    QStringList keys;
+    static const QRegularExpression numbered(QStringLiteral("^([0-9]{3})\\.png$"), QRegularExpression::CaseInsensitiveOption);
+    for (const auto& name : dir.entryList({QStringLiteral("*.png")}, QDir::Files, QDir::Name)) {
+        const auto match = numbered.match(name);
+        if (match.hasMatch()) keys << QStringLiteral("fw:") + match.captured(1);
+    }
+    return keys;
+}
+
+QString Profiles::firmwareIconPath(const QString& flashRoot, const QString& key) {
+    if (flashRoot.isEmpty() || !key.startsWith(QStringLiteral("fw:")) || !validIconKey(key)) return {};
+    return QDir(flashRoot).filePath(QStringLiteral("vsh/resource/explore/user/%1.png").arg(key.mid(3)));
+}
+
+QImage Profiles::iconImage(const Profile& profile, const QString& flashRoot) const {
+    if (profile.icon == QStringLiteral("file")) return readIcon(picturePath(profile.id));
+    if (profile.icon.startsWith(QStringLiteral("fw:"))) return readIcon(firmwareIconPath(flashRoot, profile.icon));
+    return {};
 }
 
 }

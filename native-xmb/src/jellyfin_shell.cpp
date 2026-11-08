@@ -29,6 +29,17 @@ QString progressDetail(const Entry& entry) {
 // Posters are fetched for the rows a page can show without scrolling far. One request per row per
 // page open; the client caches each picture under the data directory, keyed by the server's tag.
 constexpr int ArtworkRowsPerPage = 60;
+// Which Jellyfin page a backdrop belongs to: its depth, kind, parent (or search term) and offset. Back pops
+// pages without reloading them, so the backdrop of a closed child must not show on its parent.
+template<class Page> QString jellyfinPageKey(qsizetype depth,const Page& page) {
+    return QStringLiteral("%1/%2/%3/%4").arg(depth).arg(page.jellyfinSearch?'s':page.jellyfinViews?'v':'f')
+        .arg(page.jellyfinParent).arg(page.jellyfinStart);
+}
+}
+const QImage& Shell::pageBackdrop() const {
+    static const QImage none;
+    if(jellyfinBackdrop_.isNull() || pages_.isEmpty() || !pages_.last().jellyfin || mediaOpen_)return none;
+    return jellyfinPageKey(pages_.size(),pages_.last())==jellyfinBackdropPage_?jellyfinBackdrop_:none;
 }
 void Shell::initJellyfin() {
     jellyfin_.setImageCache(QDir(dataDirectory_).filePath("jellyfin/images"));
@@ -92,7 +103,7 @@ void Shell::initJellyfin() {
                 }
                 if(backdrop.isEmpty() && !media.backdropTag.isEmpty()) {
                     backdrop=media.id;
-                    jellyfinBackdropId_=media.id;
+                    jellyfinBackdropId_=media.id;jellyfinBackdropPage_=jellyfinPageKey(pages_.size(),page);
                     jellyfin_.artwork(media.id,media.backdropTag,true);
                 }
             }
