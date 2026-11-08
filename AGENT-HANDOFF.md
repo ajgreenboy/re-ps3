@@ -59,6 +59,9 @@ $env:PATH="C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH"
 - **Tooling:** Bun/TypeScript for scripts (`~/.bun/bin/bun.exe`; never npm, no Python without
   approval) and C++ for application code.
 - **Online features must never fake anything:** no sign-in, purchases, trophies or messages.
+- **You can't capture or drive RPCS3.** The capture/control tool is blocked on `rpcs3.exe` ("product
+  policy blocks this app"), so firmware reference frames come from the user's own rig only. Don't work
+  around the block with another capture or input method.
 
 ## 5. Current state (from the 2026-11-08 handoff; re-verify before relying on it)
 
@@ -74,10 +77,9 @@ Gate: `bun work/ab-layers.ts --all --exe <exe>` = 6/6 layers (frame ~19.6 dB vs 
 and 12/12 named states, whole set PASS. Release check (`-SkipBuild`) PASS.
 
 What a release still needs (ranked): the real-HTPC evidence run (`native-xmb/audit/RELEASE-CHECKLIST.md`,
-84 checks, 15 known-unverified items), packaging/autostart/crash watchdog, and the remaining fidelity
-surfaces (layout-table tracing F8, playlist two-pane editor, dynamic themes, Photo Gallery, in-game
-XMB, OSK variants, game boot splash, auto-off guide, music visualizer, 100 ms notification hide,
-info-bar avatar slot).
+84 checks, 15 known-unverified items), plus the remaining fidelity surfaces (playlist two-pane editor,
+animated RAF themes, Photo Gallery, in-game XMB, OSK variants, game boot splash, auto-off guide, music
+visualizer, info-bar avatar slot).
 
 ## 6. When you finish a phase
 
