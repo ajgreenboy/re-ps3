@@ -79,5 +79,29 @@ The frames show the signed-in root (Now Playing, Liked Songs, Morning Mix "3 tra
 Picks, Sign Out), the track page (First Light "Stub Artist - Stub Album - 03:01", the local file dimmed), and the
 second launch signed in with no browser step.
 
-**Not verified:** a real Spotify account (that needs your client id), the Liked Songs queue path against the
-stub, and playback on a real Connect device.
+## Real account (2026-11-07, measured)
+
+Signed in with the owner's own client id on a Premium account (redirect `http://127.0.0.1:8888/callback`):
+
+- Sign-in by the browser, then the sealed refresh token restores it on later launches with no browser step.
+- `/me/playlists` lists 99 playlists; `/me/tracks` lists Liked Songs (400).
+- `GET /playlists/{id}/tracks` answers **403 Forbidden** for this development-mode app, even on the user's own
+  playlist (the 2026 Web API migration). The client now asks `/playlists/{id}/items` first and falls back to
+  `/tracks` on 403/404/410; `/items` returned the playlist's 14 tracks.
+- Three Connect devices listed (a computer, an Echo Dot, and one that reports only a hex id, shown as "Unnamed
+  speaker"); with none active the "Play on" page appears. Play on the computer started the playlist; Now
+  Playing showed the track, artist, device and cover; Pause from Now Playing stopped it.
+- `PUT /me/player/shuffle` sent the moment the play is accepted answered `404 NO_ACTIVE_DEVICE` (the transfer was
+  still settling). It is now sent to the chosen device one second later, and a refusal only logs.
+
+## Look
+
+- The Music column's Spotify row and the sign-in rows wear Spotify's mark (drawn in code, no image file).
+- Liked Songs is a violet-to-mint tile with a heart; playlists, tracks and Now Playing show their covers from
+  Spotify's image CDN (`*.scdn.co` / `*.spotifycdn.com` over https only; 2 MB cap; cached under
+  `<data>/spotify/images`; cropped square to 192 px).
+- Devices get computer / phone / TV / speaker glyphs; Sign Out gets an exit glyph.
+- Triangle on a playlist row: **Play** (from the first track, shuffle off), **Shuffle Play** (from a random
+  track, shuffle on), **Open**.
+
+**Not verified:** the Liked Songs queue path on a real device, and a free (non-Premium) account.

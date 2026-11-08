@@ -2218,6 +2218,13 @@ void Shell::buildOptions() {
         addOption({"msg_prev","Previous"},OptionCommand::SpotifyPrevious,"spotify-now");
         return;
     }
+    // ---- A Spotify playlist row: start the whole playlist without opening it ---------------------------------
+    if(entry.action==Action::SpotifyPlaylist) {
+        addOption({"msg_play","Play"},OptionCommand::SpotifyPlayAll,"spotify-playlist");
+        addOption({"","Shuffle Play"},OptionCommand::SpotifyShuffleAll,"spotify-playlist");
+        addOption({"msg_open","Open"},OptionCommand::Activate,"spotify-playlist");
+        return;
+    }
     // ---- Playlists (playlist_plugin) ----------------------------------------------------------------------
     // A stored playlist row opens like a folder and can be deleted; the files it lists are never touched.
     if(entry.action==Action::Playlist) {
@@ -2625,6 +2632,14 @@ void Shell::optionsActivate() {
         interactionAudio_.play(InteractionAudio::Cue::Confirm);
         emit changed();
         break;
+    case OptionCommand::SpotifyPlayAll:case OptionCommand::SpotifyShuffleAll: {
+        const Entry row=entry;
+        resetOptions();
+        startSpotifyPlaylist(row,option.command==OptionCommand::SpotifyShuffleAll);
+        interactionAudio_.play(InteractionAudio::Cue::Confirm);
+        emit changed();
+        break;
+    }
     // Add to Playlist: the level lists this user's playlists of the column's kind under playlist_plugin's
     // "Select a playlist." (msg_select_playlist). With none, its one row says to create one first.
     case OptionCommand::AddToPlaylist: {

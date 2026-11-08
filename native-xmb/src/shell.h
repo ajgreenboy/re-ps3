@@ -77,6 +77,7 @@ struct Entry {
     QVariant option;
     QString themeIcon; // the PS3 theme (.p3t icontable) id that replaces this icon, e.g. "icon_game_setting"
     QImage artwork; // provider images decoded off the render thread
+    QString artworkUrl; // a remote picture still to fetch for `artwork` (Spotify covers); empty elsewhere
     // Where a generated row's title and icon came from: "xmbml" (the view's title_rsc/icon_rsc), "rco"
     // (a label the firmware builds in a plugin, resolved through its own RCO strings), "builtin" (the
     // last-resort literal this build shipped) or "fallback" (the whole column kept its built-in rows).
@@ -137,6 +138,8 @@ enum class OptionCommand { Activate, Information,
     AddToPlaylist, AddToPlaylistTarget, PlaylistDelete, PlaylistRemoveItem,
     // Spotify's Now Playing row: playback commands sent to the active Connect device.
     SpotifyPause, SpotifyResume, SpotifyNext, SpotifyPrevious,
+    // A Spotify playlist row: play the whole playlist from its start, or shuffled from a random track.
+    SpotifyPlayAll, SpotifyShuffleAll,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
     // Information with two or more users, Information alone with one. Delete runs the traced two-step ask.
     UserLogOut, UserAutoLogin, UserDelete };
@@ -474,6 +477,14 @@ private:
     SpotifyNowPlaying spotifyNowPlaying_;
     QString spotifyPendingContext_,spotifyPendingOffset_,spotifyPendingTitle_,spotifyCommandNote_,spotifyCommandDetail_;
     QStringList spotifyPendingUris_;
+    int spotifyPendingPosition_=-1;      // context offset by position when no track uri is chosen
+    int spotifyPendingShuffle_=-1;       // -1 leave shuffle alone; 0/1 set it once the play is accepted
+    int spotifyAfterPlayShuffle_=-1;
+    QString spotifyPlayDevice_;
+    QHash<QString,QImage> spotifyArt_;   // cover art by URL, already cropped square for the icon box
+    QSet<QString> spotifyArtRequested_;
+    void applySpotifyArt();
+    void startSpotifyPlaylist(const Entry& entry,bool shuffle);
     void initSpotify();
     void openSpotify();
     void openSpotifyList(const QString& kind,const QString& id,const QString& title,const QString& contextUri);

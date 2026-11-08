@@ -17,6 +17,7 @@
 #include <QTimer>
 #include <QUrlQuery>
 #include <QtDebug>
+#include <climits>
 
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -92,6 +93,20 @@ QString artistsOf(const QJsonObject& track) {
     return names.join(QStringLiteral(", "));
 }
 
+QString imageOf(const QJsonValue& images) {
+    // The cover closest to 300 px wide: big enough for the icon box, small enough to fetch quickly.
+    QString best;int bestScore = INT_MAX;
+    for (const auto& value : images.toArray()) {
+        const auto image = value.toObject();
+        const QString url = image.value(QStringLiteral("url")).toString();
+        if (url.isEmpty()) continue;
+        const int width = image.value(QStringLiteral("width")).toInt(300);
+        const int score = std::abs(width - 300);
+        if (score < bestScore) { bestScore = score;best = url; }
+    }
+    return best.left(512);
+}
+
 SpotifyTrack parseTrack(const QJsonObject& object) {
     SpotifyTrack track;
     track.id = object.value(QStringLiteral("id")).toString();
@@ -100,6 +115,8 @@ SpotifyTrack parseTrack(const QJsonObject& object) {
     track.artists = artistsOf(object);
     if (track.artists.isEmpty()) track.artists = object.value(QStringLiteral("show")).toObject().value(QStringLiteral("name")).toString();
     track.album = object.value(QStringLiteral("album")).toObject().value(QStringLiteral("name")).toString();
+    track.image = imageOf(object.value(QStringLiteral("album")).toObject().value(QStringLiteral("images")));
+    if (track.image.isEmpty()) track.image = imageOf(object.value(QStringLiteral("images")));
     track.durationMs = qint64(object.value(QStringLiteral("duration_ms")).toDouble());
     // A local file in a Spotify playlist has no streamable URI; is_playable=false is a market restriction.
     track.playable = !object.value(QStringLiteral("is_local")).toBool(false) &&
@@ -351,6 +368,41 @@ bool SpotifyClient::restoreSession() {
 
 void SpotifyClient::forgetSession() { if (!sessionPath_.isEmpty()) QFile::remove(sessionPath_); }
 
+// ---- Cover art -------------------------------------------------------------------------------------------
+void SpotifyClient::fetchImage(const QString& url) {
+    const QUrl source(url);
+    const QString host = source.host().toLower();
+    const bool cdn = source.scheme() == QLatin1String("https") &&
+                     (host.endsWith(QLatin1String(".scdn.co")) || host.endsWith(QLatin1String(".spotifycdn.com")));
+    // A local stub (XMB_SPOTIFY_API_BASE on 127.0.0.1) serves its covers from the same loopback host.
+    const bool stub = apiBase_.host() == QLatin1String("127.0.0.1") && source.scheme() == QLatin1String("http") && host == QLatin1String("127.0.0.1");
+    if ((!cdn && !stub) || url.size() > 512) { QTimer::singleShot(0, this, [this, url] { emit imageReady(url, {}); });return; }
+    if (imagesInFlight_.contains(url)) return;
+    const QString file = imageCache_.isEmpty() ? QString()
+        : QDir(imageCache_).filePath(QString::fromLatin1(QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1).toHex()) + QStringLiteral(".img"));
+    if (!file.isEmpty() && QFileInfo(file).size() > 0) {
+        QImage cached(file);
+        if (!cached.isNull()) { QTimer::singleShot(0, this, [this, url, cached] { emit imageReady(url, cached); });return; }
+    }
+    imagesInFlight_.insert(url);
+    QNetworkRequest request(source);
+    request.setTransferTimeout(RequestTimeoutMs);
+    QNetworkReply* reply = network_->get(request);
+    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64) { if (received > 2 * 1024 * 1024) reply->abort(); });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, url, file] {
+        reply->deleteLater();
+        imagesInFlight_.remove(url);
+        const QByteArray bytes = reply->error() == QNetworkReply::NoError ? reply->read(2 * 1024 * 1024 + 1) : QByteArray();
+        QImage image;
+        if (!bytes.isEmpty() && bytes.size() <= 2 * 1024 * 1024) image.loadFromData(bytes);
+        if (!image.isNull() && !file.isEmpty() && QDir().mkpath(QFileInfo(file).absolutePath())) {
+            QSaveFile out(file);
+            if (out.open(QIODevice::WriteOnly) && out.write(bytes) == bytes.size()) out.commit();
+        }
+        emit imageReady(url, image);
+    });
+}
+
 // ---- Web API ---------------------------------------------------------------------------------------------
 quint64 SpotifyClient::playlists() { return enqueue(Kind::Playlists, QStringLiteral("GET"), QStringLiteral("/me/playlists?limit=50")); }
 quint64 SpotifyClient::likedTracks() { return enqueue(Kind::Liked, QStringLiteral("GET"), QStringLiteral("/me/tracks?limit=50")); }
@@ -361,7 +413,7 @@ quint64 SpotifyClient::playlistTracks(const QString& playlistId) {
     QString id = playlistId;
     for (const QChar c : id) if (!c.isLetterOrNumber()) { id.clear();break; }
     if (id.isEmpty() || id.size() > 64) { const quint64 r = ++nextRequest_;QTimer::singleShot(0, this, [this, r] { fail(r, tr("That playlist id is not valid.")); });return r; }
-    return enqueue(Kind::PlaylistTracks, QStringLiteral("GET"), QStringLiteral("/playlists/%1/tracks?limit=100").arg(id));
+    return enqueue(Kind::PlaylistTracks, QStringLiteral("GET"), QStringLiteral("/playlists/%1/items?limit=100").arg(id));
 }
 
 namespace {
@@ -370,16 +422,23 @@ QString deviceQuery(const QString& deviceId) {
 }
 }
 
-quint64 SpotifyClient::play(const QString& deviceId, const QString& contextUri, const QString& offsetUri, const QStringList& uris) {
+quint64 SpotifyClient::play(const QString& deviceId, const QString& contextUri, const QString& offsetUri, const QStringList& uris,
+                            int offsetPosition) {
     QJsonObject body;
     if (!contextUri.isEmpty()) {
         body.insert(QStringLiteral("context_uri"), contextUri);
         if (!offsetUri.isEmpty()) body.insert(QStringLiteral("offset"), QJsonObject{{"uri", offsetUri}});
+        else if (offsetPosition >= 0) body.insert(QStringLiteral("offset"), QJsonObject{{"position", offsetPosition}});
     } else if (!uris.isEmpty()) {
         body.insert(QStringLiteral("uris"), QJsonArray::fromStringList(uris.mid(0, 100)));
     }
     return enqueue(Kind::Command, QStringLiteral("PUT"), QStringLiteral("/me/player/play") + deviceQuery(deviceId),
                    QJsonDocument(body).toJson(QJsonDocument::Compact));
+}
+quint64 SpotifyClient::shuffle(const QString& deviceId, bool on) {
+    QString query = deviceQuery(deviceId);
+    query += (query.isEmpty() ? QStringLiteral("?") : QStringLiteral("&")) + (on ? QStringLiteral("state=true") : QStringLiteral("state=false"));
+    return enqueue(Kind::Command, QStringLiteral("PUT"), QStringLiteral("/me/player/shuffle") + query);
 }
 quint64 SpotifyClient::pause(const QString& deviceId) { return enqueue(Kind::Command, QStringLiteral("PUT"), QStringLiteral("/me/player/pause") + deviceQuery(deviceId)); }
 quint64 SpotifyClient::next(const QString& deviceId) { return enqueue(Kind::Command, QStringLiteral("POST"), QStringLiteral("/me/player/next") + deviceQuery(deviceId)); }
@@ -387,7 +446,7 @@ quint64 SpotifyClient::previous(const QString& deviceId) { return enqueue(Kind::
 
 quint64 SpotifyClient::enqueue(Kind kind, const QString& method, const QString& path, const QByteArray& body) {
     Pending pending{kind, method, QUrl(join(apiBase_.toString(), path)), body, ++nextRequest_};
-    if (kind == Kind::PlaylistTracks) pending.fallbackPath = join(apiBase_.toString(), QString(path).replace(QStringLiteral("/tracks?"), QStringLiteral("/items?")));
+    if (kind == Kind::PlaylistTracks) pending.fallbackPath = join(apiBase_.toString(), QString(path).replace(QStringLiteral("/items?"), QStringLiteral("/tracks?")));
     const quint64 request = pending.request;
     if (!signedIn()) { QTimer::singleShot(0, this, [this, request] { fail(request, tr("Sign in to Spotify first.")); });return request; }
     send(std::move(pending));
@@ -452,21 +511,23 @@ void SpotifyClient::handle(QNetworkReply* reply, Pending pending, quint64 genera
         fail(pending.request, tr("Spotify is limiting requests from this app. Try again in %1 seconds.").arg(std::max(1, retry)));
         return;
     }
-    if (pending.kind == Kind::PlaylistTracks && (status == 404 || status == 410) && !pending.fallbackPath.isEmpty() && pending.pages == 0) {
+    if (pending.kind == Kind::PlaylistTracks && (status == 403 || status == 404 || status == 410) && !pending.fallbackPath.isEmpty() && pending.pages == 0) {
         // The playlist-items route has two spellings across API revisions; try the other once.
         pending.url = QUrl(pending.fallbackPath);pending.fallbackPath.clear();
         send(std::move(pending));
         return;
     }
     if (status < 200 || status >= 300) {
+        qInfo().noquote() << "spotify:" << pending.method << pending.url.path() << "->" << status << reason
+                          << QString::fromUtf8(bytes.left(300)).simplified();
         QString message;
         if (reason == QLatin1String("PREMIUM_REQUIRED") || (pending.kind == Kind::Command && status == 403))
             message = tr("Spotify only lets Premium accounts control playback from other apps (%1).").arg(apiError(status, bytes));
         else if (reason == QLatin1String("NO_ACTIVE_DEVICE") || (pending.kind == Kind::Command && status == 404))
             message = tr("No Spotify device is active. Open Spotify on this PC, a phone or a speaker, then try again.");
-        else if (pending.kind == Kind::PlaylistTracks && status == 404)
-            message = tr("Spotify does not let this app read that playlist's tracks (%1). Playlists Spotify itself makes are "
-                         "closed to apps in development mode.").arg(apiError(status, bytes));
+        else if (pending.kind == Kind::PlaylistTracks && (status == 403 || status == 404))
+            message = tr("Spotify does not let this app read that playlist's tracks (%1). Apps in development mode can read only "
+                         "playlists you own or collaborate on, not ones you only follow or that Spotify makes.").arg(apiError(status, bytes));
         else message = tr("Spotify refused the request (%1).").arg(apiError(status, bytes));
         fail(pending.request, message);
         return;
@@ -505,6 +566,7 @@ void SpotifyClient::handle(QNetworkReply* reply, Pending pending, quint64 genera
             state.device = object.value(QStringLiteral("device")).toObject().value(QStringLiteral("name")).toString().left(80);
             state.progressMs = qint64(object.value(QStringLiteral("progress_ms")).toDouble());
             state.durationMs = qint64(item.value(QStringLiteral("duration_ms")).toDouble());
+            state.image = imageOf(item.value(QStringLiteral("album")).toObject().value(QStringLiteral("images")));
         }
         emit nowPlayingReady(pending.request, state);
         return;
@@ -518,7 +580,7 @@ void SpotifyClient::handle(QNetworkReply* reply, Pending pending, quint64 genera
             SpotifyPlaylist playlist{p.value(QStringLiteral("id")).toString(), p.value(QStringLiteral("name")).toString().left(120),
                                      p.value(QStringLiteral("uri")).toString(),
                                      p.value(QStringLiteral("owner")).toObject().value(QStringLiteral("display_name")).toString().left(64),
-                                     tracks.value(QStringLiteral("total")).toInt()};
+                                     imageOf(p.value(QStringLiteral("images"))), tracks.value(QStringLiteral("total")).toInt()};
             if (!playlist.id.isEmpty() && !playlist.name.isEmpty()) pending.playlists.push_back(playlist);
         }
         break;
