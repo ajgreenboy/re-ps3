@@ -194,6 +194,10 @@ struct OskAssertion {
 
 enum class OskLayoutSource { Firmware, Committed };
 
+// The two firmware OSK shapes (FIDELITY-SURFACES-MAP S24): the full-key qwerty panel
+// (oskfullkeypanel_plugin) and the tenkey phone keypad (oskpanel_plugin).
+enum class OskVariant { FullKey, TenKey };
+
 // The resolved keyboard layout. Rectangles are in the 1920x1080 reference space. Every source is
 // recorded: the RCO supplies object/image references, captions and the 7x7 palette grid; the module
 // supplies the row strings and the palette symbols; the measured reference supplies the panel bands
@@ -207,6 +211,8 @@ struct OskLayout {
     bool texturesResolved = false;   // all 52 names present in the RCO image table
     bool texturesDecoded = false;    // all 52 returned pixels through Assets::image
     OskLayoutSource source = OskLayoutSource::Committed;
+    OskVariant variant = OskVariant::FullKey;          // the OSK shape this layout describes
+    QString container = QStringLiteral("oskfullkeypanel_plugin");   // the RCO container it was read from
     QString provenance;
     QStringList provenanceChain;
     QHash<QString, QString> anchors;   // object/property anchors quoted from the RCO
@@ -272,5 +278,11 @@ struct OskLayout {
 // logs one provenance line; XMB_OSK_LAYOUT_LOG=1 additionally prints the resolved layout and every
 // assertion. It does no GL work and owns no widgets.
 OskLayout loadOskLayout(Assets& assets, RcoObjects& objects);
+
+// Load the tenkey phone keypad (oskpanel_plugin) layout into a separate OskLayout (OskVariant::TenKey).
+// Its module carries the raw keypad rows (the T9 "abcABC2/defDEF3/..." strings) rather than the full-key
+// module's 24-byte label table. Same fallback contract as loadOskLayout: the committed table when dev-flash
+// is absent or the read fails. Returns a layout whose `variant` is TenKey and `container` is oskpanel_plugin.
+OskLayout loadOskPanelLayout(Assets& assets, RcoObjects& objects);
 
 } // namespace xmb

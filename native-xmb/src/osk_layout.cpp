@@ -650,6 +650,72 @@ QString shortSha(const QString& sha) {
     return sha.size() > 16 ? sha.left(16) + QStringLiteral("...") : sha;
 }
 
+// Read a NUL-terminated UTF-16BE string from the module bytes at a FILE offset (the tenkey module stores
+// its keypad rows as raw strings, not the full-key module's 24-byte label table).
+QString readUtf16At(const QByteArray& bytes, int offset, int maxUnits, bool& ok) {
+    ok = false;
+    QString s;
+    for (int i = 0; i < maxUnits; ++i) {
+        const qint64 p = qint64(offset) + qint64(i) * 2;
+        if (!hasBytes(bytes, p, 2)) break;
+        const quint16 u = be16(bytes, int(p));
+        if (u == 0) { ok = true; return s; }
+        s.append(QChar(u));
+    }
+    return s;
+}
+
+// The tenkey module's English default keypad: 10 raw UTF-16BE strings at fixed 4.93 file offsets - the
+// symbols+1 key, the eight T9 keys (abcABC2..wxyzWXYZ9) and the symbols+0 key. Returns empty on any
+// mismatch so the caller falls back to the committed keys.
+QStringList scanTenkeyKeys(const QByteArray& bytes) {
+    static const int offsets[10] = {0x36280, 0x362b0, 0x362c8, 0x362e0, 0x362f8,
+                                    0x36310, 0x36328, 0x36340, 0x36358, 0x36370};
+    static const char* t9[8] = {"abcABC2", "defDEF3", "ghiGHI4", "jklJKL5", "mnoMNO6",
+                                "pqrsPQRS7", "tuvTUV8", "wxyzWXYZ9"};
+    QStringList keys;
+    for (int i = 0; i < 10; ++i) {
+        bool ok = false;
+        const QString s = readUtf16At(bytes, offsets[i], kMaxStringUnits, ok);
+        if (!ok || s.isEmpty()) return {};
+        keys << s;
+    }
+    for (int i = 0; i < 8; ++i)
+        if (keys.at(i + 1) != QLatin1String(t9[i])) return {};
+    return keys;
+}
+
+// The tenkey's one character page: a 3-column T9 keypad over 4 rows. The 10 module strings fill the grid
+// row-major (index = row*3 + column); the last string (symbols+0) lands at (3,2), and (3,0)/(3,1) are the
+// @#: symbol-access and a/A shift keys that close the row.
+OskPage makeTenkeyPage(const QStringList& keys, const OskCaptions& captions, const QString& provenance) {
+    OskPage page;
+    page.name = QStringLiteral("tenkey");
+    page.provenance = provenance;
+    for (int row = 0; row < 4; ++row) {
+        OskRow entry;
+        entry.row = row;
+        for (int column = 0; column < 3; ++column) {
+            if (row == 3 && column == 0) {
+                entry.keys.push_back(makeKey(row, column, 1, QStringLiteral("@#:"), OskAction::Palette,
+                    QStringLiteral("olive"), QStringLiteral("BUTTON_BASE_B_S"), QString(), QString(), false));
+            } else if (row == 3 && column == 1) {
+                entry.keys.push_back(makeKey(row, column, 1, QStringLiteral("a/A"), OskAction::Shift,
+                    QStringLiteral("olive"), QStringLiteral("BUTTON_BASE_B_S"), QStringLiteral("R2"), QStringLiteral("LABEL_R2"), false));
+            } else {
+                const int index = row * 3 + column;
+                const QString text = index < keys.size() ? keys.at(index) : QString();
+                entry.keys.push_back(makeKey(row, column, 1, text, OskAction::Character,
+                    QStringLiteral("letter"), QString(), QString(), QString(), text.isEmpty()));
+            }
+        }
+        page.rows.push_back(entry);
+    }
+    page.rows.push_back(functionRow(4, captions));
+    page.rows.push_back(functionRow(5, captions));
+    return page;
+}
+
 } // namespace
 
 QString oskActionName(OskAction action) {
@@ -1261,6 +1327,70 @@ OskLayout loadOskLayout(Assets& assets, RcoObjects& objects) {
                .arg(layout.cost.texturesDecoded);
 
     qInfo().noquote() << "osk: layout from firmware" << layout.provenance;
+    if (trace) traceLayout(layout);
+    return layout;
+}
+
+OskLayout loadOskPanelLayout(Assets& assets, RcoObjects& objects) {
+    QElapsedTimer total;
+    total.start();
+    const bool trace = qEnvironmentVariableIntValue("XMB_OSK_LAYOUT_LOG") == 1;
+    OskLayout layout = committedLayout();
+    layout.provenanceChain.clear();
+    layout.variant = OskVariant::TenKey;
+    layout.container = QStringLiteral("oskpanel_plugin");
+    layout.columns = 3;
+    layout.rows = 6;
+    layout.defaultFocusRow = 1;
+    layout.defaultFocusColumn = 1;   // JKL5, the centre of the 3x3 keypad
+
+    // Committed tenkey keys (the English default keypad), used when dev-flash is absent or the read fails.
+    const QStringList committedKeys{
+        QStringLiteral(".,!?@\"'`:;()<>[]{}1"),
+        QStringLiteral("abcABC2"), QStringLiteral("defDEF3"), QStringLiteral("ghiGHI4"),
+        QStringLiteral("jklJKL5"), QStringLiteral("mnoMNO6"), QStringLiteral("pqrsPQRS7"),
+        QStringLiteral("tuvTUV8"), QStringLiteral("wxyzWXYZ9"),
+        QStringLiteral("/-~=_*+#$%&\\^|0"),
+    };
+    QStringList keys = committedKeys;
+    QString keysSource = QStringLiteral("committed table (work/osk-layout.proposed.json tenkey)");
+
+    if (assets.root().isEmpty()) {
+        layout.cost.totalNs = total.nsecsElapsed();
+        layout.provenance = QStringLiteral("committed table (tenkey); dev-flash absent");
+        layout.provenanceChain << layout.provenance;
+        qInfo().noquote() << "osk: tenkey layout from committed table (dev-flash absent)";
+    } else {
+        layout.firmware = true;
+        layout.source = OskLayoutSource::Firmware;
+        const QByteArray module = assets.vshModule(QStringLiteral("oskpanel_plugin.prx"));
+        layout.cost.moduleBytes = module.size();
+        layout.anchors.insert(QStringLiteral("module.sha256"),
+            QString::fromLatin1(QCryptographicHash::hash(module, QCryptographicHash::Sha256).toHex()));
+        if (module.isEmpty()) {
+            layout.provenanceChain << QStringLiteral("tenkey rows: no decrypted oskpanel_plugin.prx (pass --vsh-modules)");
+        } else {
+            const QStringList scanned = scanTenkeyKeys(module);
+            if (scanned.isEmpty()) {
+                layout.provenanceChain << QStringLiteral("tenkey rows: module keypad rows not found; committed keys used");
+            } else {
+                keys = scanned;
+                keysSource = QStringLiteral("module keypad rows (oskpanel_plugin.prx file 0x36280)");
+                layout.moduleRows = true;
+            }
+        }
+        layout.cost.totalNs = total.nsecsElapsed();
+        layout.provenance = QStringLiteral("tenkey: module=%1 (%2 B); rows=%3")
+            .arg(module.isEmpty() ? QStringLiteral("absent") : QStringLiteral("oskpanel_plugin.prx"))
+            .arg(int(module.size()))
+            .arg(layout.moduleRows ? QStringLiteral("module keypad rows") : QStringLiteral("committed"));
+    }
+
+    layout.pages.clear();
+    layout.pages.push_back(makeTenkeyPage(keys, layout.captions, keysSource));
+    layout.pageNames = QStringList{QStringLiteral("tenkey")};
+    recountKeys(layout);
+
     if (trace) traceLayout(layout);
     return layout;
 }
