@@ -405,7 +405,7 @@ void Shell::resolveMediaColumns() {
         {"video:seg_bddata_mgmt",{"bddata",Action::Unavailable,"msg_bd_data_utility","item_tex_plain_folder","explore_category_video",
             "BD Data Management lists the bonus data a Blu-ray disc wrote to the console's hard disk. This computer has "
             "no Blu-ray drive and no PS3 BD data store, so there is nothing to manage."}},
-        {"video:seg_dlna_scan",{"dlna-scan",Action::Unavailable,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_video",
+        {"video:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_video",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
             "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
         {"video:seg_editingvideo_mgmt",{"video-editor",Action::Unavailable,"msg_video_editor_and_upload","item_tex_upload","explore_category_video",
@@ -413,12 +413,12 @@ void Shell::resolveMediaColumns() {
             "system. No capture device and no editor exist in this build, so the row lists the firmware's function "
             "and opens this page instead."}},
         // Music (category_music.xml)
-        {"music:seg_dlna_scan",{"dlna-scan",Action::Unavailable,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_music",
+        {"music:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_music",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
             "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
         {"music:seg_playlist_mgmt",{"playlists",Action::PlaylistFolder,"msg_playlists","tex_playlist","explore_category_music",""}},
         // Photo (category_photo.xml)
-        {"photo:seg_dlna_scan",{"dlna-scan",Action::Unavailable,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_photo",
+        {"photo:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_photo",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
             "This build has no DLNA client; its network library is Jellyfin, which is signed in from the TV column."}},
         {"photo:seg_hakoniwa",{"gallery",Action::Unavailable,"msg_photo_gallery","","file",
@@ -1202,7 +1202,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         // flash image without them and the declaration of the native rows. Order is the whole point, so the
         // console's rows come first even in the fallback.
         {"photo","Photo","qgl/icontex","3n",{
-            item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_photo"),
+            item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_photo",Action::DlnaScan),
             item("gallery","Photo Gallery","","file"),
             item("playlists","Playlists","tex_playlist","explore_category_photo"),
             // Native rows (FIDELITY-MEDIA P1's "10 native-only rows"): the library folder, the one settings page
@@ -1211,7 +1211,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("choose","Choose Media Folder","item_tex_plain_folder",full,Action::ChooseLibrary),
             item("options","Photo Settings","tex_photo",full,Action::SettingsPage,"photo")}},
         {"music","Music","qgl/icontex","4n",{
-            item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_music"),
+            item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_music",Action::DlnaScan),
             item("playlists","Playlists","tex_playlist","explore_category_music"),
             // Native rows: the library and the picker. Music Settings is dropped from this column because the
             // Settings column's own "Music Settings" row opens the same page (id "music", Action::SettingsPage).
@@ -1221,7 +1221,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             item("spotify","Spotify","item_tex_plain_folder",full,Action::SpotifyApp)}},
         {"video","Video","qgl/icontex","5n",{
             item("bddata","BD Data Utility","item_tex_plain_folder","explore_category_video"),
-            item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_video"),
+            item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_video",Action::DlnaScan),
             item("video-editor","Video Editor & Uploader","item_tex_upload","explore_category_video"),
             // Native rows. Continue Watching is the surface a couch user wants first and the one row that works
             // before any library folder has been chosen; Action::Library is the existing "open a collection of
@@ -1527,6 +1527,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     dialogLog_=qEnvironmentVariableIsSet("XMB_DIALOG_LOG");
     initJellyfin();
     initSpotify();
+    initDlna();
     // The sign-in surface is this shell's own page, not a modal dialog: openJellyfin() emits
     // requestJellyfinSignIn, which used to reach a QDialog in the view. Connecting it here keeps one sign-in
     // surface and leaves jellyfin_shell.cpp (outside this change's fence) as the owner of the app entry.
@@ -1921,6 +1922,8 @@ void Shell::activate() {
     case Action::SpotifyApp:case Action::SpotifySignIn:case Action::SpotifySignOut:case Action::SpotifyNowPlaying:
     case Action::SpotifyLiked:case Action::SpotifyPlaylist:case Action::SpotifyTrack:case Action::SpotifyDevice:
         activateSpotify(entry);break;
+    case Action::DlnaScan:case Action::DlnaServer:case Action::DlnaFolder:case Action::DlnaPhoto:
+        activateDlna(entry);break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
     case Action::JellyfinPlay:openJellyfinMedia(entry);break;
@@ -3871,7 +3874,9 @@ void Shell::startQueuedMedia() {
     }
     for(int i=0;i<entries().size();++i)if(entries()[i].action==Action::File && entries()[i].value==item.path){currentSelection()=i;break;}
     emit mediaFrame({});
-    const auto source=QUrl::fromLocalFile(item.path);
+    // A media server's item is its http URL (dlna_shell.cpp); everything else is a local path.
+    const bool remote=item.path.startsWith(QLatin1String("http://")) || item.path.startsWith(QLatin1String("https://"));
+    const auto source=remote?QUrl(item.path):QUrl::fromLocalFile(item.path);
     if(player_->source()==source){loading_=false;player_->setPosition(0);}else player_->setSource(source);
     player_->play();
     if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: play"<<mediaQueue_.currentIndex()+1<<"of"<<mediaQueue_.items().size()<<item.title;

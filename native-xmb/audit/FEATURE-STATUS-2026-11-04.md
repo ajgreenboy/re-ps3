@@ -28,7 +28,11 @@ release verification, and exact PS3 fidelity.
    traced two Yes/No asks and drops that user's settings, Information renames with the firmware's duplicate-name
    error. Avatar editing (user_plugin `msg_icon_image_select`) and the Log Out / Automatic Login rows (listed
    disabled: this build has no logged-out state) remain.
-3. **DLNA/UPnP discovery.** Video, Music, and Photo discovery rows are explicitly
+3. **DLNA/UPnP discovery.** Updated 2026-11-07: implemented (`audit/DLNA.md`). Search for Media Servers runs SSDP
+   discovery and ContentDirectory browsing (`src/dlna_client.*`, `src/dlna_shell.cpp`); audio/video play through the
+   existing player, photos open in the viewer; `<data>/dlna.json` lists servers multicast cannot reach. Verified on a
+   local mock; this LAN has no DLNA server (Plex DLNA off, Jellyfin DLNA plugin absent), so a real server is unverified.
+   Previously: the discovery rows were explicitly
    `Action::Unavailable` in `Shell::resolveMediaColumns()` (`src/shell.cpp`).
    Jellyfin is a separate working network-media integration; it does not provide
    general DLNA discovery.

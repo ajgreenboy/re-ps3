@@ -76,7 +76,7 @@ void Shell::initSpotify() {
         if(request==spotifyDevicesRequest_)spotifyDevicesRequest_=0;
         if(request==spotifyCommandRequest_){spotifyCommandRequest_=0;spotifyAfterPlayShuffle_=-1;}
         loading_=false;status_.clear();
-        showMessage(message,MessageKind::Box);
+        showMessage(message,MessageKind::Page);
         emit changed();
     });
     connect(&spotify_,&SpotifyClient::playlistsReady,this,[this](quint64 request,const QVector<SpotifyPlaylist>& lists){
@@ -123,7 +123,7 @@ void Shell::initSpotify() {
         for(const auto& device:devices)if(!device.restricted && !device.id.isEmpty())usable.push_back(device);
         qInfo().noquote()<<"spotify:"<<devices.size()<<"device(s),"<<usable.size()<<"usable";
         if(usable.isEmpty()) {
-            showMessage(QObject::tr("No Spotify device is available. Open Spotify on this PC, a phone or a speaker, then try again."),MessageKind::Box);
+            showMessage(QObject::tr("No Spotify device is available. Open Spotify on this PC, a phone or a speaker, then try again."),MessageKind::Page);
             emit changed();return;
         }
         // The active device, else the only one; with several and none active, the user chooses.

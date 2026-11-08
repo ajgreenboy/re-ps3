@@ -7,6 +7,7 @@
 #include "profiles.h"
 #include "playlists.h"
 #include "spotify_client.h"
+#include "dlna_client.h"
 #include "steam_friends.h"
 #include "content_registry.h"
 #include "jellyfin_client.h"
@@ -68,7 +69,11 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     PlaylistFolder, CreatePlaylist, Playlist,
     // Music > Spotify (spotify_shell.cpp, audit/SPOTIFY.md): the column row, sign-in/out, Now Playing, Liked Songs,
     // one playlist (value = id, setting = its URI), one track (value = URI) and one Connect device (value = id).
-    SpotifyApp, SpotifySignIn, SpotifySignOut, SpotifyNowPlaying, SpotifyLiked, SpotifyPlaylist, SpotifyTrack, SpotifyDevice };
+    SpotifyApp, SpotifySignIn, SpotifySignOut, SpotifyNowPlaying, SpotifyLiked, SpotifyPlaylist, SpotifyTrack, SpotifyDevice,
+    // Search for Media Servers (dlna_shell.cpp, audit/DLNA.md): the scan row, one found server (value = its index),
+    // one server folder (value = object id), and one server photo (value = its URL). Audio and video items are
+    // ordinary File rows whose value is the server's http URL.
+    DlnaScan, DlnaServer, DlnaFolder, DlnaPhoto };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -498,6 +503,16 @@ private:
     void refreshSpotifyRoot();
     QVector<Entry> spotifyRootRows();
     bool activateSpotify(const Entry& entry);
+    DlnaClient dlna_;
+    QVector<DlnaServer> dlnaServers_;
+    quint64 dlnaRequest_=0,dlnaPhotoRequest_=0;
+    bool dlnaScanning_=false;
+    QString dlnaKind_;                         // the column the scan was started from: music, video or photo
+    QNetworkAccessManager* dlnaNetwork_=nullptr; // server photos (bounded download, then the photo viewer)
+    void initDlna();
+    bool activateDlna(const Entry& entry);
+    void openDlnaFolder(int server,const QString& objectId,const QString& title);
+    void openDlnaPhoto(const Entry& entry);
     void spotifyCommand(OptionCommand command);
     PlaylistStore playlists_;   // the active user's playlists (playlists.h); reopened on a user switch
     QString dataDirectory_,steamRoot_,steamId_;
@@ -620,7 +635,7 @@ private:
     int columnSink_=0;
     // `grouped` is a page the item menu's Group Content level rebuilt into letter folders: `groupedSource` keeps
     // the ungrouped rows so All can put them back without a rescan, and the folders' rows are the same entries.
-    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; };
+    struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; QString dlna; int dlnaServer=-1; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
     bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step
