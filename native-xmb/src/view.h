@@ -102,6 +102,7 @@ public:
     void setFocusTime(qint64 milliseconds) { focusTimeOverride_=milliseconds;++uiRevision_;update(); }
     // The 4.93 cold-boot intro before the XMB (coldboot.h); off for measurement and scripted runs. Set before show.
     void setIntroEnabled(bool enabled) { introEnabled_=enabled; }
+    void setHealthWarningEnabled(bool enabled) { coldboot_.setNoticeEnabled(enabled); }
     // Verification taps dispatch synchronously, independent of foreground focus and the physical input poll.
     void replayKeyTap(int key);
     // Verification taps for the PS button (no physical controller in scripted runs). They drive the
@@ -407,8 +408,8 @@ private:
     // Boot state of the background (RPCS3 capture of back_colours0 through a cold boot): _Alpha fades in as smoothstep
     // over 7.5 s from BootBG2; NIGHT WHIT BIAS goes from coldboot1 to coldboot2 on the boot weights.
     float backgroundAlpha_=1,backgroundToColdboot2_=1,backgroundToClock_=1;
-    // The intro is on screen (logo, no UI); any key or button skips it.
-    bool introRunning() const { return coldboot_.ready() && coldboot_.seconds()<Coldboot::showGui; }
+    // The intro or the health notice after it is on screen (no UI); a key or button skips/dismisses (Coldboot::skip).
+    bool introRunning() const { return coldboot_.holdsGui(); }
     IconRenderer icons_;
     QVector<IconRenderer::Icon> iconQueue_; // category icons for the firmware renderer, rebuilt with the UI layer
     std::vector<std::pair<quint64,QPointF>> windSites_; // icon centres for the particles' icon wind, rebuilt with the UI layer

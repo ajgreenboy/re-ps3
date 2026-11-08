@@ -324,6 +324,7 @@ int main(int argc,char** argv) {
     parser.addOption({"inventory","Write the local XMBML definition inventory and exit","json-file"});
     parser.addOption({"icon-sheet","Write a local contact sheet of original QGL normal maps and exit","image-file"});
     parser.addOption({"no-intro","Start at the XMB without the cold-boot intro (also implied by --script, --background-clock and --measure-reference)"});
+    parser.addOption({"no-health-warning","Skip the health warning the cold boot shows after its intro (also settings.ini [boot] healthWarning=false)"});
     parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
     parser.addOption({"background-clock","Fix background and icon-material time for reference captures (ISO date/time); UI clock stays live","date-time"});
     parser.addOption({"render-clock","Fix the background/ribbon/particles/icon animation time in seconds for deterministic A/B captures","seconds"});
@@ -981,6 +982,7 @@ int main(int argc,char** argv) {
     // Kiosk starts at the XMB like a console that is already on: the cold-boot intro is a boot animation, not a
     // launcher screen, and an appliance should be usable the moment the window appears.
     view->setIntroEnabled(!parser.isSet("no-intro") && !parser.isSet("script") && !parser.isSet("background-clock") && !parser.isSet("measure-reference") && !kiosk);
+    view->setHealthWarningEnabled(!parser.isSet("no-health-warning") && windowSettings.value("boot/healthWarning",true).toBool());
     if(parser.isSet("background-clock")) {
         const auto when=QDateTime::fromString(parser.value("background-clock"),Qt::ISODate);
         if(!when.isValid()){qCritical()<<"background-clock requires an ISO date/time";return 2;}

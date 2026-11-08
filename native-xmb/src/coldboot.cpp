@@ -6,6 +6,10 @@
 #include <QFile>
 #include <QHash>
 #include <QMediaDevices>
+#include <QFontMetricsF>
+#include <QOpenGLPaintDevice>
+#include <QPainter>
+#include <QTextLayout>
 #include <QtEndian>
 #include <QUrl>
 #include <QtMath>
@@ -231,6 +235,16 @@ bool Coldboot::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     gl.glBindVertexArray(0);gl.glBindBuffer(GL_ARRAY_BUFFER,0);
     initLighting(gl);
     decodeSound(QDir(assets.root()).filePath("vsh/resource/coldboot_stereo.ac3"));
+    if(noticeEnabled_) {
+        // The local firmware's captures (RPCS3 and the October recompiled-vsh run, docs/screenshots/03) show the
+        // SCEE string, so this dev_flash's region is an SCEE one; the generic string is the fallback.
+        noticeText_=assets.text("sysconf_plugin","msg_health_warning_start_scee");
+        if(noticeText_.isEmpty()){noticeText_=assets.text("sysconf_plugin","msg_health_warning_start");noticeLock_=1.0;noticeHold_=3.0;}
+        noticeText_.replace("\\n","\n");
+        noticeFamily_=assets.fontFamily();
+        if(noticeText_.isEmpty())qWarning()<<"coldboot: sysconf_plugin has no msg_health_warning_start string; no notice";
+    }
+    noticeCloseAt_=showGui+noticeHold_;
     ready_=true;
     qInfo().noquote()<<QString("coldboot: coldboot.raf scene and coldboot.jsx timeline (appear %1 s, blur %2 s, whole %3 s, fade %4-%5 s)")
         .arg(appearStart_).arg(blurStart_).arg(wholeStart_).arg(fadeStart_).arg(scriptEnd_);
@@ -249,8 +263,30 @@ void Coldboot::start() {
 }
 
 void Coldboot::skip() {
+    const double t=seconds();
+    if(noticeShown() && t>=showGui && t<1e8) {
+        // 0x5ab6c / 0x5abcc: ignored while the lock flag is set, else cancel the auto-close timer and hide (200 ms).
+        const bool locked=t<showGui+noticeLock_;
+        if(!locked && t<noticeCloseAt_)noticeCloseAt_=t;
+        qInfo().noquote()<<QString("coldboot: notice press at %1 s (%2)").arg(t,0,'f',3).arg(locked?"input lock, ignored":"closing");
+        return;
+    }
     skipped_=true;
     if(sink_)sink_->stop();
+}
+
+bool Coldboot::holdsGui() const {
+    if(!ready_)return false;
+    const double t=seconds();
+    return t<showGui || (noticeShown() && t<noticeCloseAt_+noticeFade);
+}
+
+// Shown at once (FUN_0005bdf8 shows the widget with 0x14b518 = 0), held until noticeCloseAt_, then hidden over
+// 200 ms. The hide's curve is paf's (paf_73CF3BB9) and not traced: linear here (INFERRED).
+double Coldboot::noticeAlpha(double t) const {
+    if(!noticeShown() || t<showGui || t>1e8)return 0;
+    if(t<noticeCloseAt_)return 1;
+    return std::max(0.,1-(t-noticeCloseAt_)/noticeFade);
 }
 
 double Coldboot::seconds() const {
@@ -316,7 +352,9 @@ void Coldboot::state(double t,std::array<QVector4D,3>& colours,QVector3D& lightP
 // _Material[0..2] = (1, 1, 0, .12), (1, .7, 6, 3), (1, 40, 0, 0): diffuse white, kd 1, ks .7, power 40 (constant in the
 // capture), _Material[3].x = the actor colour's alpha. The colour attribute is white (the logo renders white).
 void Coldboot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight,GLuint targetFbo) {
-    if(!logoVisible() || !started_ || pixelWidth<=0 || pixelHeight<=0)return;
+    if(!started_ || pixelWidth<=0 || pixelHeight<=0)return;
+    if(const double alpha=noticeAlpha(seconds());alpha>0)renderNotice(gl,pixelWidth,pixelHeight,targetFbo,alpha);
+    if(!logoVisible())return;
     std::array<QVector4D,3> colours;QVector3D lightPosition,lightColour,attenuation;
     state(seconds(),colours,lightPosition,lightColour,attenuation);
     QMatrix4x4 projection,view;
@@ -358,5 +396,42 @@ void Coldboot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeig
     for(int unit=2;unit>=0;--unit){gl.glActiveTexture(GLenum(GL_TEXTURE0+unit));gl.glBindTexture(GL_TEXTURE_2D,0);}
     program_.release();
     gl.glDisable(GL_BLEND);
+}
+
+// The notice's text, laid out as the firmware frame shows it (docs/screenshots/03-photosensitivity-notice.jpg, a
+// 1280x720 frame of the October recompiled-vsh run drawing sysconf_plugin's own widget; measured, in 1920x1080
+// units): white Rodin, cap height 18, line pitch 34, ink starting at x 322.5, wrapped inside a box symmetric about
+// the centre (322.5 .. 1597.5: line 3 ends at 1590, line 2 would need ~1330 for its next word), the block's cap
+// top to last baseline centred on y 540 (first cap top 478.5, last baseline 598.5). sysconf_plugin builds this
+// widget in code ("body" / "body_text", FUN_0005bf30), so no RCO object carries the rect. Drawn over the boot
+// background with no plate (the frame is black because that run drew no background; INFERRED), no shadow (INFERRED).
+void Coldboot::renderNotice(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight,GLuint targetFbo,double alpha) {
+    constexpr qreal left=322.5,width=1275,capHeight=18,pitch=34,centreY=540;
+    QFont font(noticeFamily_);font.setPixelSize(100);
+    const qreal capAt100=QFontMetricsF(font).capHeight();
+    font.setPixelSize(std::max(1,int(std::lround(capHeight*100/std::max<qreal>(1,capAt100)))));
+    const QFontMetricsF metrics(font);
+    // Lines: each paragraph word-wrapped to the box (QTextLayout shapes; the pitch is the measured one).
+    std::vector<std::unique_ptr<QTextLayout>> layouts;int lines=0;
+    for(const QString& paragraph:noticeText_.split('\n')) {
+        auto layout=std::make_unique<QTextLayout>(paragraph,font);
+        QTextOption option;option.setWrapMode(QTextOption::WordWrap);layout->setTextOption(option);
+        layout->beginLayout();
+        for(QTextLine line=layout->createLine();line.isValid();line=layout->createLine()){line.setLineWidth(width);line.setPosition({0,lines*pitch});++lines;}
+        layout->endLayout();
+        layouts.push_back(std::move(layout));
+    }
+    if(!lines)return;
+    const qreal firstBaseline=centreY-((lines-1)*pitch+capHeight)/2+capHeight;
+    gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.glViewport(0,0,pixelWidth,pixelHeight);
+    QOpenGLPaintDevice device(QSize(pixelWidth,pixelHeight));
+    QPainter painter(&device);
+    painter.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing);
+    const double scale=std::min(pixelWidth/1920.,pixelHeight/1080.);
+    painter.translate((pixelWidth-1920*scale)/2,(pixelHeight-1080*scale)/2);painter.scale(scale,scale);
+    painter.setOpacity(alpha);painter.setPen(Qt::white);
+    // Line k's top is k * pitch in its layout, so its baseline lands on firstBaseline + k * pitch.
+    for(const auto& layout:layouts)layout->draw(&painter,{left,firstBaseline-metrics.ascent()});
+    painter.end();
 }
 }

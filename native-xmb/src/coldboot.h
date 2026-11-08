@@ -37,10 +37,18 @@ public:
     // The AC3 decode has finished (or failed): start() can begin with the sound.
     bool soundReady() const { return soundReady_; }
     void start();
+    // A button press while the boot holds the GUI: before ShowGUI it skips the intro (a port convenience, the
+    // notice included); during the health notice it is the notice's own Cross/Circle handler, honoured only once
+    // the input lock has run out (sysconf_plugin 0x5ab6c / 0x5abcc test the lock flag at +0xbd).
     void skip();
     // Seconds since start (plugin time); a large value once skipped or never started.
     double seconds() const;
     bool logoVisible() const { return ready_ && seconds()<scriptEnd_; }
+    // The health warning (F1, audit/PIPELINE.md "Cold boot"): shown from ShowGUI until it closes; off with
+    // --no-health-warning or settings.ini [boot] healthWarning=false. Set before init().
+    void setNoticeEnabled(bool enabled) { noticeEnabled_=enabled; }
+    // The boot still owns the screen: the intro before ShowGUI, then the notice until its close fade ends.
+    bool holdsGui() const;
     void render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight,GLuint targetFbo);
 private:
     struct Actor { QString name; QVector3D position,scale,rotation; QVector2D uvOffset,uvScale; GLuint texture=0; };
@@ -70,5 +78,16 @@ private:
     void decodeSound(const QString& path);
     // The script's state at t: actor colours, light position, colour and attenuation.
     void state(double t,std::array<QVector4D,3>& colours,QVector3D& lightPosition,QVector3D& lightColour,QVector3D& attenuation) const;
+    // Health notice. sysconf_plugin FUN_00056f48 picks the string and two timers by region: SCEE regions
+    // (codes 2, 4, 6, 9) msg_health_warning_start_scee, input locked 3000 ms, auto-close at 5000 ms; the others
+    // msg_health_warning_start with 1000 / 3000 ms (or 1000 / 5000 for an unlisted code). Either close path hides
+    // the widget over 200 ms (0x14b4fc, 0x14b500/4). Times here in seconds of plugin time from ShowGUI.
+    bool noticeEnabled_=true;
+    QString noticeText_,noticeFamily_;
+    double noticeLock_=3.0,noticeHold_=5.0,noticeCloseAt_=0;
+    static constexpr double noticeFade=0.2;
+    bool noticeShown() const { return noticeEnabled_ && !noticeText_.isEmpty(); }
+    double noticeAlpha(double t) const;
+    void renderNotice(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight,GLuint targetFbo,double alpha);
 };
 }
