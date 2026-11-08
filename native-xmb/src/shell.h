@@ -67,6 +67,8 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // Users > Turn Off System (category_user.xml's first query, #seg_poweroff, class xmlpoweroff): opens the same
     // "Turn Off the System?" confirmation the PS menu reaches, so the shutdown path stays one implementation.
     TurnOffSystem,
+    // Host power rows after Turn Off System (system_power.h; not firmware rows): Restart and Sleep, each confirmed.
+    RestartSystem, SleepSystem,
     // Music/Photo > Playlists (category_music.xml / category_photo.xml #seg_playlist_mgmt, playlist_plugin):
     // the folder itself, its Create New Playlist row, and one stored playlist (value = its id).
     PlaylistFolder, CreatePlaylist, Playlist,

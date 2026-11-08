@@ -24,6 +24,7 @@ qt_add_executable(re-ps3-native
     src/steam_activity.cpp src/steam_activity.h
     src/service_icons.cpp src/service_icons.h
     src/tailscale_client.cpp src/tailscale_client.h src/tailscale_shell.cpp
+    src/system_power.cpp src/system_power.h
     src/photo_viewport.cpp src/photo_viewport.h
     src/interaction_audio.cpp src/interaction_audio.h
     src/text_renderer.cpp src/text_renderer.h

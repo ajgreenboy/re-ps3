@@ -1,6 +1,7 @@
 #include "shell.h"
 #include "glyphs.h"
 #include "service_icons.h"
+#include "system_power.h"
 #include <QPainter>
 #include "settings_menu.h"
 #include "media_controls.h"
@@ -1911,6 +1912,22 @@ void Shell::activate() {
     case Action::EditName:emit requestSystemName(preferences_.value("system/name").toString());break;
     case Action::CreateUser:emit requestNewUser();break;
     case Action::TurnOffSystem:psHeld();psConfirmOff_=true;emit changed();break;
+    case Action::RestartSystem:
+        showConfirm(QObject::tr("Do you want to restart the system?"),QString(),[this]{
+            QString error;
+            qInfo().noquote()<<"power: Restart System confirmed";
+            if(!requestRestart(&error))showMessage(QObject::tr("Restart System"),error,MessageKind::Page);
+            emit changed();
+        });
+        emit changed();break;
+    case Action::SleepSystem:
+        showConfirm(QObject::tr("Do you want to put the system to sleep?"),QString(),[this]{
+            QString error;
+            qInfo().noquote()<<"power: Sleep confirmed";
+            if(!requestSleep(false,&error))showMessage(QObject::tr("Sleep"),error,MessageKind::Page);
+            emit changed();
+        });
+        emit changed();break;
     case Action::SelectUser: {
         // D16 (BEHAVIOUR-GAP-AUDIT): selecting a user switches the whole session - that user's settings,
         // libraries, friends and trophies - not just the id in profiles.json. The settings store's
@@ -4299,6 +4316,19 @@ void Shell::rebuildUsers(){
     users={item("poweroff",QObject::tr("Turn Off System"),"tex_power_off","explore_category_user",Action::TurnOffSystem),
            item("new-user","Create New User","item_tex_NewUser","explore_category_user",Action::CreateUser)};
     users[1].themeIcon="icon_newuser";
+    // Host extensions after the power row: the PC's own Restart and Sleep (system_power.h). Sleep is listed only
+    // when the PC has a sleep state. Both ask first; the console's own Turn Off stays the first row.
+    {
+        auto restart=item("restart",QObject::tr("Restart System"),"tex_power_off","explore_category_user",Action::RestartSystem);
+        restart.detail=QObject::tr("Restarts this PC.");
+        QVector<Entry> extra{restart};
+        if(canSleep()) {
+            auto sleep=item("sleep",QObject::tr("Sleep"),"tex_power_off","explore_category_user",Action::SleepSystem);
+            sleep.detail=QObject::tr("Puts this PC to sleep; any button on a paired remote or keyboard wakes it.");
+            extra.push_back(sleep);
+        }
+        for(int i=0;i<extra.size();++i)users.insert(1+i,extra[i]);
+    }
     for(const auto& profile:profiles_.profiles()) {
         // The console draws a user as the default avatar (explore_plugin_full:tex_Avatar_Default, col-users-r00), not
         // user_tex_login (the 40x17 arrow); explore_category_user:item_tex_NewUser is the smiley-with-plus, while

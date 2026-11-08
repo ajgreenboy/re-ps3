@@ -8,6 +8,7 @@
 #include <memory>
 #include <QSettings>
 #include "catalog.h"
+#include "system_power.h"
 #include "rsx_program.h"
 #include "p3t.h"
 #include "rco_objects.h"
@@ -1019,9 +1020,16 @@ int main(int argc,char** argv) {
     // flag is the discriminator: a confirmed Turn Off quits, an idle Auto-Off goes dark and the XMB stays
     // running. Once shell.cpp calls host::requestDisplayOff() from the idle timer (the hunk in
     // audit/SESSION-POWER.md), this glue is unnecessary and should be deleted.
-    QObject::connect(&shell,&xmb::Shell::requestQuit,&app,[&app,&shell]{
+    QObject::connect(&shell,&xmb::Shell::requestQuit,&app,[&app,&shell,kiosk]{
         if(shell.psMenuConfirmingOff()) {
-            qInfo()<<"power: Turn Off the System confirmed; the XMB quits";
+            // The console's Turn Off powers the machine off. In appliance mode (--kiosk, the HTPC) this PC shuts
+            // down (not forced: apps may hold it to save); elsewhere (a desktop, development) the XMB only quits,
+            // so a confirmed Turn Off never powers off a workstation by surprise. A failed shutdown quits too.
+            if(kiosk) {
+                QString error;
+                if(xmb::requestShutdown(&error)){qInfo()<<"power: Turn Off the System confirmed; Windows is shutting down";return;}
+                qWarning().noquote()<<"power: shutdown failed:"<<error<<"- the XMB quits instead";
+            } else qInfo()<<"power: Turn Off the System confirmed; the XMB quits (not --kiosk, so the PC stays on)";
             app.quit();
             return;
         }
