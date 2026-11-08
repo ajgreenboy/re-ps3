@@ -1387,13 +1387,17 @@ QString freeSpaceText(const Snapshot& state) {
     return parts.isEmpty()?QStringLiteral("no mounted volume"):parts.join(QStringLiteral(", "));
 }
 QString padText(const Snapshot& state) {
-    if(state.pads.isEmpty())return QStringLiteral("no PlayStation controller");
     QStringList parts;
     for(const auto& pad:state.pads) {
         QString line=pad.name+QStringLiteral(" (")+pad.transport+QLatin1Char(')');
         if(pad.batteryPercent>=0)line+=" "+QString::number(pad.batteryPercent)+QLatin1Char('%');
+        if(!pad.charging.isEmpty() && pad.charging!=QLatin1String("discharging"))line+=" "+pad.charging;
         parts<<line;
     }
+    // XInput (Xbox-layout) pads, slots 0-3 (pad::xinputPads, audit/INPUT.md): four battery levels, not a percentage.
+    for(const auto& x:pad::xinputPads())
+        parts<<QStringLiteral("XInput controller %1 (battery %2)").arg(x.slot+1).arg(x.battery);
+    if(parts.isEmpty())return QStringLiteral("no controller");
     return parts.join(QStringLiteral(", "));
 }
 QString opticalText(const Snapshot& state) {

@@ -41,6 +41,7 @@ qt_add_executable(re-ps3-native
     src/rawg_client.cpp src/rawg_client.h src/rawg_artwork.cpp src/rawg_artwork.h
     src/artwork_settings.cpp src/artwork_settings.h
     src/media_controls.cpp src/media_controls.h
+    src/media_keys.cpp src/media_keys.h
     src/subtitles.cpp src/subtitles.h
     src/image_subtitles.cpp src/image_subtitles.h
     src/jellyfin_client.cpp src/jellyfin_client.h src/jellyfin_stream.cpp src/jellyfin_stream.h

@@ -199,6 +199,10 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     volumeKeys_=std::make_unique<VolumeKeyFilter>([this](int action,const char* source){return volumeKeyAction(action,source);});
     qApp->installNativeEventFilter(volumeKeys_.get());
     if(volumeTrace())qInfo()<<"volume: trace media-key filter installed (WM_APPCOMMAND, VK_VOLUME_*)";
+    // Remote and transport keys (PHASES H10, audit/INPUT.md): WM_APPCOMMAND and VK_MEDIA_*/VK_BROWSER_* are
+    // taken here, before Qt turns them into key events or DefWindowProc forwards them to the shell.
+    remoteKeys_=std::make_unique<MediaKeyFilter>([this](RemoteKey key,const QString& source){return remoteKeyAction(key,source);});
+    qApp->installNativeEventFilter(remoteKeys_.get());
 #endif
     // Input polling is independent of presentation. A 16 ms repaint timer produced ~62.5 Hz even on a 239 Hz
     // display. Request the next frame after Qt finishes composition/swap; swapInterval=1 remains in effect.
@@ -3058,6 +3062,112 @@ bool View::volumeKeyAction(int action,const char* source) {
 void View::setMasterVolumePercent(int percent) {
     volumeApply(percent,QStringLiteral("VOLSET"));
 }
+// ---- Remote and media keys (PHASES H10, audit/INPUT.md) ----------------------------------------------------
+// Every remote form (WM_APPCOMMAND, VK_MEDIA_*, Qt::Key_Media*/Key_Back/Key_HomePage/Key_Info, the Media Center
+// keyboard shortcuts) arrives here as one RemoteKey. Navigation keys become the key or button the XMB already
+// binds (Back = Circle/Escape, Info = Triangle, Channel = PageUp/PageDown, Home = the PS hold menu), so each
+// surface keeps its own rules; transport keys act on the open player only. A key that does nothing in the
+// current state is declined (returns false), so the native filter leaves the message to Windows - a Play/Pause
+// pressed at the XMB with nothing playing still reaches whatever media app Windows routes it to.
+// Every decision is one "remote:" log line; the transport keys add the player's state 400 ms later.
+bool View::remoteKeyAction(RemoteKey key,const QString& source) {
+    const QString name=QString::fromLatin1(remoteKeyName(key));
+    const auto decide=[&](bool taken,const QString& what){
+        qInfo().noquote()<<QString("remote: %1 from %2 -> %3").arg(name,source,what);
+        // A declined native message goes on to Qt, which turns WM_APPCOMMAND into the same key as a key event:
+        // remembered so keyPressEvent passes that echo on silently instead of deciding twice.
+        if(!taken && !source.startsWith(QLatin1String("qt key"))){remoteDeclined_=key;remoteDeclinedAt_=clock_.elapsed();}
+        return taken;
+    };
+    if(QApplication::activeModalWidget())return decide(false,"declined (a modal dialog owns input)");
+    if(!isVisible())return decide(false,"declined (the XMB window is not shown)");
+    shell_.noteActivity();mediaControls_.activity(clock_.elapsed());
+    if(introRunning()){coldboot_.skip();return decide(true,"skipped the intro");}
+    const auto pressKey=[this](int qtKey){
+        QScopedValueRollback<bool> replay(replayingInput_,true);
+        QKeyEvent press(QEvent::KeyPress,qtKey,Qt::NoModifier);keyPressEvent(&press);
+        QKeyEvent release(QEvent::KeyRelease,qtKey,Qt::NoModifier);keyReleaseEvent(&release);
+    };
+    switch(key) {
+    case RemoteKey::Back:
+        pressKey(Qt::Key_Escape);
+        return decide(true,QString("Circle (back); depth %1 mediaOpen %2").arg(shell_.depth()).arg(shell_.mediaOpen()?1:0));
+    case RemoteKey::ChannelUp:case RemoteKey::ChannelDown: {
+        if(osk_.open || userCreate_.open)return decide(false,"declined (a text page owns input)");
+        const int before=shell_.selection();
+        pressKey(key==RemoteKey::ChannelUp?Qt::Key_PageUp:Qt::Key_PageDown);
+        return decide(true,QString("page %1; selection %2 -> %3").arg(key==RemoteKey::ChannelUp?"up":"down").arg(before).arg(shell_.selection()));
+    }
+    case RemoteKey::Info:
+        return triangleAction(source);
+    case RemoteKey::Home:
+        if(osk_.open || userCreate_.open)return decide(false,"declined (a text page owns input)");
+        if(shell_.psMenuOpen()){shell_.psMenuClose();update();return decide(true,"closed the system menu");}
+        psPressAt_=0;   // no PS press precedes it: the menu is drawn in its steady state, not the hold envelope
+        shell_.psHeld();update();
+        return decide(true,QString("opened the system menu (PS hold); rows %1").arg(shell_.psMenuItems().size()));
+    case RemoteKey::None:return false;
+    default:break;
+    }
+    // Transport keys: the player only.
+    if(!shell_.mediaOpen())return decide(false,"declined (no media is open)");
+    // With media open the key is meant for this player even while another surface owns input: it is taken and
+    // does nothing, rather than handed to Windows, which would route it to some other media application.
+    if(osk_.open || userCreate_.open || shell_.psMenuOpen())return decide(true,"ignored (another surface owns input)");
+    QString what;
+    switch(key) {
+    case RemoteKey::PlayPause:shell_.togglePlayback();what="toggle playback";break;
+    case RemoteKey::Play:
+        if(shell_.photoOpen()?shell_.slideshowActive():!shell_.mediaPaused())what="already playing";
+        else {shell_.togglePlayback();what="play";}
+        break;
+    case RemoteKey::Pause:
+        if(shell_.photoOpen()?!shell_.slideshowActive():shell_.mediaPaused())what="already paused";
+        else {shell_.togglePlayback();what="pause";}
+        break;
+    case RemoteKey::Stop:
+        // Stop leaves the player the way Circle does (the resume point is remembered there), after taking down
+        // any panel over it so the one press really stops.
+        if(musicPanelOpen_)closeMusicPanel();
+        if(shell_.optionsOpen())shell_.toggleOptions();
+        shell_.back();what=QString("stop; mediaOpen now %1").arg(shell_.mediaOpen()?1:0);
+        break;
+    case RemoteKey::Next:case RemoteKey::Previous:
+        shell_.skipMedia(key==RemoteKey::Next?1:-1);what=key==RemoteKey::Next?"next item":"previous item";break;
+    case RemoteKey::FastForward:case RemoteKey::Rewind: {
+        if(!shell_.mediaSeekable())return decide(false,"declined (the open media is not seekable)");
+        const qint64 before=shell_.mediaPosition();
+        // The same 10 s step as L2/R2 and Left/Right (MediaControls::seekTarget clamps it).
+        shell_.seekMedia(key==RemoteKey::FastForward?10000:-10000);
+        what=QString("seek %1 10 s from %2 ms").arg(key==RemoteKey::FastForward?"+":"-").arg(before);
+        break;
+    }
+    default:return false;
+    }
+    update();
+    decide(true,what);
+    QTimer::singleShot(400,this,[this,name]{
+        qInfo().noquote()<<QString("remote: after %1 mediaOpen %2 paused %3 position %4 ms title \"%5\"")
+            .arg(name).arg(shell_.mediaOpen()?1:0).arg(shell_.mediaPaused()?1:0).arg(shell_.mediaPosition()).arg(shell_.mediaTitle());
+    });
+    return true;
+}
+// The pad's Triangle on each surface (pollController's Y branches), for a remote's Info / More-info key.
+bool View::triangleAction(const QString& source) {
+    const auto decide=[&](bool taken,const QString& what){
+        qInfo().noquote()<<QString("remote: info from %1 -> %2").arg(source,what);
+        return taken;
+    };
+    if(shell_.psMenuOpen())return decide(false,"declined (the system menu binds no Triangle)");
+    if(osk_.open || userCreate_.open)return decide(false,"declined (a text page owns input)");
+    if(shell_.optionsOpen()){shell_.toggleOptions();update();return decide(true,"Triangle: options closed");}
+    if(musicPanelOpen_){closeMusicPanel();update();return decide(true,"Triangle: music panel closed");}
+    if(shell_.photoOpen()){shell_.rotatePhoto(1);update();return decide(true,"Triangle: photo rotated");}
+    if(!shell_.mediaOpen() || shell_.videoOpen()){shell_.toggleOptions();update();return decide(true,QString("Triangle: options %1").arg(shell_.optionsOpen()?"opened":"not available here"));}
+    if(mediaAudioOnly()){toggleMusicPanel();update();return decide(true,"Triangle: music panel");}
+    shell_.cycleMediaRepeat();update();
+    return decide(true,"Triangle: repeat cycled");
+}
 void View::restoreMasterVolume() {
     if(volumeStart_<0) {
         qWarning()<<"volume: VOLRESTORE has no start-up level to put back (the endpoint was unavailable at start)";
@@ -3081,7 +3191,9 @@ void View::pollTriggerSeek(float down,float up) {
     const bool pressed=std::max(down,up)>=kPress;
     if(pressed==triggerHeld_)return;  // only the threshold crossing is a press: no repeat while held
     triggerHeld_=pressed;
-    if(!pressed || volumeInputBlocked() || !shell_.videoOpen())return;
+    // H10: the same pair seeks a local or Jellyfin music track too (any seekable, non-photo media); the music
+    // container's own hint art is unverified for L2/R2, so this follows the video container (INFERRED).
+    if(!pressed || volumeInputBlocked() || !shell_.mediaSeekable())return;
     const int direction=up>down?1:-1;
     shell_.seekMedia(qint64(direction)*10000);
     if(volumeTrace())qInfo().noquote()<<QString("volume: trace trigger seek %1 -> %2 ms")
@@ -3630,6 +3742,13 @@ bool View::eventFilter(QObject* watched,QEvent* event) {
 void View::keyPressEvent(QKeyEvent* e) {
     shell_.noteActivity();mediaControls_.activity(clock_.elapsed());
     if(introRunning()){coldboot_.skip();e->accept();return;}
+    // Remote, media and Media Center keys (media_keys.h). On Windows the native filter normally takes the
+    // WM_APPCOMMAND/VK form first; this is the path for any that arrive as Qt key events (and for scripts).
+    if(const RemoteKey remote=remoteKeyForQtKey(e->key(),e->modifiers());remote!=RemoteKey::None) {
+        if(remote==remoteDeclined_ && clock_.elapsed()-remoteDeclinedAt_<200){e->ignore();return;}
+        if(e->isAutoRepeat() || remoteKeyAction(remote,QStringLiteral("qt key 0x%1").arg(e->key(),0,16))){e->accept();return;}
+        e->ignore();return;
+    }
     // The PS system menu owns the keyboard while it is open: arrows move, Return confirms, Escape backs out.
     if(shell_.psMenuOpen()) {
         if(e->key()==Qt::Key_Up)shell_.psMenuMove(-1);
@@ -3760,10 +3879,11 @@ void View::pollController() {
     // same handlers the pad drives. A physical controller is therefore not read at all, so a capture cannot depend
     // on a pad lying on its d-pad (which used to walk the keyboard focus off the default key between two grabs).
     static const bool scriptedInput=QCoreApplication::arguments().contains(QStringLiteral("--script"));
-    // XInput pad 0 and any PlayStation controller over HID (pad.cpp), merged; the left stick doubles as the D-pad.
-    XINPUT_STATE state{};const bool xinput=!scriptedInput && XInputGetState(0,&state)==ERROR_SUCCESS;
+    // XInput slots 0-3 (pad::xinputLatest, merged) and any PlayStation controller over HID (pad.cpp), merged;
+    // the left stick doubles as the D-pad.
+    pad::XInputState xstate;const bool xinput=!scriptedInput && pad::xinputLatest(xstate);
     pad::State hid;const bool playstation=!scriptedInput && pad::latest(hid);
-    quint16 buttons=quint16((xinput?state.Gamepad.wButtons:0)|(playstation?hid.buttons:0)|keyHeld_);
+    quint16 buttons=quint16((xinput?xstate.buttons:0)|(playstation?hid.buttons:0)|keyHeld_);
     // PS is consumed by the global watcher (ps_watcher.cpp), which also covers a focused game; it must
     // never reach the XMB navigation bits below.
     buttons=quint16(buttons&~0x400);
@@ -3772,8 +3892,8 @@ void View::pollController() {
     // so a held trigger cannot move the XMB, cannot press Cross, and cannot disturb repeatAt_. Both the pad's
     // own report (pad.cpp l2/r2) and an XInput pad's triggers feed the same ramp; whichever is pressed harder
     // wins when both controllers are attached.
-    const float triggerDown=std::max(xinput?state.Gamepad.bLeftTrigger/255.f:0.f,playstation?hid.l2:0.f);
-    const float triggerUp=std::max(xinput?state.Gamepad.bRightTrigger/255.f:0.f,playstation?hid.r2:0.f);
+    const float triggerDown=std::max(xinput?xstate.l2:0.f,playstation?hid.l2:0.f);
+    const float triggerUp=std::max(xinput?xstate.r2:0.f,playstation?hid.r2:0.f);
     pollTriggerSeek(triggerDown,triggerUp);
     if(shell_.psMenuOpen()) {
         const auto edgePs=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;buttons_=buttons;
@@ -3803,7 +3923,7 @@ void View::pollController() {
         return;
     }
     if(xinput || playstation) {
-        const float lx=xinput?state.Gamepad.sThumbLX/32767.f:hid.lx,ly=xinput?-state.Gamepad.sThumbLY/32767.f:hid.ly; // +y down, as HID
+        const float lx=xinput?xstate.lx:hid.lx,ly=xinput?xstate.ly:hid.ly; // +y down, as HID
         if(lx<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_LEFT;if(lx>.5f)buttons|=XINPUT_GAMEPAD_DPAD_RIGHT;
         if(ly<-.5f)buttons|=XINPUT_GAMEPAD_DPAD_UP;if(ly>.5f)buttons|=XINPUT_GAMEPAD_DPAD_DOWN;
     }
@@ -3861,6 +3981,12 @@ void View::pollController() {
         if(!shell_.mediaOpen() || shell_.videoOpen())shell_.toggleOptions();
         else if(mediaAudioOnly())toggleMusicPanel();
         else shell_.cycleMediaRepeat();
+    }
+    // L1/R1 off the player page a list ten rows at a time, the pad's form of PageUp/PageDown (H10; the key
+    // binding's step - the console's own L1/R1 list step is not traced, INFERRED). In the player they skip.
+    if(!shell_.mediaOpen()) {
+        if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)shell_.vertical(-10);
+        if(edge&XINPUT_GAMEPAD_RIGHT_SHOULDER)shell_.vertical(10);
     }
     if(shell_.mediaOpen()) {
         if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)shell_.skipMedia(-1);

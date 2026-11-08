@@ -72,7 +72,7 @@ Surfaces added on 2026-10-26/27, in the same presentation:
   reorders the page) and Close ([audit/OPTIONS-MENU.md](audit/OPTIONS-MENU.md)).
 - **Notifications** composed from `system_plugin`'s own plaque and glyphs pop up top-right for a tracked launch
   that returns and for a library rescan ([audit/NOTIFICATIONS.md](audit/NOTIFICATIONS.md)).
-- L2/R2 or the volume media keys drive the real Windows master volume, with a **volume HUD** in the band left of
+- The volume media keys drive the real Windows master volume (L2/R2 seek in the player), with a **volume HUD** in the band left of
   the info bar ([audit/HTPC-IDEAS.md](audit/HTPC-IDEAS.md) section 6).
 - The Network column's **Download Management** row opens a real page over Steam's own download queue
   ([audit/STEAM-DOWNLOADS.md](audit/STEAM-DOWNLOADS.md) section 10), and Jellyfin **signs in on an XMB page**
@@ -104,7 +104,8 @@ normal maps can be inspected locally without writing them into the repository:
 
 ## Controllers and installed titles
 
-Input comes from the keyboard, XInput pad 0, and PlayStation controllers read directly over HID: DualShock 3 (USB),
+Input comes from the keyboard, media keys and remotes (WM_APPCOMMAND; [audit/INPUT.md](audit/INPUT.md)), XInput pads 0-3
+(the Xbox Guide button acts as the PS button), and PlayStation controllers read directly over HID: DualShock 3 (USB),
 DualShock 4 and DualSense (USB or Bluetooth). The left stick works as the D-pad. ✕ confirms and ○ goes back, as
 XInput's A and B do.
 

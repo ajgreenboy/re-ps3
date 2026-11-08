@@ -2,6 +2,8 @@
 #include <QDebug>
 #include <QStringList>
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -17,6 +19,7 @@ extern "C" {
 #include <hidsdi.h>
 #include <hidpi.h>
 }
+#include <Xinput.h>
 #endif
 
 namespace xmb::pad {
@@ -80,8 +83,9 @@ bool traceDue(const QString& action) {
 // and the scripted gate can both be proved without moving hardware. Tokens are comma separated:
 // up|down|left|right, cross|circle|square|triangle|l1|r1|start|select|l3|r3|ps, and lx=|ly=|rx=|ry=|l2=|r2=
 // with floating-point values (pad sign: +ly is down). It is sampled exactly like a real controller, so a
-// scripted run ignores it too.
-struct Fake { bool active=false; State state; };
+// scripted run ignores it too. from=<ms>/for=<ms> (H10) limit the press to a window measured from the first pad
+// read, so a single press with a real edge can be timed against an action driven from outside the app.
+struct Fake { bool active=false; State state; qint64 fromMs=-1,forMs=-1; };
 Fake parseFake(const QString& spec) {
     Fake fake;
     if(spec.trimmed().isEmpty())return fake;
@@ -115,6 +119,8 @@ Fake parseFake(const QString& spec) {
         else if(token.startsWith("ry="))fake.state.ry=number(token,3);
         else if(token.startsWith("l2="))fake.state.l2=number(token,3);
         else if(token.startsWith("r2="))fake.state.r2=number(token,3);
+        else if(token.startsWith("from="))fake.fromMs=qint64(number(token,5));
+        else if(token.startsWith("for="))fake.forMs=qint64(number(token,4));
         else qWarning().noquote()<<"input: XMB_PAD_FAKE: unknown token"<<raw;
     }
     qInfo().noquote()<<QString("input: diagnostic XMB_PAD_FAKE=%1 -> buttons=0x%2 lx=%3 ly=%4 rx=%5 ry=%6 l2=%7 r2=%8")
@@ -237,6 +243,87 @@ std::vector<std::pair<std::wstring,Kind>> enumerate() {
     SetupDiDestroyDeviceInfoList(set);
     return out;
 }
+
+// ---- XInput, slots 0-3 (pad.h) ----
+// xinput1_4.dll is loaded at run time for the two calls xinput9_1_0 (the link library) lacks: XInputGetStateEx
+// (ordinal 100, the state with the Guide bit) and XInputGetBatteryInformation. Without it the static
+// XInputGetState still reads every slot; only Guide and the battery are missing.
+struct XInputBattery { BYTE type; BYTE level; };   // XINPUT_BATTERY_INFORMATION, declared here so no header gate applies
+struct XInputStateEx { XINPUT_STATE state; DWORD reserved; };
+using GetStateFn=DWORD(WINAPI*)(DWORD,XInputStateEx*);
+using GetBatteryFn=DWORD(WINAPI*)(DWORD,BYTE,XInputBattery*);
+struct XInputApi { GetStateFn getStateEx=nullptr; GetBatteryFn getBattery=nullptr; };
+const XInputApi& xinputApi() {
+    static const XInputApi api=[]{
+        XInputApi out;
+        if(HMODULE module=LoadLibraryW(L"xinput1_4.dll")) {
+            out.getStateEx=reinterpret_cast<GetStateFn>(GetProcAddress(module,reinterpret_cast<LPCSTR>(100)));
+            out.getBattery=reinterpret_cast<GetBatteryFn>(GetProcAddress(module,"XInputGetBatteryInformation"));
+        }
+        qInfo().noquote()<<QString("pad: XInput slots 0-3; Guide %1, battery %2 (xinput1_4.dll)")
+            .arg(out.getStateEx?"read through XInputGetStateEx":"not readable")
+            .arg(out.getBattery?"readable":"not readable");
+        return out;
+    }();
+    return api;
+}
+QString xinputBatteryText(int slot) {
+    const auto& api=xinputApi();
+    if(!api.getBattery)return QStringLiteral("unknown");
+    XInputBattery battery{};
+    if(api.getBattery(DWORD(slot),0/*BATTERY_DEVTYPE_GAMEPAD*/,&battery)!=ERROR_SUCCESS)return QStringLiteral("unknown");
+    if(battery.type==BATTERY_TYPE_WIRED)return QStringLiteral("wired");
+    if(battery.type==BATTERY_TYPE_DISCONNECTED || battery.type==BATTERY_TYPE_UNKNOWN)return QStringLiteral("unknown");
+    switch(battery.level) {
+    case BATTERY_LEVEL_EMPTY:return QStringLiteral("empty");
+    case BATTERY_LEVEL_LOW:return QStringLiteral("low");
+    case BATTERY_LEVEL_MEDIUM:return QStringLiteral("medium");
+    case BATTERY_LEVEL_FULL:return QStringLiteral("full");
+    default:return QStringLiteral("unknown");
+    }
+}
+std::mutex xinputMutex;
+struct XInputCache {
+    std::chrono::steady_clock::time_point readAt{};
+    std::array<std::chrono::steady_clock::time_point,4> probeAt{};
+    std::array<bool,4> connected{};
+    XInputState merged;
+} xinputCache;
+// The raw merged read, ungated, cached for 4 ms so pollController (16 ms) and PsWatcher (20 ms) share one read.
+XInputState xinputRead() {
+    const std::lock_guard lock(xinputMutex);
+    const auto now=std::chrono::steady_clock::now();
+    if(now-xinputCache.readAt<std::chrono::milliseconds(4))return xinputCache.merged;
+    xinputCache.readAt=now;
+    const auto& api=xinputApi();
+    XInputState merged;
+    float strongestStick=0;
+    for(int slot=0;slot<4;++slot) {
+        // An empty slot is probed once a second, a connected one on every read.
+        if(!xinputCache.connected[slot] && now-xinputCache.probeAt[slot]<std::chrono::seconds(1))continue;
+        xinputCache.probeAt[slot]=now;
+        XInputStateEx state{};
+        const DWORD status=api.getStateEx?api.getStateEx(DWORD(slot),&state):XInputGetState(DWORD(slot),&state.state);
+        const bool connected=status==ERROR_SUCCESS;
+        if(connected!=xinputCache.connected[slot]) {
+            xinputCache.connected[slot]=connected;
+            if(connected)qInfo().noquote()<<QString("pad: XInput slot %1 connected, battery %2").arg(slot).arg(xinputBatteryText(slot));
+            else qInfo().noquote()<<QString("pad: XInput slot %1 disconnected").arg(slot);
+        }
+        if(!connected)continue;
+        ++merged.connected;
+        const XINPUT_GAMEPAD& g=state.state.Gamepad;
+        merged.buttons|=g.wButtons;   // Guide is 0x400 in the Ex state, the same bit as State's PS
+        const float lx=std::clamp(g.sThumbLX/32767.f,-1.f,1.f),ly=std::clamp(-g.sThumbLY/32767.f,-1.f,1.f);
+        if(const float deflection=std::max(std::abs(lx),std::abs(ly));deflection>strongestStick) {
+            strongestStick=deflection;merged.lx=lx;merged.ly=ly;
+        }
+        merged.l2=std::max(merged.l2,g.bLeftTrigger/255.f);
+        merged.r2=std::max(merged.r2,g.bRightTrigger/255.f);
+    }
+    xinputCache.merged=merged;
+    return merged;
+}
 void read(std::wstring path,Kind kind,std::mutex* openMutex,std::set<std::wstring>* open) {
     const HANDLE handle=CreateFileW(path.c_str(),GENERIC_READ|GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
     if(handle!=INVALID_HANDLE_VALUE) {
@@ -301,16 +388,30 @@ void start() {
 #endif
 }
 bool latest(State& out) {
+    // An XInput pad's Guide button is the PS button (pad.h): merged here so PsWatcher, the one consumer of the
+    // PS bit, sees it with no change of its own. The XInput read takes its own lock, before this one.
+#ifdef Q_OS_WIN
+    const bool guide=(xinputRead().buttons&ps)!=0;
+#else
+    const bool guide=false;
+#endif
     const std::lock_guard lock(mutex);
     // XMB_PAD_FAKE stands in for a controller, so the live path and the scripted gate can be proved with no
     // hardware movement. It is a diagnostic: unset in every normal run.
     const Fake& fake=fakeState();
     State sample;
-    if(fake.active)sample=fake.state;
+    static const auto fakeEpoch=std::chrono::steady_clock::now();
+    const qint64 fakeAge=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-fakeEpoch).count();
+    const bool fakeNow=fake.active && (fake.fromMs<0 || fakeAge>=fake.fromMs) && (fake.forMs<0 || fakeAge<std::max<qint64>(fake.fromMs,0)+fake.forMs);
+    if(fakeNow)sample=fake.state;
+    else if(fake.active && !guide)return false;
     else {
-        if(newestAt==std::chrono::steady_clock::time_point{} || std::chrono::steady_clock::now()-newestAt>std::chrono::milliseconds(300))return false;
-        sample=newest;
+        const bool fresh=newestAt!=std::chrono::steady_clock::time_point{} &&
+            std::chrono::steady_clock::now()-newestAt<=std::chrono::milliseconds(300);
+        if(!fresh && !guide)return false;
+        if(fresh)sample=newest;
     }
+    if(guide)sample.buttons|=ps;
     const QString action=padAction(sample);
     if(scriptOnlyMode.load()) {
         // PS is observed and logged - a press and its release, once each - but it is withheld with everything
@@ -340,6 +441,29 @@ void setScriptOnly(bool on) {
     else qInfo().noquote()<<QStringLiteral("input: live pad events accepted (no --script, XMB_INPUT_SCRIPT_ONLY unset)");
 }
 bool scriptOnly() { return scriptOnlyMode.load(); }
+bool xinputLatest(XInputState& out) {
+#ifdef Q_OS_WIN
+    const XInputState state=xinputRead();
+    if(!state.connected)return false;
+    // The scripted-run gate covers XInput exactly as it covers HID: read, never delivered.
+    if(scriptOnlyMode.load())return false;
+    out=state;return true;
+#else
+    Q_UNUSED(out);return false;
+#endif
+}
+QVector<XInputPad> xinputPads() {
+    QVector<XInputPad> pads;
+#ifdef Q_OS_WIN
+    for(int slot=0;slot<4;++slot) {
+        XInputStateEx state{};
+        const auto& api=xinputApi();
+        const DWORD status=api.getStateEx?api.getStateEx(DWORD(slot),&state):XInputGetState(DWORD(slot),&state.state);
+        if(status==ERROR_SUCCESS)pads.push_back({slot,xinputBatteryText(slot)});
+    }
+#endif
+    return pads;
+}
 quint64 ignoredEvents() { return ignoredPadEvents.load(); }
 bool info(Info& out) {
     const std::lock_guard lock(mutex);

@@ -13,6 +13,7 @@
 #include "text_renderer.h"
 #include "osk_layout.h"
 #include "rco_objects.h"
+#include "media_keys.h"
 #include <array>
 #include <functional>
 #include <QDateTime>
@@ -113,6 +114,9 @@ public:
     // same functions the pad's L2/R2, the media keys and the native WM_APPCOMMAND filter call.
     void setMasterVolumePercent(int percent);   // VOLSET=<0..100>
     void restoreMasterVolume();                 // VOLRESTORE: the level and mute state read at start-up
+    // Remote and media keys (PHASES H10, audit/INPUT.md): one entry for WM_APPCOMMAND, VK_MEDIA_*, Qt::Key_Media*
+    // and the MCE shortcuts. False = not taken (the message keeps its normal Windows routing).
+    bool remoteKeyAction(RemoteKey key,const QString& source);
 protected:
     void initializeGL() override;
     void paintGL() override;
@@ -334,7 +338,11 @@ private:
     void volumeStep(int direction,const QString& source);  // one 5% step through the host endpoint
     void volumeToggleMute(const QString& source);
     void volumeApply(int percent,const QString& source);   // set, read back, log, show the HUD
-    void pollTriggerSeek(float down,float up);             // L2/R2 seek in the video player, called from pollController
+    void pollTriggerSeek(float down,float up);             // L2/R2 seek in the player, called from pollController
+    std::unique_ptr<QAbstractNativeEventFilter> remoteKeys_; // MediaKeyFilter (media_keys.h)
+    RemoteKey remoteDeclined_=RemoteKey::None;               // the last native remote message declined, and when:
+    qint64 remoteDeclinedAt_=-1000;                          // Qt's key-event echo of it is passed on unjudged
+    bool triangleAction(const QString& source);            // the pad's Triangle, per surface; false = nothing took it
     void drawVolumeHud(QPainter& painter,double opacity);
     // ---- Media panels, surfaces A and B (audit/MEDIA-PANELS-FIRMWARE.md) ------------------------------
     // The firmware's player chrome, drawn from the containers' own objects. Every screen rect below is a

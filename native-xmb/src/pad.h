@@ -50,6 +50,20 @@ bool info(Info& out);
 // battery byte is read only when the report is long enough for the layout's own offset, so a short or unknown
 // report is rejected instead of reading past its end. Local verification runs documented synthetic reports here.
 bool parseReport(Kind kind,const QVector<quint8>& report,Info& out);
+// ---- XInput (Xbox-layout) controllers, all four slots (PHASES H10, audit/INPUT.md) ----
+// Slots 0-3 merged into one state: buttons OR'd (wButtons layout, as State), the stick and each trigger taken
+// from whichever slot deflects it most. ly is +down, as the HID reports. A slot that reported nothing is
+// re-probed at most once a second, because XInputGetState on an empty slot is slow. The Guide button is read
+// through XInputGetStateEx (xinput1_4.dll ordinal 100; undocumented, so absent = no Guide) and reported as the
+// PS bit 0x400, which latest() also merges so PsWatcher treats Guide exactly like a PlayStation PS button.
+// Withheld (false) while the scripted-run gate is on, like latest().
+struct XInputState { quint16 buttons=0; float lx=0,ly=0,l2=0,r2=0; int connected=0; };
+bool xinputLatest(XInputState& out);
+// The connected XInput slots and their battery as XInputGetBatteryInformation reports it: battery is "wired",
+// "full", "medium", "low", "empty" or "unknown" (the API reports four levels, not a percentage). Read on demand
+// for the Accessory Settings rows; empty when no XInput controller is connected or xinput1_4.dll is absent.
+struct XInputPad { int slot=0; QString battery; };
+QVector<XInputPad> xinputPads();
 QString kindName(Kind kind);          // "DualShock 3", "DualShock 4", "DualSense", "None"
 QString transportName(Transport kind); // "USB", "Bluetooth", "Unknown"
 }
