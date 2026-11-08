@@ -52,6 +52,9 @@ public:
         bool started_=false,running_=false;
     };
     static constexpr double moveMilliseconds=200;
+    // The notification hide is the firmware's own 100 ms fade (basic_plugins.prx DAT_00047f94 = 100.0,
+    // NOTIFICATIONS.md 11.2). The slide-in keeps the shared 200 ms mode-5 curve; only the exit shortens.
+    static constexpr double notificationHideMilliseconds=100;
     // The page (depth) move's two channels (audit/PAGE-MOVE.md 14.1, 15, and the 2026-11-05 runtime trace):
     //   pageMilliseconds, mode 5 - the page content (the icon's 262 px travel and the item column's entry).
     //     An RPCS3 run with every paf ease setup logged (FUN_003981ec) shows no mode-4 call during a page open or

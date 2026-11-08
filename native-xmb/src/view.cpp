@@ -929,11 +929,12 @@ void View::paintGL() {
     }
     if(static const bool panelLog=qEnvironmentVariableIsSet("XMB_MEDIA_TRACE");panelLog && musicPanelEase_.running())
         qInfo().noquote()<<"media: music panel fade"<<QString::number(musicPanelEase_.value,'f',3);
-    // The notification pop-up: Shell decides when one exists (queue + 4 s lifetime); here it slides and fades
-    // in and out on the same 200 ms mode-5 curve the rest of the XMB uses. The content is latched so the last
-    // frame of the exit still draws the text after Shell has already expired the entry.
+    // The notification pop-up: Shell decides when one exists; here it slides in on the shared 200 ms mode-5
+    // curve and slides out on the firmware's own 100 ms fade (basic_plugins.prx DAT_00047f94 = 100.0,
+    // NOTIFICATIONS.md 11.2). The content is latched so the last frame of the exit still draws the text after
+    // Shell has already expired the entry.
     if(const auto* note=shell_.notification())notificationShown_={note->title,note->detail,note->icon};
-    notificationEase_.retarget(shell_.notification()?1.:0.,moveMilliseconds);
+    notificationEase_.retarget(shell_.notification()?1.:0.,shell_.notification()?moveMilliseconds:notificationHideMilliseconds);
     notificationEase_.advance(dt);
     // Message surfaces (audit/DIALOGS-FIRMWARE.md): the modal box is the only shape with traced open and
     // close motion - 200 units on its label group (TRACED 0x00341BFC, DATA 0x0068C978) and 1000 on the

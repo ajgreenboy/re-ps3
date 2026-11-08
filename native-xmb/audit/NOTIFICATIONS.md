@@ -498,9 +498,9 @@ Addresses are Ghidra VAs; the file offset of `basic_plugins.prx` data is VA + 0x
   so the default branch is the only one implemented; flags 2/4/0x10 are noted, not wired.
 - Native: `Shell::notificationShowMs = 2100`, `notificationHoldMs = 3000`, `notificationWaitingLimit = 16`
   (was a 4000 ms fit and a 4-entry cap). `expireNotifications()` makes the decision at `decideAt`.
-  The 100 ms hide is **not** applied: the view's shared 200 ms mode-5 ease still draws the slide-out (and the
-  slide-in) as before; shortening only the hide is a view change with no gate state to measure it
-  (INFERRED that the 100 ms is the fade length; the 2100 ms and 3000 ms are the timers).
+  The 100 ms hide is **applied** (updated 2026-11-08): `View::notificationHideMilliseconds = 100` shortens only
+  the slide-out; the slide-in keeps the shared 200 ms mode-5 curve (`src/view.cpp`, the notification retarget).
+  The 2100 ms and 3000 ms are the timers; 100 ms is the hide fade length (INFERRED).
 
 Log evidence (scripted, `XMB_NOTIFY_LOG=1`): one pop-up `show 2100 ms + hold 3000 ms` then `expire`; a burst
 A, B, T printed `no hold, 2 waiting` -> `expire A` -> `show B` -> `no hold, 1 waiting` -> `expire B` -> `show T`.
