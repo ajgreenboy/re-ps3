@@ -19,6 +19,7 @@ qt_add_executable(re-ps3-native
     src/playback_queue.cpp src/playback_queue.h
     src/playlists.cpp src/playlists.h
     src/spotify_client.cpp src/spotify_client.h src/spotify_shell.cpp
+    src/glyphs.cpp src/glyphs.h
     src/photo_viewport.cpp src/photo_viewport.h
     src/interaction_audio.cpp src/interaction_audio.h
     src/text_renderer.cpp src/text_renderer.h

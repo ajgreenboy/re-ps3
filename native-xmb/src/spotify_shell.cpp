@@ -11,12 +11,9 @@
 // (Premium required, no device, a playlist the API keeps closed) is shown with Spotify's own reason.
 #include "shell.h"
 #include "assets.h"
+#include "glyphs.h"
 #include "media_controls.h"
 #include <QDir>
-#include <QLinearGradient>
-#include <QPainter>
-#include <QPainterPath>
-#include <functional>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QTimer>
@@ -29,68 +26,6 @@ Entry spotifyRow(QString id,QString title,Action action,QString value={},QString
     entry.detail=std::move(detail);entry.container=QStringLiteral("explore_plugin_full");entry.texture=QStringLiteral("item_tex_plain_folder");
     entry.source=QStringLiteral("native");
     return entry;
-}
-// ---- Icons drawn here (no shipped image files): 256 px squares in the icon box -----------------------------
-QImage canvas() { QImage image(256,256,QImage::Format_ARGB32_Premultiplied);image.fill(Qt::transparent);return image; }
-// Spotify's mark: the green disc with three arcs, for the Music column row and the sign-in rows.
-const QImage& spotifyLogo() {
-    static const QImage logo=[]{
-        QImage image=canvas();QPainter p(&image);p.setRenderHint(QPainter::Antialiasing);
-        const double s=256.;
-        p.setPen(Qt::NoPen);p.setBrush(QColor(0x1e,0xd7,0x60));p.drawEllipse(QRectF(s*.08,s*.08,s*.84,s*.84));
-        const auto arc=[&](QPointF a,QPointF c,QPointF b,double width){
-            QPainterPath path(a*s);path.quadTo(c*s,b*s);
-            QPen pen(QColor(0x12,0x12,0x12));pen.setWidthF(width*s);pen.setCapStyle(Qt::RoundCap);
-            p.setPen(pen);p.setBrush(Qt::NoBrush);p.drawPath(path);
-        };
-        arc({.27,.39},{.52,.30},{.75,.43},.075);
-        arc({.29,.53},{.51,.46},{.715,.56},.06);
-        arc({.31,.665},{.50,.615},{.68,.69},.047);
-        return image;
-    }();
-    return logo;
-}
-// Liked Songs: Spotify's own tile for it, a violet-to-mint square with a white heart.
-const QImage& likedTile() {
-    static const QImage tile=[]{
-        QImage image=canvas();QPainter p(&image);p.setRenderHint(QPainter::Antialiasing);
-        QLinearGradient gradient(28,28,228,228);gradient.setColorAt(0,QColor(0x45,0x0a,0xf5));gradient.setColorAt(1,QColor(0xc4,0xef,0xd9));
-        p.setPen(Qt::NoPen);p.setBrush(gradient);p.drawRoundedRect(QRectF(28,28,200,200),14,14);
-        QPainterPath heart;heart.moveTo(128,184);
-        heart.cubicTo(76,150,66,118,80,98);heart.cubicTo(95,78,119,82,128,102);
-        heart.cubicTo(137,82,161,78,176,98);heart.cubicTo(190,118,180,150,128,184);
-        p.setBrush(Qt::white);p.drawPath(heart);
-        return image;
-    }();
-    return tile;
-}
-// White line glyphs in the XMB's own manner (a soft shadow under a near-white stroke).
-QImage glyph(const std::function<void(QPainter&)>& draw) {
-    QImage image=canvas();QPainter p(&image);p.setRenderHint(QPainter::Antialiasing);p.setBrush(Qt::NoBrush);
-    QPen shadow(QColor(0,0,0,90));shadow.setWidthF(14);shadow.setCapStyle(Qt::RoundCap);shadow.setJoinStyle(Qt::RoundJoin);
-    p.save();p.translate(3,5);p.setPen(shadow);draw(p);p.restore();
-    QPen pen(QColor(250,250,250));pen.setWidthF(12);pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
-    p.setPen(pen);draw(p);
-    return image;
-}
-const QImage& deviceGlyph(const QString& type) {
-    static const QImage computer=glyph([](QPainter& p){p.drawRoundedRect(QRectF(48,60,160,108),8,8);p.drawLine(QPointF(128,168),QPointF(128,194));p.drawLine(QPointF(92,196),QPointF(164,196));});
-    static const QImage phone=glyph([](QPainter& p){p.drawRoundedRect(QRectF(88,44,80,168),14,14);p.drawLine(QPointF(118,190),QPointF(138,190));});
-    static const QImage tv=glyph([](QPainter& p){p.drawRoundedRect(QRectF(36,66,184,112),6,6);p.drawLine(QPointF(100,200),QPointF(156,200));});
-    static const QImage speaker=glyph([](QPainter& p){p.drawRoundedRect(QRectF(72,40,112,176),18,18);p.drawEllipse(QPointF(128,150),30,30);p.drawEllipse(QPointF(128,80),10,10);});
-    const QString t=type.toLower();
-    if(t==QLatin1String("computer"))return computer;
-    if(t==QLatin1String("smartphone")||t==QLatin1String("tablet"))return phone;
-    if(t==QLatin1String("tv")||t==QLatin1String("castvideo")||t==QLatin1String("stb")||t==QLatin1String("gameconsole"))return tv;
-    return speaker;
-}
-const QImage& signOutGlyph() {
-    static const QImage image=glyph([](QPainter& p){
-        p.drawPolyline(QPolygonF{{120,56},{60,56},{60,200},{120,200}});
-        p.drawLine(QPointF(100,128),QPointF(200,128));
-        p.drawPolyline(QPolygonF{{168,96},{200,128},{168,160}});
-    });
-    return image;
 }
 Entry withIcon(Entry entry,const QImage& icon) { entry.artwork=icon;entry.iconSized=true;return entry; }
 
@@ -110,7 +45,7 @@ void Shell::initSpotify() {
     spotify_.setImageCache(QDir(dataDirectory_).filePath("spotify/images"));
     // The Music column's Spotify row wears Spotify's mark instead of a folder.
     for(auto& category:categories_)if(category.id==QLatin1String("music"))
-        for(auto& entry:category.entries)if(entry.action==Action::SpotifyApp){entry.artwork=spotifyLogo();entry.iconSized=true;}
+        for(auto& entry:category.entries)if(entry.action==Action::SpotifyApp){entry.artwork=glyphs::spotifyLogo();entry.iconSized=true;}
     connect(&spotify_,&SpotifyClient::imageReady,this,[this](const QString& url,const QImage& image){
         QImage square;
         if(!image.isNull()) {
@@ -201,7 +136,7 @@ void Shell::initSpotify() {
             // Some Connect devices report only an id as their name; show what they are instead.
             static const QRegularExpression idLike(QStringLiteral("^[0-9a-f]{24,}$"));
             const QString name=idLike.match(device.name).hasMatch()?QObject::tr("Unnamed %1").arg(device.type.isEmpty()?QObject::tr("device"):device.type.toLower()):device.name;
-            page.entries.push_back(withIcon(spotifyRow(QStringLiteral("spotify:device:")+device.id,name,Action::SpotifyDevice,device.id,device.type),deviceGlyph(device.type)));
+            page.entries.push_back(withIcon(spotifyRow(QStringLiteral("spotify:device:")+device.id,name,Action::SpotifyDevice,device.id,device.type),glyphs::device(device.type)));
         }
         pages_.push_back(std::move(page));
         emit changed();
@@ -228,19 +163,19 @@ void Shell::initSpotify() {
 QVector<Entry> Shell::spotifyRootRows() {
     QVector<Entry> rows;
     if(!spotify_.configured()) {
-        rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:setup"),QObject::tr("Set Up Spotify"),Action::Unavailable,{},spotify_.configurationError()),spotifyLogo()));
+        rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:setup"),QObject::tr("Set Up Spotify"),Action::Unavailable,{},spotify_.configurationError()),glyphs::spotifyLogo()));
         return rows;
     }
     if(!spotify_.signedIn()) {
         rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:signin"),QObject::tr("Sign In with Spotify"),Action::SpotifySignIn,{},
-            QObject::tr("Opens Spotify's sign-in in the browser; it returns to %1.").arg(spotify_.redirectUri())),spotifyLogo()));
+            QObject::tr("Opens Spotify's sign-in in the browser; it returns to %1.").arg(spotify_.redirectUri())),glyphs::spotifyLogo()));
         return rows;
     }
     // Now Playing wears the playing track's cover once it is fetched, Spotify's mark until then.
-    auto now=withIcon(spotifyRow(QStringLiteral("spotify:now"),QObject::tr("Now Playing"),Action::SpotifyNowPlaying,{},nowPlayingText(spotifyNowPlaying_)),spotifyLogo());
+    auto now=withIcon(spotifyRow(QStringLiteral("spotify:now"),QObject::tr("Now Playing"),Action::SpotifyNowPlaying,{},nowPlayingText(spotifyNowPlaying_)),glyphs::spotifyLogo());
     now.artworkUrl=spotifyNowPlaying_.image;
     rows.push_back(std::move(now));
-    rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:liked"),QObject::tr("Liked Songs"),Action::SpotifyLiked,{},QObject::tr("Your saved tracks")),likedTile()));
+    rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:liked"),QObject::tr("Liked Songs"),Action::SpotifyLiked,{},QObject::tr("Your saved tracks")),glyphs::likedSongs()));
     for(const auto& playlist:spotifyPlaylists_) {
         auto row=spotifyRow(QStringLiteral("spotify:playlist:")+playlist.id,playlist.name,Action::SpotifyPlaylist,playlist.id,
             QObject::tr("%1 tracks").arg(playlist.tracks)+(playlist.owner.isEmpty()?QString():QStringLiteral(" - ")+playlist.owner));
@@ -251,7 +186,7 @@ QVector<Entry> Shell::spotifyRootRows() {
     }
     QString who=spotify_.displayName();
     if(!spotify_.product().isEmpty())who+=(who.isEmpty()?QString():QStringLiteral(" - "))+spotify_.product();
-    rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:signout"),QObject::tr("Sign Out of Spotify"),Action::SpotifySignOut,{},who),signOutGlyph()));
+    rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:signout"),QObject::tr("Sign Out of Spotify"),Action::SpotifySignOut,{},who),glyphs::signOut()));
     return rows;
 }
 

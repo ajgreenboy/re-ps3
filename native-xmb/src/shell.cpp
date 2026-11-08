@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "glyphs.h"
 #include "settings_menu.h"
 #include "media_controls.h"
 #include <QApplication>
@@ -1054,7 +1055,10 @@ void Shell::refreshContent() {
                 // The separator is the console's U+00B7. It was double-encoded here (U+00C2 U+00B7, rendered
                 // as two glyphs) until this fix; the source stays ASCII, the code point is built explicitly.
                 e.detail=app.kind=="game"?QString{}:app.kind=="jellyfin"?QStringLiteral("Jellyfin"):QStringLiteral("Service app ")+QChar(0x00B7)+QStringLiteral(" Opens in your browser");
-                e.artwork=result.art.value("custom:"+app.id);e.gameTile=app.kind=="game";providers.push_back(std::move(e));
+                e.artwork=result.art.value("custom:"+app.id);e.gameTile=app.kind=="game";
+                // Jellyfin's row wears Jellyfin's mark unless the user gave the app its own picture.
+                if(app.kind=="jellyfin" && e.artwork.isNull()){e.artwork=glyphs::jellyfinLogo();e.iconSized=true;}
+                providers.push_back(std::move(e));
             }
             category.entries=installed+providers+category.entries;
             selections_[c]=0;

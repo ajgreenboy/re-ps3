@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "glyphs.h"
 #include "media_controls.h"
 #include <QMediaPlayer>
 #include <QDir>
@@ -11,6 +12,8 @@ Entry jfEntry(QString id,QString title,Action action,QString value={},bool folde
     Entry e;e.id=std::move(id);e.title=std::move(title);e.action=action;e.value=std::move(value);
     e.container="explore_plugin_full";e.texture=folder?"item_tex_plain_folder":"tex_video";return e;
 }
+// A drawn icon for a row the server has no picture for.
+Entry withGlyph(Entry e,const QImage& icon){if(!icon.isNull()){e.artwork=icon;e.iconSized=true;}return e;}
 bool sameService(QUrl a,QUrl b){return a.adjusted(QUrl::StripTrailingSlash|QUrl::NormalizePathSegments)==b.adjusted(QUrl::StripTrailingSlash|QUrl::NormalizePathSegments);}
 bool playable(const QString& type){return QStringList{"Movie","Episode","Video","MusicVideo","Audio","Trailer","Recording"}.contains(type);}
 // The row's one detail line: what it is, where it stands, how long it is. Kept to printable ASCII
@@ -75,6 +78,13 @@ void Shell::initJellyfin() {
             e.mediaKind=folder?QString{}:media.type=="Audio"?QString("Music"):media.type=="Movie"?QString("Movie"):media.type=="Episode"?QString("Episode"):QString("Video");e.option=media.type=="Audio";
             if(!folder){e.resumeMs=media.resumeMs;e.durationMs=media.durationMs;e.played=media.played;e.detail=progressDetail(e);}
             if(media.type=="Audio")e.texture="tex_music";
+            // A library wears its kind's glyph until (unless) the server's own library picture arrives.
+            if(page.jellyfinViews)e=withGlyph(std::move(e),glyphs::library(media.collectionType));
+            // Folders (libraries, series, seasons, albums) fetch their poster as items do.
+            if(folder && !media.primaryTag.isEmpty() && posters<ArtworkRowsPerPage) {
+                ++posters;
+                jellyfin_.artwork(media.id,media.primaryTag,false);
+            }
             if(!folder && e.action!=Action::Unavailable) {
                 if(!media.primaryTag.isEmpty() && posters<ArtworkRowsPerPage) {
                     ++posters;
@@ -89,17 +99,17 @@ void Shell::initJellyfin() {
             if(e.id==selected)page.selection=int(page.entries.size());page.entries.push_back(std::move(e));
         }
         const qint64 next=qint64(page.jellyfinStart)+result.items.size();
-        if(!page.jellyfinViews && !result.items.empty() && next<result.total && next<=1000000){auto more=jfEntry("jellyfin:more","More...",Action::JellyfinMore,page.jellyfinParent,true);more.option=int(next);more.detail=page.title;page.entries.push_back(std::move(more));}
+        if(!page.jellyfinViews && !result.items.empty() && next<result.total && next<=1000000){auto more=withGlyph(jfEntry("jellyfin:more","More...",Action::JellyfinMore,page.jellyfinParent,true),glyphs::more());more.option=int(next);more.detail=page.title;page.entries.push_back(std::move(more));}
         if(page.jellyfinSearch) {
-            auto again=jfEntry("jellyfin:search",tr("Search Again"),Action::JellyfinSearch);
+            auto again=withGlyph(jfEntry("jellyfin:search",tr("Search Again"),Action::JellyfinSearch),glyphs::search());
             again.detail=tr("Type another title, episode or album name.");
             page.entries.push_back(std::move(again));
         }
         if(page.jellyfinViews) {
-            auto search=jfEntry("jellyfin:search",tr("Search Jellyfin"),Action::JellyfinSearch);
+            auto search=withGlyph(jfEntry("jellyfin:search",tr("Search Jellyfin"),Action::JellyfinSearch),glyphs::search());
             search.detail=tr("Type a title, an episode or an album name to search the server.");
             page.entries.push_back(std::move(search));
-            auto out=jfEntry("jellyfin:signout","Sign Out of Jellyfin",Action::JellyfinSignOut);out.texture="tex_Sign_In";page.entries.push_back(std::move(out));
+            auto out=withGlyph(jfEntry("jellyfin:signout","Sign Out of Jellyfin",Action::JellyfinSignOut),glyphs::signOut());page.entries.push_back(std::move(out));
         }
         if(page.entries.empty())status_=page.jellyfinSearch?"No Jellyfin items match that search.":"There are no supported items in this library.";
         qInfo().noquote()<<QString("jellyfin: %1 page with %2 row(s); %3 poster request(s)%4")
@@ -115,8 +125,8 @@ void Shell::initJellyfin() {
             if(itemId==jellyfinBackdropId_ && jellyfinBackdrop_!=image){jellyfinBackdrop_=image;updated=true;}
         } else {
             for(auto& page:pages_)if(page.jellyfin)for(auto& row:page.entries) {
-                if(row.value!=itemId || row.action!=Action::JellyfinPlay)continue;
-                row.artwork=image;updated=true;
+                if(row.value!=itemId || (row.action!=Action::JellyfinPlay && row.action!=Action::JellyfinFolder))continue;
+                row.artwork=image;row.iconSized=false;updated=true;
             }
         }
         if(updated)emit changed();

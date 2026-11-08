@@ -15,6 +15,7 @@ class QNetworkReply;
 namespace xmb {
 struct JellyfinItem {
     QString id, title, type, overview;
+    QString collectionType;   // a library's kind ("movies", "tvshows", "music", ...); empty on items
     bool folder = false;
     qint64 durationMs = 0, resumeMs = 0;
     bool played = false;

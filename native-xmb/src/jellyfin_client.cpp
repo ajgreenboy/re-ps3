@@ -166,6 +166,7 @@ JellyfinItem parseItem(const QJsonObject& json) {
     result.type = typeName(json);
     result.overview = json.value(QStringLiteral("Overview")).toString();
     result.folder = json.value(QStringLiteral("IsFolder")).toBool();
+    result.collectionType = json.value(QStringLiteral("CollectionType")).toString().left(32);
     result.durationMs = millisecondsFromTicks(json.value(QStringLiteral("RunTimeTicks")));
     const QJsonObject userData = json.value(QStringLiteral("UserData")).toObject();
     result.played = userData.value(QStringLiteral("Played")).toBool(false);
