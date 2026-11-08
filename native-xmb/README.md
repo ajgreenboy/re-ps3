@@ -249,6 +249,32 @@ Music and Photo > Playlists are real (Create New Playlist, Add to Playlist, Add 
 Jellyfin video has a Streaming Quality ceiling (row menu and player panel) and server text subtitles:
 [audit/JELLYFIN-NATIVE.md](audit/JELLYFIN-NATIVE.md).
 
+### Wake on LAN, Home Assistant and Weather (Network column)
+
+- **Wake on LAN** lists the machines in `<native-data>/wol.json` (`{"devices":[{"name":"Server","mac":"AA:BB:CC:DD:EE:FF","host":"192.168.1.10"}]}`)
+  with Online/Offline; Cross wakes one and reports when it answers. "Add from This Network" adds a machine Windows has already
+  seen. Only private LAN broadcasts are used.
+- **Home Assistant** needs a long-lived access token: put `{"url":"http://<HA address>","token":"<token>"}` in
+  `<native-data>/homeassistant.json`; on the next start the token moves into a DPAPI-sealed file. Rooms (or kinds) open as
+  folders; scenes and scripts run, lights / switches / fans toggle, media players play/pause.
+- **Weather** reads `<native-data>/weather.json` (`{"place":"Chicago, IL"}`, `"units":"metric"` for Celsius) and shows Open-Meteo's
+  forecast (no key, no location lookup): current conditions on the row, five days on the page.
+
+Details: [audit/HOME-SERVICES.md](audit/HOME-SERVICES.md), [audit/WEATHER.md](audit/WEATHER.md).
+
+### Power, audio output, Delete and System Check
+
+- **Users column**: Restart System and Sleep after Turn Off System, each confirmed. Turn Off the System shuts Windows down only
+  with `--kiosk`; otherwise it quits the XMB. `XMB_POWER_DRY_RUN=1` logs instead of acting (`src/system_power.*`).
+- **Settings > Sound Settings > Audio Output Settings** chooses the Windows default playback device; the player follows it.
+  `XMB_AUDIO_DRY_RUN=1` logs instead of switching.
+- **Delete** on a local media file moves it to the Recycle Bin after the firmware's confirmation, only inside the chosen
+  library folders (`src/file_ops.*`). Copy is listed but needs a destination picker.
+- **Settings > System Settings > System Check** runs read-only checks (firmware files, fonts, data folder, free space,
+  graphics, network, Jellyfin, Home Assistant, Spotify, Tailscale, Steam libraries) and lists problems first with their fix.
+- **Games** launched from the XMB: rendering pauses while the game is in front, and on exit (normal, crash, Alt-F4) the XMB
+  returns to the foreground fullscreen with the same row selected (`src/ps_watcher.*` TitleSession).
+
 ## PS3 themes
 
 All built-in colours use light, opaque category materials with a theme tint. Original follows the firmware's
