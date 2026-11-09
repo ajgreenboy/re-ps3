@@ -415,6 +415,700 @@
         { "name": "frame", "crop": [0, 0, 1920, 1080] },
         { "name": "rows", "crop": [400, 430, 800, 520] }
       ]
+    },
+    {
+      "name": "music-player-page",
+      "description": "The Music player page with the Visual Player OFF (its default): a generated silent tagged WAV from the Music Library page, paused and sought back to exactly 0, so the cover, title/artist/album, codec label, 0:00 bar and guide line are the same on every run. No bars and no glow are drawn with the visualizer off (audit/MUSIC-PLAYER.md, Visualizer).",
+      "reference": "out/native-reference/layers/music-player-page.png",
+      "dataSeed": "out/native-reference/v2/music",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam"
+      },
+      "waits": 10,
+      "settleWaits": 3,
+      "path": [
+        {
+          "categoryId": "music",
+          "catalogueId": "library"
+        },
+        {
+          "rowIndex": 0
+        }
+      ],
+      "preGrab": [
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "ENTER",
+        "wait",
+        "LEFT",
+        "wait",
+        "wait"
+      ],
+      "expect": {
+        "category": "music",
+        "depth": 1,
+        "entryCount": 1,
+        "entryTitle": "Gate Tone.wav",
+        "sidecar": {
+          "mediaOpen": true,
+          "mediaPaused": true,
+          "mediaPosition": {
+            "le": 500
+          },
+          "mediaDuration": 30000
+        }
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "cover and tags",
+          "crop": [
+            340,
+            340,
+            700,
+            280
+          ]
+        },
+        {
+          "name": "bars area",
+          "crop": [
+            100,
+            600,
+            1720,
+            270
+          ]
+        }
+      ]
+    },
+    {
+      "name": "music-visual-player-panel",
+      "description": "The Music control panel (Triangle) with focus on the eighth cell, the Visual Player button (tex_cp_vislizer under the focus plate, the string \"Visual Player\" under the panel). Paused at 0 so the panel's 00:00 / 00:30 read-out is fixed.",
+      "reference": "out/native-reference/layers/music-visual-player-panel.png",
+      "dataSeed": "out/native-reference/v2/music",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam"
+      },
+      "waits": 10,
+      "settleWaits": 3,
+      "path": [
+        {
+          "categoryId": "music",
+          "catalogueId": "library"
+        },
+        {
+          "rowIndex": 0
+        }
+      ],
+      "preGrab": [
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "ENTER",
+        "wait",
+        "LEFT",
+        "wait",
+        "wait",
+        "TRIANGLE",
+        "wait",
+        "wait",
+        "LEFT",
+        "wait",
+        "wait",
+        "wait"
+      ],
+      "expect": {
+        "category": "music",
+        "depth": 1,
+        "entryTitle": "Gate Tone.wav",
+        "sidecar": {
+          "mediaOpen": true,
+          "mediaPaused": true,
+          "mediaPosition": {
+            "le": 500
+          }
+        }
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "panel",
+          "crop": [
+            470,
+            770,
+            980,
+            300
+          ]
+        }
+      ]
+    },
+    {
+      "name": "music-visual-player-on",
+      "description": "The Music player page with the Visual Player ON and the track playing, over a silent generated track. The spectrum is pinned (XMB_MUSICVIS_FIXED=1 feeds a fixed 40-band spectrum and loudness instead of the audio tap, so the bars, peak caps and cover glow settle to the same pixels; live audio levels are not reproducible and are not gated). The time bar and read-outs move with playback, so only the regions above the bar are scored; the frame is grabbed about 6 s after the last input, before the 8 s idle style.",
+      "reference": "out/native-reference/layers/music-visual-player-on.png",
+      "dataSeed": "out/native-reference/v2/music",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_MUSICVIS_FIXED": "1"
+      },
+      "waits": 10,
+      "settleWaits": 3,
+      "path": [
+        {
+          "categoryId": "music",
+          "catalogueId": "library"
+        },
+        {
+          "rowIndex": 0
+        }
+      ],
+      "preGrab": [
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "ENTER",
+        "wait",
+        "LEFT",
+        "wait",
+        "wait",
+        "TRIANGLE",
+        "wait",
+        "wait",
+        "LEFT",
+        "wait",
+        "wait",
+        "wait",
+        "ENTER",
+        "wait",
+        "TRIANGLE",
+        "wait",
+        "wait",
+        "ENTER",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait"
+      ],
+      "expect": {
+        "category": "music",
+        "depth": 1,
+        "entryTitle": "Gate Tone.wav",
+        "sidecar": {
+          "mediaOpen": true,
+          "mediaPaused": false,
+          "mediaPosition": {
+            "ge": 3000
+          },
+          "idleMilliseconds": {
+            "lt": 7500
+          }
+        },
+        "log": [
+          {
+            "pattern": "media: Visual Player on",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "above the bar",
+          "crop": [
+            0,
+            0,
+            1920,
+            880
+          ]
+        },
+        {
+          "name": "bars",
+          "crop": [
+            100,
+            600,
+            1720,
+            270
+          ]
+        },
+        {
+          "name": "cover glow",
+          "crop": [
+            160,
+            160,
+            640,
+            640
+          ]
+        }
+      ]
+    },
+    {
+      "name": "photo-gallery-piles",
+      "description": "The Photo Gallery's pile overview over the read-only 374-photo library (C:/dev/out/gal/photos): opened from the Photo column's Photo Gallery row, boot fall finished, the 7 s help card timed out (BOOT_HELP_DISP_TIME), focus settled on the first pile. The scene clock is the pinned render clock, the photo set and its EXIF dates are fixed files, and thumbnails are decoded before the grab. The gallery has no sidecar fields, so the log lines are its state oracle.",
+      "reference": "out/native-reference/layers/photo-gallery-piles.png",
+      "dataSeed": "out/native-reference/v2/photo",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam"
+      },
+      "waits": 10,
+      "settleWaits": 2,
+      "path": [
+        {
+          "categoryId": "photo",
+          "catalogueId": "gallery"
+        }
+      ],
+      "preGrab": [
+        "pause=12000",
+        "wait",
+        "wait"
+      ],
+      "expect": {
+        "category": "photo",
+        "depth": 0,
+        "entryId": "gallery",
+        "log": [
+          {
+            "pattern": "gallery: indexed 374 photos in 17 folders",
+            "count": 1
+          },
+          {
+            "pattern": "gallery: 49 piles on 2 row\\(s\\)",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "piles",
+          "crop": [
+            800,
+            400,
+            1120,
+            680
+          ]
+        },
+        {
+          "name": "header",
+          "crop": [
+            60,
+            20,
+            1800,
+            110
+          ]
+        }
+      ]
+    },
+    {
+      "name": "photo-gallery-grid",
+      "description": "The Photo Gallery's grid of the first pile (two photos, 1 / 2) after Cross enters it: the focus ring on the first cell with its pulse, the header count and the bottom guide. Same fixed library and pinned clocks as photo-gallery-piles.",
+      "reference": "out/native-reference/layers/photo-gallery-grid.png",
+      "dataSeed": "out/native-reference/v2/photo",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam"
+      },
+      "waits": 10,
+      "settleWaits": 2,
+      "path": [
+        {
+          "categoryId": "photo",
+          "catalogueId": "gallery"
+        }
+      ],
+      "preGrab": [
+        "pause=6000",
+        "ENTER",
+        "pause=3000",
+        "wait"
+      ],
+      "expect": {
+        "category": "photo",
+        "depth": 0,
+        "entryId": "gallery",
+        "log": [
+          {
+            "pattern": "gallery: 49 piles on 2 row\\(s\\)",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "grid",
+          "crop": [
+            600,
+            380,
+            700,
+            320
+          ]
+        },
+        {
+          "name": "header",
+          "crop": [
+            1250,
+            20,
+            620,
+            110
+          ]
+        }
+      ]
+    },
+    {
+      "name": "game-boot-logo",
+      "description": "The console game-boot sequence held at 1.4 s of anim_gameboot (XMB_GAMEBOOT_AT pins the clock, never arms the Finished timer and never launches the title): the UI hidden, a black plane, tex_ps3logo at about full opacity. Reached the way a launch reaches it, by Enter on an imported game row (a stand-in app that is never started).",
+      "reference": "out/native-reference/layers/game-boot-logo.png",
+      "dataSeed": "out/native-reference/v2/game",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini",
+        "apps.json"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_GAMEBOOT_AT": "1.4"
+      },
+      "waits": 10,
+      "settleWaits": 4,
+      "path": [
+        {
+          "catalogueId": "custom:v2-stub"
+        }
+      ],
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "log": [
+          {
+            "pattern": "gameboot: anim_gameboot started",
+            "count": 1
+          },
+          {
+            "pattern": "gameboot: held at 1\\.400 s",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "logo",
+          "crop": [
+            560,
+            340,
+            800,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "name": "game-boot-fade-out",
+      "description": "The game-boot sequence held at 1.68 s, inside the 174 ms fade-out: the logo scaling toward 1.28 while its alpha falls. Pins the second half of the traced timeline (Fade to 0 and Resize at 1.6 s).",
+      "reference": "out/native-reference/layers/game-boot-fade-out.png",
+      "dataSeed": "out/native-reference/v2/game",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini",
+        "apps.json"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_GAMEBOOT_AT": "1.68"
+      },
+      "waits": 10,
+      "settleWaits": 4,
+      "path": [
+        {
+          "catalogueId": "custom:v2-stub"
+        }
+      ],
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "log": [
+          {
+            "pattern": "gameboot: held at 1\\.680 s",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "logo",
+          "crop": [
+            460,
+            300,
+            1000,
+            480
+          ]
+        }
+      ]
+    },
+    {
+      "name": "auto-off-guide",
+      "description": "The Auto-Off guide plate at the Options hint's anchor over the Game root: power/idleMinutes 11 makes the guide due from 60 s of idle (the firmware shows it for the last 600 s), and the idle token pins the shell's idle time at 70 s, so no real time passes. XMB_POWER_DRY_RUN stops the display-off request; the sidecar reports it was not made.",
+      "reference": "out/native-reference/layers/auto-off-guide.png",
+      "dataSeed": "out/native-reference/v2/autooff",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_POWER_DRY_RUN": "1"
+      },
+      "waits": 10,
+      "settleWaits": 3,
+      "preGrab": [
+        "idle=70000",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "wait"
+      ],
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "pageKind": "root",
+        "sidecar": {
+          "idleMilliseconds": 70000,
+          "displayOffRequested": false
+        }
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "guide plate",
+          "crop": [
+            920,
+            920,
+            920,
+            90
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ingame-xmb",
+      "description": "The in-game XMB over a captured game frame: a stand-in game window of our own (work/v2-stubgame.cpp, a plain GDI window launched by this script's own Enter on its imported row, game boot off), then a PS tap. The captured window frame is fitted and dimmed behind the columns, the Quit Game row is inserted and the guide reads Back to Game Screen. The sidecar reports titleRunning and inGame; the stub is ended afterwards by pid. The window capture goes through the compositor, so the frame is pinned for this machine's window theme, not across machines.",
+      "reference": "out/native-reference/layers/ingame-xmb.png",
+      "dataSeed": "out/native-reference/v2/game",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini",
+        "apps.json"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_NO_GAMEBOOT": "1",
+        "XMB_PS_LOG": "1"
+      },
+      "stubLog": "C:/dev/out/v2/stub.log",
+      "waits": 10,
+      "settleWaits": 1,
+      "path": [
+        {
+          "catalogueId": "custom:v2-stub"
+        }
+      ],
+      "preGrab": [
+        "pause=3000",
+        "ps",
+        "pause=3000",
+        "wait",
+        "wait"
+      ],
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "sidecar": {
+          "titleRunning": true,
+          "inGame": true,
+          "runningTitle": "Gate Stub"
+        },
+        "log": [
+          {
+            "pattern": "ingame: row ingame:quit inserted in game",
+            "count": 1
+          },
+          {
+            "pattern": "mode=windowed capture=ok",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "game frame",
+          "crop": [
+            0,
+            130,
+            1920,
+            810
+          ]
+        },
+        {
+          "name": "guide",
+          "crop": [
+            60,
+            940,
+            900,
+            100
+          ]
+        }
+      ]
+    },
+    {
+      "name": "raf-static-scene",
+      "description": "The offscreen RAF still (--raf-render): the firmware's coldboot.raf scene drawn once, with no window and no clock, from the read-only dev_flash. The command prints its actor / model / texture / triangle counts, which are the state oracle. No XMB surface shows it yet (audit/RAF-THEMES.md: nothing is drawn behind the XMB), so this gates the renderer itself.",
+      "reference": "out/native-reference/layers/raf-static-scene.png",
+      "dataSeed": "out/native-reference/v2/music",
+      "seedPaths": [
+        "preferences.json"
+      ],
+      "rafRender": "vsh/resource/coldboot.raf",
+      "waits": 0,
+      "expect": {
+        "log": [
+          {
+            "pattern": "RAF still: 6 actors, 1 models, 6 textures, 18 model triangles, 1920x1080, camera=scene light=scene",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "logo",
+          "crop": [
+            1100,
+            450,
+            740,
+            210
+          ]
+        }
+      ]
     }
   ]
 }

@@ -3802,6 +3802,12 @@ void View::drawMusicVisualizer(QPainter& p,double idle) {
         tap->request();
         have=tap->sample(shell_.mediaPosition(),spectrum);
     }
+    // XMB_MUSICVIS_FIXED=1 (local verification, the pinned-state gate): a fixed, audio-independent spectrum stands in
+    // for the tap while the Visual Player is on and playing, so the bars and glow settle to the same pixels every run.
+    if(playing && qEnvironmentVariableIntValue("XMB_MUSICVIS_FIXED")!=0) {
+        for(int i=0;i<int(spectrum.band.size());++i)spectrum.band[i]=.15f+.7f*float(std::abs(std::sin(.37*i+.4)))*float(1.-.012*i);
+        spectrum.rms=.5f;have=true;
+    }
     const int n=int(musicBars_.size());
     std::array<float,40> target{};
     if(have) {

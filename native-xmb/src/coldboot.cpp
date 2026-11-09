@@ -464,6 +464,13 @@ struct GameBootState {
 };
 GameBootState& gameBoot() { static GameBootState state;return state; }
 bool gameBootDisabled() { static const bool off=qEnvironmentVariableIntValue("XMB_NO_GAMEBOOT")!=0;return off; }
+// XMB_GAMEBOOT_AT=<seconds> (local verification, the pinned-state gate): the sequence is held at that time of
+// anim_gameboot. The clock does not run, the Finished timer is not armed, a press does not skip it and the title is
+// never launched, so a frame grabbed during it is the same on every run. -1 when unset.
+double gameBootPinned() {
+    static const double at=[]{bool ok=false;const double v=qEnvironmentVariable("XMB_GAMEBOOT_AT").toDouble(&ok);return ok && v>=0?v:-1.;}();
+    return at;
+}
 float bits(quint32 v) { return std::bit_cast<float>(v); }
 }
 
@@ -496,7 +503,7 @@ bool GameBoot::guideDue(qint64 idleMs,int minutes) {
 
 void GameBoot::attach(Assets& assets) { gameBoot().assets=&assets; }
 bool GameBoot::active() { return gameBoot().active; }
-double GameBoot::seconds() { auto& s=gameBoot();return s.active?s.clock.nsecsElapsed()/1e9:-1; }
+double GameBoot::seconds() { auto& s=gameBoot();return s.active?(gameBootPinned()>=0?gameBootPinned():s.clock.nsecsElapsed()/1e9):-1; }
 
 void GameBoot::begin(std::function<void()> launch) {
     auto& s=gameBoot();
@@ -507,6 +514,7 @@ void GameBoot::begin(std::function<void()> launch) {
     s.active=true;s.launch=std::move(launch);s.clock.start();
     const quint64 generation=++s.generation;
     qInfo().noquote()<<"gameboot: anim_gameboot started (the title launches when it ends or on a press after 0.4 s)";
+    if(gameBootPinned()>=0){qInfo().noquote()<<QString("gameboot: held at %1 s (XMB_GAMEBOOT_AT)").arg(gameBootPinned(),0,'f',3);return;}
     QTimer::singleShot(int(finished*1000),qApp,[generation]{
         auto& state=gameBoot();
         if(!state.active || state.generation!=generation)return;
@@ -517,7 +525,7 @@ void GameBoot::begin(std::function<void()> launch) {
 
 void GameBoot::skip() {
     auto& s=gameBoot();
-    if(!s.active || s.clock.nsecsElapsed()<400000000)return;
+    if(!s.active || gameBootPinned()>=0 || s.clock.nsecsElapsed()<400000000)return;
     qInfo().noquote()<<QString("gameboot: skipped at %1 s; launching").arg(s.clock.nsecsElapsed()/1e9,0,'f',3);
     s.active=false;auto go=std::move(s.launch);s.launch=nullptr;if(go)go();
 }
@@ -543,7 +551,7 @@ void GameBoot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeig
         painter.fillRect(QRect(0,0,pixelWidth,pixelHeight),Qt::black);
         const double scale=std::min(pixelWidth/1920.,pixelHeight/1080.);
         painter.translate((pixelWidth-1920*scale)/2,(pixelHeight-1080*scale)/2);painter.scale(scale,scale);
-        const Logo logo=logoAt(s.clock.nsecsElapsed()/1e9);
+        const Logo logo=logoAt(gameBootPinned()>=0?gameBootPinned():s.clock.nsecsElapsed()/1e9);
         const QImage& image=s.assets->image(QStringLiteral("custom_render_plugin"),QStringLiteral("tex_ps3logo"));
         if(!image.isNull() && logo.alpha>0) {
             painter.setOpacity(logo.alpha);

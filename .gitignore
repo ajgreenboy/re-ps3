@@ -27,6 +27,7 @@ empty.txt
 /work/*
 !/work/*.ts
 !/work/*.ps1
+!/work/*.cpp
 !/work/*.thresholds.json
 *.bin
 *.idb

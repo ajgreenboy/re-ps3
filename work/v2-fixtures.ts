@@ -1,0 +1,109 @@
+// Scratch fixtures for the V2 pinned-state gate scenarios (audit/PHASES-2026-11-07.md, backlog V2).
+// Everything lands under C:\dev\out\v2 or out/native-reference/v2; nothing here is committed and nothing is
+// shipped. The gate (work/ab-layers.ts, recipes in work/ab-layers.thresholds.json) reads these paths, so run this
+// once on a machine before the first gate run (the stub game needs the MSVC toolchain):
+//
+//   bun work/v2-fixtures.ts
+//
+// What it writes (all deterministic, so two runs write identical bytes):
+//   C:/dev/out/v2/music/Gate Tone.wav   30 s of digital silence, RIFF INFO tags
+//   C:/dev/out/v2/music/folder.png      256x256 gradient the music page picks up as the cover
+//   C:/dev/out/v2/stubgame.exe          the stand-in game window (work/v2-stubgame.cpp, built with cl)
+//   out/native-reference/v2/<seed>/     data seeds for the recipes (preferences.json, apps.json, settings.ini)
+//
+// The photo library is NOT copied: C:/dev/out/gal/photos is used read-only, in place.
+import { existsSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { deflateSync } from 'node:zlib';
+
+const repo = resolve(import.meta.dir, '..');
+const out = 'C:/dev/out/v2';
+const photos = 'C:/dev/out/gal/photos';
+const musicDir = `${out}/music`;
+const stubExe = `${out}/stubgame.exe`;
+const seeds = join(repo, 'out/native-reference/v2');
+
+function ascii(s: string) { return Buffer.from(s, 'latin1'); }
+function chunk(id: string, body: Buffer) {
+  const pad = body.length % 2 ? Buffer.from([0]) : Buffer.alloc(0);
+  const head = Buffer.alloc(8);
+  head.write(id, 0, 'latin1');
+  head.writeUInt32LE(body.length, 4);
+  return Buffer.concat([head, body, pad]);
+}
+function wav(seconds: number) {
+  const rate = 22050;
+  const fmt = Buffer.alloc(16);
+  fmt.writeUInt16LE(1, 0); fmt.writeUInt16LE(1, 2); fmt.writeUInt32LE(rate, 4);
+  fmt.writeUInt32LE(rate * 2, 8); fmt.writeUInt16LE(2, 12); fmt.writeUInt16LE(16, 14);
+  const info = Buffer.concat([ascii('INFO'),
+    chunk('INAM', ascii('Gate Tone\0')), chunk('IART', ascii('Fixture Artist\0')), chunk('IPRD', ascii('Gate Album\0'))]);
+  const body = Buffer.concat([ascii('WAVE'), chunk('fmt ', fmt), chunk('LIST', info), chunk('data', Buffer.alloc(rate * 2 * seconds))]);
+  const head = Buffer.alloc(8);
+  head.write('RIFF', 0, 'latin1');
+  head.writeUInt32LE(body.length, 4);
+  return Buffer.concat([head, body]);
+}
+const crcTable = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(buf: Buffer) { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function pngChunk(type: string, body: Buffer) {
+  const len = Buffer.alloc(4); len.writeUInt32BE(body.length);
+  const tb = Buffer.concat([ascii(type), body]);
+  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(tb));
+  return Buffer.concat([len, tb, crc]);
+}
+function folderPng(size: number) {
+  const raw = Buffer.alloc((size * 3 + 1) * size);
+  for (let y = 0; y < size; y++) {
+    raw[y * (size * 3 + 1)] = 0;
+    for (let x = 0; x < size; x++) {
+      const o = y * (size * 3 + 1) + 1 + x * 3;
+      raw[o] = Math.round(40 + 180 * x / (size - 1)); raw[o + 1] = Math.round(70 + 120 * y / (size - 1)); raw[o + 2] = 160;
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', ihdr), pngChunk('IDAT', deflateSync(raw, { level: 9 })), pngChunk('IEND', Buffer.alloc(0))]);
+}
+const json = (value: unknown) => JSON.stringify(value, null, 2) + '\n';
+const win = (path: string) => path.replaceAll('/', '\\');
+
+function seed(name: string, prefs: Record<string, unknown>, apps?: unknown) {
+  const dir = join(seeds, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'preferences.json'), json({ version: 1, values: { 'display/fullscreen': true, ...prefs } }));
+  // settings.ini and profiles.json are copied from the existing named-state seed so the window geometry matches.
+  copyFileSync(join(repo, 'out/native-reference/store/ui3-data/settings.ini'), join(dir, 'settings.ini'));
+  copyFileSync(join(repo, 'out/native-reference/store/ui3-data/profiles.json'), join(dir, 'profiles.json'));
+  if (apps) writeFileSync(join(dir, 'apps.json'), json(apps));
+}
+
+mkdirSync(musicDir, { recursive: true });
+mkdirSync(`${out}/empty-steam`, { recursive: true });   // XMB_STEAM_ROOT for recipes that must not see this machine's library
+writeFileSync(`${musicDir}/Gate Tone.wav`, wav(30));
+writeFileSync(`${musicDir}/folder.png`, folderPng(256));
+
+// Music: the library folder is the generated one. Photo: the read-only gallery library, in place.
+seed('music', { 'library/music': win(musicDir) });
+seed('photo', { 'library/photo': win(photos) });
+// Game boot / in-game: the stub game is registered as an imported game app; its log (the third argument) is where the
+// harness reads the pid to end after the capture (recipe stubLog). The Auto-Off guide is an 11-minute
+// setting, due 600 s early, i.e. from 60 s of idle.
+const stubApps = { version: 1, apps: [{ id: 'v2-stub', title: 'Gate Stub', kind: 'game', category: 'game', executable: win(stubExe), arguments: ['wait', '120', win(`${out}/stub.log`)] }] };
+seed('game', {}, stubApps);
+seed('autooff', { 'power/idleMinutes': 11 });
+
+// The stub game: built once from work/v2-stubgame.cpp with the MSVC toolchain.
+if (!existsSync(stubExe)) {
+  const vswhere = `${process.env['ProgramFiles(x86)']}\\Microsoft Visual Studio\\Installer\\vswhere.exe`;
+  const vs = Bun.spawnSync([vswhere, '-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath']).stdout.toString().trim();
+  if (!vs) throw new Error('Visual Studio C++ tools are required to build the stub game');
+  const cmd = `call "${vs}\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul && cl /nologo /O1 /EHsc /Fostubgame.obj /Festubgame.exe "${win(join(repo, 'work/v2-stubgame.cpp'))}" user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS`;
+  const built = Bun.spawnSync(['cmd', '/d', '/c', cmd], { cwd: win(out), stdout: 'inherit', stderr: 'inherit', env: { ...process.env, PATH: `${process.env['ProgramFiles(x86)']}\\Microsoft Visual Studio\\Installer;${process.env.PATH}` } });
+  if (built.exitCode !== 0) throw new Error('stub game build failed');
+}
+console.log(`fixtures ready: ${musicDir}, ${stubExe}, ${seeds}`);

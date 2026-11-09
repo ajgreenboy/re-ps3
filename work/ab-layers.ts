@@ -1,7 +1,7 @@
 import { decodePng, psnr, ssim, type Crop, type PngImage } from './ab-compare';
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 // Per-layer fidelity harness for the native XMB. Scores a fixed set of named
 // regions of a native 1920x1080 frame against the stored RPCS3 reference and
@@ -108,6 +108,13 @@ type StateRecipe = {
   // Extra environment for the capture. Values may contain ${repo}, which is
   // replaced with the checkout root so a fixture path stays relative here.
   env?: Record<string, string>;
+  // A stand-in game this recipe's own script launches (an imported app in the seed's apps.json). The stub appends
+  // "started pid=N" to this log (its third argument); the harness deletes the log before the run and ends exactly
+  // those pids afterwards, so no stub outlives its capture. Absolute path; the stub is a fixture of work/v2-fixtures.ts.
+  stubLog?: string;
+  // A surface with no window to script: the offscreen RAF still (--raf-render). A path under dev_flash; the capture is the
+  // PNG the command writes, the log assertions read its stdout line, and dataSeed/seedPaths/waits are unused.
+  rafRender?: string;
   // Script tokens inserted after the navigation (and the settle waits) and
   // before the grab, e.g. TRIANGLE or NOTIFY=/VOLSET=; and tokens inserted
   // after the grab and before quit, e.g. VOLRESTORE.
@@ -197,7 +204,7 @@ const scriptKeys = new Set(['full', 'wait', 'LEFT', 'RIGHT', 'UP', 'DOWN', 'ENTE
   'BACKSPACE', 'PREV', 'NEXT', 'SHUFFLE', 'REPEAT', 'ZOOMIN', 'ZOOMOUT', 'RESETVIEW', 'ROTATELEFT', 'ROTATERIGHT',
   'REFRESH', 'TRIANGLE', 'ps', 'pshold', 'VOLUP', 'VOLDOWN', 'MUTE', 'VOLRESTORE']);
 function isScriptToken(token: string) {
-  return scriptKeys.has(token) || /^size=\d+x\d+$/.test(token) || /^(NOTIFY|VOLSET|VOLKEY|type|idle|burst)=/.test(token);
+  return scriptKeys.has(token) || /^size=\d+x\d+$/.test(token) || /^(NOTIFY|VOLSET|VOLKEY|type|idle|burst|pause)=/.test(token);
 }
 function isSidecarTest(value: unknown): value is SidecarTest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -318,6 +325,8 @@ function parseThresholds(path: string): Thresholds {
             fail(`${path}: ${state.name}: env.${key} must be a string`);
         }
       }
+      if (state.stubLog !== undefined && (typeof state.stubLog !== 'string' || !isAbsolute(state.stubLog)))
+        fail(`${path}: ${state.name}: stubLog must be an absolute path`);
       for (const listKey of ['preGrab', 'postGrab'] as const) {
         const tokens = state[listKey];
         if (tokens === undefined) continue;
@@ -626,7 +635,7 @@ function fmtDeltaSsim(value: number) {
 // reference render of the same state (self-baseline, not firmware fidelity).
 // ---------------------------------------------------------------------------
 
-type StateProcess = { captureDir: string; grabPath: string; dumpPath: string; logPath: string };
+type StateProcess = { captureDir: string; grabPath: string; dumpPath: string; logPath: string; stdout?: string };
 
 function readJsonFile(path: string): any {
   try {
@@ -689,12 +698,17 @@ async function runStateProcess(t: Thresholds, opts: ReturnType<typeof parseArgs>
   if (opts.steamRoot) env.XMB_STEAM_ROOT = opts.steamRoot;
 
   if (!quiet) console.log(`  script   ${finalTokens.join(',')}`);
+  if (recipe.stubLog) rmSync(recipe.stubLog, { force: true });
   const proc = Bun.spawn([exe, ...args], { stdout: 'ignore', stderr: 'pipe', env });
   const stderrText = new Response(proc.stderr).text();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; proc.kill(); }, timeoutMs);
   let code: number;
   try { code = await proc.exited; } finally { clearTimeout(timer); }
+  // The stand-in game is ours: end exactly the pids it logged, however the capture ended.
+  if (recipe.stubLog && existsSync(recipe.stubLog))
+    for (const match of readFileSync(recipe.stubLog, 'utf8').matchAll(/started pid=(\d+)/g))
+      Bun.spawnSync(['taskkill', '/PID', match[1], '/F', '/T'], { stdout: 'ignore', stderr: 'ignore' });
   const stderr = await stderrText;
   writeFileSync(logPath, stderr);
   if (timedOut) fail(`${recipe.name}: capture timed out after ${timeoutMs} ms; evidence: ${captureDir}`);
@@ -703,6 +717,32 @@ async function runStateProcess(t: Thresholds, opts: ReturnType<typeof parseArgs>
     fail(`${recipe.name}: capture exited ${code}; log: ${logPath}` + (tail ? `\n${tail}` : ''));
   }
   return { captureDir, grabPath, dumpPath, logPath };
+}
+
+// --raf-render: a still of a RAF scene from the read-only dev_flash, drawn offscreen (no window, no data directory).
+async function runRafProcess(t: Thresholds, opts: ReturnType<typeof parseArgs>, recipe: StateRecipe): Promise<StateProcess> {
+  const exe = opts.exe || resolveRepo(t.capture.exe);
+  const flash = opts.flash || resolveRepo(t.capture.flash);
+  const timeoutMs = opts.timeoutMs === '' ? t.capture.timeoutMs : Number(opts.timeoutMs);
+  const captureDir = mkdtempSync(join(tmpdir(), 'xmb-layers-state-'));
+  const grabPath = join(captureDir, 'native.png');
+  const logPath = join(captureDir, 'native.stderr.log');
+  const source = join(flash, recipe.rafRender!);
+  if (!existsSync(source)) fail(`${recipe.name}: RAF not found: ${source}`);
+  if (!quiet) console.log(`  command  --raf-render ${source}@${grabPath}`);
+  const proc = Bun.spawn([exe, '--dev-flash', flash, '--raf-render', `${source}@${grabPath}`], { stdout: 'pipe', stderr: 'pipe', env: process.env });
+  const stdoutText = new Response(proc.stdout).text();
+  const stderrText = new Response(proc.stderr).text();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; proc.kill(); }, timeoutMs);
+  let code: number;
+  try { code = await proc.exited; } finally { clearTimeout(timer); }
+  const stdout = await stdoutText;
+  const stderr = await stderrText;
+  writeFileSync(logPath, stderr);
+  if (timedOut) fail(`${recipe.name}: --raf-render timed out after ${timeoutMs} ms; evidence: ${captureDir}`);
+  if (code !== 0) fail(`${recipe.name}: --raf-render exited ${code}: ${(stderr || stdout).trim().split(/\r?\n/).slice(-5).join('\n')}`);
+  return { captureDir, grabPath, dumpPath: '', logPath, stdout };
 }
 
 function gameEntries(dump: any): any[] {
@@ -1111,6 +1151,15 @@ async function runStates(thresholds: Thresholds, opts: ReturnType<typeof parseAr
     let problems: string[] = [];
     let summary = '';
     for (let attempt = 1; attempt <= 2; attempt++) {
+      if (recipe.rafRender !== undefined) {
+        run = await runRafProcess(thresholds, opts, recipe);
+        const checked = checkStateExpect(recipe, {}, {}, undefined, undefined, undefined, run.stdout ?? '');
+        problems = checked.problems;
+        summary = 'offscreen RAF still';
+        sidecar = { category: 'raf' };
+        if (!problems.length || attempt === 2) break;
+        continue;
+      }
       run = await runStateProcess(thresholds, opts, recipe, tokens);
       const sidecarPath = `${run.grabPath}.json`;
       sidecar = existsSync(sidecarPath) ? readJsonFile(sidecarPath) : undefined;
