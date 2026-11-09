@@ -1,4 +1,6 @@
 #include "view.h"
+#include "desktop_mode.h"
+#include "ps_watcher.h"
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
@@ -428,6 +430,10 @@ int main(int argc,char** argv) {
     parser.addOption({"vsmx-eval","Evaluate a RAF script to JSON (file.raf@report.json)","spec"});
     parser.addOption({"gtf-decode","Decode RAF or GTF textures to PNG (file@directory) and exit","spec"});
     parser.addOption({"edge-decode","Decode the first RAF model or an Edge file to JSON (file@report.json) and exit","spec"});
+    // ---- Single instance and commands (PHASES-HTPC D2, audit/DESKTOP-MODE.md) ----
+    parser.addOption({"show","Bring the running XMB to the front (leaving Desktop Mode), or start it; a plain launch means the same"});
+    parser.addOption({"desktop","Put the running XMB into Desktop Mode (hidden, process kept), or start it in Desktop Mode"});
+    parser.addOption({"quit","Ask the running XMB to exit with code 0 (the kiosk watchdog then stops) and exit; does nothing when none runs"});
     parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
     if(parser.isSet("raf-render")) {
         const QString spec=parser.value("raf-render");const int separator=spec.lastIndexOf('@');
@@ -607,6 +613,43 @@ int main(int argc,char** argv) {
     }
     const QString data=parser.isSet("data-dir")?parser.value("data-dir"):QDir(QCoreApplication::applicationDirPath()).filePath("data");
     if(parser.isSet("steam-root"))qputenv("XMB_STEAM_ROOT",parser.value("steam-root").toUtf8());
+    // ---- Single instance (PHASES-HTPC D2) ----
+    // Only a real interactive or kiosk run takes part: every report mode, --script, the clock/render pins and the
+    // reference tools are left out (an allow-list of the interactive options), so tests and the gate never meet a
+    // running XMB. One XMB per user and data directory; XMB_SINGLE_INSTANCE=0 opts out (parallel testing).
+    std::unique_ptr<xmb::InstanceServer> instanceServer;
+    const bool commandGiven=parser.isSet("show") || parser.isSet("desktop") || parser.isSet("quit");
+    {
+        static const QStringList interactiveOptions{"dev-flash","dev-hdd0","vsh-modules","data-dir","no-intro","no-health-warning","kiosk",
+            "display","start-windowed","steam-root","gallery-root","gallery-sort","show","desktop","quit"};
+        bool interactive=parser.positionalArguments().isEmpty() && qEnvironmentVariable("XMB_INPUT_SCRIPT_ONLY")!=QLatin1String("1");
+        for(const QString& name:parser.optionNames())if(!interactiveOptions.contains(name))interactive=false;
+        if(commandGiven && !interactive){qCritical()<<"--show, --desktop and --quit belong to a plain interactive launch (no report, --script or capture options)";return 2;}
+        if(commandGiven && !xmb::singleInstanceEnabled()){qCritical()<<"--show, --desktop and --quit need the single-instance guard, which XMB_SINGLE_INSTANCE=0 turned off";return 2;}
+        if(interactive && xmb::singleInstanceEnabled()) {
+            const auto command=parser.isSet("quit")?xmb::InstanceCommand::Quit:parser.isSet("desktop")?xmb::InstanceCommand::Desktop:xmb::InstanceCommand::Show;
+            const QString name=xmb::instanceServerName(data);
+            const auto handOver=[&]()->int{
+                const int result=xmb::sendInstanceCommand(name,command,10000);
+                if(result==0)qInfo().noquote()<<QString("instance: %1 handed to the running XMB; this launch exits 0").arg(xmb::instanceCommandName(command));
+                else if(result==1)qCritical()<<"instance: an XMB is running but did not answer within 10 s";
+                return result;
+            };
+            int result=handOver();
+            if(result==0)return 0;
+            if(result==1)return 1;
+            if(command==xmb::InstanceCommand::Quit){qInfo()<<"instance: --quit, but no XMB is running";return 0;}
+            instanceServer=std::make_unique<xmb::InstanceServer>(&app);
+            QString error;
+            if(!instanceServer->listen(name,&error)) {
+                // Lost a start-up race with another launch (or a stale pipe): try the running one once more.
+                result=handOver();
+                if(result==0)return 0;
+                qWarning().noquote()<<"instance: could not listen on the single-instance pipe:"<<error<<"- continuing without the guard";
+                instanceServer.reset();
+            } else qInfo().noquote()<<QString("instance: listening on %1").arg(name);
+        }
+    }
     if(parser.isSet("steam-downloads-report")) {
         QString error;
         const auto downloads=xmb::scanSteamDownloads(parser.value("steam-root"),&error);
@@ -1130,6 +1173,7 @@ int main(int argc,char** argv) {
     xmb::GameBoot::attach(assets);
     auto* guideFeed=new QTimer(&app);
     QObject::connect(guideFeed,&QTimer::timeout,&app,[&shell,data]{
+        if(shell.desktopMode())return;   // hidden for Desktop Mode: the Auto-Off guide has nothing to draw or count
         static qint64 stamp=-1;static int minutes=0;
         QFile file(QDir(data).filePath("preferences.json"));
         const qint64 modified=QFileInfo(file).lastModified().toMSecsSinceEpoch()^file.size();
@@ -1259,6 +1303,24 @@ int main(int argc,char** argv) {
                 .arg(selection>=0 && selection<entries.size()?entries[selection].id:QString{});
         }},&app);
     QObject::connect(&shell,&xmb::Shell::changed,titleSession,&xmb::TitleSession::evaluate);
+    // ---- Desktop Mode (PHASES-HTPC D1, audit/DESKTOP-MODE.md) ----
+    auto* desktop=new xmb::DesktopMode(&window,view,&shell,kiosk,kioskScreen,&app);
+    // Deferred one turn: the row's confirmation runs inside the view's key handler, which must finish before the window hides.
+    QObject::connect(&shell,&xmb::Shell::requestDesktop,&app,[desktop]{QTimer::singleShot(0,desktop,[desktop]{desktop->enter(QStringLiteral("Switch to Desktop row"));});});
+    QObject::connect(&shell,&xmb::Shell::requestExitToDesktop,&app,[&app]{
+        QTimer::singleShot(0,&app,[&app]{qInfo()<<"desktop: exit to desktop (row); exiting with code 0 so the watchdog stops";app.exit(0);});
+    });
+    QObject::connect(desktop,&xmb::DesktopMode::exitRequested,&app,[&app](const QString& source){
+        qInfo().noquote()<<QString("desktop: exit via %1; exiting with code 0 so the watchdog stops").arg(source);app.exit(0);
+    });
+    if(instanceServer)instanceServer->setHandler([&app,desktop](xmb::InstanceCommand command){
+        switch(command) {
+        case xmb::InstanceCommand::Show:desktop->showForeground(QStringLiteral("second launch"));break;
+        case xmb::InstanceCommand::Desktop:desktop->enter(QStringLiteral("second launch --desktop"));break;
+        case xmb::InstanceCommand::Quit:qInfo()<<"instance: --quit from a second launch; exiting with code 0 so the watchdog stops";app.exit(0);break;
+        }
+    });
+    if(parser.isSet("desktop"))QTimer::singleShot(0,desktop,[desktop]{desktop->enter(QStringLiteral("launch --desktop"));});
     // The Settings rows read the host snapshot from the paint path; take the first reading on a worker now so the
     // first Settings page does not pay for it (host::snapshot, ~145 ms cold).
     xmb::host::prefetchSnapshot();
@@ -1268,7 +1330,7 @@ int main(int argc,char** argv) {
         auto tokens=std::make_shared<QStringList>(parser.value("script").split(','));
         const auto tap=[view](int key){view->replayKeyTap(key);};
         auto* timer=new QTimer(&app);timer->setInterval(300);
-        QObject::connect(timer,&QTimer::timeout,&app,[&app,&window,&shell,view,tokens,timer,tap]{
+        QObject::connect(timer,&QTimer::timeout,&app,[&app,&window,&shell,view,tokens,timer,tap,desktop]{
             if(tokens->isEmpty()){timer->stop();return;}
             const QString token=tokens->takeFirst().trimmed();
             // XMB_INPUT_TRACE=1: the script is one of the two input sources the shell can hear in a scripted
@@ -1289,6 +1351,11 @@ int main(int argc,char** argv) {
                 } else qWarning()<<"script: invalid size"<<token;
             }
             else if(token.startsWith("idle=")) {bool ok=false;const auto age=token.mid(5).toLongLong(&ok);if(ok && age>=0)shell.setIdleTimeOverride(age);else qWarning()<<"script: invalid idle age";}
+            else if(token=="desktop")desktop->enter(QStringLiteral("script"));   // Switch to Desktop, as the row does
+            else if(token=="guide") {   // the Guide/PS button, through the global watcher's own state machine
+                view->psWatcher().replayPress();
+                QTimer::singleShot(150,view,[view]{view->psWatcher().replayRelease();});
+            }
             else if(token=="ps")view->replayPsTap();       // PS button tap: controller indicator
             else if(token=="pshold")view->replayPsHold();   // PS button hold: system menu
             else if(token.startsWith("NOTIFY=")) {

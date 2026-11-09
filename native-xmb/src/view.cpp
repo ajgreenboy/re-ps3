@@ -225,7 +225,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     psWatcher_.start();
     // renderPaused() (ps_watcher.h, H5): while a launched title owns the foreground the loop stops re-arming;
     // TitleSession calls update() to restart it when the XMB is back in front.
-    connect(this,&QOpenGLWidget::frameSwapped,this,[this]{if(isVisible() && !renderPaused())update();},Qt::QueuedConnection);
+    connect(this,&QOpenGLWidget::frameSwapped,this,[this]{++framesSwapped_;if(isVisible() && !renderPaused())update();},Qt::QueuedConnection);
     frameTracePath_=qEnvironmentVariable("XMB_FRAME_TRACE");
     if(!frameTracePath_.isEmpty()) {
         frameTrace_.reserve(20000);
@@ -4101,6 +4101,10 @@ void View::replayPsTap() {
         .arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(titleRunning()?1:0)
         .arg(QApplication::activeModalWidget()?1:0).arg(foregroundDescription()));
     psTappedEvent(120);   // the script stands in for the console's 60-120 ms press
+}
+void View::setSuspended(bool suspended) {
+    timer_.setInterval(suspended?250:16);
+    if(!suspended){buttons_=keyHeld_=keyPressed_=0;triggerHeld_=false;update();}
 }
 void View::replayPsHold() {
     psLog("script: token pshold (hold)");

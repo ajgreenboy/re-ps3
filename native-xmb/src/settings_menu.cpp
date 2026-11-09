@@ -187,6 +187,8 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
     if(key=="photo/fit")return {{"Fit",0},{"Fill",1}};
     if(key=="media/repeatMode")return {{"Off",0},{"Repeat One",1},{"Repeat All",2}};
     if(key=="display/screensaverMinutes")return {{"After 5 Minutes",5},{"After 10 Minutes",10},{"After 20 Minutes",20},{"After 30 Minutes",30},{"Do Not Use",0}};
+    if(key=="desktop/hotkey")return {{"Ctrl+Alt+Home",QString("Ctrl+Alt+Home")},{"Ctrl+Alt+End",QString("Ctrl+Alt+End")},{"Ctrl+Alt+X",QString("Ctrl+Alt+X")},
+        {"Ctrl+Shift+Home",QString("Ctrl+Shift+Home")},{"Ctrl+Alt+F12",QString("Ctrl+Alt+F12")}};
     if(key=="power/idleMinutes")return {{"Off",0},{"15 minutes",15},{"30 minutes",30},{"1 hour",60},{"2 hours",120}};
     // In-game XMB (INGAME-XMB-DESIGN step 8): who owns the PS tap over an RPCS3/Steam title. "xmb" is the default
     // (tap and hold both reach the XMB); "launcher" leaves the tap to the launcher's Home Menu / Guide and the
@@ -425,6 +427,14 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
         {"start_at_signin",nullptr,nullptr,Action::SettingChoices,"host/startAtSignIn",nullptr,"Start at Sign-in",
             "Starts the XMB full-screen with its crash watchdog when this Windows account signs in. Turns the scheduled task on or off for this account only; Windows automatic sign-in is a separate step you set yourself."}};
     if(id=="system")return &system;
+    // Desktop Mode (PHASES-HTPC D1; audit/DESKTOP-MODE.md): this build's own settings, so native-only rows at the end of
+    // the Power Saving page. Both keys are also settable in preferences.json.
+    static const QVector<RowSpec> power{
+        {"desktop_keep_music",nullptr,nullptr,Action::SettingChoices,"desktop/keepMusic",nullptr,"Desktop Mode - Keep Music Playing",
+            "Whether music that is playing keeps playing while the XMB is hidden for Desktop Mode. Video always pauses."},
+        {"desktop_hotkey",nullptr,nullptr,Action::SettingChoices,"desktop/hotkey",nullptr,"Desktop Mode - Return Hotkey",
+            "The global shortcut that brings the XMB back from Desktop Mode. It is registered only while the XMB is hidden. Other combinations can be set in preferences.json (desktop/hotkey)."}};
+    if(id=="power")return &power;
     return nullptr;
 }
 // A page's rows, plus what the definition said and what was left out: one record the app logs, dumps and

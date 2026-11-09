@@ -123,6 +123,12 @@ public:
     // same global watcher state machine a physical press does, including the 1 s hold.
     void replayPsTap();
     void replayPsHold();
+    // Desktop Mode (desktop_mode.h): the global PS/Guide watcher, which the mode listens to while the window is hidden, and
+    // the suspended state that slows the 16 ms controller timer to a low-rate idle tick (the watcher is slowed by the mode).
+    PsWatcher& psWatcher() { return psWatcher_; }
+    void setSuspended(bool suspended);
+    // Counted by the frame signal; the mode reads it to prove the hidden window renders nothing.
+    qint64 framesSwapped() const { return framesSwapped_; }
     // The couch volume path, reachable from --script so a capture can pin an exact level. These are the
     // same functions the pad's L2/R2, the media keys and the native WM_APPCOMMAND filter call.
     void setMasterVolumePercent(int percent);   // VOLSET=<0..100>
@@ -158,6 +164,7 @@ private:
     // PS button: the global watcher (independent of window focus) and the short controller-indicator
     // window a tap opens.
     PsWatcher psWatcher_;
+    qint64 framesSwapped_=0;
     // The tap indicator's window is the console's own, measured on the PS-tap burst (MANIFEST 4):
     // 155 ms after the press it starts to fade in, full 66 ms later, held ~2.0 s, gone 66 ms after that
     // (2288 ms after the press). psHudAt_ is the press instant, psHudUntil_ the hard end.

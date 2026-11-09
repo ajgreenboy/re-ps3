@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -29,7 +30,9 @@ QStringList Preferences::sharedKeys() {
     // name, the time zone, fullscreen and the two power/idle timers. Everything else is per user.
     return {QStringLiteral("system/name"),QStringLiteral("clock/timeZone"),QStringLiteral("display/fullscreen"),
             QStringLiteral("system/notificationMessages"),QStringLiteral("system/notificationTrophy"),
-            QStringLiteral("power/idleMinutes"),QStringLiteral("display/screensaverMinutes")};
+            QStringLiteral("power/idleMinutes"),QStringLiteral("display/screensaverMinutes"),
+            // Desktop Mode (audit/DESKTOP-MODE.md) belongs to the machine, not to a user profile.
+            QStringLiteral("desktop/keepMusic"),QStringLiteral("desktop/hotkey")};
 }
 bool Preferences::isSharedKey(const QString& key) {
     return sharedKeys().contains(key);
@@ -93,6 +96,8 @@ QVariant Preferences::defaultValue(const QString& key) {
     // /setting/system/notification and /setting/system/notificationTrophy (vsh.elf): both classes default to shown.
     if(key=="audio/keyTone" || key=="system/notificationMessages" || key=="system/notificationTrophy")return true;
     if(key=="power/idleMinutes" || key=="display/screensaverMinutes")return 0;
+    if(key=="desktop/keepMusic")return true;
+    if(key=="desktop/hotkey")return QString("Ctrl+Alt+Home");
     if(key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return false;
     if(key=="system/name")return QSysInfo::machineHostName().left(64);
     if(key=="clock/timeZone")return QString("System");
@@ -117,10 +122,13 @@ bool Preferences::validBare(const QString& key,const QVariant& value) {
     if(key=="power/idleMinutes")return integer(0,120);
     if(key=="display/screensaverMinutes")return integer(0,30) && (value.toInt()==0 || value.toInt()==5 || value.toInt()==10 || value.toInt()==20 || value.toInt()==30);
     if(key=="audio/keyTone" || key=="system/notificationMessages" || key=="system/notificationTrophy" ||
-       key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return value.metaType().id()==QMetaType::Bool;
+       key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen" || key=="desktop/keepMusic")return value.metaType().id()==QMetaType::Bool;
     if(value.metaType().id()!=QMetaType::QString)return false;
     const auto text=value.toString();
     if(text.contains(QChar(0)))return false;
+    // A global hotkey: one or more of Ctrl/Alt/Shift/Win, then Home/End/Insert/Delete/PageUp/PageDown, F1-F24, a letter or a
+    // digit (the same grammar desktop_mode.cpp parses). At least one modifier, so a bare key can never be taken.
+    if(key=="desktop/hotkey")return QRegularExpression(QStringLiteral("^((Ctrl|Alt|Shift|Win)\\+)+(Home|End|Insert|Delete|PageUp|PageDown|F([1-9]|1[0-9]|2[0-4])|[A-Z0-9])$")).match(text).hasMatch();
     if(key=="system/name")return !text.trimmed().isEmpty() && text.size()<=64 && !text.contains('\n') && !text.contains('\r');
     if(key=="clock/timeZone") {
         // Three accepted forms, all bounded (preferences.h): "System", an IANA id this Qt build knows, the

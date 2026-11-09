@@ -1709,7 +1709,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         if(active!=sessionHold_)sessionHold_=host::holdDisplayAwake(active);
         const int minutes=preferences_.value("power/idleMinutes").toInt();
         // Never close the XMB while a title it launched is still running.
-        if(minutes && !mediaOpen_ && !gameRunning() && !QApplication::activeModalWidget() && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
+        if(minutes && !desktopMode_ && !mediaOpen_ && !gameRunning() && !QApplication::activeModalWidget() && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
     });
     activity_.start();idle_.start(1000);applyPreferences();
     if(!preferences_.error().isEmpty())showMessage(preferences_.error(),MessageKind::Page);
@@ -2072,6 +2072,18 @@ void Shell::activate() {
             emit changed();
         });
         emit changed();break;
+    case Action::SwitchToDesktop:
+        showConfirm(QObject::tr("Do you want to switch to the desktop?"),QString(),[this]{
+            qInfo().noquote()<<"power: Switch to Desktop confirmed";
+            emit requestDesktop();
+        });
+        emit changed();break;
+    case Action::ExitToDesktop:
+        showConfirm(QObject::tr("Do you want to exit the XMB to the desktop?"),QString(),[this]{
+            qInfo().noquote()<<"power: Exit to Desktop confirmed";
+            emit requestExitToDesktop();
+        });
+        emit changed();break;
     case Action::SelectUser: {
         // D16 (BEHAVIOUR-GAP-AUDIT): selecting a user switches the whole session - that user's settings,
         // libraries, friends and trophies - not just the id in profiles.json. The settings store's
@@ -2376,6 +2388,22 @@ void Shell::psMenuActivate() {
     showMessage(QObject::tr("Turn Off the Controller"),QObject::tr("A controller connected to this PC is managed by Windows and stays on. Disconnect or power it off from the system."),MessageKind::Page);
     psMenu_=false;
     emit changed();
+}
+void Shell::setDesktopMode(bool on) {
+    if(desktopMode_==on)return;
+    desktopMode_=on;
+    if(!on)touch();   // coming back is activity: Auto-Off restarts from now
+}
+QString Shell::pauseMediaForDesktop() {
+    if(!mediaOpen_)return QStringLiteral("no media open");
+    if(photoOpen()) {
+        if(!slideshow_.isActive())return QStringLiteral("photo slideshow already paused");
+        togglePlayback();return QStringLiteral("photo slideshow paused");
+    }
+    if(player_->playbackState()!=QMediaPlayer::PlayingState)return QStringLiteral("media already paused");
+    if(videoOpen()){togglePlayback();return QStringLiteral("video paused (a hidden window has nothing to show)");}
+    if(!keepMusicInDesktop()){togglePlayback();return QStringLiteral("music paused (desktop/keepMusic is off)");}
+    return QStringLiteral("music keeps playing");
 }
 void Shell::psMenuClose() {
     touch();
@@ -4936,6 +4964,13 @@ void Shell::rebuildUsers(){
             sleep.detail=QObject::tr("Puts this PC to sleep; any button on a paired remote or keyboard wakes it.");
             extra.push_back(sleep);
         }
+        // Desktop Mode (PHASES-HTPC D1; INFERRED placement: the firmware has no such rows). Switch keeps the process
+        // alive and hidden; Exit quits with code 0 so the kiosk watchdog stops. Both ask first.
+        auto toDesktop=item("desktop-switch",QObject::tr("Switch to Desktop"),"tex_power_off","explore_category_user",Action::SwitchToDesktop);
+        toDesktop.detail=QObject::tr("Hides the XMB and leaves it running; the PS button, the tray icon or launching the XMB again brings it back.");
+        auto exitDesktop=item("desktop-exit",QObject::tr("Exit to Desktop"),"tex_power_off","explore_category_user",Action::ExitToDesktop);
+        exitDesktop.detail=QObject::tr("Closes the XMB and stops the kiosk watchdog.");
+        extra.push_back(toDesktop);extra.push_back(exitDesktop);
         for(int i=0;i<extra.size();++i)users.insert(1+i,extra[i]);
     }
     for(const auto& profile:profiles_.profiles()) {

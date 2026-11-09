@@ -69,6 +69,14 @@ void PsWatcher::start() {
     timer_->start();
 }
 
+void PsWatcher::setPollInterval(int milliseconds) {
+    if(timer_)timer_->setInterval(milliseconds);
+}
+
+int PsWatcher::pollInterval() const {
+    return timer_?timer_->interval():kPollMs;
+}
+
 void PsWatcher::replayPress() {
     if(!timer_)return;
     if(simulated_ && down_)return;
@@ -128,6 +136,7 @@ void PsWatcher::poll() {
 namespace xmb {
 namespace {
 bool g_renderPaused=false;
+bool g_desktopPaused=false;
 qint64 wallMs(){return QDateTime::currentMSecsSinceEpoch();}
 #ifdef Q_OS_WIN
 QString foregroundName() {
@@ -142,7 +151,8 @@ QString foregroundName(){return QStringLiteral("n/a");}
 #endif
 }
 
-bool renderPaused(){return g_renderPaused;}
+bool renderPaused(){return g_renderPaused || g_desktopPaused;}
+void setDesktopRenderPause(bool paused){g_desktopPaused=paused;}
 
 TitleSession::TitleSession(QWidget* window,QWidget* view,Hooks hooks,QObject* parent)
     :QObject(parent),window_(window),view_(view),hooks_(std::move(hooks)) {
@@ -277,6 +287,11 @@ void TitleSession::restoreWindow(const QString& reason) {
             window_->setGeometry(screen->geometry());window_->showFullScreen();
         }
     }
+    bringWindowForward(window_,view_);
+    qInfo().noquote()<<QString("title: restore end xmbForeground=%1 foreground=%2").arg(xmbForeground()?1:0).arg(foregroundName());
+}
+
+void bringWindowForward(QWidget* window_,QWidget* view_) {
     window_->raise();
     window_->activateWindow();
     if(auto* handle=window_->windowHandle())handle->requestActivate();
@@ -297,6 +312,5 @@ void TitleSession::restoreWindow(const QString& reason) {
     }
 #endif
     view_->setFocus(Qt::ActiveWindowFocusReason);
-    qInfo().noquote()<<QString("title: restore end xmbForeground=%1 foreground=%2").arg(xmbForeground()?1:0).arg(foregroundName());
 }
 }

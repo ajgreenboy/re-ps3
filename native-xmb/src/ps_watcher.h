@@ -28,6 +28,9 @@ public:
     void replayPress();
     void replayRelease();
     bool down() const { return down_; }
+    // Desktop Mode polls at a low rate while the XMB is hidden (the HID reader keeps running; only the sampling slows).
+    void setPollInterval(int milliseconds);
+    int pollInterval() const;
 signals:
     void pressed();
     void held();
@@ -57,6 +60,14 @@ private:
 // callbacks, so this file stays free of shell.h. Log lines carry the "title:" prefix (Qt log, so
 // XMB_LOG=<file> captures them). XMB_TITLE_NO_PAUSE=1 disables only the render pause (A/B measurement).
 bool renderPaused();
+// Desktop Mode (desktop_mode.h) also pauses the frame loop, independently of a launched title; renderPaused() is true
+// while either asks. Called on the GUI thread only.
+void setDesktopRenderPause(bool paused);
+
+// The Win32 foreground recipe TitleSession::restoreWindow uses, shared with Desktop Mode: raise, activate, attach to the
+// foreground thread's input queue for one SetForegroundWindow call (foreground-lock rules), then give `view` focus.
+// The caller shows the window in the right state first.
+void bringWindowForward(QWidget* window,QWidget* view);
 
 class TitleSession final : public QObject {
     Q_OBJECT

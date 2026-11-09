@@ -75,6 +75,9 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     TurnOffSystem,
     // Host power rows after Turn Off System (system_power.h; not firmware rows): Restart and Sleep, each confirmed.
     RestartSystem, SleepSystem,
+    // Desktop Mode rows (INFERRED: the firmware has no such rows; audit/DESKTOP-MODE.md). Switch hides the XMB and keeps the
+    // process alive; Exit quits with code 0 so the kiosk watchdog stops.
+    SwitchToDesktop, ExitToDesktop,
     // Music/Photo > Playlists (category_music.xml / category_photo.xml #seg_playlist_mgmt, playlist_plugin):
     // the folder itself, its Create New Playlist row, and one stored playlist (value = its id).
     PlaylistFolder, CreatePlaylist, Playlist,
@@ -495,6 +498,14 @@ public:
     void psMenuActivate();
     void psMenuClose();
     bool psMenuConfirmingOff() const { return psConfirmOff_; }
+    // Desktop Mode: while the XMB is hidden the idle Auto-Off must not blank a display the user is using. Leaving
+    // it counts as activity. keepMusicInDesktop() is the desktop/keepMusic preference (default on).
+    void setDesktopMode(bool on);
+    bool desktopMode() const { return desktopMode_; }
+    QString desktopHotkey() const { return preferences_.value("desktop/hotkey").toString(); }
+    bool keepMusicInDesktop() const { return preferences_.value("desktop/keepMusic").toBool(); }
+    // Pauses a playing video or (when music is not kept) any playback; returns what it did, for the log.
+    QString pauseMediaForDesktop();
     // ---- In-game XMB (plan F5, audit/INGAME-XMB-DESIGN.md steps 1-3) ----
     // titleRunning(): a tracked title (our QProcess) or a Steam handoff is running. runningTitle() is its name;
     // lastTitle() keeps it past the end of the process so the quit message can still name it. runningTitlePid() is
@@ -585,6 +596,9 @@ signals:
     void requestTheme();
     void requestSystemName(const QString& value);
     void requestQuit();
+    // Desktop Mode (INFERRED rows; audit/DESKTOP-MODE.md): main.cpp owns the window, the tray and the ways back.
+    void requestDesktop();
+    void requestExitToDesktop();
     void psTapIndicator();
     void requestNewUser();
     // Information on a user row: the name page in rename mode, prefilled with the current name.
@@ -833,7 +847,8 @@ private:
     struct Page { QString title; QVector<Entry> entries; int selection=0; QString directory; bool jellyfin=false,jellyfinViews=false,jellyfinSearch=false; QString jellyfinParent; int jellyfinStart=0; bool downloads=false; bool continuePage=false; bool signIn=false; bool steamAccounts=false; bool grouped=false; QString groupKey; QVector<Entry> groupedSource; bool sysconfPlugin=false; QString playlistsType,playlistId; QString spotify,spotifyContext; QString dlna; int dlnaServer=-1; QString tailscale; QString wol,ha; bool weather=false; bool systemCheck=false; QString userInfo; int userInfoStep=0; };
     QVector<Page> pages_;
     bool psMenu_=false;              // the PS-button system menu is showing
-    bool psConfirmOff_=false;        // its "Turn Off the System" confirmation step
+    bool desktopMode_=false;         // the XMB window is hidden for Desktop Mode (main.cpp DesktopMode)
+    bool psConfirmOff_=false;      // its "Turn Off the System" confirmation step
     int psSelection_=0;
     // Item options panel state: the list itself, one parent level (Sort By), and the selection.
     bool optionsOpen_=false,optionsNested_=false;
