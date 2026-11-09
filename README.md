@@ -46,7 +46,7 @@ Buildable, gated, and measured — not "finished". The current snapshot:
 | Canonical render gate | **6/6 layers PASS** vs the matched console frame (frame ≈ 19.5 dB) | `work/ab-layers.ts --all` |
 | Regression states | **12/12 PASS** (deterministic self-baselines) | same |
 | Release hygiene | **PASS** (no secrets, no firmware data, links + cited commits resolve) | `work/release-check.ps1` |
-| Feature breadth | feature-complete for daily HTPC use | [HANDOFF-2026-11-08.md](native-xmb/HANDOFF-2026-11-08.md) |
+| Feature breadth | feature-complete for daily HTPC use | [HANDOFF-2026-11-09.md](native-xmb/HANDOFF-2026-11-09.md) |
 | Fidelity vs the console | partial and measured per surface | [FIDELITY-VERDICT.md](native-xmb/audit/FIDELITY-VERDICT.md), [FIDELITY-SURFACES-MAP.md](native-xmb/audit/FIDELITY-SURFACES-MAP.md) |
 
 What still needs work is release plumbing and the remaining fidelity surfaces, not core features: the
@@ -116,7 +116,7 @@ The project measures itself rather than trusting screenshots:
 ## Documentation
 
 - [Application README](native-xmb/README.md) — architecture, build, controls, service setup.
-- [Active handoff](native-xmb/HANDOFF-2026-11-08.md) — current state, what landed, open work.
+- [Active handoff](native-xmb/HANDOFF-2026-11-09.md) — current state, what landed, open work.
 - [Plan of record](native-xmb/audit/PHASES-2026-11-07.md) · [ISA](native-xmb/ISA.md) · [audit index](native-xmb/audit/README.md).
 - [Install, build and run](native-xmb/INSTALL.md) · [Manager](native-xmb/MANAGER.md) · [packaging](native-xmb/packaging/README.md).
 

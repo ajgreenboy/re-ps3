@@ -5,7 +5,7 @@ RPCS3 VSH recording. Project goal: a complete native C++ recreation.
 
 ## Read this set
 
-Current handoff (2026-11-08): [HANDOFF-2026-11-08.md](../HANDOFF-2026-11-08.md) - the tree at `00bfdd6`,
+Current handoff (2026-11-09): [HANDOFF-2026-11-09.md](../HANDOFF-2026-11-09.md) - the tree at `00bfdd6`,
 what ships, the build/run/verify commands, the gates and the ranked open work. Plan of record (2026-11-07):
 [PHASES-2026-11-07.md](PHASES-2026-11-07.md) - done work, ranked backlog, parallel workstreams. Newer
 feature audits: [SPOTIFY.md](SPOTIFY.md), [DLNA.md](DLNA.md), [TAILSCALE.md](TAILSCALE.md) and the dated updates in

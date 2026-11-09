@@ -14,7 +14,7 @@ from-scratch native renderer and services, not an emulator.
 
 ## 2. Start here, in this order
 
-1. `native-xmb/HANDOFF-2026-11-08.md` - current state, build/run/verify, what landed, config files,
+1. `native-xmb/HANDOFF-2026-11-09.md` - current state, build/run/verify, what landed, config files,
    open work. This is the newest handoff and takes precedence over everything else.
 2. `native-xmb/audit/PHASES-2026-11-07.md` - the plan of record: done work, ranked backlog (Tier 1
    HTPC product, Tier 2 product gaps, Tier 3 fidelity), parallel workstreams and their write fences.
@@ -80,7 +80,7 @@ visualizer, info-bar avatar slot).
 
 ## 6. When you finish a phase
 
-1. Update `native-xmb/HANDOFF-2026-11-08.md` (or the newest handoff) and `native-xmb/ISA.md` with what
+1. Update `native-xmb/HANDOFF-2026-11-09.md` (or the newest handoff) and `native-xmb/ISA.md` with what
    was observed and what remains open.
 2. Commit only your own files, with author `-c user.name=Al -c user.email=ajgreenboy@gmail.com`.
    No AI attribution in commits, PRs or files.

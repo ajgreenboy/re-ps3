@@ -360,7 +360,7 @@ See the [forward phase plan](archive/PHASES-2026-10-28.md), the [full feature/pr
 parallel workstreams; it supersedes the "Next steps" list in [HANDOFF-PHASES.md](HANDOFF-PHASES.md) and the open-gap list in
 [audit/FEATURE-STATUS-2026-11-04.md](audit/FEATURE-STATUS-2026-11-04.md) where they disagree.
 
-**Current handoff (2026-11-08):** [HANDOFF-2026-11-08.md](HANDOFF-2026-11-08.md) - state, build/run/verify, what landed 2026-11-07/08, config files, open work and conventions.
+**Current handoff (2026-11-09):** [HANDOFF-2026-11-09.md](HANDOFF-2026-11-09.md) - state, build/run/verify, what landed 2026-11-08/09, work in flight, config files, open work and conventions.
 
 **Previous handoff (2026-10-28):** [HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md) - supersedes [HANDOFF-2026-10-27.md](archive/HANDOFF-2026-10-27.md) (the tree at `0c8faee`),
 with build/run/verify, today's gate result, the known gaps by surface, the config migration policy, the

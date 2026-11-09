@@ -3,7 +3,7 @@
 > **Historical, 2026-10-23/24 - this is not the current handoff.** It survives as the record of the first
 > application slice (the procedural-wave checkpoint, the initial asset decode and the reference-observation
 > constraint). Everything it calls current has been replaced: the current handoff is
-> [HANDOFF-2026-11-08.md](HANDOFF-2026-11-08.md), and the plan of record is
+> [HANDOFF-2026-11-09.md](HANDOFF-2026-11-09.md), and the plan of record is
 > [audit/PHASES-2026-11-07.md](audit/PHASES-2026-11-07.md). The 2026-10-28 handoff
 > ([HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md), tree at `9545047`) and its completion ledger
 > ([PHASES-2026-10-28.md](archive/PHASES-2026-10-28.md)) are historical; per-feature status is
