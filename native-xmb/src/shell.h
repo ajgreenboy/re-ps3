@@ -506,7 +506,15 @@ public:
     QString lastTitle() const { return gameTitle_.isEmpty()?quitTitle_:gameTitle_; }
     quint32 runningTitlePid() const;
     bool runningTitleIsSteam() const { return !steamGameId_.isEmpty(); }
+    // True while the tracked process is RPCS3 (launched from the Game column's own title rows through the emulator
+    // path), as opposed to an imported app/emulator. Step 8 needs the distinction: RPCS3 owns its own Home Menu on a
+    // PS press, exactly as Steam owns its Guide.
+    bool runningTitleIsRpcs3() const { return gameIsRpcs3_; }
     bool inGame() const { return inGame_; }
+    // PS-tap arbitration (INGAME-XMB-DESIGN step 8): when the owner leaves the tap to the launcher (input/psArbitration
+    // = "launcher"), the XMB ignores a PS tap over an RPCS3 or Steam title so their Home Menu / Guide gets it; a hold
+    // still opens the XMB's system menu. Imported apps and emulators have no launcher PS handling and are unaffected.
+    bool launcherOwnsPsTap() const;
     void setInGame(bool on);
     // Quit Game (the PS menu row and the in-game rows): impose_plugin:msg_game_quit_ask, Yes -> quitRunningTitle().
     void requestQuitGame();
@@ -753,6 +761,7 @@ private:
     qint64 resumePending_=0;         // milliseconds to seek once the media reports Loaded
     QPointer<QProcess> game_;        // the launched title, kept so a return is observable
     QString gameTitle_;              // its title, for the return message
+    bool gameIsRpcs3_=false;         // the tracked process is RPCS3 (launched through the emulator path)
     QString steamGameId_;            // a Steam title handed to steam.exe, watched through the registry
     QTimer steamWatch_;              // polls Steam's Running flags while steamGameId_ is set
     QElapsedTimer steamWatchAge_;    // since the handoff (or last update tick), for the start timeout

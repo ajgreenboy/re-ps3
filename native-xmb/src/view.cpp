@@ -4152,6 +4152,13 @@ void View::psTappedEvent(qint64 durationMs) {
     if(!psPressActionable_) { psLog("event: tap ignored (not actionable)"); return; }
     if(QApplication::activeModalWidget()) { psLog("event: tap ignored (a modal dialog owns input)"); return; }
     if(!running && !xmbOwnsForeground()) { psLog("event: tap ignored (XMB lost the foreground before the tap completed)"); return; }
+    // Step 8 (INGAME-XMB-DESIGN): when the owner leaves the PS tap to the launcher (input/psArbitration=launcher)
+    // for an RPCS3 or Steam title, the XMB does not react to a tap so the launcher's own Home Menu / Guide gets it;
+    // a hold still opens the XMB's system menu. The return-to-game tap above (already in-game) is unaffected.
+    if(running && !shell_.inGame() && shell_.launcherOwnsPsTap() && (shell_.runningTitleIsSteam() || shell_.runningTitleIsRpcs3())) {
+        psLog("event: tap left to the launcher (input/psArbitration=launcher)");
+        return;
+    }
     // A second tap while the XMB is already over the game goes back to the game (INGAME-XMB-DESIGN step 6).
     if(running && shell_.inGame() && xmbOwnsForeground() && !shell_.psMenuOpen()) {
         const bool surface=shell_.depth()>0 || !shell_.message().isEmpty() || shell_.optionsOpen() || shell_.mediaOpen() || osk_.open || userCreate_.open || plEdit_.open;

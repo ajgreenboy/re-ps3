@@ -563,7 +563,7 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
     });
     connect(process,QOverload<int,QProcess::ExitStatus>::of(&QProcess::finished),this,
             [this,process,title](int code,QProcess::ExitStatus status){
-        process->deleteLater();game_.clear();gameTitle_.clear();touch();
+        process->deleteLater();game_.clear();gameTitle_.clear();gameIsRpcs3_=false;touch();
         qInfo().noquote()<<"returned from"<<title<<"exit"<<code<<(status==QProcess::NormalExit?"normal":"crashed");
         clearInGame();
         if(quitStage_>0) {
@@ -614,7 +614,7 @@ bool Shell::startSteamTracked(const QString& appId,const QString& title) {
         showMessage(title,"Steam could not be started. Refresh the game library and check the Steam installation.",MessageKind::Page);
         return false;
     }
-    steamGameId_=appId;gameTitle_=title;steamGameSeen_=false;steamGameClear_=0;
+    steamGameId_=appId;gameTitle_=title;gameIsRpcs3_=false;steamGameSeen_=false;steamGameClear_=0;
     steamWatchAge_.start();steamWatch_.start();
     activity_.start();
     qInfo().noquote()<<"launch: steam -applaunch"<<appId<<"(watched through Steam's registry)";
@@ -657,7 +657,9 @@ void Shell::restoreFocus() {
 }
 void Shell::launch(const Entry& entry) {
     const QString emulator=emulatorPath();
+    gameIsRpcs3_=true;
     if(emulator.isEmpty() || !startTracked(emulator,{"--no-gui",entry.value},QFileInfo(emulator).absolutePath(),entry.title)) {
+        gameIsRpcs3_=false;
         if(emulator.isEmpty())showMessage(entry.title,"RPCS3 could not be started.",MessageKind::Page);
         return;
     }
@@ -2367,6 +2369,11 @@ bool inGameColumn(const QString& id) {
 }
 quint32 Shell::runningTitlePid() const {
     return (!game_.isNull() && game_->state()!=QProcess::NotRunning)?quint32(game_->processId()):0;
+}
+bool Shell::launcherOwnsPsTap() const {
+    // input/psArbitration = "launcher" leaves the PS tap to RPCS3's Home Menu / Steam's Guide; the default ("xmb")
+    // keeps the current behaviour. The key is a preferences.json entry; no settings page row yet (step 8 follow-up).
+    return preferences_.value("input/psArbitration").toString()==QLatin1String("launcher");
 }
 void Shell::syncInGameRows() {
     for(int c=0;c<categories_.size();++c) {
