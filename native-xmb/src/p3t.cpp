@@ -473,6 +473,7 @@ void P3t::readScene(int depth) {
         script.id=element.text(QStringLiteral("id"));
         script.file=element.text(QStringLiteral("fileref"));
         const auto bytes=fileBytes(script.file);
+        script.data=bytes;
         script.bytes=quint32(bytes.size());
         if(bytes.startsWith("VSMX") && bytes.size()>=0x30) {
             script.vsmx=true;
@@ -598,6 +599,67 @@ QByteArray P3t::vagToWav(const QByteArray& left,const QByteArray& right) {
 namespace xmb {
 namespace {
 QJsonArray v3(const P3t::Raf::Vec3& v){return QJsonArray{v.x,v.y,v.z};}
+// VSMX tables are indexed strings, not byte offsets. Validate every region before decoding untrusted themes.
+QJsonArray disassembleVsmx(const QByteArray& data,QString& error) {
+    QJsonArray result;
+    if(data.size()<0x34 || !data.startsWith("VSMX")){error=QStringLiteral("Invalid VSMX header");return result;}
+    const auto region=[&](quint32 off,quint32 size){return quint64(off)+size<=quint64(data.size());};
+    const quint32 code=le32(data,8),size=le32(data,12);
+    if(!region(code,size) || size%8){error=QStringLiteral("Invalid VSMX code region");return result;}
+    const auto table=[&](int header,bool wide,QStringList& strings)->bool {
+        const quint32 off=le32(data,header),len=le32(data,header+4);
+        if(!region(off,len) || (wide && len%2))return false;
+        if(!wide) {
+            for(const auto& s:data.mid(off,len).split('\0'))strings.append(QString::fromLatin1(s));
+        } else {
+            QString s;
+            for(quint32 i=0;i<len;i+=2) {
+                const ushort c=qFromLittleEndian<quint16>(data.constData()+off+i);
+                if(c)s.append(QChar(c));else {strings.append(s);s.clear();}
+            }
+            if(!s.isEmpty())strings.append(s);
+        }
+        return true;
+    };
+    QStringList text,props,names;
+    if(!table(0x10,true,text) || !table(0x1c,true,props) || !table(0x28,false,names)) {
+        error=QStringLiteral("Invalid VSMX string table region");return result;
+    }
+    static const char* const mnemonic[]={
+        nullptr,"ASSIGN","ADD","SUBTRACT","MULTIPLY","DIVIDE","MODULO","POSITIVE","NEGATE","NOT",
+        "PRE_INCREMENT","PRE_DECREMENT","POST_INCREMENT","POST_DECREMENT","EQUAL","NOT_EQUAL","STRICT_EQUAL","STRICT_NOT_EQUAL",
+        "LESS","LESS_EQUAL","GREATER_EQUAL","GREATER",nullptr,nullptr,"TYPEOF","BIT_AND","BIT_XOR","BIT_OR","BIT_NOT",
+        "SHIFT_LEFT","SHIFT_RIGHT","SHIFT_UNSIGNED","DUPLICATE",nullptr,"END_STATEMENT","CONST_NULL","CONST_ARRAY",
+        "CONST_BOOL","CONST_INT","CONST_FLOAT","CONST_STRING","CONST_OBJECT","FUNCTION","ARRAY_START","THIS","ARGUMENT",
+        "VARIABLE","PROPERTY","PROPERTY_REF","PROPERTY_ASSIGN","PROPERTY_DELETE","OBJECT_PROPERTY","INDEX",nullptr,"INDEX_ASSIGN",
+        nullptr,"ARRAY_APPEND","JUMP","JUMP_TRUE","JUMP_FALSE","CALL","METHOD_CALL","NEW","RETURN",
+        nullptr,nullptr,nullptr,nullptr,nullptr,"END","UNKNOWN_46","UNKNOWN_47",nullptr,"ARRAY_LITERAL"
+    };
+    const auto resolved=[](const QStringList& strings,quint32 index) {
+        return index<quint32(strings.size())?QStringLiteral("%1: %2").arg(index).arg(strings[int(index)]):QStringLiteral("%1: <invalid index>").arg(index);
+    };
+    for(quint32 i=0;i<size/8;++i) {
+        const qsizetype at=qsizetype(code)+qsizetype(i)*8;
+        const quint32 id=le32(data,at),value=le32(data,at+4),op=id&0xff;
+        const char* name=op<std::size(mnemonic)?mnemonic[op]:nullptr;
+        // 0x46 and 0x47 are ignored by the reference decompiler, not actually decoded.
+        if(op==0x46 || op==0x47)name=nullptr;
+        QString operands;
+        if(!name)operands=QStringLiteral("raw=%1").arg(QString::fromLatin1(data.mid(at,8).toHex()));
+        else if(op==0x25)operands=value?QStringLiteral("true"):QStringLiteral("false");
+        else if(op==0x26)operands=QString::number(qint32(value));
+        else if(op==0x27)operands=QString::number(double(std::bit_cast<float>(value)),'g',9);
+        else if(op==0x28)operands=resolved(text,value);
+        else if(op==0x2e)operands=resolved(names,value);
+        else if(op>=0x2f && op<=0x33)operands=resolved(props,value);
+        else if(op==0x2a)operands=QStringLiteral("target=%1 args=%2 locals=%3").arg(value).arg((id>>8)&0xff).arg(id>>24);
+        else if(op==0x2d)operands=QStringLiteral("index=%1").arg(value);
+        else if(op>=0x39 && op<=0x3b)operands=QStringLiteral("target=%1").arg(value);
+        else if((op>=0x3c && op<=0x3e) || op==0x49)operands=QStringLiteral("count=%1").arg(value);
+        result.append(QJsonObject{{"index",int(i)},{"opcode",QStringLiteral("0x%1 %2").arg(op,2,16,QChar('0')).arg(name?QString::fromLatin1(name):QStringLiteral("UNKNOWN"))},{"operands",operands}});
+    }
+    return result;
+}
 }
 // --raf-report: the parsed scene graph, for checking a user-supplied theme against what a renderer would need.
 // Everything here is read from the file (M); the "renderer" block states what the native shell does with it.
@@ -649,8 +711,13 @@ QByteArray P3t::rafReportJson() const {
         for(const auto& m:s.materials)materials.append(QJsonObject{{"id",m.id},{"effect",m.effect},{"colorMap",m.colorMap},
             {"normalMap",m.normalMap},{"specularMap",m.specularMap}});
         o["materials"]=materials;
-        o["script"]=QJsonObject{{"present",s.script.present},{"id",s.script.id},{"file",s.script.file},{"bytes",int(s.script.bytes)},
+        QJsonObject script{{"present",s.script.present},{"id",s.script.id},{"file",s.script.file},{"bytes",int(s.script.bytes)},
             {"vsmx",s.script.vsmx},{"version",int(s.script.version)},{"instructions",int(s.script.instructions)},{"names",int(s.script.names)}};
+        if(s.script.vsmx) {
+            QString error;script["disassembly"]=disassembleVsmx(s.script.data,error);
+            if(!error.isEmpty())script["disassemblyError"]=error;
+        }
+        o["script"]=script;
         o["animationCount"]=s.animationCount;
         o["timeline"]=QJsonObject{{"start",s.timelineStart},{"end",s.timelineEnd}};
         QStringList effects;for(const auto& m:s.materials)if(!effects.contains(m.effect))effects<<m.effect;

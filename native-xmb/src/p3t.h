@@ -63,6 +63,7 @@ public:
         struct Script {
             bool present=false; QString id,file; quint32 bytes=0;
             bool vsmx=false; quint32 version=0,instructions=0,names=0;
+            QByteArray data; // original VSMX bytes, for the read-only report
         };
 
         bool valid=false;          // a RAF container was found and parsed
