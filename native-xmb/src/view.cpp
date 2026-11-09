@@ -121,6 +121,9 @@ private:
 bool volumeTrace() { static const bool on=qEnvironmentVariableIsSet("XMB_VOLUME_LOG");return on; }
 }
 View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),shell_(shell),assets_(assets) {
+    liveCaptureTimer_.setSingleShot(true);
+    liveCaptureTimer_.setTimerType(Qt::PreciseTimer);
+    connect(&liveCaptureTimer_,&QTimer::timeout,this,&View::captureLiveFrame);
     setFocusPolicy(Qt::StrongFocus);setMinimumSize(800,450);
     setMouseTracking(true);qApp->installEventFilter(this);
     // Decode and cache frequently used original assets before animation starts.
@@ -417,6 +420,7 @@ void View::drawBackdrops(QPainter& p) {
     }
 }
 View::~View(){
+    stopLiveCapture();
 #ifdef Q_OS_WIN
     if(volumeKeys_ && qApp)qApp->removeNativeEventFilter(volumeKeys_.get());
 #endif
@@ -1007,7 +1011,7 @@ void View::paintGL() {
     // In-game XMB: no wave or particles (xmb_ingame's page_xmb_bg is empty, TRACED F15); the captured game frame,
     // darkened, is the backdrop instead (the darkening itself is INFERRED, factor unmeasured).
     if(glReady_ && shell_.inGame())drawInGameBackdrop(int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
-    else if(!inGameBackdrop_.isNull())inGameBackdrop_=QImage();
+    else if(!inGameBackdrop_.isNull()){stopLiveCapture();inGameBackdrop_=QImage();}
     if(glReady_ && !shell_.inGame()) {
         const auto time=QTime::currentTime();
         renderBackground(float(renderSeconds),float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
@@ -4242,6 +4246,7 @@ double inGameDim() {
 }
 }
 void View::enterInGame(const QString& reason) {
+    stopLiveCapture();
     quintptr hwnd=0;
     GameWindowInfo info;
     GameCaptureResult capture;
@@ -4275,6 +4280,8 @@ void View::enterInGame(const QString& reason) {
     inGameHwnd_=hwnd;inGamePid_=info.pid;inGameMode_=info.mode;
     // A fullscreen game that was minimised by the focus change: the recorded window may need SW_RESTORE on return.
     shell_.setInGame(true);
+    if(qEnvironmentVariable("XMB_INGAME_LIVE")==QStringLiteral("1") && !inGameBackdrop_.isNull() &&
+       (inGameMode_==GameWindowMode::Windowed || inGameMode_==GameWindowMode::Borderless))startLiveCapture();
     psLog(QStringLiteral("ingame: enter reason=\"%1\" mode=%2 backdrop=%3").arg(reason,QLatin1String(gameWindowModeName(info.mode)))
         .arg(inGameBackdrop_.isNull()?QStringLiteral("plain dark"):QStringLiteral("captured %1x%2").arg(inGameBackdrop_.width()).arg(inGameBackdrop_.height())));
     bringXmbForward(reason);
@@ -4294,6 +4301,7 @@ bool View::inGameBack() {
 }
 void View::returnToGame(const QString& reason) {
     const quintptr recorded=inGameHwnd_;
+    stopLiveCapture();
     shell_.setInGame(false);
     inGameBackdrop_=QImage();
 #ifdef Q_OS_WIN
@@ -4323,6 +4331,58 @@ void View::returnToGame(const QString& reason) {
     });
 #endif
     update();
+}
+void View::startLiveCapture() {
+    liveCaptureActive_=true;
+    ++liveCaptureGeneration_;
+    psLog(QStringLiteral("ingame: live capture started (250 ms interval)"));
+    liveCaptureTimer_.start(250);
+}
+void View::stopLiveCapture() {
+    if(!liveCaptureActive_)return;
+    liveCaptureActive_=false;
+    ++liveCaptureGeneration_;
+    liveCaptureTimer_.stop();
+    psLog(QStringLiteral("ingame: live capture stopped"));
+}
+void View::captureLiveFrame() {
+    if(!liveCaptureActive_ || !shell_.inGame() || liveCapturePending_)return;
+    const quintptr hwnd=inGameHwnd_;
+    const quint32 pid=inGamePid_;
+    const quint64 generation=liveCaptureGeneration_;
+    liveCapturePending_=true;
+    auto* watcher=new QFutureWatcher<GameCaptureResult>(this);
+    connect(watcher,&QFutureWatcher<GameCaptureResult>::finished,this,[this,watcher,generation,hwnd,pid]{
+        const auto result=watcher->result();
+        watcher->deleteLater();
+        liveCapturePending_=false;
+        if(liveCaptureActive_ && generation==liveCaptureGeneration_ && shell_.inGame() &&
+           hwnd==inGameHwnd_ && pid==inGamePid_) {
+            if(result.status==GameCaptureStatus::Ok && !result.image.isNull()) {
+                inGameBackdrop_=result.image;
+                update();
+            } else if(result.status==GameCaptureStatus::Failed) {
+                stopLiveCapture();
+            }
+        }
+        if(liveCaptureActive_)liveCaptureTimer_.start(250);
+    });
+    watcher->setFuture(QtConcurrent::run([hwnd,pid] {
+#ifdef Q_OS_WIN
+        auto valid=[hwnd,pid] {
+            DWORD actual=0;
+            const HWND window=reinterpret_cast<HWND>(hwnd);
+            return window && IsWindow(window) && GetWindowThreadProcessId(window,&actual) && actual==pid;
+        };
+        if(!valid())return GameCaptureResult{};
+        auto result=captureGameWindow(hwnd,200);
+        if(!valid())return GameCaptureResult{};
+        return result;
+#else
+        Q_UNUSED(hwnd);Q_UNUSED(pid);
+        return GameCaptureResult{};
+#endif
+    }));
 }
 void View::drawInGameBackdrop(int width,int height) {
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,width,height);
