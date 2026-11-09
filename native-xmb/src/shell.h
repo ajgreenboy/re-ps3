@@ -99,7 +99,10 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // A user's Information page (P4): its Icon row (opens the icon page) and User Name row (the name page); one
     // icon choice (value = Profile::icon key), the "From a File" row, and one picture in the Pictures folder
     // (value = its path). The page's user id is Page::userInfo.
-    UserInfoIcon, UserInfoName, UserIconChoice, UserIconFromFile, UserIconFile };
+    UserInfoIcon, UserInfoName, UserIconChoice, UserIconFromFile, UserIconFile,
+    // F5 in-game XMB (audit/INGAME-XMB-DESIGN.md): the firmware's seg_gameexit row (class xmlgameexit, key gameexit) and the
+    // Game column's seg_manual row. Both exist only while a title runs and the XMB was raised over it (inGame()).
+    QuitGame, GameManual };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -482,6 +485,26 @@ public:
     void psMenuActivate();
     void psMenuClose();
     bool psMenuConfirmingOff() const { return psConfirmOff_; }
+    // ---- In-game XMB (plan F5, audit/INGAME-XMB-DESIGN.md steps 1-3) ----
+    // titleRunning(): a tracked title (our QProcess) or a Steam handoff is running. runningTitle() is its name;
+    // lastTitle() keeps it past the end of the process so the quit message can still name it. runningTitlePid() is
+    // the tracked process id (0 for a Steam title, which is not our process). inGame(): the XMB was raised over the
+    // running title by the PS button, so the in-game column set, the dimmed backdrop and "Back to Game Screen"
+    // apply. setInGame() inserts or removes the firmware's in-game-only rows; the shell clears it when the title ends.
+    bool titleRunning() const { return gameRunning(); }
+    QString runningTitle() const { return gameTitle_; }
+    QString lastTitle() const { return gameTitle_.isEmpty()?quitTitle_:gameTitle_; }
+    quint32 runningTitlePid() const;
+    bool runningTitleIsSteam() const { return !steamGameId_.isEmpty(); }
+    bool inGame() const { return inGame_; }
+    void setInGame(bool on);
+    // Quit Game (the PS menu row and the in-game rows): impose_plugin:msg_game_quit_ask, Yes -> quitRunningTitle().
+    void requestQuitGame();
+    // Cooperative close: WM_CLOSE to the title's windows, a grace period for save-on-exit (XMB_QUIT_GRACE_MS, default
+    // 10000), then terminate(), then kill(). Steam titles go through steam.exe +app_stop. Asynchronous.
+    void quitRunningTitle();
+    // The in-game help line text (xmb_ingame:msg_help_back_to_game, "Back to Game Screen").
+    QString inGameHelpText();
     // Triangle options panel for the selected entry (a right-hand panel; the XMB behind it keeps its layout).
     bool optionsOpen() const { return optionsOpen_; }
     // Whether the focused row's firmware class offers the "Triangle : Options" operation guide
@@ -741,6 +764,11 @@ private:
     QString collectionLabel(const QString& appId) const;
     bool startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title);
     bool gameRunning() const;
+    bool inGame_=false;              // the XMB was raised over the running title (setInGame)
+    QString quitTitle_;              // the title a Quit Game asked to close, for the closing message
+    int quitStage_=0;                // 0 none, 1 WM_CLOSE posted, 2 terminate sent, 3 kill sent
+    void syncInGameRows();
+    void clearInGame();
     bool startSteamTracked(const QString& appId,const QString& title);
     void pollSteamGame();
     void restoreFocus();

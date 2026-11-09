@@ -10,6 +10,7 @@
 #include "assets.h"
 #include "catalog.h"
 #include "xmbml_view.h"
+#include "game_capture.h"
 #include "host.h"
 #include "p3t.h"
 #include "steam_library.h"
@@ -564,6 +565,18 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
             [this,process,title](int code,QProcess::ExitStatus status){
         process->deleteLater();game_.clear();gameTitle_.clear();touch();
         qInfo().noquote()<<"returned from"<<title<<"exit"<<code<<(status==QProcess::NormalExit?"normal":"crashed");
+        clearInGame();
+        if(quitStage_>0) {
+            // Quit Game asked for this end: report which stage got the process out (audit/INGAME-XMB-DESIGN step 3).
+            static const char* const stages[]={"none","cooperative (WM_CLOSE)","terminate","kill"};
+            qInfo().noquote()<<"ingame: quit ended by stage"<<stages[std::clamp(quitStage_,0,3)]<<"title="+quitTitle_;
+            const QString closed=quitTitle_.isEmpty()?title:quitTitle_;
+            quitStage_=0;quitTitle_.clear();
+            showMessage(closed,QObject::tr("The game was closed."),MessageKind::Page);
+            emit changed();
+            refreshContent();
+            return;
+        }
         // The return of a tracked title is a real event this build can report. The console itself has no
         // return pop-up (only launches), so this one is a native event, not a firmware one.
         if(status==QProcess::CrashExit) {
@@ -631,6 +644,8 @@ void Shell::pollSteamGame() {
     const QString title=gameTitle_;
     steamGameId_.clear();gameTitle_.clear();steamGameSeen_=false;steamGameClear_=0;
     qInfo().noquote()<<"returned from"<<title<<"(Steam reported it stopped)";
+    clearInGame();
+    if(quitStage_>0){qInfo().noquote()<<"ingame: quit ended by stage steam +app_stop";quitStage_=0;quitTitle_.clear();showMessage(title,QObject::tr("The game was closed."),MessageKind::Page);}
     notify(title,QObject::tr("Returned to the XMB"),"tex_notification_info");
     restoreFocus();
     emit changed();
@@ -1453,6 +1468,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     selections_.fill(0,categories_.size());
     // The tenth column (FIDELITY-ROOT-BAR C1/#5): built like every other category above, then dropped here when
     // `appearance/tvColumn` is off, so the bar, the navigation clamps and the entry dump all follow categories_.
+    // In-game XMB rows survive any column rebuild (refreshContent and friends replace category entries).
+    connect(this,&Shell::changed,this,[this]{if(inGame_)syncInGameRows();});
     syncTvColumn();
     rebuildUsers();
     addInstalledApps();
@@ -1964,7 +1981,28 @@ void Shell::activate() {
         if(entry.action!=Action::SetSetting)
         interactionAudio_.play(entry.action==Action::Unavailable?InteractionAudio::Cue::Error:
             entry.action==Action::SettingChoices?InteractionAudio::Cue::Options:InteractionAudio::Cue::Confirm);
+    // In-game XMB: an operation that needs the game's resources is refused with the firmware's quit offer
+    // (explore_plugin_full msg_need_quit_game_to_operate_ask, TRACED; the set of operations that trigger it is
+    // INFERRED: starting another title, media playback, a browser or store hand-off).
+    if(inGame_ && gameRunning()) {
         switch(entry.action) {
+        case Action::Launch:case Action::LaunchSteam:case Action::LaunchApp:case Action::File:case Action::OpenUrl:
+        case Action::SteamStoreBrowse:case Action::JellyfinPlay:
+            showConfirm(assets_.text("explore_category_game","msg_need_quit_game_to_operate_ask",
+                QStringLiteral("To perform this operation, you must quit the game.\nDo you want to quit the game now?")).replace(QStringLiteral("\\n"),QStringLiteral("\n")),
+                QString(),[this]{quitRunningTitle();});
+            emit changed();
+            return;
+        default:break;
+        }
+    }
+        switch(entry.action) {
+    case Action::QuitGame:requestQuitGame();break;
+    case Action::GameManual:
+        // seg_manual opens the running title's manual through the game_plugin `manual` module action (TRACED,
+        // category_game.xml:397-409). A PC title has no manual source the XMB can reach.
+        showMessage(entry.title,QObject::tr("No manual is available for this title."),MessageKind::Page);
+        break;
     case Action::SettingsPage:openSettings(entry.value);break;
     case Action::SettingChoices:openChoices(entry.setting,entry.title);break;
     case Action::SetSetting:
@@ -2294,22 +2332,10 @@ void Shell::psMenuActivate() {
     const QString item=items.value(std::clamp(psSelection_,0,int(items.size())-1));
     if(item==QObject::tr("Turn Off the System")) { psConfirmOff_=true; emit changed(); return; }
     if(item==QObject::tr("Quit Game")) {
-        if(!steamGameId_.isEmpty()) {
-            // A Steam title is not our process: ask the client to stop it (audit/STEAM-CLI.md) and let the
-            // registry watcher report the return. Killing steam.exe would end the whole client.
-            QString stopError;
-            if(steamStopApp(steamGameId_,steamRoot_,&stopError))
-                qInfo().noquote()<<"shell: asked Steam to stop"<<steamGameId_;
-            else
-                qWarning().noquote()<<"shell: Steam stop failed:"<<stopError;
-        }
-        else if(!game_.isNull() && game_->state()!=QProcess::NotRunning) {
-            game_->terminate();
-            if(!game_->waitForFinished(3000))game_->kill();
-            qInfo().noquote()<<"shell: quit game requested from the PS menu";
-        }
-        showMessage(gameTitle_,QObject::tr("The game was closed."),MessageKind::Page);
+        // Quit Game asks first (impose_plugin msg_game_quit_ask, TRACED string; the confirm step after the menu
+        // row is INFERRED from it, audit/INGAME-XMB-DESIGN.md F12). The black menu closes and the box takes over.
         psMenu_=false;
+        requestQuitGame();
         emit changed();
         return;
     }
@@ -2324,6 +2350,128 @@ void Shell::psMenuClose() {
     if(!psMenu_ && !psConfirmOff_)return;
     psMenu_=false;psConfirmOff_=false;
     emit changed();
+}
+// --- In-game XMB (plan F5, audit/INGAME-XMB-DESIGN.md) ---------------------------------------------------------
+// The firmware's in-game XMB is the normal explore plugin with rows filtered by the `ingame` selector (TRACED,
+// xmb_ingame.prx strings, category_*.xml). Seven columns carry the in-game-only `seg_gameexit` row (class
+// xmlgameexit, label msg_game_quit2 "Quit Game", icon tex_quit); Users, Settings and Friends do not. The Game
+// column also carries `seg_manual` (msg_soft_manual). Where a row sits in a column follows the XMBML root query
+// order (F8, TRACED); this build's columns are shorter than the console's, so each position is the nearest
+// native row after which the console's query falls (INFERRED).
+namespace {
+bool inGameColumn(const QString& id) {
+    return id==QLatin1String("game") || id==QLatin1String("music") || id==QLatin1String("video") || id==QLatin1String("photo") ||
+           id==QLatin1String("network") || id==QLatin1String("psn") || id==QLatin1String("tv");
+}
+}
+quint32 Shell::runningTitlePid() const {
+    return (!game_.isNull() && game_->state()!=QProcess::NotRunning)?quint32(game_->processId()):0;
+}
+void Shell::syncInGameRows() {
+    for(int c=0;c<categories_.size();++c) {
+        auto& category=categories_[c];
+        if(!inGameColumn(category.id))continue;
+        const bool present=std::any_of(category.entries.cbegin(),category.entries.cend(),[](const Entry& e){return e.id==QLatin1String("ingame:quit");});
+        if(present)continue;
+        const QString container=QStringLiteral("explore_category_")+category.id;
+        QVector<Entry> add;
+        Entry quit=item(QStringLiteral("ingame:quit"),assets_.text(container,"msg_game_quit2",QObject::tr("Quit Game")),
+            QStringLiteral("tex_quit"),container,Action::QuitGame);
+        quit.source=QStringLiteral("xmbml");   // category_*.xml #seg_gameexit
+        add.push_back(std::move(quit));
+        if(category.id==QLatin1String("game")) {
+            Entry manual=item(QStringLiteral("ingame:manual"),assets_.text(container,"msg_soft_manual",QObject::tr("Software Manual")),
+                QStringLiteral("tex_manual"),container,Action::GameManual);
+            manual.source=QStringLiteral("xmbml");   // category_game.xml:397-409 #seg_manual
+            add.push_back(std::move(manual));
+        }
+        const auto after=[&](const std::function<bool(const Entry&)>& match)->int {
+            for(int i=0;i<category.entries.size();++i)if(match(category.entries[i]))return i+1;
+            return -1;
+        };
+        int at=-1;
+        const QString id=category.id;
+        if(id==QLatin1String("game"))at=after([](const Entry& e){return e.id==QLatin1String("store");});            // after seg_welcome
+        else if(id==QLatin1String("psn"))at=after([](const Entry& e){return e.id==QLatin1String("trophy");});       // after seg_trophy
+        else if(id==QLatin1String("tv"))at=category.entries.isEmpty()?-1:1;                                         // after seg_welcome
+        else if(id==QLatin1String("video"))at=after([](const Entry& e){return e.id==QLatin1String("video-editor");});
+        else if(id==QLatin1String("music") || id==QLatin1String("photo"))at=after([](const Entry& e){return e.id==QLatin1String("playlists");});
+        else if(id==QLatin1String("network"))at=after([](const Entry& e){return e.action==Action::SteamDownloads;}); // after seg_dlctrl
+        if(at<0) {   // fallback: before the first native row of this build, else last
+            at=int(category.entries.size());
+            for(int i=0;i<category.entries.size();++i)if(category.entries[i].source==QLatin1String("native")){at=i;break;}
+        }
+        at=std::clamp(at,0,int(category.entries.size()));
+        for(int k=0;k<add.size();++k)category.entries.insert(at+k,add[k]);
+        if(c<selections_.size() && at<=selections_[c])selections_[c]+=int(add.size());   // the focused row stays the focused row
+        qInfo().noquote()<<QStringLiteral("ingame: row ingame:quit inserted in %1 at %2 (%3 rows)").arg(category.id).arg(at).arg(int(category.entries.size()));
+    }
+}
+void Shell::clearInGame() {
+    inGame_=false;
+    for(int c=0;c<categories_.size();++c) {
+        auto& entries=categories_[c].entries;
+        for(int i=int(entries.size())-1;i>=0;--i) {
+            if(!entries[i].id.startsWith(QLatin1String("ingame:")))continue;
+            entries.remove(i);
+            if(c<selections_.size() && i<selections_[c])--selections_[c];
+        }
+        if(c<selections_.size())selections_[c]=std::clamp(selections_[c],0,std::max(0,int(entries.size())-1));
+    }
+}
+void Shell::setInGame(bool on) {
+    if(on && !gameRunning())on=false;
+    if(inGame_==on)return;
+    qInfo().noquote()<<"ingame: shell inGame="+QString::number(on?1:0)<<"title="+gameTitle_;
+    if(on){inGame_=true;syncInGameRows();}
+    else clearInGame();
+    emit changed();
+}
+QString Shell::inGameHelpText() {
+    // The resource string starts with the Circle gaiji (U+F892, TRACED in the dump); the view draws it like the
+    // operation guide's Triangle (drawOptionHint).
+    return assets_.text("xmb_ingame","msg_help_back_to_game",QString(QChar(0xF892))+QStringLiteral(": Back to Game Screen"));
+}
+void Shell::requestQuitGame() {
+    if(!gameRunning()){qInfo().noquote()<<"ingame: Quit Game ignored (no title is running)";return;}
+    const QString ask=assets_.text("impose_plugin","msg_game_quit_ask",QObject::tr("Do you want to quit the game?"));
+    qInfo().noquote()<<"ingame: Quit Game asks:"<<ask<<"title="+gameTitle_;
+    showConfirm(ask,QString(),[this]{quitRunningTitle();});
+    emit changed();
+}
+void Shell::quitRunningTitle() {
+    // Only a title this XMB launched is ever closed, and only here, after the Yes answer.
+    if(!gameRunning())return;
+    quitTitle_=gameTitle_;quitStage_=1;
+    if(!steamGameId_.isEmpty()) {
+        // A Steam title is not our process: ask the client to stop it (audit/STEAM-CLI.md) and let the registry
+        // watcher report the return. Killing steam.exe would end the whole client.
+        QString stopError;
+        if(steamStopApp(steamGameId_,steamRoot_,&stopError))qInfo().noquote()<<"shell: asked Steam to stop"<<steamGameId_;
+        else{qWarning().noquote()<<"shell: Steam stop failed:"<<stopError;quitStage_=0;showMessage(quitTitle_,stopError,MessageKind::Page);}
+        return;
+    }
+    if(game_.isNull() || game_->state()==QProcess::NotRunning)return;
+    const quint32 pid=quint32(game_->processId());
+    const int posted=postCloseToProcessTree(pid);
+    bool ok=false;int grace=qEnvironmentVariableIntValue("XMB_QUIT_GRACE_MS",&ok);
+    if(!ok || grace<0)grace=10000;
+    qInfo().noquote()<<QStringLiteral("ingame: quit stage 1 WM_CLOSE posted to %1 window(s) of pid %2, waiting up to %3 ms").arg(posted).arg(pid).arg(grace);
+    // Stages 2 and 3 are timers on the event loop, not a blocking wait, so the XMB keeps painting and a savedata
+    // write the title is making is not cut short before the grace period ends. The guard re-checks the same process.
+    const QPointer<QProcess> process=game_;
+    QTimer::singleShot(grace,this,[this,process]{
+        if(process.isNull() || process->state()==QProcess::NotRunning)return;
+        quitStage_=2;
+        qInfo().noquote()<<"ingame: quit stage 2 terminate (the title did not exit within the grace period)";
+        process->terminate();
+        QTimer::singleShot(3000,this,[this,process]{
+            if(process.isNull() || process->state()==QProcess::NotRunning)return;
+            quitStage_=3;
+            qInfo().noquote()<<"ingame: quit stage 3 kill";
+            process->kill();
+        });
+    });
 }
 // --- Item options (Triangle) ----------------------------------------------------------------------
 // The firmware's item menu is explore_plugin's `expage_menu`: rows are installed at run time from an array

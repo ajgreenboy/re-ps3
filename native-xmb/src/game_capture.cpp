@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <unknwn.h>
 #include <dwmapi.h>
+#include <tlhelp32.h>
 #include <shellapi.h>
 #include <dxgi.h>
 #include <d3d11.h>
@@ -319,6 +320,48 @@ GameCaptureResult captureGameWindow(quintptr handle, int timeoutMs) {
     std::thread worker([&] { out = captureImpl(hwnd, timeoutMs); });
     worker.join();
     return out;
+}
+
+namespace {
+// pid -> parent pid for every process, from one Toolhelp snapshot.
+QHash<quint32, quint32> parentMap() {
+    QHash<quint32, quint32> parents;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return parents;
+    PROCESSENTRY32W e{};
+    e.dwSize = sizeof(e);
+    for (BOOL ok = Process32FirstW(snap, &e); ok; ok = Process32NextW(snap, &e))
+        parents.insert(e.th32ProcessID, e.th32ParentProcessID);
+    CloseHandle(snap);
+    return parents;
+}
+bool inTree(const QHash<quint32, quint32>& parents, quint32 pid, quint32 root) {
+    // Bounded walk: a recycled parent id can make a cycle.
+    for (int depth = 0; pid && depth < 32; ++depth) {
+        if (pid == root) return true;
+        pid = parents.value(pid, 0);
+    }
+    return false;
+}
+}  // namespace
+
+bool pidInTree(quint32 pid, quint32 rootPid) {
+    if (!pid || !rootPid) return false;
+    return inTree(parentMap(), pid, rootPid);
+}
+
+int postCloseToProcessTree(quint32 rootPid) {
+    if (!rootPid) return 0;
+    struct Ctx { QHash<quint32, quint32> parents; quint32 root; int posted; } c{parentMap(), rootPid, 0};
+    EnumWindows([](HWND h, LPARAM lp) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(lp);
+        DWORD p = 0;
+        GetWindowThreadProcessId(h, &p);
+        if (!IsWindowVisible(h) || GetWindow(h, GW_OWNER) || !inTree(c->parents, p, c->root)) return TRUE;
+        if (PostMessageW(h, WM_CLOSE, 0, 0)) ++c->posted;
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&c));
+    return c.posted;
 }
 
 QString gameCaptureLogLine(const GameWindowInfo& i, const GameCaptureResult& r) {

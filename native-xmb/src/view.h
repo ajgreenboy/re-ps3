@@ -14,6 +14,7 @@
 #include "osk_layout.h"
 #include "rco_objects.h"
 #include "media_keys.h"
+#include "game_capture.h"
 #include <array>
 #include <functional>
 #include <QDateTime>
@@ -179,6 +180,18 @@ private:
     void psTappedEvent(qint64 durationMs);
     void psReleasedEvent(qint64 durationMs);
     void bringXmbForward(const QString& reason);
+    // ---- In-game XMB (plan F5, audit/INGAME-XMB-DESIGN.md steps 4-6) ----
+    // enterInGame(): record the title's window, classify it, capture one frame through DWM (never injected), tell the
+    // shell the XMB is now in-game (rows, help line) and raise the XMB. returnToGame(): the reverse; hands the
+    // foreground back to the recorded window. inGameBack(): Circle at the column root is "Back to Game Screen".
+    void enterInGame(const QString& reason);
+    void returnToGame(const QString& reason);
+    bool inGameBack();
+    void drawInGameBackdrop(int width,int height);
+    QImage inGameBackdrop_;           // the captured game frame, empty when capture was black/failed/unsupported
+    quintptr inGameHwnd_=0;           // the title's window recorded at the PS press
+    quint32 inGamePid_=0;
+    GameWindowMode inGameMode_=GameWindowMode::Invalid;
     void reassertForeground(const QString& reason);
     void activatePsMenuSelection();
     quint64 frames_=0;
@@ -239,7 +252,7 @@ private:
     bool playlistEditorInput(int action);
     void drawUserCreatePage(QPainter& painter);
     bool userCreateInput(int action); // 0 up, 1 down, 2 cross, 3 circle; true when the page took it
-    void drawOptionHint(QPainter& painter,double amount);
+    void drawOptionHint(QPainter& painter,double amount,const QString& textOverride={});
     // The active sidecar subtitle cue (Shell::subtitleCueText): centred in the lower third, above the
     // media controls, drawn through the GL glyph atlas with a dark outline so it stays legible over a
     // bright frame. audit/SUBTITLES.md.

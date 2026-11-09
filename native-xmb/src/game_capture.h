@@ -5,6 +5,7 @@
 // in, or suspended in the target process.
 #include <QImage>
 #include <QRect>
+#include <QHash>
 #include <QString>
 #include <QtGlobal>
 
@@ -64,6 +65,15 @@ quintptr findMainWindow(quint32 pid);
 // timeoutMs (default 2 s). Runs the WinRT work on its own MTA thread so the
 // caller's apartment (e.g. Qt's STA) is irrelevant. Never throws.
 GameCaptureResult captureGameWindow(quintptr hwnd, int timeoutMs = 2000);
+
+// True when `pid` is `rootPid` or a descendant of it (Toolhelp snapshot; a launcher that
+// hands over to a game keeps the game in the tree).
+bool pidInTree(quint32 pid, quint32 rootPid);
+
+// Ask a launched title to close: post WM_CLOSE to every visible top-level window of `rootPid`
+// and its descendants. This is the cooperative half of Quit Game (INGAME-XMB-DESIGN step 3):
+// nothing is injected and no process is terminated here. Returns the number of windows asked.
+int postCloseToProcessTree(quint32 rootPid);
 
 // "ingame: window pid=.. mode=.. capture=ok|black|failed ..." log line.
 QString gameCaptureLogLine(const GameWindowInfo& info, const GameCaptureResult& result);
