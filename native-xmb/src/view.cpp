@@ -982,9 +982,7 @@ void View::paintGL() {
         if(columns_.size()>shell_.depth()+1)columns_.resize(shell_.depth()+1);
     }
     if(std::abs(barDepthPosition_-shell_.depth())<.001)barDepthPosition_=shell_.depth();
-    // In-game live mode (step 9) clears transparent so the running game shows through; every other path clears opaque.
-    if(inGameLive_)glClearColor(0,0,0,0);else glClearColor(.04f,.04f,.05f,1.f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(.04f,.04f,.05f,1.f);glClear(GL_COLOR_BUFFER_BIT);
     // Photo Gallery (audit/PHOTO-GALLERY.md): while its area is up it replaces the XMB scene; the photo viewer over it uses
     // the normal path below.
     if(galleryDrawing()){paintGallery(dt,renderSeconds);++frames_;return;}
@@ -4275,17 +4273,10 @@ void View::enterInGame(const QString& reason) {
 #endif
     inGameBackdrop_=capture.status==GameCaptureStatus::Ok?capture.image:QImage();
     inGameHwnd_=hwnd;inGamePid_=info.pid;inGameMode_=info.mode;
-    // Step 9: the live translucent overlay. Opt-in (XMB_INGAME_LIVE=1) and only for a DWM-composited window
-    // (windowed/borderless); an exclusive frame bypasses DWM so there is nothing to show through.
-    {
-        bool live=false;const int flag=qEnvironmentVariableIntValue("XMB_INGAME_LIVE",&live);
-        inGameLive_=live && (info.mode==GameWindowMode::Windowed || info.mode==GameWindowMode::Borderless);
-    }
     // A fullscreen game that was minimised by the focus change: the recorded window may need SW_RESTORE on return.
     shell_.setInGame(true);
-    psLog(QStringLiteral("ingame: enter reason=\"%1\" mode=%2 backdrop=%3 live=%4").arg(reason,QLatin1String(gameWindowModeName(info.mode)))
-        .arg(inGameLive_?QStringLiteral("live translucent"):inGameBackdrop_.isNull()?QStringLiteral("plain dark"):QStringLiteral("captured %1x%2").arg(inGameBackdrop_.width()).arg(inGameBackdrop_.height()))
-        .arg(inGameLive_?1:0));
+    psLog(QStringLiteral("ingame: enter reason=\"%1\" mode=%2 backdrop=%3").arg(reason,QLatin1String(gameWindowModeName(info.mode)))
+        .arg(inGameBackdrop_.isNull()?QStringLiteral("plain dark"):QStringLiteral("captured %1x%2").arg(inGameBackdrop_.width()).arg(inGameBackdrop_.height())));
     bringXmbForward(reason);
 #ifdef Q_OS_WIN
     // Game Bar style: stay above the game while the in-game XMB is up (INGAME-XMB-DESIGN, "always there").
@@ -4304,7 +4295,7 @@ bool View::inGameBack() {
 void View::returnToGame(const QString& reason) {
     const quintptr recorded=inGameHwnd_;
     shell_.setInGame(false);
-    inGameBackdrop_=QImage();inGameLive_=false;
+    inGameBackdrop_=QImage();
 #ifdef Q_OS_WIN
     // Drop the Game Bar-style topmost band so the XMB behaves like a normal window again once the game is in front.
     setTopmost(reinterpret_cast<HWND>(window()->winId()), false);
@@ -4337,11 +4328,6 @@ void View::drawInGameBackdrop(int width,int height) {
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,width,height);
     QOpenGLPaintDevice device(width,height);
     QPainter p(&device);p.setRenderHint(QPainter::SmoothPixmapTransform);
-    if(inGameLive_) {
-        // Live translucent (step 9): the game keeps rendering behind the transparent clear; only the dim is drawn.
-        p.fillRect(0,0,width,height,QColor(0,0,0,int(255.*inGameDim())));
-        return;
-    }
     p.fillRect(0,0,width,height,QColor(8,8,12));   // plain dark when nothing could be captured
     if(!inGameBackdrop_.isNull()) {
         const QSizeF size=QSizeF(inGameBackdrop_.size()).scaled(QSizeF(width,height),Qt::KeepAspectRatio);

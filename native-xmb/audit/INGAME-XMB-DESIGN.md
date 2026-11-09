@@ -280,8 +280,6 @@ our own, registered as an imported app; harness `C:\dev\out\ingame-test\run.ts`,
 | 6 | Circle at the column root, or a second PS tap with no page/dialog/panel open, calls `View::returnToGame`: clears `inGame`, restores the recorded window (`SW_RESTORE` if minimised; falls back to the tree's largest window if it was recreated), takes the foreground through the same `AttachThreadInput` path, retries once after 400 ms. Inside a page Circle is the ordinary Back. `TitleSession` needed no change: the title is still running, so it re-pauses rendering when the XMB loses the foreground. | stub log flips `foreground=0` to `foreground=1` |
 | 8 | PS-tap arbitration: `Shell::runningTitleIsRpcs3()` (a launch-kind flag set in `launch()`, cleared on finish) and `Shell::launcherOwnsPsTap()` (preferences `input/psArbitration` = `"launcher"`). When the policy is `"launcher"` and the running title is RPCS3 or Steam, `psTappedEvent` leaves a PS tap to the launcher's Home Menu / Guide (logs and returns before entering in-game); a hold still opens the XMB's system menu. The return-to-game tap (already in-game) is unaffected. The default (`"xmb"`) keeps the current behaviour. | not exercised (no real RPCS3/Steam title); the log line is the stub-verifiable artefact |
 | 5b | Topmost in-game window (the Xbox Game Bar model): `enterInGame` puts the XMB window in the `HWND_TOPMOST` band (`SetWindowPos` with `SWP_NOACTIVATE`) so DWM composites it above a game that is itself topmost, and `returnToGame` drops it back to `HWND_NOTOPMOST`. The reason this is enough for "fullscreen" games is Fullscreen Optimizations (Windows 10+): a DirectX "exclusive fullscreen" game is actually presented as an optimised borderless window through DWM, which reassumes composition when an overlay such as the Game Bar is present. The XMB already has the "always responds to the button" half: `ps_watcher` polls the HID slot and the XInput Guide bit without focus. | TRACED (FSO, DirectX blog) |
-| 7 | Notification overlay (`src/notify_overlay.*`): a frameless `WS_EX_TOPMOST\|NOACTIVATE\|TOOLWINDOW\|TRANSPARENT\|LAYERED` click-through window drawing the plaque, shown by `Shell` while a title runs and the XMB is not in-game; hidden on title end or in-game. Mirrors `View::drawNotification` geometry (software `QPainter`, no GL). | not exercised over a real game |
-| 9 | Live translucent overlay (`XMB_INGAME_LIVE=1`): `main.cpp` gives the window `WA_TranslucentBackground` only when the flag is set; `enterInGame` sets `inGameLive_` when the title was classified windowed/borderless; `paintGL` clears transparent and `drawInGameBackdrop` draws only the dim, so the game keeps rendering behind the XMB. Alpha correctness and frame-time cost are unmeasured (the design's "measure, not assume" gate). | not exercised; env-flag opt-in |
 
 Evidence, from the stub runs (all in `C:\dev\out\ingame-test\runs\*`):
 
@@ -297,9 +295,9 @@ Not done, and why:
 
 - **Step 4 verification** with the D3D stub (`stubgame-d3d.cpp` was never written): borderless and exclusive-fullscreen capture are unverified. The capture
   code is the committed step-4 code; only the GDI windowed case has run.
-- **Steps 7 (notification overlay), 9 (live translucent overlay)** are in the tree (7 default-on over a title, 9 behind
-  `XMB_INGAME_LIVE=1`); **step 10 (owner validation matrix)** is not done. Step 8's policy is in the tree; its
-  settings-menu row and the real-launcher exercise are not done.
+- **Steps 7 (notification overlay), 9 (live translucent overlay), 10 (owner validation matrix)**; step 8 (controller
+  arbitration) is in the tree as the policy + `input/psArbitration` preference, but its settings-menu row and the
+  real-launcher exercise are not done.
 - The factor of the darkening (F15), and where the firmware places the help line, still need a real in-game capture.
 - RPCS3's own Home Menu and Steam's Guide handling are untouched; with them enabled a PS tap still reaches them too (section 1.3, step 8).
 - Quit Game for an RPCS3 title when `confirmationBoxExitGame` is on: the cooperative stage will wait out the grace period on RPCS3's own "Exit Game?" box

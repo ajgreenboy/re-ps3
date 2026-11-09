@@ -1031,10 +1031,6 @@ int main(int argc,char** argv) {
     if(kiosk && !kioskScreen){qCritical()<<"kiosk: no screen is available";return 2;}
     QSettings windowSettings(QDir(data).filePath("settings.ini"),QSettings::IniFormat);
     QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);view->setGalleryRoots(parser.values("gallery-root"));window.setCentralWidget(view);window.resize(960,540);
-    // The live in-game overlay (INGAME-XMB-DESIGN step 9) needs a per-pixel-alpha surface so the running game shows
-    // through the dimmed XMB. Only enabled when the opt-in is set, so the normal path is otherwise unchanged.
-    // (WA_TranslucentBackground must be set before the native window exists.)
-    if(qEnvironmentVariableIntValue("XMB_INGAME_LIVE")==1)window.setAttribute(Qt::WA_TranslucentBackground);
     // Kiosk starts at the XMB like a console that is already on: the cold-boot intro is a boot animation, not a
     // launcher screen, and an appliance should be usable the moment the window appears.
     view->setIntroEnabled(!parser.isSet("no-intro") && !parser.isSet("script") && !parser.isSet("background-clock") && !parser.isSet("measure-reference") && !kiosk);

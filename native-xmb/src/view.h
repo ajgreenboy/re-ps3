@@ -197,15 +197,10 @@ private:
     void returnToGame(const QString& reason);
     bool inGameBack();
     void drawInGameBackdrop(int width,int height);
-    // Step 9 (INGAME-XMB-DESIGN): the live translucent overlay. True only when XMB_INGAME_LIVE=1 AND the title was
-    // classified borderless/windowed, so the game keeps rendering behind the dimmed XMB instead of a frozen capture.
-    // The window carries WA_TranslucentBackground (set in main.cpp) and the clear goes transparent in this mode.
-    bool inGameLive() const { return inGameLive_; }
     QImage inGameBackdrop_;           // the captured game frame, empty when capture was black/failed/unsupported
     quintptr inGameHwnd_=0;           // the title's window recorded at the PS press
     quint32 inGamePid_=0;
     GameWindowMode inGameMode_=GameWindowMode::Invalid;
-    bool inGameLive_=false;           // live translucent mode (step 9), gated by XMB_INGAME_LIVE
     void reassertForeground(const QString& reason);
     void activatePsMenuSelection();
     quint64 frames_=0;
