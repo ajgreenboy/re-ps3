@@ -77,7 +77,15 @@ if($Shortcuts -or $NoTask) {
     # "Return to XMB" asks the running XMB to come back to the front (single-instance --show, PHASES D2).
     $link = $shell.CreateShortcut((Join-Path $ShortcutDirectory 'Return to XMB.lnk'))
     $link.TargetPath = $exe
-    $link.Arguments = '--show'
+    # The single-instance channel is named per data folder, so --show must name the folder the watchdog's XMB uses:
+    # xmb-config.json's dataDir when set, else <package>\data (watchdog.ps1 resolves it the same way).
+    $dataDirectory = Join-Path $PackageDirectory 'data'
+    $configPath = Join-Path $PackageDirectory 'xmb-config.json'
+    if(Test-Path -LiteralPath $configPath) {
+        $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        if($config.dataDir) { $dataDirectory = $config.dataDir }
+    }
+    $link.Arguments = '--show --data-dir "' + $dataDirectory + '"'
     $link.WorkingDirectory = $PackageDirectory
     $link.IconLocation = "$exe,0"
     $link.Description = 'Return to the PS3 XMB'
