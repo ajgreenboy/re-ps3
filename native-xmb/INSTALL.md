@@ -39,10 +39,10 @@ source control. A clone without `dev_flash` can still build; it cannot run.
 
 ## 2. Get the source and build
 
-The project lives in the private `ajgreenboy/re-ps3` repository under `native-xmb/`.
+The project lives in the `ajgreenboy/XMB-Rewritten` repository under `native-xmb/`.
 
 ```powershell
-git clone https://github.com/ajgreenboy/re-ps3.git C:\dev\xmb
+git clone https://github.com/ajgreenboy/XMB-Rewritten.git C:\dev\xmb
 cd C:\dev\xmb
 
 # Stop any running re-ps3-native.exe first: the linker fails with LNK1104 while it runs.

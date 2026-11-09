@@ -1,7 +1,7 @@
 # Handoff for Codex: native XMB, 2026-11-06
 
 This is a native C++/Qt recreation of the PS3 4.93 XMB, traced from the firmware. The repo is `C:\dev\xmb`
-(private, `ajgreenboy/re-ps3`, branch `main`), and the app lives in `native-xmb/`. Findings are written up in
+(`ajgreenboy/XMB-Rewritten`, branch `main`), and the app lives in `native-xmb/`. Findings are written up in
 `native-xmb/audit/*.md`; most recently `PAGE-MOVE.md`, `PARTICLES.md`, `SETTINGS-COVERAGE.md` and `TEXT-RENDERER.md`.
 
 ## Hard rules

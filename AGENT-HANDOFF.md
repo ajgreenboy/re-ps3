@@ -51,7 +51,7 @@ $env:PATH="C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH"
 
 - **Firmware stays private.** Firmware, decrypted modules, extracted assets, recordings, console
   identity and API keys never go into Git or anywhere public. Only source, docs and approved UI
-  screenshots are committed. The remote `ajgreenboy/re-ps3` is private; still ask before pushing.
+  screenshots are committed. The remote is `ajgreenboy/XMB-Rewritten` (public); still ask before pushing.
 - **Use only the firmware already on this machine.** Don't download any other.
 - **Other agents work here too.** Run `git status` before editing and commit only your own files.
 - **Report only what you observed.** A successful build, a surviving window or a logged FPS is not a
