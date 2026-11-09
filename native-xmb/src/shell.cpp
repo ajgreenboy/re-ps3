@@ -2283,7 +2283,7 @@ void Shell::activate() {
     case Action::Unavailable:
         // A Continue Watching row whose file has gone says why, instead of the generic line, which would be
         // false: the feature exists, the file does not.
-        showMessage(entry.title,entry.id.startsWith("continue:") && !entry.detail.isEmpty()
+        showMessage(entry.title,(entry.id.startsWith("continue:") || entry.id==QLatin1String("start_at_signin")) && !entry.detail.isEmpty()
             ?entry.detail
             :QObject::tr("This feature is not available in the native recreation yet."),MessageKind::Page);
         break;

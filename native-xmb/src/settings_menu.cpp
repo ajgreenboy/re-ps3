@@ -2,6 +2,7 @@
 #include "settings_menu.h"
 #include "assets.h"
 #include "host.h"
+#include "autostart.h"
 #include "p3t.h"
 #include "xmbml_view.h"
 #include "rco_objects.h"
@@ -170,6 +171,7 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
     if(key=="host/keyRepeatDelay")return {{"Short",0},{"Normal",1},{"Long",2}};
     if(key=="host/keyRepeatSpeed")return {{"Fast",0},{"Normal",1},{"Slow",2}};
     if(key=="host/mouseButtons")return {{"Right-Handed",0},{"Left-Handed",1}};
+    if(key=="host/startAtSignIn")return {{"Off",0},{"On",1}};
     if(key=="host/pointerSpeed")return {{"Fast",0},{"Normal",1},{"Slow",2}};
     // H8: Audio Output Settings lists the active Windows render endpoints by friendly name, in Core Audio's
     // enumeration order; the value is the item's index (host::setHostChoice). The console's own page lists its
@@ -416,7 +418,12 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
     // in preferences.json).
     static const QVector<RowSpec> system{
         {"ps_arbitration",nullptr,nullptr,Action::SettingChoices,"input/psArbitration",nullptr,"PS Button Over a Game",
-            "Whether the PS button opens the XMB (tap and hold) or the launcher's own menu on a tap (RPCS3 Home Menu / Steam Guide), with the XMB keeping the hold."}};
+            "Whether the PS button opens the XMB (tap and hold) or the launcher's own menu on a tap (RPCS3 Home Menu / Steam Guide), with the XMB keeping the hold."},
+        // INFERRED (PHASES-HTPC D3): the firmware has no such row, the console has no sign-in. On creates the per-user
+        // logon task packaging/install-autostart.ps1 makes (same name, action and settings: the row runs that script);
+        // Off removes it. Unavailable, with the reason, when no watchdog.ps1 sits beside the exe (a dev build).
+        {"start_at_signin",nullptr,nullptr,Action::SettingChoices,"host/startAtSignIn",nullptr,"Start at Sign-in",
+            "Starts the XMB full-screen with its crash watchdog when this Windows account signs in. Turns the scheduled task on or off for this account only; Windows automatic sign-in is a separate step you set yourself."}};
     if(id=="system")return &system;
     return nullptr;
 }
@@ -570,6 +577,11 @@ PageRows pageRows(const QString& id,Assets& assets,const QString& dateTimeInfo) 
     }
     if(extra)for(const auto& spec:*extra) {
         Entry entry=rowEntry(spec,assets,id);
+        if(entry.id==QLatin1String("start_at_signin")) {
+            // A dev build has no watchdog.ps1 beside the exe: list the row as unavailable with the reason.
+            QString reason;
+            if(!autostart::available(&reason)){entry.action=Action::Unavailable;entry.disabled=true;entry.detail=reason;entry.setting.clear();}
+        }
         data.nativeOnly<<entry.id;
         data.entries.push_back(std::move(entry));
     }
@@ -1439,7 +1451,7 @@ QString settingsChoiceLabel(const QString& key,const QVariant& value,Assets& ass
     }
     if(key=="host/muted")return host::snapshot().muted?QStringLiteral("On"):QStringLiteral("Off");
     if(key=="host/keyRepeatDelay" || key=="host/keyRepeatSpeed" || key=="host/mouseButtons" || key=="host/pointerSpeed" ||
-       key=="host/audioOutput") {
+       key=="host/audioOutput" || key=="host/startAtSignIn") {
         const int index=host::hostChoiceIndex(key);
         for(const auto& choice:choices(key,assets))if(choice.value==index)return choice.title;
         return {};
@@ -2023,7 +2035,7 @@ void Shell::openSettings(const QString& id) {
         if(key=="host/volume")return int(std::lround(host::masterVolume()/10.)*10);
         if(key=="host/muted")return host::masterMuted();
         if(key=="host/keyRepeatDelay" || key=="host/keyRepeatSpeed" || key=="host/mouseButtons" ||
-           key=="host/pointerSpeed" || key=="host/audioOutput")return host::hostChoiceIndex(key);
+           key=="host/pointerSpeed" || key=="host/audioOutput" || key=="host/startAtSignIn")return host::hostChoiceIndex(key);
         if(key=="media/repeatMode")return mediaRepeatMode();
         return preferences_.value(key);
     };

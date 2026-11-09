@@ -1,5 +1,6 @@
 #include "host.h"
 #include "pad.h"
+#include "autostart.h"
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QHostInfo>
@@ -893,6 +894,7 @@ const Snapshot& snapshot() {
 }
 void invalidateSnapshot() { ++gGeneration;gSnapshotAt.store(0); }
 void prefetchSnapshot() {
+    autostart::prefetch();   // the Start at Sign-in row reads the scheduler on a worker, off the paint path
     if(gSnapshotAt.load()!=0 || gRefreshing.exchange(true))return;
     const int generation=gGeneration.load();
     QThreadPool::globalInstance()->start([generation]{
@@ -1105,6 +1107,7 @@ void followDefaultAudioOutput(QAudioOutput* output) {
 }
 
 int hostChoiceIndex(const QString& key) {
+    if(key==QLatin1String("host/startAtSignIn"))return autostart::enabled()?1:0;   // D3 (autostart.h)
     const auto& state=snapshot();
     if(key==QLatin1String("host/audioOutput"))return audioOutputIndex(state);
     if(key==QLatin1String("host/keyRepeatDelay")) {
@@ -1130,6 +1133,7 @@ int hostChoiceIndex(const QString& key) {
 }
 QString hostChoiceName(const QString& key) {
     if(key==QLatin1String("host/audioOutput"))return QStringLiteral("Audio Output Settings");
+    if(key==QLatin1String("host/startAtSignIn"))return QStringLiteral("Start at Sign-in");
     if(key==QLatin1String("host/keyRepeatDelay"))return QStringLiteral("Key Repeat Interval");
     if(key==QLatin1String("host/keyRepeatSpeed"))return QStringLiteral("Key Repeat Speed");
     if(key==QLatin1String("host/mouseButtons"))return QStringLiteral("Mouse Type");
@@ -1137,6 +1141,7 @@ QString hostChoiceName(const QString& key) {
     return {};
 }
 bool setHostChoice(const QString& key,int index) {
+    if(key==QLatin1String("host/startAtSignIn")){QString error;const bool ok=autostart::setEnabled(index==1,&error);if(!ok)qWarning().noquote()<<"autostart:"<<error;return ok;}
     if(key==QLatin1String("host/audioOutput"))return setDefaultAudioOutput(index);
 #ifdef Q_OS_WIN
     if(index<0 || index>3)return false;

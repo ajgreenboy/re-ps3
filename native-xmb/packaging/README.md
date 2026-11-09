@@ -16,7 +16,7 @@ and is pointed at by `xmb-config.json`.
 | `re-ps3-native.exe`, `xmb-manager.exe` | the app and the companion manager |
 | `run-kiosk.ps1` | the launcher: resolves firmware/data paths and runs the app `--kiosk --display N` |
 | `watchdog.ps1` | loops the kiosk app and restarts it after a crash |
-| `install-autostart.ps1` | registers a logon scheduled task that runs the watchdog |
+| `install-autostart.ps1` | registers the logon scheduled task that runs the watchdog; optionally creates the Start-menu shortcuts; uninstalls both |
 | `xmb-config.json` | (you write it) `devFlash`, `dataDir`, `vshModules` paths on the HTPC |
 
 ## Build a package
@@ -42,11 +42,26 @@ and is pointed at by `xmb-config.json`.
    & .\run-kiosk.ps1 -Display 1
    ```
    Confirm the TV is `--display 1` (the second screen) in Windows Display settings; change `-Display` if not.
-4. Register autostart:
+4. Register autostart and the Start-menu shortcuts:
    ```powershell
-   & .\install-autostart.ps1 -Display 1      # schedules watchdog.ps1 at logon
-   & .\install-autostart.ps1 -Remove         # undo
+   & .\install-autostart.ps1 -Display 1               # logon task only: schedules watchdog.ps1 at sign-in
+   & .\install-autostart.ps1 -Display 1 -Shortcuts    # ... plus Start menu "XMB" and "Return to XMB"
+   & .\install-autostart.ps1 -Remove                  # remove the logon task only
+   & .\install-autostart.ps1 -Uninstall               # remove the logon task and the shortcuts (clean uninstall)
    ```
+   The task and the shortcuts are per user and need no administrator rights. "XMB" starts the kiosk through the
+   watchdog; "Return to XMB" runs `re-ps3-native.exe --show` (the single-instance command that brings the
+   running XMB back to the front). `-ShortcutDirectory <folder>` puts the shortcuts somewhere other than the
+   Start menu (used for testing); `-NoTask` creates only the shortcuts; `-TaskName <name>` (or the environment
+   variable `XMB_AUTOSTART_TASK`) renames the task, so a test never touches the real `re-ps3-native-kiosk`.
+
+### Start at Sign-in, from the XMB
+
+System Settings has a **Start at Sign-in** row (On/Off). It runs this same `install-autostart.ps1` (with an
+argument list, never a shell string), so the row and the script agree on what "on" means: a scheduled task
+named `re-ps3-native-kiosk` whose action runs the `watchdog.ps1` that sits next to the running exe. The row
+reads its state back from the scheduler. In a dev build with no `watchdog.ps1` beside the exe the row is
+listed as unavailable and says why. The row is this build's own (the console has no sign-in).
 
 ## Watchdog behaviour
 
@@ -60,14 +75,26 @@ and is pointed at by `xmb-config.json`.
 The log is `watchdog.log` next to the exe. In kiosk mode "Turn Off the System" shuts Windows down, so the
 watchdog never sees it - the machine powers off and the loop dies with it.
 
-## Auto-logon (the one step not automated)
+## Windows automatic sign-in (your own step)
 
-`install-autostart.ps1` schedules the watchdog for the *current* account. For a TV that boots straight
-into the XMB with no password prompt, enable Windows auto-logon for that account separately - either
-`netplwiz` (uncheck "Users must enter a user name and password") or the `AutoAdminLogon` /
-`DefaultUserName` / `DefaultPassword` registry values under
-`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`. This is deliberately manual: it stores a
-password in the registry, so only the owner should set it.
+The logon task only runs once the account is signed in. For a TV that boots straight into the XMB with no
+password prompt, turn on Windows automatic sign-in for that account yourself; this package never asks for,
+reads or stores a password.
+
+- **netplwiz**: Win+R, `netplwiz`, untick "Users must enter a user name and password to use this computer",
+  Apply, and enter the account's password in Windows' own dialog. (On Windows 11 the tickbox may be hidden until
+  Settings > Accounts > Sign-in options > "For improved security, only allow Windows Hello sign-in for Microsoft
+  accounts" is switched off.)
+- **Sysinternals Autologon** (`autologon.exe` from Microsoft Sysinternals): enter the user, domain and password
+  once; it stores the password as an LSA secret instead of plain text in the registry.
+
+Both store a credential on this PC, so only the owner should do it, and only on a machine in a trusted room.
+
+## Boot time and the cursor
+
+The app logs `boot: first frame after N ms` (process creation to the first buffer swap) to the Qt log; set
+`XMB_LOG=<file>` to capture it. In `--kiosk` the mouse cursor hides after 3 s without movement and returns on
+the next movement.
 
 ## Dry-run and safety
 

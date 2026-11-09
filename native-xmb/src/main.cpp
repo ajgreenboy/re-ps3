@@ -41,6 +41,7 @@
 #include <QPainter>
 #include <QImageReader>
 #include <QTimer>
+#include <QMouseEvent>
 #include <QElapsedTimer>
 #include <QScreen>
 #include <QtEndian>
@@ -84,6 +85,49 @@ static LONG WINAPI writeCrashStack(EXCEPTION_POINTERS* info) {
 }
 #endif
 
+// D4: milliseconds since this process was created (loader and static initialisation included), for the boot lines.
+static double processAgeMs() {
+#ifdef Q_OS_WIN
+    FILETIME created{},exited{},kernel{},user{},now{};
+    if(!GetProcessTimes(GetCurrentProcess(),&created,&exited,&kernel,&user))return -1;
+    GetSystemTimeAsFileTime(&now);
+    ULARGE_INTEGER a{},b{};
+    a.LowPart=created.dwLowDateTime;a.HighPart=created.dwHighDateTime;
+    b.LowPart=now.dwLowDateTime;b.HighPart=now.dwHighDateTime;
+    return double(b.QuadPart-a.QuadPart)/10000.0;
+#else
+    return -1;
+#endif
+}
+// D4: kiosk hides the mouse cursor after 3 s without movement and shows it again on the next movement, so a TV
+// that boots to the XMB never shows a stray pointer. App-wide override cursor; only a real position change counts.
+class CursorHider final:public QObject {
+public:
+    explicit CursorHider(QObject* parent):QObject(parent) {
+        timer_.setSingleShot(true);timer_.setInterval(3000);
+        QObject::connect(&timer_,&QTimer::timeout,this,[this]{
+            if(hidden_)return;
+            hidden_=true;QGuiApplication::setOverrideCursor(Qt::BlankCursor);
+            qInfo()<<"kiosk: cursor hidden (3 s without mouse movement)";
+        });
+        timer_.start();
+    }
+    bool eventFilter(QObject* watched,QEvent* event) override {
+        if(event->type()==QEvent::MouseMove) {
+            const auto at=static_cast<QMouseEvent*>(event)->globalPosition().toPoint();
+            if(at!=last_) {
+                last_=at;
+                if(hidden_){hidden_=false;QGuiApplication::restoreOverrideCursor();qInfo()<<"kiosk: cursor shown (mouse moved)";}
+                timer_.start();
+            }
+        }
+        return QObject::eventFilter(watched,event);
+    }
+private:
+    QTimer timer_;
+    QPoint last_{-1,-1};
+    bool hidden_=false;
+};
 namespace {
 // XMB_INPUT_TRACE=1 logs each input decision (audit/PS-BUTTON.md): source=script|pad|keyboard, the action, and
 // whether the shell accepted it. Script decisions are logged by the token loop below and pad decisions by
@@ -324,6 +368,7 @@ int main(int argc,char** argv) {
     });
     QSurfaceFormat format;format.setVersion(3,3);format.setProfile(QSurfaceFormat::CoreProfile);format.setSwapInterval(1);format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);app.setApplicationName("re-ps3-native");app.setApplicationVersion("0.2.0");QImageReader::setAllocationLimit(128);
+    qInfo().noquote()<<QString("boot: QApplication ready after %1 ms").arg(processAgeMs(),0,'f',0);
     QCommandLineParser parser;parser.setApplicationDescription("Native C++ XMB recreation");parser.addHelpOption();parser.addVersionOption();
     parser.addOption({"dev-flash","Local dev_flash asset directory","directory"});
     parser.addOption({"dev-hdd0","Local dev_hdd0 directory (default: next to dev_flash)","directory"});
@@ -1190,12 +1235,18 @@ int main(int argc,char** argv) {
         window.setScreen(kioskScreen);
         window.setGeometry(kioskScreen->geometry());
         window.showFullScreen();
+        app.installEventFilter(new CursorHider(&app));
         qInfo().noquote()<<QString("kiosk: frameless fullscreen on display %1 (%2), %3x%4")
             .arg(QGuiApplication::screens().indexOf(kioskScreen)).arg(kioskScreen->name())
             .arg(kioskScreen->geometry().width()).arg(kioskScreen->geometry().height());
     } else if(startWindowed)window.show();
     else if(shell.fullscreen())window.showFullScreen();else window.show();
     if(window.screen())qInfo()<<"native display refresh:"<<window.screen()->refreshRate()<<"Hz";
+    // D4: process start to the first presented frame (frameSwapped = the first buffer swap after the window is up).
+    qInfo().noquote()<<QString("boot: window shown after %1 ms").arg(processAgeMs(),0,'f',0);
+    QObject::connect(view,&QOpenGLWidget::frameSwapped,&app,[]{
+        qInfo().noquote()<<QString("boot: first frame after %1 ms").arg(processAgeMs(),0,'f',0);
+    },Qt::SingleShotConnection);
     // ---- Launch and return (PHASES H5) ----
     // Idle while a launched title owns the foreground, and restore the window, fullscreen state, foreground and
     // keyboard focus when it ends however it ends (ps_watcher.h, TitleSession). "A title is running" is the same
