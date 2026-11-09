@@ -4226,6 +4226,13 @@ void takeForeground(HWND window) {
     SetForegroundWindow(window);BringWindowToTop(window);SetActiveWindow(window);
     if(attached)AttachThreadInput(thisThread,foregroundThread,FALSE);
 }
+// The Xbox Game Bar is a topmost window: DWM composites it over an FSO (borderless-emulated) fullscreen game, so it
+// stays above the game even when the game is itself HWND_TOPMOST. The in-game XMB does the same while it is over a
+// title, and drops back to a normal window on return. SWP_NOACTIVATE so the z-order changes without stealing focus.
+void setTopmost(HWND window, bool on) {
+    if(!window)return;
+    SetWindowPos(window, on?HWND_TOPMOST:HWND_NOTOPMOST, 0,0,0,0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+}
 #endif
 // Darkening of the captured frame. UNMEASURED: no firmware capture of the in-game XMB exists (INGAME-XMB-DESIGN F15
 // and step 5), so 50 % is a placeholder; XMB_INGAME_DIM=<0..1> overrides it for comparison runs.
@@ -4271,6 +4278,10 @@ void View::enterInGame(const QString& reason) {
     psLog(QStringLiteral("ingame: enter reason=\"%1\" mode=%2 backdrop=%3").arg(reason,QLatin1String(gameWindowModeName(info.mode)))
         .arg(inGameBackdrop_.isNull()?QStringLiteral("plain dark"):QStringLiteral("captured %1x%2").arg(inGameBackdrop_.width()).arg(inGameBackdrop_.height())));
     bringXmbForward(reason);
+#ifdef Q_OS_WIN
+    // Game Bar style: stay above the game while the in-game XMB is up (INGAME-XMB-DESIGN, "always there").
+    setTopmost(reinterpret_cast<HWND>(window()->winId()), true);
+#endif
     update();
 }
 bool View::inGameBack() {
@@ -4286,6 +4297,8 @@ void View::returnToGame(const QString& reason) {
     shell_.setInGame(false);
     inGameBackdrop_=QImage();
 #ifdef Q_OS_WIN
+    // Drop the Game Bar-style topmost band so the XMB behaves like a normal window again once the game is in front.
+    setTopmost(reinterpret_cast<HWND>(window()->winId()), false);
     HWND target=reinterpret_cast<HWND>(recorded);
     if(!target || !IsWindow(target)) {
         // The recorded window went away (a title that recreates its window on mode switch): take the tree's largest.
