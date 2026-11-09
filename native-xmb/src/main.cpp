@@ -15,6 +15,7 @@
 #include "rsx_program.h"
 #include "p3t.h"
 #include "gtf_decode.h"
+#include "edge_decode.h"
 #include "rco_objects.h"
 #include "content_registry.h"
 #include "steam_library.h"
@@ -377,7 +378,30 @@ int main(int argc,char** argv) {
     parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});
     parser.addOption({"p3t-dump","List a PS3 theme's elements and write its decoded pictures and sounds to a local folder (theme.p3t@directory) and exit","spec"});
     parser.addOption({"raf-report","Write a PS3 theme's (or .raf's) animated-scene graph as JSON (theme.p3t@report.json) and exit; nothing is drawn","spec"});
-    parser.addOption({"gtf-decode","Decode RAF or GTF textures to PNG (file@directory) and exit","spec"});parser.process(app);
+    parser.addOption({"gtf-decode","Decode RAF or GTF textures to PNG (file@directory) and exit","spec"});
+    parser.addOption({"edge-decode","Decode the first RAF model or an Edge file to JSON (file@report.json) and exit","spec"});parser.process(app);
+    if(parser.isSet("edge-decode")) {
+        const QString spec=parser.value("edge-decode");const int separator=spec.lastIndexOf('@');
+        if(separator<=0 || separator==spec.size()-1){std::fprintf(stderr,"use --edge-decode file@report.json\n");return 2;}
+        const QString path=spec.left(separator);QByteArray data;QString name=QFileInfo(path).fileName(),error;
+        if(QFileInfo(path).suffix().compare(QStringLiteral("edge"),Qt::CaseInsensitive)==0) {
+            QFile f(path);if(!f.open(QIODevice::ReadOnly)){std::fprintf(stderr,"cannot read Edge file\n");return 2;}
+            data=f.readAll();if(f.error()!=QFileDevice::NoError){std::fprintf(stderr,"cannot read Edge file\n");return 2;}
+        } else {
+            const auto theme=xmb::P3t::load(path,&error);
+            if(theme.isNull() || !theme.hasScene()){std::fprintf(stderr,"cannot read RAF: %s\n",error.toUtf8().constData());return 2;}
+            for(const auto& model:theme.scene().models)if(!model.geometryData.isEmpty()){data=model.geometryData;name=model.geometry;break;}
+            if(data.isEmpty()){std::fprintf(stderr,"RAF has no model geometry\n");return 2;}
+        }
+        QVector<xmb::EdgeVertex> vertices;QVector<quint32> indices;
+        if(!xmb::decodeEdge(data,vertices,indices,&error)){std::fprintf(stderr,"Edge decode failed: %s\n",error.toUtf8().constData());return 2;}
+        QJsonArray samples,outputIndices;
+        for(qsizetype i=0;i<vertices.size() && i<8;++i) {const auto& v=vertices[i];samples.append(QJsonObject{{"position",QJsonArray{v.position.x(),v.position.y(),v.position.z()}},{"normal",QJsonArray{v.normal.x(),v.normal.y(),v.normal.z()}},{"uv",QJsonArray{v.uv.x(),v.uv.y()}}});}
+        for(quint32 i:indices)outputIndices.append(int(i));
+        const QJsonObject report{{"model",name},{"vertexCount",int(vertices.size())},{"indexCount",int(indices.size())},{"vertices",samples},{"indices",outputIndices},{"indexDecode",QStringLiteral("edge-compressed")}};
+        QFile out(spec.mid(separator+1));if(!out.open(QIODevice::WriteOnly) || out.write(QJsonDocument(report).toJson())<0){std::fprintf(stderr,"cannot write report\n");return 2;}
+        std::printf("Edge %s: %lld vertices, %lld indices\n",name.toUtf8().constData(),static_cast<long long>(vertices.size()),static_cast<long long>(indices.size()));return 0;
+    }
     if(parser.isSet("gtf-decode")) {
         const QString spec=parser.value("gtf-decode");const int separator=spec.lastIndexOf('@');
         if(separator<=0 || separator==spec.size()-1){std::fprintf(stderr,"use --gtf-decode file@directory\n");return 2;}

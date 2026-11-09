@@ -440,7 +440,7 @@ void P3t::readScene(int depth) {
         for(qsizetype j=i+1;j<elements_.size() && elements_[j].depth>element.depth;++j) {
             const auto& child=elements_[j];
             if(child.depth!=element.depth+1)continue;
-            if(child.name=="geometry") {model.geometry=child.text(QStringLiteral("fileref"));model.geometryBytes=fileSize(model.geometry);}
+            if(child.name=="geometry") {model.geometry=child.text(QStringLiteral("fileref"));model.geometryBytes=fileSize(model.geometry);model.geometryData=fileBytes(model.geometry);}
             else if(child.name=="skeleton") {model.skeleton=child.text(QStringLiteral("fileref"));model.skeletonBytes=fileSize(model.skeleton);}
             else if(child.name=="animation") {
                 Raf::Animation animation;

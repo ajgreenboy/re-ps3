@@ -54,6 +54,7 @@ public:
         struct Model {
             QString id,geometry,skeleton;
             quint32 geometryBytes=0,skeletonBytes=0;
+            QByteArray geometryData;
             QVector<Animation> animations;
         };
         struct Texture { QString id,file,format; int type=0,width=0,height=0; quint32 bytes=0; QByteArray data; };
