@@ -17,6 +17,7 @@
 #include "gtf_decode.h"
 #include "edge_decode.h"
 #include "raf_render.h"
+#include "vsmx_eval.h"
 #include "rco_objects.h"
 #include "content_registry.h"
 #include "steam_library.h"
@@ -379,6 +380,7 @@ int main(int argc,char** argv) {
     parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});
     parser.addOption({"p3t-dump","List a PS3 theme's elements and write its decoded pictures and sounds to a local folder (theme.p3t@directory) and exit","spec"});
     parser.addOption({"raf-report","Write a PS3 theme's (or .raf's) animated-scene graph as JSON (theme.p3t@report.json) and exit; nothing is drawn","spec"});
+    parser.addOption({"vsmx-eval","Evaluate a RAF script to JSON (file.raf@report.json)","spec"});
     parser.addOption({"gtf-decode","Decode RAF or GTF textures to PNG (file@directory) and exit","spec"});
     parser.addOption({"edge-decode","Decode the first RAF model or an Edge file to JSON (file@report.json) and exit","spec"});
     parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
@@ -441,6 +443,23 @@ int main(int argc,char** argv) {
             const QByteArray text=line.toUtf8();std::fwrite(text.constData(),1,size_t(text.size()),stdout);std::fflush(stdout);
         }
         return decoded?0:1;
+    }
+    if(parser.isSet("vsmx-eval")) {
+        const QString spec=parser.value("vsmx-eval");const int at=spec.lastIndexOf('@');
+        if(at<=0 || at==spec.size()-1){std::fprintf(stderr,"use --vsmx-eval file.raf@report.json\n");return 2;}
+        QString error;const auto theme=xmb::P3t::load(spec.left(at),&error);
+        xmb::VsmxTimeline timeline;
+        if(theme.isNull() || !theme.hasScene() || !xmb::evalVsmx(theme.scene().script.data,&timeline,&error)){std::fprintf(stderr,"VSMX evaluation failed: %s\n",error.toUtf8().constData());return 2;}
+        QJsonObject constants,strings,actors,samples;QJsonArray skipped;
+        for(auto it=timeline.constants.cbegin();it!=timeline.constants.cend();++it)constants[it.key()]=it.value();
+        for(auto it=timeline.strings.cbegin();it!=timeline.strings.cend();++it)strings[it.key()]=it.value();
+        const auto kind=[](xmb::VsmxKey::Kind k){switch(k){case xmb::VsmxKey::Alpha:return QStringLiteral("alpha");case xmb::VsmxKey::Position:return QStringLiteral("position");case xmb::VsmxKey::Scale:return QStringLiteral("scale");default:return QStringLiteral("colour");}};
+        const auto vector=[](const QVector4D& v){return QJsonArray{v.x(),v.y(),v.z(),v.w()};};
+        for(auto it=timeline.actors.cbegin();it!=timeline.actors.cend();++it){QJsonArray keys;QJsonObject actorSamples;for(const auto& k:it.value())keys.append(QJsonObject{{"time",k.time},{"kind",kind(k.kind)},{"value",vector(k.value)}});for(double t:{0.,1.,2.,3.,4.,4.9,5.5}){QJsonObject values;for(const auto& k:it.value())values[kind(k.kind)]=vector(xmb::sample(timeline,it.key(),k.kind,t));actorSamples[QString::number(t)]=values;}actors[it.key()]=keys;samples[it.key()]=actorSamples;}
+        for(const auto& s:timeline.notEvaluated)skipped.append(s);
+        const QByteArray json=QJsonDocument(QJsonObject{{"constants",constants},{"strings",strings},{"actors",actors},{"samples",samples},{"notEvaluated",skipped}}).toJson();
+        QFile out(spec.mid(at+1));if(!out.open(QIODevice::WriteOnly) || out.write(json)!=json.size()){std::fprintf(stderr,"cannot write VSMX report\n");return 2;}
+        std::printf("VSMX: %lld constants, %lld actors -> %s\n",static_cast<long long>(timeline.constants.size()),static_cast<long long>(timeline.actors.size()),spec.mid(at+1).toUtf8().constData());return 0;
     }
     if(parser.isSet("raf-report")) { // local analysis only: theme-derived facts, keep out of Git
         const auto spec=parser.value("raf-report").split('@');

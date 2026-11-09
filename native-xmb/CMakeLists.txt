@@ -14,6 +14,7 @@ qt_add_executable(re-ps3-native
     src/gtf_decode.cpp src/gtf_decode.h
     src/edge_decode.cpp src/edge_decode.h
     src/raf_render.cpp src/raf_render.h
+    src/vsmx_eval.cpp src/vsmx_eval.h
     src/rco_objects.cpp src/rco_objects.h
     src/osk_layout.cpp src/osk_layout.h
     src/xmbml_view.cpp src/xmbml_view.h
