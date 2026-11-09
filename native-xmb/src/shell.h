@@ -602,6 +602,7 @@ signals:
     void requestJellyfinFieldEdit(QString field,QString title,QString initial,bool masked);
 private:
     Assets& assets_;
+    std::unique_ptr<class NotifyOverlay> notifyOverlay_;
     Preferences preferences_;
     MediaLibrary library_;
     InteractionAudio interactionAudio_;

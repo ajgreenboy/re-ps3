@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "notify_overlay.h"
 #include "glyphs.h"
 #include "service_icons.h"
 #include "system_power.h"
@@ -1711,6 +1712,13 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     notificationClock_.start();
     notificationTimer_.setInterval(100);
     connect(&notificationTimer_,&QTimer::timeout,this,&Shell::expireNotifications);
+    connect(this,&Shell::changed,this,[this]{
+        const auto* current=notification();
+        if(titleRunning() && !inGame() && current) {
+            if(!notifyOverlay_)notifyOverlay_=std::make_unique<NotifyOverlay>(assets_,fontFamily());
+            notifyOverlay_->showNotification(current->title,current->detail,current->icon);
+        } else if(notifyOverlay_)notifyOverlay_->hideNotification();
+    });
     // Sidecar subtitle work is quiet by default; XMB_SUBTITLE_LOG=1 adds discovery, parse, cue and
     // track-switch lines (audit/SUBTITLES.md). A sidecar this build cannot read is always named, because
     // a file the user put next to the film and that silently does nothing is the report this answers.

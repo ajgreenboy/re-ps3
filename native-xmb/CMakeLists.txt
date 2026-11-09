@@ -34,6 +34,7 @@ qt_add_executable(re-ps3-native
     src/gallery_params.cpp src/gallery_params.h src/gallery_model.cpp src/gallery_model.h src/gallery_thumbs.cpp src/gallery_thumbs.h
     src/gallery_controller.cpp src/gallery_controller.h src/gallery_scene.cpp src/gallery_scene.h src/gallery_chrome.cpp src/gallery_view.h src/gallery_replay.cpp
     src/interaction_audio.cpp src/interaction_audio.h
+    src/notify_overlay.cpp src/notify_overlay.h
     src/text_renderer.cpp src/text_renderer.h
     src/font_raster.cpp src/font_raster.h
     src/profiles.cpp src/profiles.h
