@@ -1220,6 +1220,7 @@ int main(int argc,char** argv) {
                     {"padEventsIgnored",double(xmb::pad::ignoredEvents())},{"inputScriptOnly",xmb::pad::scriptOnly()},
                     // Kiosk evidence (Phase 4.2): the window state at grab time. IsFullScreen is the widget's own
                     // state; the no-title-bar proof is the window rect/style read by the test's own Win32 query.
+                    {"titleRunning",shell.titleRunning()},{"inGame",shell.inGame()},{"runningTitle",shell.runningTitle()},
                     {"fullscreen",window.isFullScreen()},{"windowWidth",window.width()},{"windowHeight",window.height()},
                     {"notificationCount",shell.notificationCount()},{"notificationRemainingMs",double(shell.notificationRemainingMs())},
                     {"notificationTitle",shell.notification()?shell.notification()->title:QString{}},

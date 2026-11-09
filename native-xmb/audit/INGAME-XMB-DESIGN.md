@@ -1,6 +1,7 @@
 # In-game XMB (plan item F5): firmware evidence, Windows feasibility, design
 
-Status: research and design only, 2026-11-08. No source was changed for this document. Labels used
+Status: research and design, 2026-11-08; sections 1-4 are the research and were written before any source changed. Section 5 records what has
+since landed (steps 1-3, 4, 5 and 6). Labels used
 throughout:
 
 - **TRACED** - read directly from firmware files (dev_flash 4.93 XMBML/RCO, decrypted `fw493` PRX strings),
@@ -261,3 +262,39 @@ anti-cheat title. Per title record: PS tap/hold detected, mode detected, backdro
 game while navigating, return time, Quit Game outcome (cooperative or forced), notification visibility.
 Nothing in this design injects into, hooks, or suspends a game process, so the anti-cheat title is a
 behaviour check, not a safety risk.
+
+---
+
+## 5. Implementation status (what landed, 2026-11-08)
+
+Steps 4 (commit d2b0774), 1, 2, 3, 5 and 6 are built and exercised with the stub game (`C:\dev\out\h5-test\stubgame.exe`, a GDI window of
+our own, registered as an imported app; harness `C:\dev\out\ingame-test\run.ts`, not committed). Nothing was run against a real title.
+
+| Step | What is in the tree | Label of the behaviour |
+|---|---|---|
+| CMake | `src/game_capture.cpp/.h` in the source list; MSVC links `windowsapp d3d11 dxgi dwmapi shell32` | built |
+| 1 | `Shell::titleRunning/runningTitle/lastTitle/runningTitlePid/inGame/setInGame`; the shell clears `inGame` when the title ends (process finished or Steam reports it stopped). The quit message names the title from `quitTitle_`, so it no longer loses it. The scripted `grab=` sidecar carries `titleRunning`, `inGame`, `runningTitle`. | measured (sidecar) |
+| 2 | While `inGame()`, `Shell::syncInGameRows` inserts the firmware's `seg_gameexit` row (`msg_game_quit2` "Quit Game", `tex_quit`, id `ingame:quit`, `Action::QuitGame`) into Game, Music, Video, Photo, Network, PSN and TV, and not into Users, Settings or Friends (F6). Game also gets `seg_manual` (`msg_soft_manual`, `tex_manual`, `Action::GameManual`, answers "No manual is available for this title."). Positions follow the XMBML root-query order as far as this build's shorter columns allow: Game after the Store row, Video after the editor row, Music/Photo after Playlists, Network after Download Management, PSN after Trophy Collection, TV after the first row (F8 TRACED for the order; the anchor row per column INFERRED). The rows are re-inserted on every `changed` while in-game, so a content refresh cannot drop them, and removed when the title ends. Launch, file/media, URL, Steam-store and Jellyfin-play rows are answered with `msg_need_quit_game_to_operate_ask` (F10, string TRACED; the operation set INFERRED). `ingame=disable` rows: the only traced one, Install Package Files, is not a row of this build, so nothing is hidden. | rows TRACED, placement INFERRED |
+| 3 | Quit Game (PS menu row or in-game row) asks `impose_plugin:msg_game_quit_ask` (Yes/No box, default No). Yes posts `WM_CLOSE` to every visible top-level window of the launched process tree (`postCloseToProcessTree`), then waits `XMB_QUIT_GRACE_MS` (default 10000) on the event loop, then `terminate()`, then `kill()` 3 s later; the stage that ended the process is logged (`ingame: quit ended by stage ...`). Steam titles keep `steam.exe +app_stop`. The wait is a timer, not the old blocking `waitForFinished(3000)`. Only a process the XMB launched is ever closed, and only after Yes. | stub: cooperative stage reached, WM_CLOSE logged by the stub, No leaves it running |
+| 5 | `View::enterInGame` on a PS tap or hold while a title runs: it records the title's window (foreground window when it is in the tracked process tree; for a Steam title only a monitor-covering foreground window, never an alt-tabbed app; else the tree's largest window), classifies it, captures one frame through `captureGameWindow` (1.5 s bound), sets `inGame`, raises the XMB. In-game paint: no wave or particles (F15), the captured frame fitted to the window and darkened, plain dark when the capture is empty (black frame, failure, minimised). The dim is 50 percent and **unmeasured** (`XMB_INGAME_DIM` overrides it for comparison); there is no firmware capture of it. The in-game help line is `xmb_ingame:msg_help_back_to_game` (the string starts with the PS-button gaiji U+F892, TRACED in the dump) drawn on the operation guide plate where the Triangle hint normally sits (placement INFERRED). | measured on the stub (capture 223-307 ms, `mode=windowed capture=ok`) |
+| 6 | Circle at the column root, or a second PS tap with no page/dialog/panel open, calls `View::returnToGame`: clears `inGame`, restores the recorded window (`SW_RESTORE` if minimised; falls back to the tree's largest window if it was recreated), takes the foreground through the same `AttachThreadInput` path, retries once after 400 ms. Inside a page Circle is the ordinary Back. `TitleSession` needed no change: the title is still running, so it re-pauses rendering when the XMB loses the foreground. | stub log flips `foreground=0` to `foreground=1` |
+
+Evidence, from the stub runs (all in `C:\dev\out\ingame-test\runs\*`):
+
+- PS tap: `ps: ingame: window pid=.. mode=windowed capture=ok (223 ms) ... 786x443 maxChannel=255`, then seven `ingame: row ingame:quit inserted in <column>` lines
+  (photo, music, video, tv, game, network, psn) and the `ingame: enter` line. The grabs show the stub window frame dimmed behind the columns, the Quit Game row
+  (Video: after Video Editor & Uploader), and "PS : Back to Game Screen". Sidecars: Friends 3 rows, Settings 16, Users 6 (no in-game row).
+- Quit Yes (tap and hold paths): `Quit Game asks: Do you want to quit the game?`, Yes -> stub log `WM_CLOSE received`, `window destroyed`, `exited 0`; `ingame: quit ended by stage cooperative (WM_CLOSE)`.
+- Quit No: no `WM_CLOSE`, sidecar still `titleRunning=true inGame=true`.
+- Return: Circle (`ESC`) and a second PS tap both log `ingame: return ... foreground=stubgame.exe` and `return confirmed`; the stub's own `foreground=1` resumes.
+- Launch guard: selecting the stub's own row while in-game raises the quit-first ask and nothing is closed on No.
+
+Not done, and why:
+
+- **Step 4 verification** with the D3D stub (`stubgame-d3d.cpp` was never written): borderless and exclusive-fullscreen capture are unverified. The capture
+  code is the committed step-4 code; only the GDI windowed case has run.
+- **Steps 7 (notification overlay), 8 (controller arbitration per launcher), 9 (live translucent overlay), 10 (owner validation matrix)**.
+- The factor of the darkening (F15), and where the firmware places the help line, still need a real in-game capture.
+- RPCS3's own Home Menu and Steam's Guide handling are untouched; with them enabled a PS tap still reaches them too (section 1.3, step 8).
+- Quit Game for an RPCS3 title when `confirmationBoxExitGame` is on: the cooperative stage will wait out the grace period on RPCS3's own "Exit Game?" box
+  before `terminate()`; owner decision, see step 3.

@@ -999,7 +999,11 @@ void View::paintGL() {
         // --render-clock it would stay on coldboot1 (FRESNEL 2, FFD SCALE2 Y 1.0) for good.
         ribbon_.setBootTime(1e9,Coldboot::normalBg);
     }
-    if(glReady_) {
+    // In-game XMB: no wave or particles (xmb_ingame's page_xmb_bg is empty, TRACED F15); the captured game frame,
+    // darkened, is the backdrop instead (the darkening itself is INFERRED, factor unmeasured).
+    if(glReady_ && shell_.inGame())drawInGameBackdrop(int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
+    else if(!inGameBackdrop_.isNull())inGameBackdrop_=QImage();
+    if(glReady_ && !shell_.inGame()) {
         const auto time=QTime::currentTime();
         renderBackground(float(renderSeconds),float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
             int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
@@ -1033,6 +1037,7 @@ void View::paintGL() {
         signature+=QString::asprintf(" bar %.4f ",barDepthPosition_);
     for(const auto& column:columns_)signature+=QString::number(column.position,'f',4)+' ';
     signature+=shell_.clockText()+shell_.message()+shell_.status();
+    if(shell_.inGame())signature+=QStringLiteral(" ingame");
     // The message surface's own fades run between shell changes (the box in and out, the hint row, the
     // error page's settle), so their amounts belong in the signature, quantised by 1/256.
     if(dialogEase_.value>.002 || dialogPlateEase_.value>.002 || dialogHintEase_.value>.002 || dialogSettleEase_.value>.002)
@@ -1392,8 +1397,8 @@ double View::optionHintAmount() const {
 // ": Options" ink at x 1702..1793, y 967..986. Its right/bottom anchor is the style-4 layout row, grid ids
 // e7a/e7b = (860, -459) from the screen centre (TRACED, layout_grid_table_1080.txt), the plate ending
 // 4-5 px inside it. The plate grows to the left with the text.
-void View::drawOptionHint(QPainter& p,double amount) {
-    QString text=assets_.text("explore_plugin_full","msg_option_with_icon",QString(QChar(0xF883))+": Options");
+void View::drawOptionHint(QPainter& p,double amount,const QString& textOverride) {
+    QString text=!textOverride.isEmpty()?textOverride:assets_.text("explore_plugin_full","msg_option_with_icon",QString(QChar(0xF883))+": Options");
     // The string's first character is the firmware's Triangle gaiji (U+F883), drawn from vsh's image font: a
     // 26 x 23 RGBA glyph (dark disc, pale rim, hollow green triangle). The console draws it at the text's
     // 21 px height (rim rows y 966 / 986), centred 17 px left of the text ink.
@@ -3094,8 +3099,13 @@ void View::drawScene(QPainter& p) {
     // The operation guide sits on the same system_plugin page as the notification, under it. It belongs to
     // the XMB's own focus, so no overlay that takes the focus (PS menu, item menu, media, a message) shows it.
     if(!shell_.psMenuOpen() && !shell_.optionsOpen() && !optionsDrawn() && !shell_.mediaOpen() &&
-       shell_.message().isEmpty() && !osk_.open && !userCreate_.open && !plEdit_.open)
-        if(const double hint=optionHintAmount();hint>.002)drawOptionHint(p,hint);
+       shell_.message().isEmpty() && !osk_.open && !userCreate_.open && !plEdit_.open) {
+        // In-game, Circle at the column root returns to the game: xmb_ingame:msg_help_back_to_game (TRACED string).
+        // The firmware shows it as the operation guide; its placement beside the Triangle guide is INFERRED, so it
+        // takes the guide's plate and replaces the Options hint while it is up.
+        if(shell_.inGame() && shell_.depth()==0)drawOptionHint(p,1.,shell_.inGameHelpText());
+        else if(const double hint=optionHintAmount();hint>.002)drawOptionHint(p,hint);
+    }
     if(!shell_.psMenuOpen() && notificationEase_.value>.002 && !notificationShown_.title.isEmpty())
         drawNotification(p,notificationEase_.value);
     // PS button: the console's system menu, re-measured on the 4.93 day frame (a21-ps-menu-1.png, the
@@ -4121,7 +4131,8 @@ void View::psHeldEvent() {
     if(!running && !xmbOwnsForeground()) { psLog("event: hold ignored (XMB lost the foreground before the hold completed)"); return; }
     // The console only opens its menu over the game; the XMB is brought forward first so the user can
     // see and drive the menu. Quitting remains a separate, explicit selection.
-    if(running)bringXmbForward("PS hold while a tracked title is running");
+    if(running && !shell_.inGame())enterInGame("PS hold while a tracked title is running");
+    else if(running)bringXmbForward("PS hold while a tracked title is running");
     if(shell_.psMenuOpen()){psLog("event: system menu already open");return;}
     shell_.psHeld();
     psLog(QString("event: system menu opened rows=%1 quitGameOffered=%2 foreground=%3")
@@ -4136,7 +4147,13 @@ void View::psTappedEvent(qint64 durationMs) {
     if(!psPressActionable_) { psLog("event: tap ignored (not actionable)"); return; }
     if(QApplication::activeModalWidget()) { psLog("event: tap ignored (a modal dialog owns input)"); return; }
     if(!running && !xmbOwnsForeground()) { psLog("event: tap ignored (XMB lost the foreground before the tap completed)"); return; }
-    if(running)bringXmbForward("PS tap while a tracked title is running");
+    // A second tap while the XMB is already over the game goes back to the game (INGAME-XMB-DESIGN step 6).
+    if(running && shell_.inGame() && xmbOwnsForeground() && !shell_.psMenuOpen()) {
+        const bool surface=shell_.depth()>0 || !shell_.message().isEmpty() || shell_.optionsOpen() || shell_.mediaOpen() || osk_.open || userCreate_.open || plEdit_.open;
+        if(!surface){returnToGame("PS tap while in-game");return;}
+    }
+    if(running && !shell_.inGame())enterInGame("PS tap while a tracked title is running");
+    else if(running)bringXmbForward("PS tap while a tracked title is running");
     psHudAt_=clock_.elapsed();
     psHudUntil_=psHudAt_+2288;   // the console's own window (PS-BUTTON.md, MANIFEST 4)
     shell_.psTapped();   // closes the menu if open, otherwise clears status and flashes the indicator
@@ -4182,6 +4199,117 @@ void View::bringXmbForward(const QString& reason) {
     psLog(QString("focus: bring-to-front end xmbActive=%1 xmbForeground=%2 foreground=%3")
         .arg(isActiveWindow()?1:0).arg(xmbOwnsForeground()?1:0).arg(foregroundDescription()));
 }
+// ---- In-game XMB (plan F5, audit/INGAME-XMB-DESIGN.md steps 4-6) ----------------------------------------------
+namespace {
+#ifdef Q_OS_WIN
+// The documented way through the foreground lock (the same as View::bringXmbForward): attach to the current
+// foreground thread's input queue for the call. Nothing is injected into any process.
+void takeForeground(HWND window) {
+    if(!window)return;
+    const HWND foreground=GetForegroundWindow();
+    if(foreground==window)return;
+    const DWORD foregroundThread=foreground?GetWindowThreadProcessId(foreground,nullptr):0;
+    const DWORD thisThread=GetCurrentThreadId();
+    const bool attached=foregroundThread && foregroundThread!=thisThread && AttachThreadInput(thisThread,foregroundThread,TRUE);
+    SetForegroundWindow(window);BringWindowToTop(window);SetActiveWindow(window);
+    if(attached)AttachThreadInput(thisThread,foregroundThread,FALSE);
+}
+#endif
+// Darkening of the captured frame. UNMEASURED: no firmware capture of the in-game XMB exists (INGAME-XMB-DESIGN F15
+// and step 5), so 50 % is a placeholder; XMB_INGAME_DIM=<0..1> overrides it for comparison runs.
+double inGameDim() {
+    bool ok=false;const double v=qEnvironmentVariable("XMB_INGAME_DIM").toDouble(&ok);
+    return ok?std::clamp(v,0.,1.):.5;
+}
+}
+void View::enterInGame(const QString& reason) {
+    quintptr hwnd=0;
+    GameWindowInfo info;
+    GameCaptureResult capture;
+#ifdef Q_OS_WIN
+    const quint32 root=shell_.runningTitlePid();
+    QWidget* top=window();
+    const HWND self=top?reinterpret_cast<HWND>(top->winId()):nullptr;
+    // 1. The foreground window, when it is the title's: a window of the tracked process tree, or - for a Steam title,
+    //    which is not our process - a monitor-covering window (the only kind a game is; a window the user alt-tabbed
+    //    to is never captured). 2. Otherwise the tracked tree's largest visible window.
+    const HWND foreground=GetForegroundWindow();
+    if(foreground && foreground!=self) {
+        DWORD pid=0;GetWindowThreadProcessId(foreground,&pid);
+        if(root && pidInTree(pid,root))hwnd=quintptr(foreground);
+        else if(shell_.runningTitleIsSteam()) {
+            const auto candidate=classifyGameWindow(quintptr(foreground));
+            if(candidate.mode==GameWindowMode::Borderless || candidate.mode==GameWindowMode::Exclusive)hwnd=quintptr(foreground);
+        }
+    }
+    if(!hwnd && root)hwnd=findMainWindow(root);
+    if(hwnd) {
+        info=classifyGameWindow(hwnd);
+        // TRACED limits (design 2.1): an exclusive-fullscreen frame bypasses DWM, a minimised window has no content.
+        // Capture is still tried for Exclusive - it reports black or fails, never throws - but not for Minimized.
+        if(info.mode!=GameWindowMode::Minimized && info.mode!=GameWindowMode::Invalid)capture=captureGameWindow(hwnd,1500);
+        else capture.detail=QStringLiteral("not captured (%1)").arg(info.reason);
+        psLog(gameCaptureLogLine(info,capture));
+    } else psLog(QStringLiteral("ingame: no title window found (root pid %1, foreground %2)").arg(root).arg(foregroundDescription()));
+#endif
+    inGameBackdrop_=capture.status==GameCaptureStatus::Ok?capture.image:QImage();
+    inGameHwnd_=hwnd;inGamePid_=info.pid;inGameMode_=info.mode;
+    // A fullscreen game that was minimised by the focus change: the recorded window may need SW_RESTORE on return.
+    shell_.setInGame(true);
+    psLog(QStringLiteral("ingame: enter reason=\"%1\" mode=%2 backdrop=%3").arg(reason,QLatin1String(gameWindowModeName(info.mode)))
+        .arg(inGameBackdrop_.isNull()?QStringLiteral("plain dark"):QStringLiteral("captured %1x%2").arg(inGameBackdrop_.width()).arg(inGameBackdrop_.height())));
+    bringXmbForward(reason);
+    update();
+}
+bool View::inGameBack() {
+    if(!shell_.inGame())return false;
+    // Only the column root: inside a page, Circle is the ordinary Back (design step 5/6).
+    if(shell_.depth()>0 || !shell_.message().isEmpty() || shell_.optionsOpen() || shell_.mediaOpen() || shell_.psMenuOpen() ||
+       shell_.busy() || osk_.open || userCreate_.open || plEdit_.open)return false;
+    returnToGame("Circle at the column root");
+    return true;
+}
+void View::returnToGame(const QString& reason) {
+    const quintptr recorded=inGameHwnd_;
+    shell_.setInGame(false);
+    inGameBackdrop_=QImage();
+#ifdef Q_OS_WIN
+    HWND target=reinterpret_cast<HWND>(recorded);
+    if(!target || !IsWindow(target)) {
+        // The recorded window went away (a title that recreates its window on mode switch): take the tree's largest.
+        const quint32 root=shell_.runningTitlePid();
+        target=root?reinterpret_cast<HWND>(findMainWindow(root)):nullptr;
+    }
+    if(!target) {
+        psLog(QStringLiteral("ingame: return reason=\"%1\" found no title window; leaving the XMB in front").arg(reason));
+        update();return;
+    }
+    const bool iconic=IsIconic(target)!=0;
+    if(iconic)ShowWindow(target,SW_RESTORE);
+    takeForeground(target);
+    psLog(QStringLiteral("ingame: return reason=\"%1\" hwnd=0x%2 restored=%3 foreground=%4")
+        .arg(reason).arg(quintptr(target),0,16).arg(iconic?1:0).arg(foregroundDescription()));
+    // The foreground lock can still refuse once; one retry after 400 ms (design step 6), then Alt-Tab is the fallback.
+    QTimer::singleShot(400,this,[this,target,reason]{
+        if(shell_.inGame() || !IsWindow(target))return;
+        if(GetForegroundWindow()==target){psLog(QStringLiteral("ingame: return confirmed, the title holds the foreground"));return;}
+        takeForeground(target);
+        psLog(QStringLiteral("ingame: return retry after 400 ms foreground=%1").arg(foregroundDescription()));
+    });
+#endif
+    update();
+}
+void View::drawInGameBackdrop(int width,int height) {
+    glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,width,height);
+    QOpenGLPaintDevice device(width,height);
+    QPainter p(&device);p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.fillRect(0,0,width,height,QColor(8,8,12));   // plain dark when nothing could be captured
+    if(!inGameBackdrop_.isNull()) {
+        const QSizeF size=QSizeF(inGameBackdrop_.size()).scaled(QSizeF(width,height),Qt::KeepAspectRatio);
+        p.drawImage(QRectF((width-size.width())/2,(height-size.height())/2,size.width(),size.height()),inGameBackdrop_);
+        p.fillRect(0,0,width,height,QColor(0,0,0,int(255.*inGameDim())));
+    }
+}
 void View::reassertForeground(const QString& reason) {
     if(xmbOwnsForeground())psLog(QString("focus: XMB already holds the foreground after %1 (%2)").arg(reason,foregroundDescription()));
     else bringXmbForward(reason);
@@ -4196,10 +4324,7 @@ void View::activatePsMenuSelection() {
     const bool quitting=titleRunning() && !shell_.psMenuConfirmingOff() && shell_.psMenuSelection()==0;
     psLog(QString("event: PS menu activate selection=%1 quitting=%2").arg(shell_.psMenuSelection()).arg(quitting?1:0));
     shell_.psMenuActivate();
-    if(quitting) {
-        psLog(QString("event: Quit Game confirmed; tracked title terminated=%1").arg(titleRunning()?0:1));
-        reassertForeground("Quit Game terminated the tracked title");
-    }
+    if(quitting)psLog(QString("event: Quit Game selected; confirmation shown=%1 (the title is closed only on Yes)").arg(shell_.message().isEmpty()?0:1));
     update();
 }
 bool View::eventFilter(QObject* watched,QEvent* event) {
@@ -4335,7 +4460,7 @@ void View::keyPressEvent(QKeyEvent* e) {
     case Qt::Key_Left:shell_.horizontal(-1);break;case Qt::Key_Right:shell_.horizontal(1);break;
     case Qt::Key_Up:shell_.vertical(-1);break;case Qt::Key_Down:shell_.vertical(1);break;
     case Qt::Key_Return:case Qt::Key_Enter:shell_.activate();break;
-    case Qt::Key_Escape:case Qt::Key_Backspace:shell_.back();break;
+    case Qt::Key_Escape:case Qt::Key_Backspace:if(!inGameBack())shell_.back();break;
     case Qt::Key_Space:shell_.togglePlayback();break;
     case Qt::Key_BracketLeft:shell_.skipMedia(-1);break;
     case Qt::Key_BracketRight:shell_.skipMedia(1);break;
@@ -4472,7 +4597,7 @@ void View::pollController() {
     if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)shell_.horizontal(1);
     if(movement&XINPUT_GAMEPAD_DPAD_UP)shell_.vertical(-1);
     if(movement&XINPUT_GAMEPAD_DPAD_DOWN)shell_.vertical(1);
-    if(edge&XINPUT_GAMEPAD_A)shell_.activate();if(edge&XINPUT_GAMEPAD_B)shell_.back();
+    if(edge&XINPUT_GAMEPAD_A)shell_.activate();if(edge&XINPUT_GAMEPAD_B){if(!inGameBack())shell_.back();}
     // Triangle: the item options panel on a content row, the in-player panel (subtitles, audio tracks,
     // repeat, shuffle) while a video plays, and the firmware's music control panel (explore_plugin_full
     // control_panel_page) while a local track plays - which is where the console puts it (audit 7.2). Repeat
