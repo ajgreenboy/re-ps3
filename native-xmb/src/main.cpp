@@ -8,6 +8,7 @@
 #include <memory>
 #include <QSettings>
 #include "catalog.h"
+#include "gallery_controller.h"
 #include "gallery_model.h"
 #include "system_power.h"
 #include "coldboot.h"
@@ -366,6 +367,8 @@ int main(int argc,char** argv) {
     parser.addOption({"gallery-layout","Index the Photo library recursively, write the gallery's piles and floor layout as JSON, then exit (uses --data-dir)","json-file"});
     parser.addOption({"gallery-root","Photo folder for --gallery-layout (repeatable; default: the Photo library folder preference)","directory"});
     parser.addOption({"gallery-sort","Pile order for --gallery-layout: newest (default), oldest or random","order"});
+    parser.addOption({"gallery-replay","Replay controller tokens (LEFT,RIGHT,UP,DOWN,ENTER,ESC,TRIANGLE,START,ZOOMIN,ZOOMOUT,wait=ms) over the Photo Gallery headlessly and write the state after each as JSON, then exit (uses --data-dir, --gallery-root)","tokens"});
+    parser.addOption({"gallery-replay-out","Output file for --gallery-replay","json-file"});
     parser.addOption({"gallery-thumbs","With --gallery-layout: also warm the thumbnail LOD cache under <data>/cache/gallery/thumbs and report it"});
     parser.addOption({"decode-fp","Decode RSX fragment-program captures (archive:lib/x.fpo@dir) into named parameter values and exit","spec"});
     parser.addOption({"dump-cg","Translate the original qgl/lines Cg programs to GLSL into a local folder and exit","directory"});
@@ -870,6 +873,12 @@ int main(int argc,char** argv) {
         request.warmThumbs=parser.isSet("gallery-thumbs");
         return xmb::runGalleryReport(request);
     }
+    if(parser.isSet("gallery-replay")) {
+        xmb::GalleryReplayRequest request;request.devFlash=parser.value("dev-flash");request.dataDir=data;
+        request.tokens=parser.value("gallery-replay");request.outputPath=parser.isSet("gallery-replay-out")?parser.value("gallery-replay-out"):QStringLiteral("gallery-replay.json");
+        request.roots=parser.values("gallery-root");if(parser.isSet("gallery-sort"))request.sort=parser.value("gallery-sort");
+        return xmb::runGalleryReplay(request);
+    }
     if(parser.isSet("font-report")) {
         QFile out(parser.value("font-report"));
         if(!out.open(QIODevice::WriteOnly|QIODevice::Text)){qCritical()<<out.errorString();return 2;}
@@ -1009,7 +1018,7 @@ int main(int argc,char** argv) {
     if(kiosk && !kioskScreen)kioskScreen=QGuiApplication::primaryScreen();
     if(kiosk && !kioskScreen){qCritical()<<"kiosk: no screen is available";return 2;}
     QSettings windowSettings(QDir(data).filePath("settings.ini"),QSettings::IniFormat);
-    QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);window.setCentralWidget(view);window.resize(960,540);
+    QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);view->setGalleryRoots(parser.values("gallery-root"));window.setCentralWidget(view);window.resize(960,540);
     // Kiosk starts at the XMB like a console that is already on: the cold-boot intro is a boot animation, not a
     // launcher screen, and an appliance should be usable the moment the window appears.
     view->setIntroEnabled(!parser.isSet("no-intro") && !parser.isSet("script") && !parser.isSet("background-clock") && !parser.isSet("measure-reference") && !kiosk);

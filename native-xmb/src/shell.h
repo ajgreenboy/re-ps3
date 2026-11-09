@@ -99,7 +99,9 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // A user's Information page (P4): its Icon row (opens the icon page) and User Name row (the name page); one
     // icon choice (value = Profile::icon key), the "From a File" row, and one picture in the Pictures folder
     // (value = its path). The page's user id is Page::userInfo.
-    UserInfoIcon, UserInfoName, UserIconChoice, UserIconFromFile, UserIconFile };
+    UserInfoIcon, UserInfoName, UserIconChoice, UserIconFromFile, UserIconFile,
+    // Photo > Photo Gallery (category_photo.xml #seg_hakoniwa): the recreated hakoniwa library area (gallery_*.cpp, audit/PHOTO-GALLERY.md).
+    PhotoGallery };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -324,6 +326,14 @@ public:
     bool fullscreen() const { return preferences_.value("display/fullscreen").toBool(); }
     bool photoFill() const { return preferences_.value("photo/fit").toInt()==1; }
     bool photoOpen() const;
+    // Photo Gallery hand-off: the Photo library folder preference as the gallery's root (empty when none is set), and the
+    // viewer over one pile's files. galleryIndex() is the file the viewer is on (kept after it closes).
+    QStringList photoLibraryRoots() const;
+    QString dataDirectory() const { return dataDirectory_; }
+    void openGalleryPhotos(const QStringList& paths,int index,bool slideshow);
+    int galleryIndex() const { return galleryIndex_; }
+    // The gallery found no photos: the console's own message page (msg_error_no_image).
+    void galleryMessage(const QString& text);
     bool slideshowActive() const { return slideshow_.isActive(); }
     // The console's busy state (audit DIALOGS-FIRMWARE 2.8 page_busy; FIDELITY-BEHAVIOUR N10/N12/X5).
     // True from the moment a list scan is asked for until its rows land, and while a settings write's
@@ -537,6 +547,8 @@ public:
 signals:
     void changed();
     void requestLibrary();
+    // Cross on Photo > Photo Gallery: the view opens the gallery.
+    void requestPhotoGallery();
     void mediaFrame(const QImage& frame);
     void requestWallpaper();
     void requestTheme();
@@ -768,6 +780,7 @@ private:
     QString lastPreferencesError_;
     QString status_;
     QTimer slideshow_,idle_;
+    QStringList galleryPaths_;int galleryIndex_=0; // the Photo Gallery pile the viewer is stepping through
     QElapsedTimer activity_;
     qint64 idleTimeOverride_=-1;
     bool sessionHold_=false;         // the host display-awake request currently in effect

@@ -1,4 +1,5 @@
 #include "view.h"
+#include "gallery_view.h"
 #include "app_editor.h"
 #include "artwork_settings.h"
 #include "host.h"
@@ -146,6 +147,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         else if(shell_.photoOpen())photoViewport_.reset(frame.size(),{1920,1080},shell_.photoFill());
         update();
     });
+    connect(&shell_,&Shell::requestPhotoGallery,this,[this]{openGallery();});
     connect(&shell_,&Shell::requestLibrary,this,[this]{const auto path=QFileDialog::getExistingDirectory(this,"Choose media folder");shell_.noteActivity();if(!path.isEmpty())shell_.chooseLibrary(path);});
     connect(&shell_,&Shell::requestWallpaper,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Wallpaper",{},"Images (*.png *.jpg *.jpeg *.bmp *.webp)");shell_.noteActivity();if(!file.isEmpty())shell_.chooseWallpaper(file);});
     connect(&shell_,&Shell::requestTheme,this,[this]{const auto file=QFileDialog::getOpenFileName(this,"Choose Theme",{},"PS3 Themes (*.p3t)");shell_.noteActivity();if(!file.isEmpty())shell_.chooseTheme(file);});
@@ -418,7 +420,7 @@ View::~View(){
 #ifdef Q_OS_WIN
     if(volumeKeys_ && qApp)qApp->removeNativeEventFilter(volumeKeys_.get());
 #endif
-    saveFrameTrace();if(context()){makeCurrent();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
+    saveFrameTrace();if(context()){makeCurrent();gallery_.reset();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
     if(!initializeOpenGLFunctions()){qCritical()<<"Native renderer requires OpenGL 3.3";return;}
     textRenderer_.init(*this,QDir(assets_.root()).filePath("data/font"));
@@ -981,6 +983,9 @@ void View::paintGL() {
     }
     if(std::abs(barDepthPosition_-shell_.depth())<.001)barDepthPosition_=shell_.depth();
     glClearColor(.04f,.04f,.05f,1.f);glClear(GL_COLOR_BUFFER_BIT);
+    // Photo Gallery (audit/PHOTO-GALLERY.md): while its area is up it replaces the XMB scene; the photo viewer over it uses
+    // the normal path below.
+    if(galleryDrawing()){paintGallery(dt,renderSeconds);++frames_;return;}
     // Cold boot: the intro starts once its sound is decoded (or after 1.5 s without it); its clock drives the boot
     // presets of every background layer (BootBG2 / NormalBG2, Ribbon::bootWeights) and hides the UI until ShowGUI.
     if(coldboot_.ready()) {
@@ -4250,6 +4255,24 @@ void View::keyPressEvent(QKeyEvent* e) {
     }
     // Keyboard substitute for the PS button (controllers send 0x400 over HID): F10 opens the system menu.
     if(e->key()==Qt::Key_F10){shell_.psHeld();e->accept();return;}
+    // The Photo Gallery owns the keys while its area is up (gallery_chrome.cpp). A real keyboard's arrows go through
+    // pollController's repeat like the XMB's; scripted taps and non-Windows arrows act at once.
+    if(galleryOwnsInput()) {
+        const bool arrow=e->key()==Qt::Key_Left || e->key()==Qt::Key_Right || e->key()==Qt::Key_Up || e->key()==Qt::Key_Down;
+        const bool mapped=arrow || e->key()==Qt::Key_Return || e->key()==Qt::Key_Enter || e->key()==Qt::Key_Escape || e->key()==Qt::Key_Backspace ||
+            e->key()==Qt::Key_T || e->key()==Qt::Key_S || e->key()==Qt::Key_Space || e->key()==Qt::Key_Plus || e->key()==Qt::Key_Equal ||
+            e->key()==Qt::Key_Minus || e->key()==Qt::Key_PageUp || e->key()==Qt::Key_PageDown;
+#ifdef Q_OS_WIN
+        const bool viaPoll=arrow && !replayingInput_;
+#else
+        const bool viaPoll=false;
+#endif
+        if(mapped && !viaPoll){if(!e->isAutoRepeat() || arrow)galleryPress(e->key());e->accept();return;}
+        if(mapped && viaPoll) {
+            if(const auto bit=arrowBit(e->key());bit && !e->isAutoRepeat()){keyHeld_|=bit;keyPressed_|=bit;}
+            e->accept();return;
+        }
+    }
     // The Windows media volume keys. The native filter takes the WM_APPCOMMAND/VK_VOLUME form before Qt or
     // DefWindowProc sees it; this is the path for a Key_Volume* that does arrive as a key event, and it is the
     // path the VOLUP/VOLDOWN/MUTE script tokens drive. The XMB binds no volume key, so handling it here takes
@@ -4413,6 +4436,30 @@ void View::pollController() {
         if(edgePs&XINPUT_GAMEPAD_A)musicPanelActivate();
         if(edgePs&(XINPUT_GAMEPAD_B|XINPUT_GAMEPAD_Y))closeMusicPanel();
         return;
+    }
+    // The Photo Gallery owns the pad while its area is up: d-pad and keyboard arrows hop between piles or cells with the
+    // XMB's repeat, the left stick moves the free focus, the right stick (a DualShock/HID pad) and L1/R1 zoom.
+    if(galleryOwnsInput()) {
+        const auto edgeG=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;const auto nowG=clock_.elapsed();
+        if(buttons || edgeG){shell_.noteActivity();mediaControls_.activity(nowG);}
+        const bool repeatG=nowG>=repeatAt_;
+        const qint64 nextG=std::max(repeatAt_,nowG-67)+67;
+        const auto moveG=quint16(edgeG|(repeatG?buttons:0));
+        const float stickX=xinput?xstate.lx:(playstation?hid.lx:0.f),stickY=xinput?xstate.ly:(playstation?hid.ly:0.f);
+        const float zoomY=playstation?hid.ry:0.f;
+        if(moveG&XINPUT_GAMEPAD_DPAD_LEFT)galleryPress(Qt::Key_Left);
+        if(gallery_ && (moveG&XINPUT_GAMEPAD_DPAD_RIGHT))galleryPress(Qt::Key_Right);
+        if(gallery_ && (moveG&XINPUT_GAMEPAD_DPAD_UP))galleryPress(Qt::Key_Up);
+        if(gallery_ && (moveG&XINPUT_GAMEPAD_DPAD_DOWN))galleryPress(Qt::Key_Down);
+        if(gallery_ && (edgeG&XINPUT_GAMEPAD_A))galleryPress(Qt::Key_Return);
+        if(gallery_ && (edgeG&XINPUT_GAMEPAD_B))galleryPress(Qt::Key_Escape);
+        if(gallery_ && (edgeG&XINPUT_GAMEPAD_Y))galleryPress(Qt::Key_T);
+        if(gallery_ && (edgeG&XINPUT_GAMEPAD_START))galleryPress(Qt::Key_S);
+        if(gallery_ && (edgeG&XINPUT_GAMEPAD_RIGHT_SHOULDER))galleryPress(Qt::Key_Plus);
+        if(gallery_ && (edgeG&XINPUT_GAMEPAD_LEFT_SHOULDER))galleryPress(Qt::Key_Minus);
+        if(gallery_ && gallery_->controller)gallery_->controller->setSticks(stickX,stickY,zoomY);
+        if(edgeG&0x000f)repeatAt_=nowG+300;else if(moveG&0x000f)repeatAt_=nextG;
+        buttons_=buttons;return;
     }
     if(xinput || playstation) {
         const float lx=xinput?xstate.lx:hid.lx,ly=xinput?xstate.ly:hid.ly; // +y down, as HID
