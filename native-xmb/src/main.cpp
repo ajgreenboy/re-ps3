@@ -16,6 +16,7 @@
 #include "p3t.h"
 #include "gtf_decode.h"
 #include "edge_decode.h"
+#include "raf_render.h"
 #include "rco_objects.h"
 #include "content_registry.h"
 #include "steam_library.h"
@@ -379,7 +380,18 @@ int main(int argc,char** argv) {
     parser.addOption({"p3t-dump","List a PS3 theme's elements and write its decoded pictures and sounds to a local folder (theme.p3t@directory) and exit","spec"});
     parser.addOption({"raf-report","Write a PS3 theme's (or .raf's) animated-scene graph as JSON (theme.p3t@report.json) and exit; nothing is drawn","spec"});
     parser.addOption({"gtf-decode","Decode RAF or GTF textures to PNG (file@directory) and exit","spec"});
-    parser.addOption({"edge-decode","Decode the first RAF model or an Edge file to JSON (file@report.json) and exit","spec"});parser.process(app);
+    parser.addOption({"edge-decode","Decode the first RAF model or an Edge file to JSON (file@report.json) and exit","spec"});
+    parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
+    if(parser.isSet("raf-render")) {
+        const QString spec=parser.value("raf-render");const int separator=spec.lastIndexOf('@');
+        if(separator<=0 || separator==spec.size()-1){std::fprintf(stderr,"use --raf-render file@image.png\n");return 2;}
+        QFile file(spec.left(separator));if(!file.open(QIODevice::ReadOnly)){std::fprintf(stderr,"cannot read RAF\n");return 2;}
+        const QByteArray data=file.readAll();if(file.error()!=QFileDevice::NoError){std::fprintf(stderr,"cannot read RAF\n");return 2;}
+        QString error;xmb::RafStillStats stats;const QImage image=xmb::renderRafStill(data,parser.value("dev-flash"),1920,1080,&error,&stats);
+        if(image.isNull()){std::fprintf(stderr,"RAF render failed: %s\n",error.toUtf8().constData());return 2;}
+        if(!image.save(spec.mid(separator+1),"PNG")){std::fprintf(stderr,"cannot write PNG\n");return 2;}
+        std::printf("RAF still: %d actors, %d models, %d textures, %d model triangles, %dx%d, camera=%s light=%s\n",stats.actors,stats.models,stats.textures,stats.triangles,image.width(),image.height(),stats.cameraFallback?"fallback":"scene",stats.lightFallback?"fallback":"scene");std::fflush(stdout);return 0;
+    }
     if(parser.isSet("edge-decode")) {
         const QString spec=parser.value("edge-decode");const int separator=spec.lastIndexOf('@');
         if(separator<=0 || separator==spec.size()-1){std::fprintf(stderr,"use --edge-decode file@report.json\n");return 2;}
