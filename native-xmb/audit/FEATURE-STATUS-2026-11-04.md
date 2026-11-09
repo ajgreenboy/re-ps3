@@ -113,10 +113,11 @@ release verification, and exact PS3 fidelity.
    `Action::Unavailable` in `Shell::resolveMediaColumns()` (`src/shell.cpp`).
    Jellyfin is a separate working network-media integration; it does not provide
    general DLNA discovery.
-4. **Firmware Photo Gallery application.** The `photo:seg_hakoniwa` row is
-   explicitly unavailable in `src/shell.cpp`. The built-in photo library,
-   full-screen viewer, slideshow, rotation, and zoom/pan are separate native
-   features and do not implement the firmware's 3D Gallery app.
+4. **Firmware Photo Gallery application.** Updated 2026-11-08: the `photo:seg_hakoniwa` row opens a native
+    hakoniwa library area (scope (b) in `audit/PHOTO-GALLERY-DESIGN.md`): piles on a floor, focus/zoom, a grid per
+    pile, and a hand-off to the built-in viewer (`audit/PHOTO-GALLERY.md`, `src/gallery_*.cpp`). The Playlist and
+    Network/PSN areas, the 15 package floors and face/age/smile groupings are not built; the separate native photo
+    library, full-screen viewer, slideshow, rotation and zoom/pan remain the general photo path.
 5. **Jellyfin image-based subtitles.** Updated 2026-11-07: text subtitle streams are fetched from the server
    as SRT and drawn like a sidecar (`audit/JELLYFIN-NATIVE.md`, "Server text subtitles"). Updated 2026-11-08
    (plan H9): image subtitles play. Local `.sup` (PGS) and `.idx`+`.sub` (VobSub, one track per `.idx`

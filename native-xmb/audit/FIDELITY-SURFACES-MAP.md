@@ -201,12 +201,12 @@ at the console's exact sizes and are all dead.
 |---|---|---|---|---|
 | Photo column (depth 0) | `category_photo.xml#root` (11 views) | `captured` `AG/col-photo-r00..r02.png` | **P** `src\shell.cpp:1024` | Console: Search for Media Servers / Photo Gallery / Playlists (**3**). Build: Photo Library / Photo Settings / Choose Media Folder (**3**, none shared, and Photo Settings is a native-only page). |
 | Search for Media Servers | `#seg_dlna_scan` | `captured` `AG/page3-photo-row0`, `AG/page2-photo-item0` | **A** | |
-| Photo Gallery | `sel://localhost/hakoniwa` `#seg_hakoniwa` (+ `#seg_hakoniwa_dummy`) | uncaptured | **A** | A whole Sony app surface (3D gallery) with no native trace. |
+| Photo Gallery | `sel://localhost/hakoniwa` `#seg_hakoniwa` (+ `#seg_hakoniwa_dummy`) | uncaptured | **P** | Recreated as the hakoniwa library area, scope (b) (see `audit/PHOTO-GALLERY.md`): piles on a floor, focus/zoom, a grid per pile, viewer hand-off. The Playlist/Network areas, the 15 package floors and face groupings are not built. |
 | Playlists | `#seg_playlist_mgmt` | `captured` `AG/page2-photo-item1.png` | **A** | See 2.4. |
 | Screenshot | `sel://localhost/screenshot` `#seg_screenshot`; `screenshot_plugin` (2 pages) | uncaptured | **A** | The screenshot viewer/browser (game screenshots saved to the XMB) is absent; the build takes no screenshots. |
 | Photo Library page | native-only | - | **N** | |
 
-**Photo verdict: 0 of 4 firmware pages.**
+**Photo verdict: 0 of 4 firmware pages (Photo Gallery is now partial, not absent - see above).**
 
 ### 2.6 TV / Video Services (3 surfaces)
 
