@@ -433,9 +433,9 @@ void Shell::resolveMediaColumns() {
         {"photo:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_photo",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
             "This build runs it natively (src/dlna_client.*, audit/DLNA.md): SSDP discovery, then ContentDirectory browsing."}},
-        {"photo:seg_hakoniwa",{"gallery",Action::Unavailable,"msg_photo_gallery","","file",
-            "Photo Gallery is the console's own 3D gallery application (hakoniwa). This build's photo viewer is the "
-            "full-screen slideshow Photo Library opens."}},
+        // Photo Gallery (hakoniwa, hknw_plugin): the library area is recreated in gallery_*.cpp (audit/PHOTO-GALLERY.md);
+        // the Playlist and Network areas, the 15 package floors and the face groupings are not.
+        {"photo:seg_hakoniwa",{"gallery",Action::PhotoGallery,"msg_photo_gallery","","file",""}},
         {"photo:seg_playlist_mgmt",{"playlists",Action::PlaylistFolder,"msg_playlists","tex_playlist","explore_category_photo",""}}};
     // The queries a media column never draws at rest, each with the reason it is not a row here. A provider with
     // nothing attached produces no row on the console either, which is why these are skipped rather than listed.
@@ -1348,7 +1348,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         // console's rows come first even in the fallback.
         {"photo","Photo","qgl/icontex","3n",{
             item("dlna-scan","Search for Media Servers","item_tex_dlna_scan","explore_category_photo",Action::DlnaScan),
-            item("gallery","Photo Gallery","","file"),
+            item("gallery","Photo Gallery","","file",Action::PhotoGallery),
             item("playlists","Playlists","tex_playlist","explore_category_photo"),
             // Native rows (FIDELITY-MEDIA P1's "10 native-only rows"): the library folder, the one settings page
             // that has no other surface, and the folder picker. They stay because each is a feature's only door.
@@ -2131,6 +2131,7 @@ void Shell::activate() {
         if(!path.isEmpty())openDirectory(path);else emit requestLibrary();break;
     }
     case Action::ChooseLibrary:emit requestLibrary();break;
+    case Action::PhotoGallery:emit requestPhotoGallery();break;
     case Action::Folder:openDirectory(entry.value);break;
     case Action::File:openFile(entry);break;
     case Action::PlaylistFolder:openPlaylists(categories_[category_].id);break;
@@ -4033,7 +4034,7 @@ void Shell::back() {
         if(!resumePath_.isEmpty() && worth)storeResumePosition(resumePath_,at,total,mediaTitle_);
         else clearResumePosition(resumePath_);
         resumePath_.clear();resumePending_=0;mediaDisplayPinned_=false;
-        ++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});
+        ++photoRequest_;++mediaRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;galleryPaths_.clear();mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};player_->stop();player_->setSource({});loading_=false;status_.clear();emit mediaFrame({});
         // Nothing is playing, so no subtitle file or audio track is current. The per-file choice stays in
         // subtitleChoice_, which is what makes reopening the same file come back on the same track.
         subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;subtitleMediaPath_.clear();++subtitleGeneration_;
@@ -4675,8 +4676,37 @@ void Shell::rotatePhoto(int delta) {
 }
 bool Shell::photoOpen()const{return mediaOpen_ && !jellyfinQueue_ && categories_[category_].id=="photo";}
 void Shell::showPhoto(){if(!photo_.isNull())emit mediaFrame(photo_.transformed(QTransform().rotate(photoRotation_)));}
+void Shell::galleryMessage(const QString& text){showMessage(text,MessageKind::Page);emit changed();}
+QStringList Shell::photoLibraryRoots() const {
+    const QString root=preferences_.value("library/photo").toString();
+    return root.isEmpty()?QStringList{}:QStringList{root};
+}
+void Shell::openGalleryPhotos(const QStringList& paths,int index,bool slideshow) {
+    // Photo Gallery hand-off (audit/PHOTO-GALLERY.md): the existing viewer over one pile's files. The gallery is entered
+    // from the Photo column, so openFile() takes its photo branch; Circle closes the viewer and the view's gallery
+    // is still open underneath. stepPhoto() steps through these paths while they are set.
+    if(paths.isEmpty() || categories_[category_].id!="photo" || loading_)return;
+    galleryPaths_=paths;galleryIndex_=std::clamp(index,0,int(paths.size())-1);
+    Entry file;file.id=QStringLiteral("gallery:photo");file.title=QFileInfo(paths[galleryIndex_]).fileName();
+    file.action=Action::File;file.value=paths[galleryIndex_];
+    openFile(file);
+    if(slideshow)slideshow_.start(preferences_.value("photo/interval").toInt());
+    emit changed();
+}
 void Shell::stepPhoto(int delta) {
     if(loading_)return;
+    if(!galleryPaths_.isEmpty()) {
+        // Opened from the Photo Gallery: step through that pile's files, not the folder listing.
+        const int count=int(galleryPaths_.size());int next=galleryIndex_+delta;
+        if(next<0 || next>=count) {
+            if(slideshow_.isActive() && preferences_.value("media/repeat").toBool())next=(next%count+count)%count;
+            else{slideshow_.stop();return;}
+        }
+        galleryIndex_=next;
+        Entry file;file.id=QStringLiteral("gallery:photo");file.title=QFileInfo(galleryPaths_[next]).fileName();
+        file.action=Action::File;file.value=galleryPaths_[next];
+        openFile(file);emit changed();return;
+    }
     const auto& files=entries();
     for(int i=selection()+delta;i>=0 && i<files.size();i+=delta)if(files[i].action==Action::File){const auto file=files[i];currentSelection()=i;openFile(file);emit changed();return;}
     if(slideshow_.isActive() && preferences_.value("media/repeat").toBool()) {
@@ -4910,7 +4940,7 @@ void Shell::rebuildUsers(){
 }
 // The surfaces a signed-in user owns end on a switch and on Log Out: playback, pages, panels and messages.
 void Shell::endUserSurfaces(){
-    ++mediaRequest_;++photoRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;
+    ++mediaRequest_;++photoRequest_;jellyfinRequest_=0;finishJellyfinPlayback();jellyfinQueue_=false;mediaOpen_=false;galleryPaths_.clear();
     mediaQueue_.clear();mediaFailures_=0;slideshow_.stop();photo_={};photoRotation_=0;player_->stop();player_->setSource(QUrl{});
     resumePath_.clear();resumePending_=0;mediaDisplayPinned_=false;loading_=false;status_.clear();
     pages_.clear();resetOptions();clearMessage();

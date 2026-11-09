@@ -1,6 +1,7 @@
 #pragma once
 #include "assets.h"
 #include "coldboot.h"
+#include "gallery_controller.h"
 #include "hdr.h"
 #include "particles.h"
 #include "icons.h"
@@ -29,6 +30,7 @@ class QAbstractNativeEventFilter;
 class QLabel;
 
 namespace xmb {
+struct GalleryState;
 class View final:public QOpenGLWidget,protected QOpenGLFunctions_3_3_Core {
 public:
     View(Shell& shell,Assets& assets,QWidget* parent=nullptr);
@@ -110,6 +112,13 @@ public:
     void setHealthWarningEnabled(bool enabled) { coldboot_.setNoticeEnabled(enabled); }
     // Verification taps dispatch synchronously, independent of foreground focus and the physical input poll.
     void replayKeyTap(int key);
+    // Photo Gallery (gallery_chrome.cpp, audit/PHOTO-GALLERY.md). Cross on Photo > Photo Gallery opens it; --gallery-root
+    // replaces the Photo library folder preference as the root (checks and scripted runs). galleryOpen() is true while
+    // its area is up.
+    void openGallery();
+    void closeGallery();
+    bool galleryOpen() const;
+    void setGalleryRoots(const QStringList& roots) { galleryRoots_=roots; }
     // Verification taps for the PS button (no physical controller in scripted runs). They drive the
     // same global watcher state machine a physical press does, including the 1 s hold.
     void replayPsTap();
@@ -565,6 +574,17 @@ private:
     static constexpr double dialogHintMilliseconds=100;
     static constexpr double dialogSettleMilliseconds=150;
     void grabIntroFrame();
+    // Photo Gallery. gallery_ is non-null only while it is open; the key and pad handlers route to it first.
+    std::unique_ptr<GalleryState> gallery_;
+    QStringList galleryRoots_;
+    bool galleryDrawing() const;
+    bool galleryOwnsInput() const;
+    void galleryPress(int key);
+    void galleryOnIndexed(quint64 request,const GalleryScan& scan);
+    void galleryResult(const GalleryController::Result& result);
+    void paintGallery(double dt,double seconds);
+    void drawGalleryChrome(QPainter& p);
+    QString galleryText(const char* id,const QString& fallback);
     // PS3 on-screen keyboard, resolved from the firmware (audit/OSK-FIRMWARE.md): a 10x6 grid of 72x54 cells
     // from `oskfullkeypanel_plugin.rco` plus the decrypted module's row strings, a 7x7 symbol palette and a
     // prediction column. oskLayout_ is loaded once in the constructor and every key, rect and caption comes
