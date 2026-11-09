@@ -786,6 +786,7 @@ private:
     QString collectionLabel(const QString& appId) const;
     bool startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title);
     bool gameRunning() const;
+    bool launchWebApp(const Entry& entry);   // true when the entry was handled here (Chromium window or an error page)
     bool inGame_=false;              // the XMB was raised over the running title (setInGame)
     QString quitTitle_;              // the title a Quit Game asked to close, for the closing message
     int quitStage_=0;                // 0 none, 1 WM_CLOSE posted, 2 terminate sent, 3 kill sent

@@ -1,4 +1,5 @@
 #include "content_registry.h"
+#include "web_launch.h"
 
 #include <QDir>
 #include <QFile>
@@ -29,7 +30,7 @@ bool hasOnlyKnownKeys(const QJsonObject& object, QString& error, const QString& 
         QStringLiteral("id"), QStringLiteral("title"), QStringLiteral("kind"),
         QStringLiteral("category"), QStringLiteral("executable"),
         QStringLiteral("workingDirectory"), QStringLiteral("url"),
-        QStringLiteral("artwork"), QStringLiteral("arguments")
+        QStringLiteral("artwork"), QStringLiteral("arguments"), QStringLiteral("window")
     };
     for (auto it = object.begin(); it != object.end(); ++it) {
         if (!known.contains(it.key()))
@@ -95,6 +96,9 @@ bool validateAppForWrite(ContentApp& app, const QString& baseDirectory, QString&
     app.title = app.title.trimmed();
     app.kind = app.kind.trimmed();
     app.category = app.category.trimmed();
+    if (!webLaunch::isValidWindow(app.window))
+        return fail(error, QStringLiteral("Window must be app, kiosk or browser"));
+    app.window = app.kind == QStringLiteral("web") ? app.window.trimmed().toLower() : QString();
     if (app.kind == QStringLiteral("jellyfin") && app.category.isEmpty())
         app.category = QStringLiteral("tv");
     if (app.id.isEmpty())
@@ -172,8 +176,13 @@ bool parseApp(const QJsonValue& value, qsizetype index, const QString& baseDirec
         || !readString(object, QStringLiteral("executable"), app.executable, false, where, error)
         || !readString(object, QStringLiteral("workingDirectory"), app.workingDirectory, false, where, error)
         || !readString(object, QStringLiteral("url"), app.url, false, where, error)
-        || !readString(object, QStringLiteral("artwork"), app.artwork, false, where, error))
+        || !readString(object, QStringLiteral("artwork"), app.artwork, false, where, error)
+        || !readString(object, QStringLiteral("window"), app.window, false, where, error))
         return false;
+    if (!webLaunch::isValidWindow(app.window))
+        return fail(error, QStringLiteral("%1 window must be app, kiosk or browser").arg(where));
+    if (app.kind != QStringLiteral("web")) app.window.clear();
+    else app.window = app.window.trimmed().toLower();
 
     if (app.id.isEmpty())
         return fail(error, QStringLiteral("%1 id must not be empty").arg(where));
@@ -314,6 +323,7 @@ QJsonObject serializeApp(const ContentApp& app) {
     if (!app.workingDirectory.isEmpty()) object.insert(QStringLiteral("workingDirectory"), app.workingDirectory);
     if (!app.url.isEmpty()) object.insert(QStringLiteral("url"), app.url);
     if (!app.artwork.isEmpty()) object.insert(QStringLiteral("artwork"), app.artwork);
+    if (!app.window.isEmpty()) object.insert(QStringLiteral("window"), app.window);
     QJsonArray arguments;
     for (const QString& argument : app.arguments)
         arguments.append(argument);

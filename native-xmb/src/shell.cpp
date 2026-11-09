@@ -21,6 +21,7 @@
 #include "steam_overrides.h"
 #include "steam_family.h"
 #include "steam_downloads.h"
+#include "web_launch.h"
 #include <QDesktopServices>
 #include <QAudioOutput>
 #include <QMediaPlayer>
@@ -601,6 +602,22 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
     activity_.start();
     qInfo().noquote()<<"launch:"<<program<<arguments.join(' ')<<"(tracked)";
     emit changed();
+    return true;
+}
+bool Shell::launchWebApp(const Entry& entry) {
+    if(!entry.id.startsWith(QLatin1String("custom:")))return false;
+    const QString id=entry.id.mid(7);
+    const auto app=std::find_if(contentApps_.cbegin(),contentApps_.cend(),[&](const auto& a){return a.id==id && a.kind==QLatin1String("web");});
+    if(app==contentApps_.cend())return false;
+    const QString window=webLaunch::normalizeWindow(app->window);
+    if(window.isEmpty()||window==QLatin1String("browser")){qInfo().noquote()<<"web: "+app->id<<"window=browser, system default browser";return false;}
+    const QString exe=webLaunch::findChromium();
+    if(exe.isEmpty()){qInfo().noquote()<<"web: "+app->id<<"no Chromium browser found, falling back to the system default browser";return false;}
+    const QString profile=QDir(dataDirectory_).filePath("browser-profile");
+    QDir().mkpath(profile);
+    if(gameRunning()){showMessage(QObject::tr("A title is already running."),MessageKind::Page);return true;}
+    qInfo().noquote()<<"web: "+app->id<<"window="+window<<"browser="+exe<<"profile="+profile;
+    startTracked(exe,webLaunch::arguments(exe,app->url,window,profile),QString(),entry.title);
     return true;
 }
 bool Shell::gameRunning() const {
@@ -2205,6 +2222,10 @@ void Shell::activate() {
         break;
     }
     case Action::OpenUrl:
+        // A registered web app (row id custom:<id>) opens in a Chromium app/kiosk window on its own profile and is
+        // tracked like a launched title (P6, audit/WEB-APPS.md). Everything else, and the fallback when no Chromium
+        // browser is installed or the app says "window": "browser", is the OS default browser as before.
+        if(launchWebApp(entry))break;
         if(!QDesktopServices::openUrl(QUrl(entry.value)))showMessage(entry.title,"The application could not be opened.",MessageKind::Page);
         break;
     case Action::RefreshContent:refreshContent();break;

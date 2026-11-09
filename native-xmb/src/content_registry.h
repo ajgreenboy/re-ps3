@@ -15,6 +15,7 @@ struct ContentApp {
     QString workingDirectory;
     QString url;
     QString artwork;
+    QString window;   // web apps only: "app" (default, empty = app), "kiosk" or "browser" (P6)
     QStringList arguments;
 };
 

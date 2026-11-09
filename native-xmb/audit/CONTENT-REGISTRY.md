@@ -50,3 +50,7 @@ Updated 2026-11-07: Spotify now also has a native page in the Music column (audi
 `examples/media-apps.json` seeds media services (Jellyfin, Plex, YouTube, Spotify) with the
 native Jellyfin kind plus browser `kind: "web"` entries. How these entries surface inside the XMB, next to the owned Steam
 library, is described in [XMB-TOOLING.md](XMB-TOOLING.md).
+
+## Web app launch style (P6)
+
+Web apps take an optional `"window": "app"|"kiosk"|"browser"` (default `app`). `app` and `kiosk` open an Edge or Chrome window on `<data>/browser-profile` and track it like a launched title; `browser` keeps the system default browser. Other kinds ignore the field. Details and evidence: `audit/WEB-APPS.md`.

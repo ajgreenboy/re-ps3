@@ -299,6 +299,11 @@ ContentApp AppEditor::currentApp(QString& error) const {
         app.url = targetEdit_->text().trimmed();
     }
     app.artwork = artworkEdit_->text().trimmed();
+    // The editor has no field for the web launch style (P6); an edit keeps whatever apps.json already says.
+    if (app.kind == QStringLiteral("web")) {
+        const auto staged = std::find_if(apps_.cbegin(), apps_.cend(), [&app](const ContentApp& candidate) { return candidate.id == app.id; });
+        if (staged != apps_.cend()) app.window = staged->window;
+    }
     error.clear();
     return app;
 }
