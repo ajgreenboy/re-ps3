@@ -14,6 +14,7 @@
 #include "coldboot.h"
 #include "rsx_program.h"
 #include "p3t.h"
+#include "gtf_decode.h"
 #include "rco_objects.h"
 #include "content_registry.h"
 #include "steam_library.h"
@@ -42,6 +43,7 @@
 #include <QtEndian>
 #include <QTextLayout>
 #include <QRawFont>
+#include <QRegularExpression>
 #include <QGlyphRun>
 #include <cstdio>
 #ifdef Q_OS_WIN
@@ -374,7 +376,36 @@ int main(int argc,char** argv) {
     parser.addOption({"dump-cg","Translate the original qgl/lines Cg programs to GLSL into a local folder and exit","directory"});
     parser.addOption({"measure-reference","Render the background offscreen, write statistics comparable to audit/VIDEO-REFERENCES.md and exit","text-file"});
     parser.addOption({"p3t-dump","List a PS3 theme's elements and write its decoded pictures and sounds to a local folder (theme.p3t@directory) and exit","spec"});
-    parser.addOption({"raf-report","Write a PS3 theme's (or .raf's) animated-scene graph as JSON (theme.p3t@report.json) and exit; nothing is drawn","spec"});parser.process(app);
+    parser.addOption({"raf-report","Write a PS3 theme's (or .raf's) animated-scene graph as JSON (theme.p3t@report.json) and exit; nothing is drawn","spec"});
+    parser.addOption({"gtf-decode","Decode RAF or GTF textures to PNG (file@directory) and exit","spec"});parser.process(app);
+    if(parser.isSet("gtf-decode")) {
+        const QString spec=parser.value("gtf-decode");const int separator=spec.lastIndexOf('@');
+        if(separator<=0 || separator==spec.size()-1){std::fprintf(stderr,"use --gtf-decode file@directory\n");return 2;}
+        const QString path=spec.left(separator);const QDir out(spec.mid(separator+1));
+        if(!QDir().mkpath(out.path())){std::fprintf(stderr,"cannot create output directory\n");return 2;}
+        QVector<xmb::P3t::Raf::Texture> textures;
+        if(QFileInfo(path).suffix().compare(QStringLiteral("gtf"),Qt::CaseInsensitive)==0) {
+            QFile file(path);if(!file.open(QIODevice::ReadOnly)){std::fprintf(stderr,"cannot read input file\n");return 2;}
+            xmb::P3t::Raf::Texture texture;texture.id=QFileInfo(path).completeBaseName();texture.data=file.readAll();
+            if(file.error()!=QFileDevice::NoError){std::fprintf(stderr,"cannot read input file\n");return 2;}
+            textures.push_back(texture);
+        } else {
+            QString error;const auto theme=xmb::P3t::load(path,&error);
+            if(theme.isNull() || !theme.hasScene()){std::fprintf(stderr,"cannot read RAF: %s\n",error.toUtf8().constData());return 2;}
+            textures=theme.scene().textures;
+        }
+        int decoded=0;
+        for(qsizetype i=0;i<textures.size();++i) {
+            const auto& texture=textures[i];QString error;const auto image=xmb::decodeGtf(texture.data,&error);
+            const int code=texture.data.size()>0x18?quint8(texture.data.at(0x18)):-1;
+            QString name=texture.id;name.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_.-]")),QStringLiteral("_"));
+            const bool ok=!image.isNull() && image.save(out.filePath(QStringLiteral("%1_%2.png").arg(i).arg(name)));
+            if(ok)++decoded;else if(error.isEmpty())error=QStringLiteral("PNG write failed");
+            const QString line=QStringLiteral("id=%1 format=%2 width=%3 height=%4 %5%6\n").arg(texture.id,code<0?QStringLiteral("unknown"):QStringLiteral("0x%1").arg(code,2,16,QChar('0'))).arg(image.isNull()?texture.width:image.width()).arg(image.isNull()?texture.height:image.height()).arg(ok?QStringLiteral("decoded ok"):QStringLiteral("failed"),ok?QString():QStringLiteral(": ")+error);
+            const QByteArray text=line.toUtf8();std::fwrite(text.constData(),1,size_t(text.size()),stdout);std::fflush(stdout);
+        }
+        return decoded?0:1;
+    }
     if(parser.isSet("raf-report")) { // local analysis only: theme-derived facts, keep out of Git
         const auto spec=parser.value("raf-report").split('@');
         if(spec.size()!=2){qCritical()<<"use --raf-report theme.p3t@report.json";return 2;}

@@ -369,6 +369,7 @@ void P3t::readScene(int depth) {
         texture.file=element.text(QStringLiteral("fileref"));
         const auto bytes=fileBytes(texture.file);
         texture.bytes=quint32(bytes.size());
+        texture.data=bytes;
         int width=0,height=0;QString format;
         if(gtfInfo(bytes,width,height,format)){texture.width=width;texture.height=height;texture.format=format;}
         textureTypes.insert(texture.id,texture.type);

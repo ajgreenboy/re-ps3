@@ -56,7 +56,7 @@ public:
             quint32 geometryBytes=0,skeletonBytes=0;
             QVector<Animation> animations;
         };
-        struct Texture { QString id,file,format; int type=0,width=0,height=0; quint32 bytes=0; };
+        struct Texture { QString id,file,format; int type=0,width=0,height=0; quint32 bytes=0; QByteArray data; };
         struct Material {
             QString id,effect,colorMap,normalMap,specularMap;
         };
