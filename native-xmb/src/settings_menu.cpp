@@ -186,6 +186,10 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
     if(key=="media/repeatMode")return {{"Off",0},{"Repeat One",1},{"Repeat All",2}};
     if(key=="display/screensaverMinutes")return {{"After 5 Minutes",5},{"After 10 Minutes",10},{"After 20 Minutes",20},{"After 30 Minutes",30},{"Do Not Use",0}};
     if(key=="power/idleMinutes")return {{"Off",0},{"15 minutes",15},{"30 minutes",30},{"1 hour",60},{"2 hours",120}};
+    // In-game XMB (INGAME-XMB-DESIGN step 8): who owns the PS tap over an RPCS3/Steam title. "xmb" is the default
+    // (tap and hold both reach the XMB); "launcher" leaves the tap to the launcher's Home Menu / Guide and the
+    // XMB keeps the hold.
+    if(key=="input/psArbitration")return {{"XMB owns the PS button",QString("xmb")},{"Launcher owns the PS button",QString("launcher")}};
     // The console's Notification Messages / Trophy Notifications pages are a two-item Display / Do Not Display list.
     if(key=="system/notificationMessages" || key=="system/notificationTrophy")
         return {{text("msg_display_on","Display"),true},{text("msg_display_off","Do Not Display"),false}};
@@ -407,6 +411,13 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
         {"host_mute",nullptr,nullptr,Action::SettingChoices,"host/muted",nullptr,"Host Mute",
             "Mutes this computer's default output device."}};
     if(id=="sound")return &sound;
+    // The System page's firmware set stops at 26 rows; the PS-button arbitration over a running title is this
+    // build's own input behaviour and keeps its surface here (INGAME-XMB-DESIGN step 8; the key is also settable
+    // in preferences.json).
+    static const QVector<RowSpec> system{
+        {"ps_arbitration",nullptr,nullptr,Action::SettingChoices,"input/psArbitration",nullptr,"PS Button Over a Game",
+            "Whether the PS button opens the XMB (tap and hold) or the launcher's own menu on a tap (RPCS3 Home Menu / Steam Guide), with the XMB keeping the hold."}};
+    if(id=="system")return &system;
     return nullptr;
 }
 // A page's rows, plus what the definition said and what was left out: one record the app logs, dumps and
