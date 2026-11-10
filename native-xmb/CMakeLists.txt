@@ -67,7 +67,7 @@ qt_add_executable(re-ps3-native
 target_link_libraries(re-ps3-native PRIVATE Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::Network)
 qt_add_executable(xmb-updater updater/updater_main.cpp src/updater.cpp src/updater.h)
 target_include_directories(xmb-updater PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(xmb-updater PRIVATE Qt6::Core Qt6::Network)
+target_link_libraries(xmb-updater PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Network)
 target_compile_definitions(xmb-updater PRIVATE XMB_APP_VERSION="${PROJECT_VERSION}")
 option(XMB_UPDATER_BUILD_TESTS "Build the updater fixture runner" OFF)
 if(XMB_UPDATER_BUILD_TESTS)
