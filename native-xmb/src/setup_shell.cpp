@@ -13,10 +13,14 @@
 #include "autostart.h"
 #include "pad.h"
 #include "setup.h"
+#include "service_installer.h"
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QtConcurrent/QtConcurrentRun>
 #include <algorithm>
 
 namespace xmb {
@@ -42,7 +46,7 @@ bool Shell::setupActive() const { return setup_.active; }
 QStringList Shell::setupOrder() const {
     QStringList order{QStringLiteral("welcome"),QStringLiteral("firmware"),QStringLiteral("library")};
     if(QGuiApplication::screens().size()>1)order<<QStringLiteral("display");
-    order<<QStringLiteral("pad")<<QStringLiteral("autostart")<<QStringLiteral("finish");
+    order<<QStringLiteral("pad")<<QStringLiteral("autostart")<<QStringLiteral("services")<<QStringLiteral("finish");
     return order;
 }
 QString Shell::setupStepOfTopPage() const {
@@ -71,7 +75,7 @@ void Shell::setupPush(const QString& step) {
     page.title=step==QLatin1String("welcome")?assets_.text("sysconf_plugin","msg_initsetup",tr("Initial Setup"))   // TRACED: sysconf_plugin msg_initsetup
         :step==QLatin1String("firmware")?tr("Firmware Folder"):step==QLatin1String("library")?tr("Library Folders")
         :step==QLatin1String("display")?tr("Display"):step==QLatin1String("pad")?tr("Controller")
-        :step==QLatin1String("autostart")?tr("Start at Sign-in"):tr("Setup Complete");
+        :step==QLatin1String("autostart")?tr("Start at Sign-in"):step==QLatin1String("services")?tr("Services"):tr("Setup Complete");
     page.entries=setupRows(step);
     // Focus the row the step is about: "Continue" when the step has nothing to choose, else its first choice.
     pages_.push_back(std::move(page));
@@ -214,6 +218,15 @@ QVector<Entry> Shell::setupRows(const QString& step) {
             available?(autostart::enabled()?tr("On"):tr("Off")):tr("Unavailable"),available);
         if(!available)entry.detail=reason;
         rows<<entry<<cont()<<skip();
+    } else if(step==QLatin1String("services")) {
+        for(auto service:serviceAvailability()) {
+            if(service.name==QLatin1String("Steam") && QFileInfo(QDir(steamRoot_).filePath(QStringLiteral("steam.exe"))).isFile())service.installed=true;
+            Entry entry=row(prefix+QStringLiteral(":")+service.name,service.installed?service.name:tr("Get %1").arg(service.name),service.name,
+                service.installed?tr("Installed"):tr("Download and run the official installer."),service.installed?tr("Installed"):QString());
+            if(service.installed)entry.action=Action::Information;
+            rows<<entry;
+        }
+        rows<<cont();
     } else if(step==QLatin1String("finish")) {
         const auto path=[&](const char* kind){const QString value=preferences_.value(QStringLiteral("library/")+QLatin1String(kind)).toString();return value.isEmpty()?tr("not set"):nativePath(value);};
         const QString root=!setup_.chosenFlash.isEmpty()?setup_.chosenFlash:setup_.devFlash;
@@ -233,6 +246,22 @@ QVector<Entry> Shell::setupRows(const QString& step) {
 }
 void Shell::activateSetup(const Entry& entry) {
     if(entry.id==QLatin1String("run_setup")) {beginSetup(true);return;}
+    if(entry.id.startsWith(QLatin1String("setup:services:")) && entry.value!=QLatin1String("next")) {
+        for(const auto& service:serviceAvailability())if(service.name==entry.value && !service.installed) {
+            auto* watcher=new QFutureWatcher<QPair<QString,QString>>(this);
+            connect(watcher,&QFutureWatcher<QPair<QString,QString>>::finished,this,[this,watcher,service]{
+                const auto result=watcher->result();watcher->deleteLater();
+                if(!result.second.isEmpty())showMessage(tr("Services"),tr("Could not download %1:\n%2").arg(service.name,result.second),MessageKind::Page);
+                else if(qEnvironmentVariable("XMB_SERVICES_DRY_RUN")==QLatin1String("1"))qInfo().noquote()<<"would run"<<result.first;
+                else if(!QDesktopServices::openUrl(QUrl::fromLocalFile(result.first)))showMessage(tr("Services"),tr("Could not launch the %1 installer.").arg(service.name),MessageKind::Page);
+                emit changed();
+            });
+            watcher->setFuture(QtConcurrent::run([service]{QString path,error;downloadInstaller(service.installerUrl,service.name,&path,&error);return qMakePair(path,error);}));
+            showMessage(tr("Services"),tr("Downloading the %1 installer.").arg(service.name),MessageKind::Page);
+            emit changed();return;
+        }
+        return;
+    }
     const QString command=entry.value.section(QLatin1Char('|'),0,0),argument=entry.value.section(QLatin1Char('|'),1);
     if(command==QLatin1String("next")) {setupNext();emit changed();return;}
     if(command==QLatin1String("leave")) {
