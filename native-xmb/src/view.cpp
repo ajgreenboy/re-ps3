@@ -227,6 +227,9 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     // its input behaves identically. The PS button goes through the tap handler.
     connect(&shell_.phoneRemote(),&PhoneRemote::keyRequested,this,&View::replayKeyTap);
     connect(&shell_.phoneRemote(),&PhoneRemote::psRequested,this,[this]{psTappedEvent(120);});
+    // Text from the phone lands in the on-screen keyboard while it is open (search, name, sign-in fields); with
+    // no keyboard open there is nowhere for it to go, so it is dropped.
+    connect(&shell_.phoneRemote(),&PhoneRemote::textRequested,this,[this](const QString& text){if(osk_.open)oskInsert(text);});
     // renderPaused() (ps_watcher.h, H5): while a launched title owns the foreground the loop stops re-arming;
     // TitleSession calls update() to restart it when the XMB is back in front.
     connect(this,&QOpenGLWidget::frameSwapped,this,[this]{++framesSwapped_;if(isVisible() && !renderPaused())update();},Qt::QueuedConnection);

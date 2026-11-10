@@ -17,6 +17,7 @@ public:
 signals:
     void keyRequested(int key);
     void psRequested();
+    void textRequested(const QString& text);
 private:
     QTcpServer server_;
     QString code_;

@@ -32,7 +32,12 @@ PhoneRemote::PhoneRemote(QObject* parent):QObject(parent) {
                 const QUrlQuery query(target);
                 if(!target.isValid() || query.queryItemValue(QStringLiteral("code"))!=code_){respond(socket,403,"text/plain","Forbidden");return;}
                 if(line[0]=="GET" && target.path()==QStringLiteral("/")){respond(socket,200,"text/html; charset=utf-8",page);return;}
-                if(line[0]=="POST" && target.path()==QStringLiteral("/text")){respond(socket,400,"text/plain","Text input needs the OSK path");return;}
+                if(line[0]=="POST" && target.path()==QStringLiteral("/text")) {
+                    const QString value=query.queryItemValue(QStringLiteral("value"));
+                    if(value.isEmpty()){respond(socket,400,"text/plain","Empty text");return;}
+                    emit textRequested(value);
+                    respond(socket,200,"text/plain","Sent");return;
+                }
                 if(line[0]=="POST" && target.path()==QStringLiteral("/button")) {
                     const QString value=query.queryItemValue(QStringLiteral("value"));
                     static const QHash<QString,int> keys{{QStringLiteral("LEFT"),Qt::Key_Left},{QStringLiteral("RIGHT"),Qt::Key_Right},{QStringLiteral("UP"),Qt::Key_Up},{QStringLiteral("DOWN"),Qt::Key_Down},{QStringLiteral("CROSS"),Qt::Key_Return},{QStringLiteral("CIRCLE"),Qt::Key_Escape},{QStringLiteral("TRIANGLE"),Qt::Key_T}};
