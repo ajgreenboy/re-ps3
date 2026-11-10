@@ -16,7 +16,7 @@
 #include "weather_client.h"
 #include "phone_remote.h"
 #include "self_check.h"
-#include "steam_friends.h"
+#include "discord_client.h"
 #include "content_registry.h"
 #include "jellyfin_client.h"
 #include "jellyfin_stream.h"
@@ -836,7 +836,7 @@ private:
     void reportJellyfinPlaybackState();
     void finishJellyfinPlayback(bool completed=false);
     void signOutJellyfin();
-    SteamFriends steamFriends_;
+    DiscordClient discordFriends_;
     SteamOwned steamOwned_;
     OwnedGameList ownedGames_;      // purchased titles from the Steam Web API (may be empty without a key)
     SteamCollectionList collections_; // the account's own Steam library collections
@@ -867,11 +867,12 @@ private:
     QString artworkStatus_;
     QTimer steamRefresh_;
     QElapsedTimer friendsAge_;
-    SteamFriendList steamFriendList_;
-    QString steamFriendsError_;
+    QVector<DiscordFriend> discordFriendList_;
+    QVector<Entry> staticFriendEntries_;
+    QString discordFriendsError_;
     bool contentScanning_=false,contentLoaded_=false,contentRefreshPending_=false,friendsRefreshing_=false,showFriendsErrors_=false;
     void rebuildFriends();
-    void refreshSteamFriends(bool showErrors=false,bool force=false);
+    void refreshDiscordFriends(bool showErrors=false,bool force=false);
     void refreshOwnedGames();
     bool stageOwnedForRefresh() const;
     QString collectionLabel(const QString& appId) const;

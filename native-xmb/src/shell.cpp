@@ -1116,7 +1116,6 @@ void Shell::refreshContent() {
         family_=scanSteamFamily(steamInstalled_.steamId);
         { QString familyError; familyGames_=scanFamilySharedGames(dataDirectory_,&familyError);
           if(!familyError.isEmpty())qWarning().noquote()<<"steam family:"<<familyError; }
-        const bool accountChanged=steamId_!=result.steam.steamId;
         steamId_=result.steam.steamId;
         steamActivity_=scanSteamActivity(steamRoot_,steamId_);
         if(!result.error.isEmpty()){showMessage("App Library",result.error,MessageKind::Page);result.apps=contentApps_;}
@@ -1215,8 +1214,6 @@ void Shell::refreshContent() {
         for(auto it=rawgArtworkPaths_.begin();it!=rawgArtworkPaths_.end();)
             if(!liveRawgIds.contains(it.key()))it=rawgArtworkPaths_.erase(it);else ++it;
         if(!diagnostics::safeMode())rawgArtwork_->refresh(rawgTargets);   // D6: safe mode fetches no artwork
-        if(accountChanged){steamFriendList_.clear();friendsAge_.invalidate();rebuildFriends();}
-        if(SteamFriends::available() && !diagnostics::safeMode())refreshSteamFriends(false,accountChanged);
         if(stageOwnedForRefresh() && !diagnostics::safeMode())refreshOwnedGames();
         QStringList missingArt;
         for(const auto& category:categories_)for(const auto& e:category.entries)
@@ -1300,30 +1297,32 @@ void Shell::importApps(const QString& file) {
     else refreshContent();
     emit changed();
 }
-void Shell::refreshSteamFriends(bool showErrors,bool force) {
+void Shell::refreshDiscordFriends(bool showErrors,bool force) {
     if(friendsRefreshing_ && !force)return;
-    showFriendsErrors_=showErrors;friendsRefreshing_=true;steamFriendsError_=QStringLiteral("Refreshing Steam friends")+QChar(0x2026);rebuildFriends();emit changed();
-    steamFriends_.refresh(qEnvironmentVariable("XMB_STEAM_ID",steamId_));
+    if(!discordFriends_.signedIn()) {
+        if(showErrors) { showFriendsErrors_=true;discordFriends_.signIn(); }
+        return;
+    }
+    showFriendsErrors_=showErrors;friendsRefreshing_=true;discordFriendsError_=QStringLiteral("Refreshing Discord friends")+QChar(0x2026);rebuildFriends();emit changed();
+    discordFriends_.refresh();
 }
 void Shell::rebuildFriends() {
     for(int c=0;c<categories_.size();++c)if(categories_[c].id=="friends") {
         auto& entries=categories_[c].entries;
         const QString selected=entries.isEmpty()?QString{}:entries[std::clamp(selections_[c],0,int(entries.size())-1)].id;
-        const bool hadFriends=std::any_of(entries.cbegin(),entries.cend(),[](const Entry& e){return e.id.startsWith("steam-friend:");});
-        entries.clear();
-        for(const auto& person:steamFriendList_) {
-            auto e=item("steam-friend:"+person.steamId,person.name,"tex_Avatar_Default","explore_category_friend",Action::OpenUrl,"steam://friends/message/"+person.steamId);
-            static const QStringList states{"Offline","Online","Busy","Away","Snooze","Looking to trade","Looking to play"};
-            e.detail=person.game.isEmpty()?states.value(person.personaState,"Online"):"Playing "+person.game;
-            e.friendRow=true;e.presenceState=person.game.isEmpty()?person.personaState:7;entries.push_back(std::move(e));
+        const bool hadFriends=std::any_of(entries.cbegin(),entries.cend(),[](const Entry& e){return e.id.startsWith("discord-friend:");});
+        entries=staticFriendEntries_;
+        for(const auto& person:discordFriendList_) {
+            auto e=item("discord-friend:"+person.id,person.name,"tex_Avatar_Default","explore_category_friend",Action::OpenUrl,"https://discord.com/channels/@me");
+            e.friendRow=true;e.artworkUrl=person.avatarUrl;e.artwork=discordFriends_.avatar(person.avatarUrl);entries.push_back(std::move(e));
         }
-        auto open=item("steam-friends:open","Open Steam Friends","item_tex_NewFriend","explore_category_friend",Action::OpenUrl,"steam://open/friends");
-        open.detail=steamFriendsError_.isEmpty() && steamFriendList_.isEmpty()?"Your Steam friends list is empty.":steamFriendsError_;entries.push_back(std::move(open));
-        entries.push_back(item("steam-friends:refresh","Refresh Steam Friends","item_tex_Players","explore_category_friend",Action::RefreshFriends));
-        const QString setup="Steam Friends\n\nFriends and presence come from Steam.\nThe signed-in Steam client supplies your friends without changing profile privacy.\nThe Web API is an optional fallback.\nYour most recent local Steam account is selected automatically.\nUse XMB_STEAM_ID to select another numeric Steam ID.\nThe API key is never stored in XMB settings.\nPrivate lists and unavailable connections are reported here.";
-        entries.push_back(item("steam-friends:setup","Steam Connection","item_tex_Profile_Onlines","explore_category_friend",Action::Information,setup));
+        auto open=item("discord-friends:open","Open Discord Friends","item_tex_NewFriend","explore_category_friend",Action::OpenUrl,"https://discord.com/channels/@me");
+        open.detail=discordFriendsError_.isEmpty() && discordFriendList_.isEmpty()?"Your Discord friends list is empty.":discordFriendsError_;entries.push_back(std::move(open));
+        entries.push_back(item("discord-friends:refresh","Refresh Discord Friends","item_tex_Players","explore_category_friend",Action::RefreshFriends));
+        const QString setup="Discord Friends\n\nFriends come from Discord. Add your Discord application clientId to discord.json in the data folder next to the executable, and register the loopback redirect URI. Select Refresh Discord Friends to sign in. Discord may restrict the relationships.read scope.";
+        auto connection=item("discord-friends:setup","Discord Connection","item_tex_Profile_Onlines","explore_category_friend",Action::Information,setup);connection.detail=setup;entries.push_back(std::move(connection));
         selections_[c]=0;
-        if(hadFriends || steamFriendList_.isEmpty())for(int i=0;i<entries.size();++i)if(entries[i].id==selected){selections_[c]=i;break;}
+        if(hadFriends || discordFriendList_.isEmpty())for(int i=0;i<entries.size();++i)if(entries[i].id==selected){selections_[c]=i;break;}
     }
 }
 Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(parent),
@@ -1504,11 +1503,19 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     syncTvColumn();
     rebuildUsers();
     addInstalledApps();
-    connect(&steamFriends_,&SteamFriends::loaded,this,[this](const SteamFriendList& friends,const QString& error){
-        steamFriendList_=friends;steamFriendsError_=error;friendsRefreshing_=false;rebuildFriends();emit changed();
+    for(const auto& category:categories_)if(category.id=="friends")staticFriendEntries_=category.entries;
+    discordFriends_.configure(dataDirectory_);
+    if(!diagnostics::safeMode())discordFriends_.restoreSession();
+    connect(&discordFriends_,&DiscordClient::loaded,this,[this](const QVector<DiscordFriend>& friends,const QString& error){
+        if(error.isEmpty())discordFriendList_=friends;discordFriendsError_=error;friendsRefreshing_=false;rebuildFriends();emit changed();
         if(error.isEmpty())friendsAge_.restart();
-        if(showFriendsErrors_ && !error.isEmpty()){showMessage("Steam Friends",error,MessageKind::Page);emit changed();}
+        if(showFriendsErrors_ && !error.isEmpty()){showMessage("Discord Friends",error,MessageKind::Page);emit changed();}
         showFriendsErrors_=false;
+        if(error.isEmpty() && !diagnostics::safeMode())for(const auto& person:friends)if(!person.avatarUrl.isEmpty())discordFriends_.fetchAvatar(person.avatarUrl);
+    });
+    connect(&discordFriends_,&DiscordClient::avatarReady,this,[this](const QString& url,const QImage& image){
+        for(auto& category:categories_)if(category.id=="friends")for(auto& entry:category.entries)if(entry.artworkUrl==url)entry.artwork=image;
+        emit changed();
     });
     connect(&steamOwned_,&SteamOwned::loaded,this,[this](const OwnedGameList& games,const QString& error,bool needsKey){
         ownedInFlight_=false;
@@ -1607,12 +1614,12 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         emit changed();
     });
     connect(&steamRefresh_,&QTimer::timeout,this,[this]{
-        if(categories_[category_].id=="friends" && SteamFriends::available() && !diagnostics::safeMode())refreshSteamFriends();
+        if(categories_[category_].id=="friends" && discordFriends_.signedIn() && !diagnostics::safeMode())refreshDiscordFriends();
     });
     steamRefresh_.start(60000);
     steamWatch_.setInterval(1000);
     connect(&steamWatch_,&QTimer::timeout,this,&Shell::pollSteamGame);
-    steamFriendsError_="Connect the signed-in Steam client, or open the Steam friends window.";
+    discordFriendsError_=discordFriends_.configured()?QStringLiteral("Select Refresh Discord Friends to sign in."):discordFriends_.configurationError();
     rebuildFriends();
     for(auto& category:categories_)if(category.id=="game") {
         category.entries.push_back(item("content:refresh","Refresh Game Library","item_tex_plain_folder",full,Action::RefreshContent));
@@ -1793,7 +1800,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         refreshJellyfinSignInPage();emit changed();
     });
 }
-Shell::~Shell(){host::holdDisplayAwake(false);jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();disconnect(&steamFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
+Shell::~Shell(){host::holdDisplayAwake(false);jellyfinRequest_=0;finishJellyfinPlayback();jellyfin_.signOut();disconnect(&discordFriends_,nullptr,this,nullptr);disconnect(steamArtwork_.get(),nullptr,this,nullptr);}
 // --- Notifications --------------------------------------------------------------------------------
 // One pop-up on screen at a time; the rest wait in order. The lifetime starts when an entry reaches the
 // front, so a burst of events each gets its own 4 s instead of the last one starving the others.
@@ -1954,8 +1961,8 @@ void Shell::horizontal(int delta) {
     }
     if(loggedOut_)return;   // P3: the login column is the only column (category_user_login.xml)
     const int previous=category_;category_=std::clamp(category_+delta,0,int(categories_.size())-1);
-    if(previous!=category_ && categories_[category_].id=="friends" && SteamOwned::hasApiKey()
-       && (!friendsAge_.isValid() || friendsAge_.elapsed()>30000))refreshSteamFriends();
+    if(previous!=category_ && categories_[category_].id=="friends" && discordFriends_.signedIn() && !diagnostics::safeMode()
+       && (!friendsAge_.isValid() || friendsAge_.elapsed()>30000))refreshDiscordFriends();
     if(previous!=category_)interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
 }
 void Shell::vertical(int delta) {
@@ -2279,7 +2286,7 @@ void Shell::activate() {
         if(!QDesktopServices::openUrl(QUrl(entry.value)))showMessage(entry.title,"The application could not be opened.",MessageKind::Page);
         break;
     case Action::RefreshContent:refreshContent();break;
-    case Action::RefreshFriends:refreshSteamFriends(true);break;
+    case Action::RefreshFriends:refreshDiscordFriends(true);break;
     case Action::ImportApps:emit requestImportApps();break;
     case Action::ArtworkSettings:emit requestArtworkSettings();break;
     case Action::SpotifyApp:case Action::SpotifySignIn:case Action::SpotifySignOut:case Action::SpotifyNowPlaying:
@@ -4981,7 +4988,7 @@ void Shell::refreshDirectory(){
     // positions, which is also what picks up a file that has reappeared or gone since the page opened.
     if(!mediaOpen_ && !pages_.isEmpty() && pages_.last().continuePage){reloadContinueWatching();emit changed();return;}
     if(pages_.isEmpty() && !mediaOpen_) {
-        if(categories_[category_].id=="friends")refreshSteamFriends(true);else refreshContent();
+        if(categories_[category_].id=="friends")refreshDiscordFriends(true);else refreshContent();
         return;
     }
     if(pages_.isEmpty() || pages_.last().directory.isEmpty() || mediaOpen_)return;

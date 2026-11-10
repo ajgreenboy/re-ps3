@@ -1,4 +1,5 @@
 #include "view.h"
+#include "steam_friends.h"
 #include "phone_remote.h"
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
