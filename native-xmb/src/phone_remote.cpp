@@ -1,5 +1,6 @@
 #include "phone_remote.h"
 #include <QHostAddress>
+#include <QNetworkInterface>
 #include <QRandomGenerator>
 #include <QTcpSocket>
 #include <QTimer>
@@ -49,11 +50,21 @@ bool PhoneRemote::setEnabled(bool enabled) {
     if(!enabled){server_.close();code_.clear();for(auto* socket:findChildren<QTcpSocket*>())socket->abort();return true;}
     if(isEnabled())return true;
     code_=QStringLiteral("%1").arg(QRandomGenerator::system()->bounded(1000000),6,10,QLatin1Char('0'));
-    if(!server_.listen(QHostAddress::LocalHost,0)){code_.clear();return false;}
+    // LAN access is opt-in (XMB_PHONE_REMOTE_LAN=1): localhost is the safe default so the input-injection endpoint
+    // is not exposed to the network without an explicit choice. The pairing code still gates every request.
+    const bool lan=qEnvironmentVariableIntValue("XMB_PHONE_REMOTE_LAN")==1;
+    if(!server_.listen(lan?QHostAddress::Any:QHostAddress::LocalHost,0)){code_.clear();return false;}
     return true;
 }
 QUrl PhoneRemote::url() const {
     if(!isEnabled())return {};
-    return QUrl(QStringLiteral("http://127.0.0.1:%1/?code=%2").arg(server_.serverPort()).arg(code_));
+    // When bound to any interface, name the machine's first non-loopback IPv4 address so a phone can reach it;
+    // otherwise localhost. The ?code= pairing code is in the URL.
+    QString host=QStringLiteral("127.0.0.1");
+    if(server_.serverAddress()==QHostAddress::Any) {
+        for(const auto& addr:QNetworkInterface::allAddresses())
+            if(addr.protocol()==QAbstractSocket::IPv4Protocol && !addr.isLoopback()){host=addr.toString();break;}
+    }
+    return QUrl(QStringLiteral("http://%1:%2/?code=%3").arg(host).arg(server_.serverPort()).arg(code_));
 }
 }
