@@ -114,7 +114,10 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     PhoneRemote,
     // Settings > System Settings > System Update (updater_shell.cpp, D7): checks GitHub releases for a newer version
     // and reports. Native-only; the firmware's System Update wizard is a 29-page PSN channel this build does not have.
-    SystemUpdate };
+    SystemUpdate,
+    // Network > Wi-Fi Networks (wifi_shell.cpp, D10): lists the host's wireless networks. Native-only; connecting
+    // (with a passphrase prompt) is the next step.
+    WifiApp };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -712,6 +715,8 @@ private:
     void initPhoneRemote();
     void activatePhoneRemote(const Entry& entry);
     void activateSystemUpdate(const Entry& entry);
+    void initWifi();
+    void activateWifi(const Entry& entry);
     SelfCheck* systemCheck_=nullptr;
     void openSystemCheck();   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
     void spotifyCommand(OptionCommand command);

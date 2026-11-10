@@ -1751,6 +1751,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     initHome();
     initWeather();
     initPhoneRemote();
+    initWifi();
     connect(&fileOps_,&FileOperations::finished,this,[this](quint64 request,bool ok,const QString& message,const QStringList&){
         if(request!=fileOpsRequest_)return;
         fileOpsRequest_=0;loading_=false;status_.clear();
@@ -2282,6 +2283,7 @@ void Shell::activate() {
     case Action::WeatherApp:case Action::WeatherUnits:activateWeather(entry);break;
     case Action::PhoneRemote:activatePhoneRemote(entry);break;
     case Action::SystemUpdate:activateSystemUpdate(entry);break;
+    case Action::WifiApp:activateWifi(entry);break;
     case Action::SystemCheck:openSystemCheck();break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
