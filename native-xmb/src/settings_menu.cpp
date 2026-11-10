@@ -429,7 +429,11 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
             "Starts the XMB full-screen with its crash watchdog when this Windows account signs in. Turns the scheduled task on or off for this account only; Windows automatic sign-in is a separate step you set yourself."},
         // INFERRED (PHASES-HTPC D6): the firmware has no such row. Read-only page: the last crash, safe or normal run, the log folder.
         {"diagnostics",nullptr,nullptr,Action::Information,nullptr,nullptr,"Diagnostics",
-            "Shows the last crash (time and code), whether this run is safe mode, and where the logs and crash files are kept."}};
+            "Shows the last crash (time and code), whether this run is safe mode, and where the logs and crash files are kept."},
+        // INFERRED (PHASES-HTPC D7): the firmware's System Update is a PSN wizard. This checks GitHub releases for a
+        // newer version and reports; download-and-install is the next step.
+        {"system_update",nullptr,nullptr,Action::SystemUpdate,nullptr,nullptr,"System Update",
+            "Checks the update server for a newer version of this build. Downloading and installing is opt-in and not automatic."}};
     if(id=="system")return &system;
     // Desktop Mode (PHASES-HTPC D1; audit/DESKTOP-MODE.md): this build's own settings, so native-only rows at the end of
     // the Power Saving page. Both keys are also settable in preferences.json.

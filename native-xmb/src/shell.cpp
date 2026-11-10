@@ -2281,6 +2281,7 @@ void Shell::activate() {
         activateHome(entry);break;
     case Action::WeatherApp:case Action::WeatherUnits:activateWeather(entry);break;
     case Action::PhoneRemote:activatePhoneRemote(entry);break;
+    case Action::SystemUpdate:activateSystemUpdate(entry);break;
     case Action::SystemCheck:openSystemCheck();break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;

@@ -111,7 +111,10 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     PhotoGallery,
     // Network > Phone Remote (phone_remote_shell.cpp, audit/HANDOFF-2026-11-09 D11): a LAN web page that drives the
     // XMB from a phone. The column row toggles it on and shows the pairing code and URL. Native-only, off by default.
-    PhoneRemote };
+    PhoneRemote,
+    // Settings > System Settings > System Update (updater_shell.cpp, D7): checks GitHub releases for a newer version
+    // and reports. Native-only; the firmware's System Update wizard is a 29-page PSN channel this build does not have.
+    SystemUpdate };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -708,6 +711,7 @@ private:
     PhoneRemote phoneRemote_;
     void initPhoneRemote();
     void activatePhoneRemote(const Entry& entry);
+    void activateSystemUpdate(const Entry& entry);
     SelfCheck* systemCheck_=nullptr;
     void openSystemCheck();   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
     void spotifyCommand(OptionCommand command);
