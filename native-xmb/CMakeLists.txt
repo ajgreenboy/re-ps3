@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets OpenGLWidgets Multimedia Concurrent Network)
 find_package(Freetype QUIET)
+find_package(Qt6ZlibPrivate CONFIG REQUIRED)
 if(NOT Freetype_FOUND)
     find_package(Qt6BundledFreetype CONFIG REQUIRED)
     find_package(Qt6FreetypePrivate CONFIG REQUIRED)
@@ -38,6 +39,7 @@ qt_add_executable(re-ps3-native
     src/self_check.cpp src/self_check.h src/system_check_shell.cpp
     src/updater.cpp src/updater.h src/updater_shell.cpp
     src/firmware_fetcher.cpp src/firmware_fetcher.h
+    src/firmware_extract.cpp src/firmware_extract.h src/firmware_crypto.cpp src/firmware_crypto.h
     src/wifi_client.cpp src/wifi_client.h src/wifi_shell.cpp
     src/bluetooth_client.cpp src/bluetooth_client.h src/bluetooth_shell.cpp
     src/wol_client.cpp src/wol_client.h src/homeassistant_client.cpp src/homeassistant_client.h src/home_shell.cpp
@@ -65,6 +67,14 @@ qt_add_executable(re-ps3-native
     src/setup.cpp src/setup.h src/setup_shell.cpp
     src/autostart.cpp src/autostart.h src/cec.cpp src/cec.h src/display_mode.cpp src/display_mode.h src/display_spec.h src/diagnostics.cpp src/diagnostics.h src/game_capture.cpp src/game_capture.h src/shell.cpp src/shell.h src/host.cpp src/host.h src/pad.cpp src/pad.h src/ps_watcher.cpp src/ps_watcher.h src/desktop_mode.cpp src/desktop_mode.h src/desktop_pad.cpp src/desktop_pad_win.cpp src/desktop_pad.h src/view.cpp src/view.h src/dialogs.cpp)
 target_link_libraries(re-ps3-native PRIVATE Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::Network)
+target_link_libraries(re-ps3-native PRIVATE Qt6::ZlibPrivate)
+option(XMB_FIRMWARE_BUILD_TESTS "Build firmware synthetic fixture tests" OFF)
+if(XMB_FIRMWARE_BUILD_TESTS)
+    qt_add_executable(xmb-firmware-tests tests/firmware_tests.cpp src/firmware_extract.cpp src/firmware_crypto.cpp)
+    target_include_directories(xmb-firmware-tests PRIVATE src)
+    target_compile_definitions(xmb-firmware-tests PRIVATE XMB_FIRMWARE_NO_EMBEDDED_KEYS)
+    target_link_libraries(xmb-firmware-tests PRIVATE Qt6::Core Qt6::ZlibPrivate)
+endif()
 qt_add_executable(xmb-updater updater/updater_main.cpp src/updater.cpp src/updater.h)
 target_include_directories(xmb-updater PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(xmb-updater PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Network)

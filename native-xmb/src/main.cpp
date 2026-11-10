@@ -15,6 +15,7 @@
 #include "desktop_pad.h"
 #include "ps_watcher.h"
 #include "firmware_fetcher.h"
+#include "firmware_extract.h"
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
@@ -426,6 +427,7 @@ int main(int argc,char** argv) {
     parser.addOption({"pad-report","Write the attached PlayStation controller's kind, connection and battery as JSON, then exit","json-file"});
     parser.addOption({"check-update","Check GitHub for a newer release without downloading or installing"});
     parser.addOption({"firmware-check","Check Sony's current PS3 firmware version without downloading it"});
+    parser.addOption({"firmware-extract","Extract local PS3 firmware (PS3UPDAT.PUP@dev_flash-directory)","spec"});
     parser.addOption({"desktop-pad-test","Run a pad scenario through the Desktop Mode controller mapper, write the resulting input actions as JSON (second argument), then exit","json-in"});
     parser.addOption({"desktop-pad-sink","Open a small window that logs the mouse and key events it receives (JSON lines) for the given log file; optional second argument: seconds to run (default 30)","log-file"});
     parser.addOption({"desktop-pad-inject","Run a pad scenario through the mapper and deliver it with SendInput, only while the named sink window is foreground and under the pointer; result JSON is the second argument","json-in"});
@@ -482,6 +484,12 @@ int main(int argc,char** argv) {
         QString error; const auto release=xmb::latestFirmware(QStringLiteral("us"),&error);
         if(!error.isEmpty()){std::fprintf(stderr,"Firmware check: %s\n",error.toUtf8().constData());return 2;}
         std::fprintf(stdout,"Version: %s\nURL: %s\nMatches %s: %s\n",release.version.toUtf8().constData(),release.url.toUtf8().constData(),xmb::expectedFirmwareVersion().toUtf8().constData(),release.version==xmb::expectedFirmwareVersion()?"yes":"no");
+        return 0;
+    }
+    if(parser.isSet("firmware-extract")) {
+        const QString spec=parser.value("firmware-extract");const auto split=spec.lastIndexOf('@');QString error;
+        if(split<=0||split==spec.size()-1){std::fprintf(stderr,"Firmware extraction: expected <pup>@<dest-dir>\n");return 2;}
+        if(!xmb::extractPup(spec.left(split),spec.mid(split+1),&error)){std::fprintf(stderr,"Firmware extraction: %s\n",error.toUtf8().constData());return 2;}
         return 0;
     }
     if(parser.isSet("bluetooth-list")) {
