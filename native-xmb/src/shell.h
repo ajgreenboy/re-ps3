@@ -350,6 +350,7 @@ public:
     QStringList photoLibraryRoots() const;
     QString dataDirectory() const { return dataDirectory_; }
     void openGalleryPhotos(const QStringList& paths,int index,bool slideshow);
+    QVector<Playlist> photoPlaylists() const { return playlists_.list(QStringLiteral("photo")); }
     int galleryIndex() const { return galleryIndex_; }
     // The gallery found no photos: the console's own message page (msg_error_no_image).
     void galleryMessage(const QString& text);

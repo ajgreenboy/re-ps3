@@ -1,6 +1,7 @@
 #pragma once
 #include "gallery_model.h"
 #include "gallery_params.h"
+#include "playlists.h"
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -44,7 +45,7 @@ struct GalleryDraw {
 
 class GalleryController {
 public:
-    enum class Mode { Boot, Piles, Grid };
+    enum class Mode { Boot, Piles, Grid, Playlists };
     enum class Overlay { None, Menu, Help, QuitAsk };
     enum class Key { Left, Right, Up, Down, Cross, Circle, Triangle, Start, ZoomIn, ZoomOut };
     enum class Act { None, OpenPhoto, Slideshow, Quit };
@@ -68,6 +69,7 @@ public:
     void tick(double dt);
     // Back from the photo viewer: put the grid cursor on that file of the entered pile.
     void setGridFocus(int indexInPile);
+    void setPlaylists(QVector<Playlist> playlists) { playlists_ = std::move(playlists); playlistFocus_ = 0; }
 
     // ---- read-only state ----
     Mode mode() const { return mode_; }
@@ -97,6 +99,8 @@ public:
     int gridColumns() const { return gridColumns_; }
     QVector<MenuItem> menu() const;
     int menuFocus() const { return menuFocus_; }
+    const QVector<Playlist>& playlists() const { return playlists_; }
+    int playlistFocus() const { return playlistFocus_; }
     int quitChoice() const { return quitChoice_; }  // 0 = Yes, 1 = No
     double nearLimit() const { return c_.nearLimit; }
     double farLimit() const { return c_.farLimit; }
@@ -147,6 +151,8 @@ private:
     int blendDirection_ = 0; // +1 entering, -1 leaving
     // menu / quit
     int menuFocus_ = 0, quitChoice_ = 0;
+    QVector<Playlist> playlists_;
+    int playlistFocus_ = 0;
     // sticks
     double stickX_ = 0, stickZ_ = 0, stickZoom_ = 0;
 };

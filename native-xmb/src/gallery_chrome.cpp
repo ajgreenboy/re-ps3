@@ -83,6 +83,7 @@ void View::galleryOnIndexed(quint64 request, const GalleryScan& scan) {
         qWarning().noquote() << "gallery: layout failed:" << error;
         return;
     }
+    g.controller->setPlaylists(shell_.photoPlaylists());
     g.stage = GalleryState::Stage::Ready;
     qInfo().noquote() << QStringLiteral("gallery: %1 piles on %2 row(s)").arg(g.controller->layout().piles.size()).arg(g.controller->layout().rows);
     update();
@@ -208,6 +209,7 @@ void View::drawGalleryChrome(QPainter& p) {
         return;
     }
     const GalleryController& c = *g.controller;
+    const bool playlists = c.mode() == GalleryController::Mode::Playlists;
     const bool grid = c.enteredPile() >= 0;
 
     // ---- top band: the area and the focused pile ----
@@ -217,9 +219,9 @@ void View::drawGalleryChrome(QPainter& p) {
         band.setColorAt(1, QColor(10, 12, 16, 0));
         p.fillRect(QRectF(0, 0, 1920, 130), band);
         text(QRectF(90, 28, 900, 56), galleryText("msg_photo_gallery", tr("Photo Gallery")), 40, Qt::white);
-        text(QRectF(90, 80, 900, 36), galleryText("msg_library_area", tr("Library Area")), 24, QColor(255, 255, 255, 200));
+        text(QRectF(90, 80, 900, 36), playlists ? tr("Playlists") : galleryText("msg_library_area", tr("Library Area")), 24, QColor(255, 255, 255, 200));
         const int pile = grid ? c.enteredPile() : c.focusPile();
-        if (pile >= 0 && pile < c.layout().piles.size()) {
+        if (!playlists && pile >= 0 && pile < c.layout().piles.size()) {
             const GalleryPile& info = c.layout().piles[pile];
             QString line = info.label + QStringLiteral("   ") + tr("%1 photos").arg(info.photos.size());
             if (grid && c.gridFocus() >= 0 && c.gridFocus() < c.gridCells().size())
@@ -238,18 +240,39 @@ void View::drawGalleryChrome(QPainter& p) {
         band.setColorAt(1, QColor(10, 12, 16, 190));
         p.fillRect(QRectF(0, 1080 - 150, 1920, 150), band);
         struct Hint { const char* glyph; QString label; };
-        const QVector<Hint> hints{{"tex_guidepanel_Cross", plainHelp(galleryText("msg_enter", tr("Enter")))},
-            {"tex_guidepanel_Circle", plainHelp(galleryText("msg_back", tr("Back")))},
-            {"tex_guidepanel_Triangle", plainHelp(galleryText("msg_menu", tr("Menu")))},
-            {"tex_guidepanel_Start", plainHelp(galleryText("msg_slideshow", tr("Slideshow")))}};
+        QVector<Hint> hints{{"tex_guidepanel_Cross", plainHelp(galleryText("msg_enter", tr("Enter")))},
+            {"tex_guidepanel_Circle", plainHelp(galleryText("msg_back", tr("Back")))}};
+        if (!playlists) {
+            hints.push_back({"tex_guidepanel_Triangle", plainHelp(galleryText("msg_menu", tr("Menu")))});
+            hints.push_back({"tex_guidepanel_Start", plainHelp(galleryText("msg_slideshow", tr("Slideshow")))});
+        }
         double x = 120;
         for (const Hint& hint : hints) {
             image(hint.glyph, QRectF(x, 1080 - 96, 48, 48));
             text(QRectF(x + 58, 1080 - 96, 300, 48), hint.label, 30, Qt::white);
             x += 58 + 30 + hint.label.size() * 17 + 40;
         }
-        text(QRectF(1100, 1080 - 96, 720, 48), plainHelp(galleryText("msg_help_rstick_zoom", tr("Right Stick: Zoom In/Zoom Out"))), 26,
+        if (!playlists) text(QRectF(1100, 1080 - 96, 720, 48), plainHelp(galleryText("msg_help_rstick_zoom", tr("Right Stick: Zoom In/Zoom Out"))), 26,
              QColor(255, 255, 255, 190), Qt::AlignRight | Qt::AlignVCenter);
+    }
+
+    if (playlists) {
+        p.fillRect(QRectF(0, 130, 1920, 800), QColor(8, 10, 14, 195));
+        text(QRectF(160, 150, 1600, 64), tr("Playlists"), 42, Qt::white);
+        const auto& lists = c.playlists();
+        if (lists.isEmpty()) text(QRectF(180, 240, 1500, 60), tr("No playlists"), 30, QColor(255, 255, 255, 190));
+        const int visible = 8;
+        const int first = std::max(0, c.playlistFocus() - visible + 1);
+        for (int i = first; i < lists.size() && i < first + visible; ++i) {
+            const QRectF row(160, 230 + (i - first) * 80, 1600, 70);
+            if (i == c.playlistFocus()) {
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(255, 255, 255, 65));
+                p.drawRoundedRect(row, 8, 8);
+            }
+            text(row.adjusted(24, 0, -300, 0), lists[i].name, 32, Qt::white);
+            text(row.adjusted(1100, 0, -24, 0), tr("%1 photos").arg(lists[i].items.size()), 28, QColor(255, 255, 255, 200), Qt::AlignRight | Qt::AlignVCenter);
+        }
     }
 
     // ---- boot: the title logo, then the first help card ----
@@ -263,7 +286,7 @@ void View::drawGalleryChrome(QPainter& p) {
             p.restore();
         }
     }
-    if (c.helpCardShown() && c.overlay() == GalleryController::Overlay::None) {
+    if (!playlists && c.helpCardShown() && c.overlay() == GalleryController::Overlay::None) {
         const QRectF card(1920 - 760, 150, 680, 150);
         p.setPen(Qt::NoPen);
         p.setBrush(QColor(20, 22, 26, 215));
@@ -294,7 +317,7 @@ void View::drawGalleryChrome(QPainter& p) {
             {"slideshow", "msg_slideshow"}, {"add_to_playlist", "msg_add_to_playlist"}};
         const QString id = items[c.menuFocus()].id;
         // The firmware strip has no caption for Quit (its string is not in hknw_plugin.rco): the native word.
-        const QString label = keys.contains(id) ? galleryText(keys.value(id), capitalised(id)) : tr("Quit");
+        const QString label = id == QStringLiteral("playlists") ? tr("Playlists") : keys.contains(id) ? galleryText(keys.value(id), capitalised(id)) : tr("Quit");
         text(QRectF(strip.left(), strip.bottom() + 8, strip.width(), 44), label, 32, Qt::white, Qt::AlignHCenter | Qt::AlignVCenter);
     }
 

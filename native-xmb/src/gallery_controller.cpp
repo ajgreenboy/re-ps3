@@ -231,7 +231,7 @@ QVector<GalleryController::MenuItem> GalleryController::menu() const {
     // Names are tex_menuItems' own icons; only what maps to a working feature of this port is enabled.
     return {{"quit", 0, true}, {"tools", 1, false}, {"help", 2, true}, {"info", 3, false}, {"delete", 4, false},
             {"rotate", 5, false}, {"move", 6, false}, {"edit", 7, false}, {"group", 8, false}, {"sort", 9, true},
-            {"slideshow", 10, true}, {"add_to_playlist", 11, false}, {"undo", 12, false}, {"redo", 13, false}};
+            {"slideshow", 10, true}, {"playlists", 11, mode_ == Mode::Piles}, {"undo", 12, false}, {"redo", 13, false}};
 }
 
 // ------------------------------------------------------------------ input
@@ -276,6 +276,7 @@ GalleryController::Result GalleryController::press(Key key) {
             const QString id = menuItems[menuFocus_].id;
             if (id == "quit") { overlay_ = Overlay::QuitAsk; quitChoice_ = 0; }
             else if (id == "help") overlay_ = Overlay::Help;
+            else if (id == "playlists") { overlay_ = Overlay::None; mode_ = Mode::Playlists; }
             else if (id == "sort") {
                 const GallerySort next = layout_.sort == GallerySort::Newest ? GallerySort::Oldest
                     : layout_.sort == GallerySort::Oldest ? GallerySort::Random : GallerySort::Newest;
@@ -288,6 +289,18 @@ GalleryController::Result GalleryController::press(Key key) {
             break;
         }
         default: break;
+        }
+        return none;
+    }
+    if (mode_ == Mode::Playlists) {
+        if (key == Key::Circle) mode_ = Mode::Piles;
+        else if (key == Key::Up && playlistFocus_ > 0) --playlistFocus_;
+        else if (key == Key::Down && playlistFocus_ + 1 < playlists_.size()) ++playlistFocus_;
+        else if (key == Key::Cross && !playlists_.isEmpty()) {
+            Result result;
+            result.act = Act::OpenPhoto;
+            result.paths = playlists_[playlistFocus_].items;
+            return result;
         }
         return none;
     }
@@ -365,7 +378,7 @@ void GalleryController::tick(double dt) {
     }
     const bool inGrid = mode_ == Mode::Grid;
     // Zoom: right stick (analog) on top of the key steps.
-    if (stickZoom_ != 0) {
+    if (stickZoom_ != 0 && mode_ != Mode::Playlists) {
         const double factor = std::exp(stickZoom_ * c_.zoomSpeed * 0.2 * dt);
         if (inGrid) gridDistanceGoal_ = std::clamp(gridDistanceGoal_ * factor, c_.nearGrid, c_.farGrid);
         else distanceGoal_ = std::clamp(distanceGoal_ * factor, c_.nearLimit, c_.farLimit);
@@ -383,7 +396,7 @@ void GalleryController::tick(double dt) {
     // Focus in the pile view.
     if (!layout_.piles.isEmpty() && gridPile_ < 0) {
         const double frames = dt * 60.0;   // the firmware's constants are per 60 Hz frame (FOCUS_MOVE_BRAKE, FOCUS_GRAVITY)
-        if (stickX_ != 0 || stickZ_ != 0) {
+        if (mode_ != Mode::Playlists && (stickX_ != 0 || stickZ_ != 0)) {
             // INFERRED: FOCUS_MOVE_SPEED scales the stick into a speed in world units per second that grows with the
             // camera distance; FOCUS_MOVE_BRAKE is the per-frame retention of the velocity.
             const double speed = c_.focusSpeed * distance_ * 0.5;
@@ -494,10 +507,11 @@ void GalleryController::collectDraws(QVector<GalleryDraw>* out, const std::funct
 
 QJsonObject GalleryController::stateJson() const {
     const GalleryCamera cam = camera();
-    const char* modeName = mode_ == Mode::Boot ? "boot" : mode_ == Mode::Piles ? "piles" : "grid";
+    const char* modeName = mode_ == Mode::Boot ? "boot" : mode_ == Mode::Piles ? "piles" : mode_ == Mode::Grid ? "grid" : "playlists";
     const char* overlayName = overlay_ == Overlay::None ? "none" : overlay_ == Overlay::Menu ? "menu" : overlay_ == Overlay::Help ? "help" : "quit-ask";
     QJsonObject out{{"mode", modeName}, {"overlay", overlayName}, {"sort", gallerySortName(layout_.sort)},
         {"piles", layout_.piles.size()}, {"focusPile", focusPile_}, {"gridPile", gridPile_}, {"gridFocus", gridFocus_},
+        {"playlists", playlists_.size()}, {"playlistFocus", playlistFocus_},
         {"gridCells", grid_.size()}, {"gridColumns", gridColumns_}, {"gridAmount", std::round(gridAmount() * 1000) / 1000},
         {"camera", QJsonObject{{"x", std::round(cam.targetX * 100) / 100}, {"z", std::round(cam.targetZ * 100) / 100},
             {"distance", std::round(cam.distance * 100) / 100}, {"angle", std::round(cam.angleDeg * 100) / 100}}},
