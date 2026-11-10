@@ -2418,6 +2418,11 @@ void Shell::psMenuActivate() {
     psMenu_=false;
     emit changed();
 }
+bool Shell::setDesktopControllerMouse(bool on) {
+    if(!preferences_.setValue("desktop/controllerMouse",on))return false;
+    emit changed();
+    return true;
+}
 void Shell::setDesktopMode(bool on) {
     if(desktopMode_==on)return;
     desktopMode_=on;

@@ -519,6 +519,10 @@ public:
     bool desktopMode() const { return desktopMode_; }
     QString desktopHotkey() const { return preferences_.value("desktop/hotkey").toString(); }
     bool keepMusicInDesktop() const { return preferences_.value("desktop/keepMusic").toBool(); }
+    // Controller-driven desktop (desktop_pad.h): desktop/controllerMouse (default on) and desktop/pointerSpeed (1-5, default 3).
+    bool desktopControllerMouse() const { return preferences_.value("desktop/controllerMouse").toBool(); }
+    int desktopPointerSpeed() const { return preferences_.value("desktop/pointerSpeed").toInt(); }
+    bool setDesktopControllerMouse(bool on);
     // Pauses a playing video or (when music is not kept) any playback; returns what it did, for the log.
     QString pauseMediaForDesktop();
     // ---- In-game XMB (plan F5, audit/INGAME-XMB-DESIGN.md steps 1-3) ----

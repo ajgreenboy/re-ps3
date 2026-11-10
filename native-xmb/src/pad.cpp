@@ -297,7 +297,7 @@ XInputState xinputRead() {
     xinputCache.readAt=now;
     const auto& api=xinputApi();
     XInputState merged;
-    float strongestStick=0;
+    float strongestStick=0,strongestRight=0;
     for(int slot=0;slot<4;++slot) {
         // An empty slot is probed once a second, a connected one on every read.
         if(!xinputCache.connected[slot] && now-xinputCache.probeAt[slot]<std::chrono::seconds(1))continue;
@@ -317,6 +317,10 @@ XInputState xinputRead() {
         const float lx=std::clamp(g.sThumbLX/32767.f,-1.f,1.f),ly=std::clamp(-g.sThumbLY/32767.f,-1.f,1.f);
         if(const float deflection=std::max(std::abs(lx),std::abs(ly));deflection>strongestStick) {
             strongestStick=deflection;merged.lx=lx;merged.ly=ly;
+        }
+        const float rx=std::clamp(g.sThumbRX/32767.f,-1.f,1.f),ry=std::clamp(-g.sThumbRY/32767.f,-1.f,1.f);
+        if(const float deflection=std::max(std::abs(rx),std::abs(ry));deflection>strongestRight) {
+            strongestRight=deflection;merged.rx=rx;merged.ry=ry;
         }
         merged.l2=std::max(merged.l2,g.bLeftTrigger/255.f);
         merged.r2=std::max(merged.r2,g.bRightTrigger/255.f);

@@ -190,6 +190,7 @@ QVector<Choice> choices(const QString& key,Assets& assets) {
     if(key=="display/screensaverMinutes")return {{"After 5 Minutes",5},{"After 10 Minutes",10},{"After 20 Minutes",20},{"After 30 Minutes",30},{"Do Not Use",0}};
     if(key=="desktop/hotkey")return {{"Ctrl+Alt+Home",QString("Ctrl+Alt+Home")},{"Ctrl+Alt+End",QString("Ctrl+Alt+End")},{"Ctrl+Alt+X",QString("Ctrl+Alt+X")},
         {"Ctrl+Shift+Home",QString("Ctrl+Shift+Home")},{"Ctrl+Alt+F12",QString("Ctrl+Alt+F12")}};
+    if(key=="desktop/pointerSpeed")return {{"Slow",1},{"Relaxed",2},{"Normal",3},{"Fast",4},{"Very Fast",5}};
     if(key=="power/idleMinutes")return {{"Off",0},{"15 minutes",15},{"30 minutes",30},{"1 hour",60},{"2 hours",120}};
     // In-game XMB (INGAME-XMB-DESIGN step 8): who owns the PS tap over an RPCS3/Steam title. "xmb" is the default
     // (tap and hold both reach the XMB); "launcher" leaves the tap to the launcher's Home Menu / Guide and the
@@ -440,6 +441,10 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
     static const QVector<RowSpec> power{
         {"desktop_keep_music",nullptr,nullptr,Action::SettingChoices,"desktop/keepMusic",nullptr,"Desktop Mode - Keep Music Playing",
             "Whether music that is playing keeps playing while the XMB is hidden for Desktop Mode. Video always pauses."},
+        {"desktop_controller_mouse",nullptr,nullptr,Action::SettingChoices,"desktop/controllerMouse",nullptr,"Desktop Mode - Controller Mouse",
+            "While the XMB is hidden for Desktop Mode, the controller drives Windows: left stick moves the pointer, right stick scrolls, Cross clicks, Square right-clicks, Circle is Escape, Triangle is Enter, the D-pad is the arrow keys, L1/R1 switch windows, Start opens the on-screen keyboard and Select is the Windows key. The Guide button still returns to the XMB. Turn this off if Steam Input or DS4Windows already maps the controller."},
+        {"desktop_pointer_speed",nullptr,nullptr,Action::SettingChoices,"desktop/pointerSpeed",nullptr,"Desktop Mode - Pointer Speed",
+            "How fast the left stick moves the pointer in Desktop Mode. Small stick movements stay precise at every speed."},
         {"desktop_hotkey",nullptr,nullptr,Action::SettingChoices,"desktop/hotkey",nullptr,"Desktop Mode - Return Hotkey",
             "The global shortcut that brings the XMB back from Desktop Mode. It is registered only while the XMB is hidden. Other combinations can be set in preferences.json (desktop/hotkey)."}};
     if(id=="power")return &power;

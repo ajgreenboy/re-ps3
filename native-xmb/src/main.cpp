@@ -6,6 +6,7 @@
 #include "updater.h"
 #include "desktop_mode.h"
 #include "diagnostics.h"
+#include "desktop_pad.h"
 #include "ps_watcher.h"
 #include <QApplication>
 #include <QCommandLineParser>
@@ -403,6 +404,10 @@ int main(int argc,char** argv) {
     parser.addOption({"start-windowed","Start in a window even when the stored preference is fullscreen (local testing)"});
     parser.addOption({"pad-report","Write the attached PlayStation controller's kind, connection and battery as JSON, then exit","json-file"});
     parser.addOption({"check-update","Check GitHub for a newer release without downloading or installing"});
+    parser.addOption({"desktop-pad-test","Run a pad scenario through the Desktop Mode controller mapper, write the resulting input actions as JSON (second argument), then exit","json-in"});
+    parser.addOption({"desktop-pad-sink","Open a small window that logs the mouse and key events it receives (JSON lines) for the given log file; optional second argument: seconds to run (default 30)","log-file"});
+    parser.addOption({"desktop-pad-inject","Run a pad scenario through the mapper and deliver it with SendInput, only while the named sink window is foreground and under the pointer; result JSON is the second argument","json-in"});
+    parser.addOption({"desktop-pad-keyboard","Press the Desktop Mode Start button twice (on-screen keyboard open then close) and write what was on screen as JSON, then exit","json-out"});
     parser.addOption({"pad-check","Run documented synthetic DualSense/DualShock 4 input reports through the pad parser, write JSON, then exit","json-file"});
     parser.addOption({"motion-report","Write easing samples at different host frame rates without opening a window","json-file"});
     parser.addOption({"steam-root","Override the local Steam installation directory","directory"});
@@ -618,6 +623,10 @@ int main(int argc,char** argv) {
             <<(theme.dynamic()?"(dynamic)":"")<<","<<icons.size()<<"icons,"<<sounds.size()<<"sounds";
         return 0;
     }
+    if(parser.isSet("desktop-pad-test"))return xmb::desktoppad::runPadTest(parser.value("desktop-pad-test"),parser.positionalArguments().value(0));
+    if(parser.isSet("desktop-pad-sink"))return xmb::desktoppad::runPadSink(parser.value("desktop-pad-sink"),parser.positionalArguments().value(0,"30").toInt());
+    if(parser.isSet("desktop-pad-inject"))return xmb::desktoppad::runPadInject(parser.value("desktop-pad-inject"),parser.positionalArguments().value(0));
+    if(parser.isSet("desktop-pad-keyboard"))return xmb::desktoppad::runKeyboardCheck(parser.value("desktop-pad-keyboard"));
     if(parser.isSet("pad-check")) {
         // Local verification only (audit/SESSION-POWER.md): documented synthetic input reports through the exact
         // parser the HID watcher uses. The battery byte sits at payload byte 52 on a DualSense and 29 on a
