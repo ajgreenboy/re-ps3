@@ -22,7 +22,7 @@ robocopy $OutputDirectory $PackageDirectory /E `
 if($LASTEXITCODE -ge 8) { throw "robocopy failed (exit code $LASTEXITCODE)." }
 
 # The launcher, watchdog, autostart and docs.
-foreach($name in 'run-kiosk.ps1','watchdog.ps1','install-autostart.ps1','README.md','xmb-config.example.json') {
+foreach($name in 'run-kiosk.ps1','watchdog.ps1','apply-update.ps1','install-autostart.ps1','README.md','xmb-config.example.json') {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $PackageDirectory -Force
 }
 

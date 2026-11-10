@@ -617,6 +617,7 @@ signals:
     void requestTheme();
     void requestSystemName(const QString& value);
     void requestQuit();
+    void requestUpdateRestart();
     // Desktop Mode (INFERRED rows; audit/DESKTOP-MODE.md): main.cpp owns the window, the tray and the ways back.
     void requestDesktop();
     void requestExitToDesktop();

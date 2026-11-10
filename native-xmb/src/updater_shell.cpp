@@ -1,11 +1,10 @@
 // Settings > System Settings > System Update (PHASES-HTPC D7): check GitHub releases for a newer version, then
-// download and install it on confirmation. The check and the download both run on a worker thread (updater.h's
-// synchronous calls). The install stages the package next to the app and reports the path; the final folder swap
-// and the watchdog restart are the remaining step (the package folder must not be swapped while it is running).
+// download and install it on confirmation. The check and download run on a worker thread.
 #include "shell.h"
 #include "updater.h"
 #include <QCoreApplication>
 #include <QFutureWatcher>
+#include <QSaveFile>
 #include <QtConcurrent>
 
 namespace xmb {
@@ -42,17 +41,28 @@ void Shell::activateSystemUpdate(const Entry& entry) {
                     release.name.isEmpty()?QString():QStringLiteral("\n\n")+release.name),
                 [this,release,installDir]{
                     auto* dl=new QFutureWatcher<QPair<QString,QString>>(this);
-                    connect(dl,&QFutureWatcher<QPair<QString,QString>>::finished,this,[this,dl,release]{
+                    connect(dl,&QFutureWatcher<QPair<QString,QString>>::finished,this,[this,dl,release,installDir]{
                         const auto result=dl->result();
                         dl->deleteLater();
                         if(!result.second.isEmpty()) {
                             showMessage(tr("System Update"),result.second,MessageKind::Page);
                         } else {
-                            // The package is staged next to the app; applying it (folder swap) and restarting through
-                            // the watchdog is the remaining step, which cannot run while the app is executing.
-                            showMessage(tr("System Update"),
-                                tr("Version %1 was downloaded and staged at:\n%2\n\nRestart the XMB through the watchdog to apply it.")
-                                    .arg(release.tag,result.first),MessageKind::Page);
+                            showConfirm(tr("System Update"),
+                                tr("Version %1 was staged at:\n%2\n\nApply it now and restart through the watchdog? Files stored inside the installation, including data and configuration, will remain in the .old folder. The previous .old folder will be removed.").arg(release.tag,result.first),
+                                [this,installDir,staged=result.first]{
+                                    if(qEnvironmentVariable("XMB_UPDATER_DRY_RUN")==QStringLiteral("1")) {
+                                        qInfo().noquote()<<"updater: would apply staged path"<<staged<<"and restart";
+                                        showMessage(tr("System Update"),tr("Dry run: update was not applied."),MessageKind::Page);
+                                        return;
+                                    }
+                                    QSaveFile marker(staged+QStringLiteral(".pending"));
+                                    const QByteArray data=installDir.toUtf8();
+                                    if(!marker.open(QIODevice::WriteOnly) || marker.write(data)!=data.size() || !marker.commit()) {
+                                        showMessage(tr("System Update"),tr("Could not write the pending update marker: %1").arg(marker.errorString()),MessageKind::Page);
+                                        return;
+                                    }
+                                    emit requestUpdateRestart();
+                                });
                         }
                     });
                     dl->setFuture(QtConcurrent::run([release,installDir]{return downloadAndStage(release,installDir);}));

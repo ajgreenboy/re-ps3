@@ -1326,6 +1326,7 @@ int main(int argc,char** argv) {
     // Kiosk does not write the window geometry back: the fullscreen rectangle would replace the stored window
     // state, which is a preference change a launcher flag has no business making.
     QObject::connect(&app,&QApplication::aboutToQuit,&window,[&]{if(kiosk)return;windowSettings.setValue("window/geometry",window.saveGeometry());windowSettings.sync();});
+    QObject::connect(&shell,&xmb::Shell::requestUpdateRestart,&app,[&app]{app.exit(42);});
     // ---- Auto-Off (Phase 4.1) ----
     // Shell emits requestQuit from exactly two places today: the idle timer (power/idleMinutes) and the PS
     // menu's confirmed "Turn Off the System". The confirmation emits while its own flag is still up, so the

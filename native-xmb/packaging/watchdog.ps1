@@ -85,6 +85,33 @@ while($true) {
         break
     }
 
+    if($code -eq 42) {
+        if($env:XMB_UPDATER_DRY_RUN -eq '1') {
+            Log 'update restart suppressed (XMB_UPDATER_DRY_RUN=1); watchdog stopping'
+            break
+        }
+        $parent = Split-Path -Parent $root
+        $markers = @(Get-ChildItem -LiteralPath $parent -File | Where-Object { $_.Name.StartsWith((Split-Path -Leaf $root) + '.update.', [StringComparison]::OrdinalIgnoreCase) -and $_.Name.EndsWith('.pending', [StringComparison]::OrdinalIgnoreCase) })
+        if($markers.Count -ne 1) { Log "expected one pending update marker, found $($markers.Count); watchdog stopping"; break }
+        $helper = Join-Path $parent ('.xmb-apply-' + [guid]::NewGuid().ToString('N') + '.ps1')
+        try {
+            Copy-Item -LiteralPath (Join-Path $root 'apply-update.ps1') -Destination $helper
+            Set-Location -LiteralPath $parent
+            [Environment]::CurrentDirectory = $parent
+            $update = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"'+$helper+'"'),'-InstallDirectory',('"'+$root+'"'),'-Marker',('"'+$markers[0].FullName+'"')) -WorkingDirectory $parent -Wait -PassThru
+            if($update.ExitCode -ne 0) { Log "update failed (code $($update.ExitCode)); watchdog stopping"; break }
+            Log 'update applied; restarting the XMB'
+        } catch {
+            Log "update failed: $_; watchdog stopping"
+            break
+        } finally {
+            if(Test-Path -LiteralPath $helper) { Remove-Item -LiteralPath $helper -Force }
+        }
+        $consecutiveRapid = 0
+        $crashTimes.Clear()
+        continue
+    }
+
     # D6: a run that lasted long enough ends the crash streak; a safe run that long also returns the XMB to normal mode.
     if($uptime -ge $StableSeconds) {
         if($crashTimes.Count -gt 0) { Log "run lasted $([math]::Round($uptime,1))s (>= $StableSeconds s); the crash streak is cleared" }
