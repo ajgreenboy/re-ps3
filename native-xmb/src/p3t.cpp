@@ -327,12 +327,14 @@ void P3t::readScene(int depth) {
             if(inner.hasScene()) {
                 scene_=inner.scene();
                 scene_.embedded=true;
+                sceneBytes_=inner.sceneBytes();
                 return;
             }
         }
         return;
     }
     Raf& scene=scene_;
+    sceneBytes_=data_;
     scene.valid=true;
     scene.container=container_;
     scene.compressed=sceneCompressed_;

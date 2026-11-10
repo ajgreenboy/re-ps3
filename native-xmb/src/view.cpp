@@ -6,6 +6,7 @@
 #include "pad.h"
 #include "settings_menu.h"
 #include "musicvis.h"
+#include "raf_render.h"
 #include <QPainter>
 #include <QKeyEvent>
 #include <QAbstractNativeEventFilter>
@@ -21,6 +22,7 @@
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QOpenGLFramebufferObject>
+#include <QOpenGLContext>
 #include <QOpenGLPaintDevice>
 #include <QTextStream>
 #include <QTextBoundaryFinder>
@@ -291,6 +293,7 @@ void View::PafEase::advance(double seconds) {
 }
 void View::resizeEvent(QResizeEvent* event) {
     QOpenGLWidget::resizeEvent(event);
+    loadWallpaper();
     if (artworkCredit_) artworkCredit_->move(12, height() - artworkCredit_->height() - 12);
 }
 void View::syncColumns() {
@@ -379,10 +382,23 @@ void View::syncFocusedBackground() {
 }
 void View::loadWallpaper() {
     if(shell_.backgroundMode()!=2)return;
-    // A PS3 theme's still background (decoded in memory by the shell) comes before the user's own wallpaper.
-    if(!shell_.themeBackground().isNull()) {
-        const auto key="p3t:"+shell_.themePath();if(key==wallpaperPath_)return;
-        wallpaperPath_=key;++wallpaperRequest_;wallpaperImage_=shell_.themeBackground();return;
+    // A theme scene is a static frame for now; on failure retain its still picture like any other theme.
+    const auto& scene=shell_.themeSceneBytes();
+    if(!scene.isEmpty() || !shell_.themeBackground().isNull()) {
+        const QSize pixels=(QSizeF(size())*devicePixelRatioF()).toSize();
+        if(!scene.isEmpty() && (pixels.width()<=0 || pixels.height()<=0))return;
+        const auto key=QStringLiteral("p3t:")+shell_.themePath()+(scene.isEmpty()?QString{}:QStringLiteral(":%1x%2").arg(pixels.width()).arg(pixels.height()));
+        if(key==wallpaperPath_)return;
+        wallpaperPath_=key;++wallpaperRequest_;wallpaperImage_=shell_.themeBackground();
+        if(!scene.isEmpty()) {
+            auto* previous=QOpenGLContext::currentContext();
+            auto* surface=previous?previous->surface():nullptr;
+            QString error;const auto rendered=renderRafStill(scene,QString{},pixels.width(),pixels.height(),&error);
+            if(previous && surface)previous->makeCurrent(surface);
+            if(rendered.isNull())qInfo().noquote()<<"theme: scene render failed; using still background:"<<error;
+            else wallpaperImage_=rendered;
+        }
+        return;
     }
     const auto path=shell_.wallpaper();if(path==wallpaperPath_)return;
     wallpaperPath_=path;wallpaperImage_={};const auto request=++wallpaperRequest_;

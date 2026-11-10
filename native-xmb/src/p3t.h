@@ -117,7 +117,7 @@ public:
     QHash<QString,Pointer> pointers() const;
     QImage notification() const;
     QStringList soundRoles() const; // every "se" id in tree order, not only the five the shell maps
-    bool dynamic() const;          // has an animated scene (its still background, if any, is still used)
+    bool dynamic() const;          // has a bgimage/anim attribute
     QImage background() const;     // the first bgimage's hd picture, else its sd one
     // Every bgimage's hd (else sd) picture in tree order. Air Paint carries two; the rule that picks one is open.
     QVector<QImage> backgrounds() const;
@@ -128,6 +128,7 @@ public:
     QString container() const { return container_; }
     quint32 containerVersion() const { return containerVersion_; }
     bool hasScene() const { return scene_.valid; }
+    const QByteArray& sceneBytes() const { return sceneBytes_; }
     // The scene graph as JSON (container facts, camera, lights, actors with their material/texture bindings, models,
     // animation headers, script header, and what the renderer does and does not cover). Data only; draws nothing.
     QByteArray rafReportJson() const;
@@ -150,5 +151,6 @@ private:
     bool sceneCompressed_=false;
     QVector<Raf::Section> sections_;
     Raf scene_;
+    QByteArray sceneBytes_;
 };
 }

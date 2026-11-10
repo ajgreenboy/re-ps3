@@ -2072,7 +2072,7 @@ void Shell::activate() {
         }
         // A picker row writes nothing yet, so it has no chain: a Background row that needs a file asks the
         // view for one (the file dialog's result comes back through chooseWallpaper()).
-        if(entry.setting=="appearance/background" && entry.option.toInt()==2 && wallpaper().isEmpty() && theme_.background.isNull()){emit requestWallpaper();break;}
+        if(entry.setting=="appearance/background" && entry.option.toInt()==2 && wallpaper().isEmpty() && theme_.background.isNull() && theme_.sceneBytes.isEmpty()){emit requestWallpaper();break;}
         // Every other write now runs the console's chain (ask -> [proceed] -> finish) instead of committing
         // and popping in one frame (FIDELITY-BEHAVIOUR I77). beginSettingWrite() decides the stages per row
         // class and names the evidence for each.
@@ -4918,6 +4918,8 @@ void Shell::loadTheme() {
     if(p3t.isNull()){showMessage(QFileInfo(path).fileName(),error,MessageKind::Page);qWarning().noquote()<<"theme:"<<path<<error;return;}
     theme_.name=p3t.name().isEmpty()?QFileInfo(path).completeBaseName():p3t.name();
     theme_.background=p3t.background();theme_.icons=p3t.icons();
+    if(p3t.hasScene())theme_.sceneBytes=p3t.sceneBytes();
+    else if(p3t.dynamic())qInfo().noquote()<<"theme:"<<theme_.name<<"animated scene could not be parsed; using still background";
     // The theme's appearance selections (THEMES 6): font 0 Original / 1 Rounded / 2 Pop maps to the assets' font
     // style 0 Rodin / 1 Seurat / 2 VAGRundschriftDLig, so Rounded -> 2 and Pop -> 1; colour 0 follows the month,
     // 1..12 pins a month's palette. A theme without the element leaves -1 (the user's own choice applies).
@@ -4925,7 +4927,7 @@ void Shell::loadTheme() {
     theme_.font=fontSel<0?-1:(fontSel==0?0:(fontSel==1?2:1));
     theme_.color=p3t.colorSelection();
     interactionAudio_.setThemeSounds(p3t.sounds());
-    qInfo().noquote()<<"theme:"<<theme_.name<<"background"<<theme_.background.size()<<(p3t.dynamic()?"(its animated scene is not drawn)":"")<<"icons"<<theme_.icons.size()<<"font"<<theme_.font<<"color"<<theme_.color;
+    qInfo().noquote()<<"theme:"<<theme_.name<<"background"<<theme_.background.size()<<(p3t.hasScene()?"(scene rendered as a still; animation not played)":"")<<"icons"<<theme_.icons.size()<<"font"<<theme_.font<<"color"<<theme_.color;
 }
 qint64 Shell::mediaPosition()const{return player_->position();}
 qint64 Shell::mediaDuration()const{return player_->duration();}

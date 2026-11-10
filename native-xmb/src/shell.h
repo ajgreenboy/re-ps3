@@ -339,6 +339,7 @@ public:
     // The PS3 theme in use (Theme Settings > Theme), decoded in memory from its .p3t: empty path = the system's own.
     QString themePath() const { return theme_.path; }
     const QImage& themeBackground() const { return theme_.background; }
+    const QByteArray& themeSceneBytes() const { return theme_.sceneBytes; }
     QImage themeIcon(const QString& id) const { return id.isEmpty()?QImage{}:theme_.icons.value(id); }
     // The theme's pinned month palette (P3t color selection 1..12), or 0 = follow the real month / no theme colour.
     int themeColorMonth() const { return theme_.color>=1 && theme_.color<=12?theme_.color:0; }
@@ -980,7 +981,7 @@ private:
     QString mediaTitle_,renderer_;
     QDateTime clockOverride_;
     // Only the decoded pieces are kept (the .p3t itself is read again when the theme changes); nothing is written to disk.
-    struct Theme { QString path,name; QImage background; QHash<QString,QImage> icons;
+    struct Theme { QString path,name; QImage background; QByteArray sceneBytes; QHash<QString,QImage> icons;
     // The theme's appearance selections (P3t::fontSelection/colorSelection), mapped to the assets' font style index
     // (0 Rodin / 1 Seurat / 2 VAGRundschriftDLig) and the pinned month (1..12); -1 = the theme has no such element.
     int font=-1,color=-1; };
