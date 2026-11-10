@@ -57,7 +57,7 @@ bool parseReport(Kind kind,const QVector<quint8>& report,Info& out);
 // through XInputGetStateEx (xinput1_4.dll ordinal 100; undocumented, so absent = no Guide) and reported as the
 // PS bit 0x400, which latest() also merges so PsWatcher treats Guide exactly like a PlayStation PS button.
 // Withheld (false) while the scripted-run gate is on, like latest().
-struct XInputState { quint16 buttons=0; float lx=0,ly=0,l2=0,r2=0; int connected=0; };
+struct XInputState { quint16 buttons=0; float lx=0,ly=0,rx=0,ry=0,l2=0,r2=0; int connected=0; };   // rx/ry: right stick, +down like ly (Desktop Mode scroll)
 bool xinputLatest(XInputState& out);
 // The connected XInput slots and their battery as XInputGetBatteryInformation reports it: battery is "wired",
 // "full", "medium", "low", "empty" or "unknown" (the API reports four levels, not a percentage). Read on demand

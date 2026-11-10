@@ -32,7 +32,8 @@ QStringList Preferences::sharedKeys() {
             QStringLiteral("system/notificationMessages"),QStringLiteral("system/notificationTrophy"),
             QStringLiteral("power/idleMinutes"),QStringLiteral("display/screensaverMinutes"),
             // Desktop Mode (audit/DESKTOP-MODE.md) belongs to the machine, not to a user profile.
-            QStringLiteral("desktop/keepMusic"),QStringLiteral("desktop/hotkey")};
+            QStringLiteral("desktop/keepMusic"),QStringLiteral("desktop/hotkey"),
+            QStringLiteral("desktop/controllerMouse"),QStringLiteral("desktop/pointerSpeed")};
 }
 bool Preferences::isSharedKey(const QString& key) {
     return sharedKeys().contains(key);
@@ -96,7 +97,8 @@ QVariant Preferences::defaultValue(const QString& key) {
     // /setting/system/notification and /setting/system/notificationTrophy (vsh.elf): both classes default to shown.
     if(key=="audio/keyTone" || key=="system/notificationMessages" || key=="system/notificationTrophy")return true;
     if(key=="power/idleMinutes" || key=="display/screensaverMinutes")return 0;
-    if(key=="desktop/keepMusic")return true;
+    if(key=="desktop/keepMusic" || key=="desktop/controllerMouse")return true;
+    if(key=="desktop/pointerSpeed")return 3;
     if(key=="desktop/hotkey")return QString("Ctrl+Alt+Home");
     if(key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return false;
     if(key=="system/name")return QSysInfo::machineHostName().left(64);
@@ -120,9 +122,10 @@ bool Preferences::validBare(const QString& key,const QVariant& value) {
     if(key=="photo/interval")return integer(1000,60000);
     if(key=="media/repeatMode")return integer(0,2);
     if(key=="power/idleMinutes")return integer(0,120);
+    if(key=="desktop/pointerSpeed")return integer(1,5);
     if(key=="display/screensaverMinutes")return integer(0,30) && (value.toInt()==0 || value.toInt()==5 || value.toInt()==10 || value.toInt()==20 || value.toInt()==30);
     if(key=="audio/keyTone" || key=="system/notificationMessages" || key=="system/notificationTrophy" ||
-       key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen" || key=="desktop/keepMusic")return value.metaType().id()==QMetaType::Bool;
+       key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen" || key=="desktop/keepMusic" || key=="desktop/controllerMouse")return value.metaType().id()==QMetaType::Bool;
     if(value.metaType().id()!=QMetaType::QString)return false;
     const auto text=value.toString();
     if(text.contains(QChar(0)))return false;

@@ -7,11 +7,13 @@
 #include <QRect>
 #include <QString>
 #include <QVector>
+#include "desktop_pad.h"
 #include <functional>
 class QMainWindow;
 class QMenu;
 class QScreen;
 class QSystemTrayIcon;
+class QAction;
 class QTimer;
 
 // Single instance (PHASES-HTPC D2) and Desktop Mode (D1); design and measurements in audit/DESKTOP-MODE.md.
@@ -71,6 +73,7 @@ private:
     bool registerHotkey();
     void unregisterHotkey();
     void probeForeground(qint64 returnedAt);
+    void updateTrayTip();
     QString selection() const;
     QMainWindow* window_;
     View* view_;
@@ -80,6 +83,8 @@ private:
     QPointer<QScreen> screen_;
     QSystemTrayIcon* tray_=nullptr;
     QMenu* menu_=nullptr;
+    QAction* padAction_=nullptr;
+    desktoppad::DesktopPadDriver* pad_=nullptr;
     QTimer* idleReport_=nullptr;
     QElapsedTimer clock_;
     bool active_=false;

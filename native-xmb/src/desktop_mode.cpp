@@ -196,6 +196,13 @@ DesktopMode::DesktopMode(QMainWindow* window,View* view,Shell* shell,bool kiosk,
     :QObject(parent),window_(window),view_(view),shell_(shell),kiosk_(kiosk),kioskScreen_(kioskScreen) {
     clock_.start();
     qApp->installNativeEventFilter(this);
+    // Controller-driven desktop (desktop_pad.h): live only between enter() and leave().
+    pad_=new desktoppad::DesktopPadDriver({
+        [this]{return shell_->desktopControllerMouse();},
+        [this]{return shell_->desktopPointerSpeed();},
+        [this]{return shell_->titleRunning();},
+        [this]{return window_->isVisible();}},this);
+    connect(pad_,&desktoppad::DesktopPadDriver::idleReasonChanged,this,[this]{updateTrayTip();});
     // The Guide/PS button on any pad. The watcher is the one that already reads the HID/XInput Guide bit independent of
     // window focus; View's own handlers ignore a press while the window is hidden (not actionable), so this is the only
     // listener that acts. A press within 600 ms of entering is the tail of the press that chose the row.
@@ -220,6 +227,10 @@ void DesktopMode::ensureTray() {
     if(tray_)return;
     menu_=new QMenu;
     auto* back=menu_->addAction(QObject::tr("Return to XMB"));
+    padAction_=menu_->addAction(QObject::tr("Controller mouse and keyboard"));
+    padAction_->setCheckable(true);
+    connect(menu_,&QMenu::aboutToShow,this,[this]{padAction_->setChecked(shell_->desktopControllerMouse());});
+    connect(padAction_,&QAction::triggered,this,[this](bool on){shell_->setDesktopControllerMouse(on);updateTrayTip();});
     auto* quit=menu_->addAction(QObject::tr("Exit XMB"));
     connect(back,&QAction::triggered,this,[this]{leave(QStringLiteral("tray menu"));});
     connect(quit,&QAction::triggered,this,[this]{emit exitRequested(QStringLiteral("tray menu"));});
@@ -229,6 +240,15 @@ void DesktopMode::ensureTray() {
     connect(tray_,&QSystemTrayIcon::activated,this,[this](QSystemTrayIcon::ActivationReason reason){
         if(reason==QSystemTrayIcon::Trigger || reason==QSystemTrayIcon::DoubleClick)leave(QStringLiteral("tray icon"));
     });
+}
+
+void DesktopMode::updateTrayTip() {
+    if(!tray_)return;
+    QString pad;
+    if(!shell_->desktopControllerMouse())pad=QObject::tr("controller mouse off");
+    else if(pad_->active() && !pad_->idleReason().isEmpty())pad=QObject::tr("controller mouse paused: %1").arg(pad_->idleReason());
+    else pad=QObject::tr("controller mouse on");
+    tray_->setToolTip(QObject::tr("XMB (desktop mode) - %1").arg(pad));
 }
 
 bool DesktopMode::registerHotkey() {
@@ -298,6 +318,8 @@ void DesktopMode::enter(const QString& source) {
     else qWarning()<<"desktop: no system tray is available; the Guide button, the hotkey and a second launch bring the XMB back";
     registerHotkey();
     window_->hide();
+    updateTrayTip();
+    pad_->setActive(true);
     framesAtEnter_=reportFrames_=view_->framesSwapped();
     reportAt_=enteredAt_;
     if(!idleReport_) {
@@ -321,6 +343,7 @@ void DesktopMode::leave(const QString& source) {
         .arg(source).arg(returnedAt-enteredAt_).arg(view_->framesSwapped()-framesAtEnter_);
     active_=false;
     ++generation_;
+    pad_->setActive(false);   // releases anything it holds before the window reappears
     idleReport_->stop();
     unregisterHotkey();
     if(tray_)tray_->hide();
