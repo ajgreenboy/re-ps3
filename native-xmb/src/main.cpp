@@ -1,4 +1,8 @@
 #include "view.h"
+#include "phone_remote.h"
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QEventLoop>
 #include "updater.h"
 #include "desktop_mode.h"
 #include "diagnostics.h"
@@ -383,6 +387,7 @@ int main(int argc,char** argv) {
     parser.addOption({"no-intro","Start at the XMB without the cold-boot intro (also implied by --script, --background-clock and --measure-reference)"});
     parser.addOption({"no-health-warning","Skip the health warning the cold boot shows after its intro (also settings.ini [boot] healthWarning=false)"});
     parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
+    parser.addOption({"phone-remote-test","Check the localhost phone remote and exit"});
     parser.addOption({"background-clock","Fix background and icon-material time for reference captures (ISO date/time); UI clock stays live","date-time"});
     parser.addOption({"render-clock","Fix the background/ribbon/particles/icon animation time in seconds for deterministic A/B captures","seconds"});
     parser.addOption({"ui-clock","Fix the displayed UI date/time for local captures; never changes the host clock","date-time"});
@@ -439,6 +444,24 @@ int main(int argc,char** argv) {
     parser.addOption({"safe","Safe mode (the watchdog passes it after repeated crashes): no network clients, no artwork or icon fetches, the default theme, no cold-boot intro; stored preferences are not changed"});
     parser.addOption({"quit","Ask the running XMB to exit with code 0 (the kiosk watchdog then stops) and exit; does nothing when none runs"});
     parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
+    if(parser.isSet("phone-remote-test")) {
+        xmb::PhoneRemote remote;
+        if(!remote.setEnabled(true)){qCritical()<<"phone remote: bind failed"<<remote.errorString();return 1;}
+        qInfo().noquote()<<"phone remote: pairing code"<<remote.pairingCode()<<"URL"<<remote.url().toString();
+        QNetworkAccessManager manager;
+        const auto check=[&manager](const QUrl& url,int expected,bool html){
+            QNetworkReply* reply=manager.get(QNetworkRequest(url));
+            QEventLoop loop;QTimer timeout;timeout.setSingleShot(true);
+            QObject::connect(reply,&QNetworkReply::finished,&loop,&QEventLoop::quit);
+            QObject::connect(&timeout,&QTimer::timeout,&loop,&QEventLoop::quit);
+            timeout.start(5000);loop.exec();
+            const bool ok=timeout.isActive() && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()==expected && (!html || reply->readAll().contains("<!doctype html>"));
+            reply->abort();reply->deleteLater();return ok;
+        };
+        QUrl noCode=remote.url();noCode.setQuery(QString());
+        const bool ok=check(remote.url(),200,true) && check(noCode,403,false);
+        qInfo().noquote()<<"phone remote: self-check"<<(ok?"PASS":"FAIL");return ok?0:1;
+    }
     if(parser.isSet("check-update")) {
         const auto release=xmb::latestRelease();
         const QString current=app.applicationVersion();
@@ -1226,6 +1249,13 @@ int main(int argc,char** argv) {
     if(kiosk && !kioskScreen){qCritical()<<"kiosk: no screen is available";return 2;}
     QSettings windowSettings(QDir(data).filePath("settings.ini"),QSettings::IniFormat);
     QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);view->setGalleryRoots(parser.values("gallery-root"));window.setCentralWidget(view);window.resize(960,540);
+    auto* phoneRemote=new xmb::PhoneRemote(&app);
+    QObject::connect(phoneRemote,&xmb::PhoneRemote::keyRequested,view,[view](int key){view->replayKeyTap(key);},Qt::QueuedConnection);
+    QObject::connect(phoneRemote,&xmb::PhoneRemote::psRequested,view,[view]{view->replayPsTap();},Qt::QueuedConnection);
+    if(qEnvironmentVariable("XMB_PHONE_REMOTE")==QStringLiteral("1")) {
+        if(phoneRemote->setEnabled(true))qInfo().noquote()<<"phone remote: pairing code"<<phoneRemote->pairingCode()<<"URL"<<phoneRemote->url().toString();
+        else qCritical()<<"phone remote: bind failed"<<phoneRemote->errorString();
+    }
     // Kiosk starts at the XMB like a console that is already on: the cold-boot intro is a boot animation, not a
     // launcher screen, and an appliance should be usable the moment the window appears.
     view->setIntroEnabled(!parser.isSet("no-intro") && !parser.isSet("script") && !parser.isSet("background-clock") && !parser.isSet("measure-reference") && !kiosk && !xmb::diagnostics::safeMode());
