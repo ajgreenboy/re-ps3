@@ -10,6 +10,7 @@
 // Playback is Spotify's: this app sends the command and Spotify plays on the chosen device. Every refusal
 // (Premium required, no device, a playlist the API keeps closed) is shown with Spotify's own reason.
 #include "shell.h"
+#include "diagnostics.h"
 #include "assets.h"
 #include "glyphs.h"
 #include "service_icons.h"
@@ -58,7 +59,7 @@ void Shell::initSpotify() {
         spotifyArt_.insert(url,square);   // a null image is remembered too, so a failed cover is not refetched
         applySpotifyArt();emit changed();
     });
-    if(spotify_.configured())spotify_.restoreSession();
+    if(spotify_.configured() && !diagnostics::safeMode())spotify_.restoreSession();   // D6: no network in safe mode
     connect(&spotify_,&SpotifyClient::signedInChanged,this,[this]{
         // A sign-in that finished while the Spotify page is open fills it now.
         const bool rootOpen=std::any_of(pages_.begin(),pages_.end(),[](const Page& p){return p.spotify==QLatin1String("root");});

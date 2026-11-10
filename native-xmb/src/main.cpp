@@ -1,6 +1,7 @@
 #include "view.h"
 #include "updater.h"
 #include "desktop_mode.h"
+#include "diagnostics.h"
 #include "ps_watcher.h"
 #include <QApplication>
 #include <QCommandLineParser>
@@ -363,12 +364,12 @@ int runImageAudit(xmb::Assets& assets,const QString& outputPath) {
 
 int main(int argc,char** argv) {
 #ifdef Q_OS_WIN
-    SetUnhandledExceptionFilter(writeCrashStack);
+    // D6: minidump + text under <data>/crashes (the folder is set once --data-dir is parsed), then the symbolised stack below.
+    xmb::diagnostics::installCrashCapture([](void* info)->long{return writeCrashStack(static_cast<EXCEPTION_POINTERS*>(info));});
 #endif
-    // The Windows build has no console: XMB_LOG=<file> appends every Qt message to that file (local diagnosis).
-    if(qEnvironmentVariableIsSet("XMB_LOG"))qInstallMessageHandler([](QtMsgType,const QMessageLogContext&,const QString& message){
-        QFile file(qEnvironmentVariable("XMB_LOG"));if(file.open(QIODevice::Append|QIODevice::Text))file.write((message+'\n').toUtf8());
-    });
+    // The Windows build has no console: XMB_LOG=<file> appends every Qt message to that file (local diagnosis), rotated
+    // by size (5 MB, 3 old files kept); a qFatal also writes a crash capture (diagnostics.h).
+    xmb::diagnostics::installLogHandler();
     QSurfaceFormat format;format.setVersion(3,3);format.setProfile(QSurfaceFormat::CoreProfile);format.setSwapInterval(1);format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);app.setApplicationName("re-ps3-native");app.setApplicationVersion("0.2.0");QImageReader::setAllocationLimit(128);
     qInfo().noquote()<<QString("boot: QApplication ready after %1 ms").arg(processAgeMs(),0,'f',0);
@@ -435,6 +436,7 @@ int main(int argc,char** argv) {
     // ---- Single instance and commands (PHASES-HTPC D2, audit/DESKTOP-MODE.md) ----
     parser.addOption({"show","Bring the running XMB to the front (leaving Desktop Mode), or start it; a plain launch means the same"});
     parser.addOption({"desktop","Put the running XMB into Desktop Mode (hidden, process kept), or start it in Desktop Mode"});
+    parser.addOption({"safe","Safe mode (the watchdog passes it after repeated crashes): no network clients, no artwork or icon fetches, the default theme, no cold-boot intro; stored preferences are not changed"});
     parser.addOption({"quit","Ask the running XMB to exit with code 0 (the kiosk watchdog then stops) and exit; does nothing when none runs"});
     parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
     if(parser.isSet("check-update")) {
@@ -450,6 +452,7 @@ int main(int argc,char** argv) {
         std::printf("%s\n",line.toUtf8().constData());std::fflush(stdout);
         return error.isEmpty()?(newer?0:1):2;
     }
+    xmb::diagnostics::setSafeMode(parser.isSet("safe"));
     if(parser.isSet("raf-render")) {
         const QString spec=parser.value("raf-render");const int separator=spec.lastIndexOf('@');
         if(separator<=0 || separator==spec.size()-1){std::fprintf(stderr,"use --raf-render file@image.png\n");return 2;}
@@ -627,6 +630,8 @@ int main(int argc,char** argv) {
         return app.exec();
     }
     const QString data=parser.isSet("data-dir")?parser.value("data-dir"):QDir(QCoreApplication::applicationDirPath()).filePath("data");
+    xmb::diagnostics::setCrashDirectory(data);
+    if(xmb::diagnostics::safeMode())qWarning().noquote()<<"safe mode:"<<xmb::diagnostics::kSafeModeNotice;
     if(parser.isSet("steam-root"))qputenv("XMB_STEAM_ROOT",parser.value("steam-root").toUtf8());
     // ---- Single instance (PHASES-HTPC D2) ----
     // Only a real interactive or kiosk run takes part: every report mode, --script, the clock/render pins and the
@@ -636,7 +641,7 @@ int main(int argc,char** argv) {
     const bool commandGiven=parser.isSet("show") || parser.isSet("desktop") || parser.isSet("quit");
     {
         static const QStringList interactiveOptions{"dev-flash","dev-hdd0","vsh-modules","data-dir","no-intro","no-health-warning","kiosk",
-            "display","start-windowed","steam-root","gallery-root","gallery-sort","show","desktop","quit"};
+            "display","start-windowed","steam-root","gallery-root","gallery-sort","show","desktop","quit","safe"};
         bool interactive=parser.positionalArguments().isEmpty() && qEnvironmentVariable("XMB_INPUT_SCRIPT_ONLY")!=QLatin1String("1");
         for(const QString& name:parser.optionNames())if(!interactiveOptions.contains(name))interactive=false;
         if(commandGiven && !interactive){qCritical()<<"--show, --desktop and --quit belong to a plain interactive launch (no report, --script or capture options)";return 2;}
@@ -1223,8 +1228,8 @@ int main(int argc,char** argv) {
     QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);view->setGalleryRoots(parser.values("gallery-root"));window.setCentralWidget(view);window.resize(960,540);
     // Kiosk starts at the XMB like a console that is already on: the cold-boot intro is a boot animation, not a
     // launcher screen, and an appliance should be usable the moment the window appears.
-    view->setIntroEnabled(!parser.isSet("no-intro") && !parser.isSet("script") && !parser.isSet("background-clock") && !parser.isSet("measure-reference") && !kiosk);
-    view->setHealthWarningEnabled(!parser.isSet("no-health-warning") && windowSettings.value("boot/healthWarning",true).toBool());
+    view->setIntroEnabled(!parser.isSet("no-intro") && !parser.isSet("script") && !parser.isSet("background-clock") && !parser.isSet("measure-reference") && !kiosk && !xmb::diagnostics::safeMode());
+    view->setHealthWarningEnabled(!parser.isSet("no-health-warning") && !xmb::diagnostics::safeMode() && windowSettings.value("boot/healthWarning",true).toBool());
     if(parser.isSet("background-clock")) {
         const auto when=QDateTime::fromString(parser.value("background-clock"),Qt::ISODate);
         if(!when.isValid()){qCritical()<<"background-clock requires an ISO date/time";return 2;}
@@ -1339,6 +1344,10 @@ int main(int argc,char** argv) {
     // The Settings rows read the host snapshot from the paint path; take the first reading on a worker now so the
     // first Settings page does not pay for it (host::snapshot, ~145 ms cold).
     xmb::host::prefetchSnapshot();
+    xmb::diagnostics::armTestCrash();
+    // Safe mode says so on screen, through the ordinary notification pop-up, once the first frames are up.
+    if(xmb::diagnostics::safeMode())
+        QTimer::singleShot(2500,&shell,[&shell]{shell.notify(QObject::tr("Started in safe mode"),QObject::tr("after repeated errors"));});
     if(parser.isSet("script")) {
         // Local verification: replay key presses and save framebuffer grabs at the window's real resolution, e.g.
         // --script "full,wait,LEFT,DOWN,grab=C:/tmp/a.png,quit". One token every 300 ms.

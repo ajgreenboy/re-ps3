@@ -4,6 +4,7 @@
 //   Weather page               Now, Today, the next four days, and Units (Fahrenheit / Celsius)
 // The place comes from <data>/weather.json ({"place": "Chicago, IL"}): Open-Meteo, no key, never IP geolocation.
 #include "shell.h"
+#include "diagnostics.h"
 #include "glyphs.h"
 #include <QLocale>
 #include <QTimer>
@@ -103,6 +104,7 @@ void Shell::initWeather() {
         if(ok){qInfo().noquote()<<"weather: place resolved to"<<place;weather_.refresh();}
         else{weatherError_=message;refreshWeatherRows();emit changed();}
     });
+    if(diagnostics::safeMode()){qInfo()<<"weather: not refreshed in safe mode";return;}   // D6
     // A weather.json with only a place name is geocoded once (Open-Meteo), then stored with its coordinates.
     if(!weather_.configured() && !weather_.place().isEmpty())weather_.setPlace(weather_.place());
     if(!weather_.configured() && weather_.place().isEmpty())return;

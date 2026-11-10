@@ -8,6 +8,7 @@
 // The CLI is the only interface (tailscale.exe, argument arrays, bounded). Turning Tailscale off or choosing an
 // exit node changes this PC's network, so those happen only on the user's explicit choice on these pages.
 #include "shell.h"
+#include "diagnostics.h"
 #include "assets.h"
 #include "glyphs.h"
 #include "service_icons.h"
@@ -156,7 +157,7 @@ void Shell::initTailscale() {
         tailscale_.refresh();
         emit changed();
     });
-    if(tailscale_.installed())tailscale_.refresh();
+    if(tailscale_.installed() && !diagnostics::safeMode())tailscale_.refresh();   // D6: no network in safe mode
 }
 
 bool Shell::activateTailscale(const Entry& entry) {

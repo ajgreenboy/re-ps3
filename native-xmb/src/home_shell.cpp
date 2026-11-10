@@ -7,6 +7,7 @@
 //   Home Assistant         rooms (HA areas) or kinds as folders; scenes and scripts run, lights / switches / fans /
 //                          input booleans toggle, media players play/pause, sensors and climate show their state
 #include "shell.h"
+#include "diagnostics.h"
 #include "assets.h"
 #include "glyphs.h"
 #include "service_icons.h"
@@ -183,7 +184,7 @@ void Shell::initHome() {
     });
 
     ha_.configure(dataDirectory_);
-    if(ha_.configured())
+    if(ha_.configured() && !diagnostics::safeMode())
         serviceIcons::loadHomeAssistant(dlnaNetwork_,ha_.baseUrl(),QDir(dataDirectory_).filePath("homeassistant/server-icon.png"),
                                         [this]{refreshHaPages();emit changed();});
     connect(&ha_,&HomeAssistantClient::statesReady,this,[this](quint64 request,const QVector<HaEntity>& entities){

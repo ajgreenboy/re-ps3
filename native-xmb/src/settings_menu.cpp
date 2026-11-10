@@ -3,6 +3,7 @@
 #include "assets.h"
 #include "host.h"
 #include "autostart.h"
+#include "diagnostics.h"
 #include "p3t.h"
 #include "xmbml_view.h"
 #include "rco_objects.h"
@@ -425,7 +426,10 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
         // logon task packaging/install-autostart.ps1 makes (same name, action and settings: the row runs that script);
         // Off removes it. Unavailable, with the reason, when no watchdog.ps1 sits beside the exe (a dev build).
         {"start_at_signin",nullptr,nullptr,Action::SettingChoices,"host/startAtSignIn",nullptr,"Start at Sign-in",
-            "Starts the XMB full-screen with its crash watchdog when this Windows account signs in. Turns the scheduled task on or off for this account only; Windows automatic sign-in is a separate step you set yourself."}};
+            "Starts the XMB full-screen with its crash watchdog when this Windows account signs in. Turns the scheduled task on or off for this account only; Windows automatic sign-in is a separate step you set yourself."},
+        // INFERRED (PHASES-HTPC D6): the firmware has no such row. Read-only page: the last crash, safe or normal run, the log folder.
+        {"diagnostics",nullptr,nullptr,Action::Information,nullptr,nullptr,"Diagnostics",
+            "Shows the last crash (time and code), whether this run is safe mode, and where the logs and crash files are kept."}};
     if(id=="system")return &system;
     // Desktop Mode (PHASES-HTPC D1; audit/DESKTOP-MODE.md): this build's own settings, so native-only rows at the end of
     // the Power Saving page. Both keys are also settable in preferences.json.
@@ -1596,6 +1600,8 @@ QString settingsRowBody(const Entry& row,Assets& assets,const QString& renderer,
     // composed from the explanation (its payload is empty, and the report must show the same page).
     if(row.settingsPage==QLatin1String("system") && row.id==QLatin1String("information"))
         body=host::systemInformation(renderer,label,systemName);
+    if(row.settingsPage==QLatin1String("system") && row.id==QLatin1String("diagnostics"))
+        body=diagnostics::pageText();
     if(body.isEmpty())body=host::rowDetail(row.settingsPage,row.id);
     if(body.isEmpty()) {
         // The host layer has no page of its own for this row: its title, the firmware's explanation of what

@@ -70,9 +70,25 @@ listed as unavailable and says why. The row is this build's own (the console has
 - exits cleanly itself when the app quits with code **0** (a deliberate quit);
 - restarts after **3 s** when the app crashes (a non-zero exit that survived past `-MinUptimeSeconds`);
 - gives up after **5** consecutive runs that exit with a usage error (code 2) or in under 5 s, so a
-  bad `dev_flash` path or missing config never spins.
+  bad `dev_flash` path or missing config never spins;
+- starts the XMB with **`--safe`** after **2** crashes in a row within **5 minutes** (`-SafeAfterCrashes`,
+  `-CrashWindowSeconds`), and goes back to normal after a safe run that lasts **60 s** or more (`-StableSeconds`; a
+  normal run that long also clears the crash streak). A safe start that fails fast counts toward the same
+  5-rapid-failures give-up above. See `audit/SAFE-MODE.md`.
 
-The log is `watchdog.log` next to the exe. In kiosk mode "Turn Off the System" shuts Windows down, so the
+The log is `watchdog.log` next to the exe; it rotates at 5 MB keeping 3 old copies (`.1` to `.3`), and every decision
+(start mode, exit, crash count, switch to safe mode, return to normal, give-up) is a line in it. The app's own log is
+pointed at `<data>\logs\xmb.log` (rotated the same way) unless `XMB_LOG` is already set.
+
+### Safe mode and crash files
+
+`re-ps3-native.exe --safe` skips the network clients (Spotify, Jellyfin, DLNA, Tailscale, Home Assistant, Weather, Steam
+Store), the Steam/RAWG artwork and site-icon fetches, the theme and the boot intro, and says "Started in safe mode after
+repeated errors" in a notification and on System Information. Nothing stored changes. A crash writes a minidump and a
+short text file (time, build, exception code, faulting module and offset) to `<data>\crashes\`, newest 5 kept; nothing is
+ever uploaded. Settings > System Settings > Diagnostics shows the last crash, the run mode and the log folder.
+
+In kiosk mode "Turn Off the System" shuts Windows down, so the
 watchdog never sees it - the machine powers off and the loop dies with it.
 
 ## Windows automatic sign-in (your own step)

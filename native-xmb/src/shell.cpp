@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "diagnostics.h"
 #include "notify_overlay.h"
 #include "glyphs.h"
 #include "service_icons.h"
@@ -901,7 +902,7 @@ void Shell::openSteamFolder(const QString& mode) {
         QStringList missing;
         for(const auto& e:page.entries)
             if(e.action!=Action::SteamFolder && e.artwork.isNull())missing.push_back(e.value);
-        if(!missing.isEmpty() && qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0")steamArtwork_->refresh(missing);
+        if(!missing.isEmpty() && qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0" && !diagnostics::safeMode())steamArtwork_->refresh(missing);
     }
     // Verification hook: a folder open writes its own row list next to the catalogue dump.
     if(qEnvironmentVariableIsSet("XMB_DUMP_ENTRIES")) {
@@ -1165,7 +1166,7 @@ void Shell::refreshContent() {
                     // Spotify's web player wears the installed Spotify client's own icon (the site only declares 48 px).
                     if(site.host().endsWith(QLatin1String("spotify.com"))){e.artwork=serviceIcons::spotify();e.iconSized=true;}
                     else if(!serviceIcons::siteIcon(site).isNull()){e.artwork=serviceIcons::siteIcon(site);e.iconSized=true;}
-                    else serviceIcons::loadSiteIcon(dlnaNetwork_,site,QDir(dataDirectory_).filePath("cache/site-icons"),[this]{
+                    else if(!diagnostics::safeMode())serviceIcons::loadSiteIcon(dlnaNetwork_,site,QDir(dataDirectory_).filePath("cache/site-icons"),[this]{
                         for(auto& column:categories_)for(auto& row:column.entries)
                             if(row.action==Action::OpenUrl && row.artwork.isNull() && !serviceIcons::siteIcon(QUrl(row.value)).isNull()) {
                                 row.artwork=serviceIcons::siteIcon(QUrl(row.value));row.iconSized=true;
@@ -1176,7 +1177,7 @@ void Shell::refreshContent() {
                 if(app.kind=="jellyfin" && e.artwork.isNull()) {
                     e.artwork=serviceIcons::jellyfin();e.iconSized=true;
                     // The server's own icon, once: cached under the data folder, then fetched from the server.
-                    serviceIcons::loadJellyfin(dlnaNetwork_,QUrl(app.url),QDir(dataDirectory_).filePath("jellyfin/server-icon.png"),[this]{
+                    if(!diagnostics::safeMode())serviceIcons::loadJellyfin(dlnaNetwork_,QUrl(app.url),QDir(dataDirectory_).filePath("jellyfin/server-icon.png"),[this]{
                         for(auto& column:categories_)for(auto& row:column.entries)
                             if(row.action==Action::JellyfinApp && row.iconSized)row.artwork=serviceIcons::jellyfin();
                         emit changed();
@@ -1203,14 +1204,14 @@ void Shell::refreshContent() {
         }
         for(auto it=rawgArtworkPaths_.begin();it!=rawgArtworkPaths_.end();)
             if(!liveRawgIds.contains(it.key()))it=rawgArtworkPaths_.erase(it);else ++it;
-        rawgArtwork_->refresh(rawgTargets);
+        if(!diagnostics::safeMode())rawgArtwork_->refresh(rawgTargets);   // D6: safe mode fetches no artwork
         if(accountChanged){steamFriendList_.clear();friendsAge_.invalidate();rebuildFriends();}
-        if(SteamFriends::available())refreshSteamFriends(false,accountChanged);
-        if(stageOwnedForRefresh())refreshOwnedGames();
+        if(SteamFriends::available() && !diagnostics::safeMode())refreshSteamFriends(false,accountChanged);
+        if(stageOwnedForRefresh() && !diagnostics::safeMode())refreshOwnedGames();
         QStringList missingArt;
         for(const auto& category:categories_)for(const auto& e:category.entries)
             if(e.id.startsWith("steam:") && e.artwork.isNull())missingArt.push_back(e.value);
-        if(qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0")steamArtwork_->refresh(missingArt);
+        if(qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0" && !diagnostics::safeMode())steamArtwork_->refresh(missingArt);
         qInfo()<<"content: Steam installed"<<result.steam.games.size()<<"imported apps"<<contentApps_.size()<<"warnings"<<result.steam.warnings.size();
         // Verification hook: dump the rebuilt catalogue so scripted runs can be checked without
         // reading pixels (XMB_DUMP_ENTRIES=<json file>).
@@ -1596,7 +1597,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         emit changed();
     });
     connect(&steamRefresh_,&QTimer::timeout,this,[this]{
-        if(categories_[category_].id=="friends" && SteamFriends::available())refreshSteamFriends();
+        if(categories_[category_].id=="friends" && SteamFriends::available() && !diagnostics::safeMode())refreshSteamFriends();
     });
     steamRefresh_.start(60000);
     steamWatch_.setInterval(1000);
@@ -2021,6 +2022,28 @@ void Shell::activate() {
             emit changed();
             return;
         default:break;
+        }
+    }
+    // D6: safe mode starts no network client. The rows stay (the columns look the same) and say why they do nothing.
+    if(diagnostics::safeMode()) {
+        bool network=false;
+        switch(entry.action) {
+        case Action::JellyfinApp:case Action::JellyfinFolder:case Action::JellyfinPlay:case Action::JellyfinMore:case Action::JellyfinSearch:
+        case Action::SpotifyApp:case Action::SpotifySignIn:case Action::SpotifySignOut:case Action::SpotifyNowPlaying:
+        case Action::SpotifyLiked:case Action::SpotifyPlaylist:case Action::SpotifyTrack:case Action::SpotifyDevice:
+        case Action::DlnaScan:case Action::DlnaServer:case Action::DlnaFolder:case Action::DlnaPhoto:
+        case Action::TailscaleApp:case Action::TailscaleToggle:case Action::TailscaleExitNodes:case Action::TailscaleExitNode:case Action::TailscalePeer:
+        case Action::WolApp:case Action::WolWake:case Action::WolAddPage:case Action::WolAdd:
+        case Action::HaApp:case Action::HaGroup:case Action::HaEntity:
+        case Action::WeatherApp:case Action::WeatherUnits:case Action::SteamStoreBrowse:case Action::SteamStoreSection:
+            network=true;break;
+        default:break;
+        }
+        if(network) {
+            qInfo().noquote()<<"safe mode: network action refused:"<<entry.title;
+            showMessage(entry.title,QObject::tr("Not available in safe mode. Restart the XMB normally to use it."),MessageKind::Page);
+            emit changed();
+            return;
         }
     }
         switch(entry.action) {
@@ -4874,7 +4897,8 @@ void Shell::syncTvColumn() {
         "reachable until it is shown again").arg(int(categories_.size()));
 }
 void Shell::loadTheme() {
-    const auto path=preferences_.value("appearance/theme").toString();
+    // D6: safe mode draws the default theme; the stored choice is untouched and applies again on a normal start.
+    const auto path=diagnostics::safeMode()?QString{}:preferences_.value("appearance/theme").toString();
     if(path==theme_.path)return;
     theme_={};theme_.path=path; // a theme that can't be read stays chosen and shows the system's own pieces
     interactionAudio_.setThemeSounds({}); // switching to Original or a failed theme clears previous overrides
@@ -5607,7 +5631,7 @@ QString Shell::focusedBackgroundPath() {
     if(const auto rawg=rawgArtworkPaths_.value(entry.id);!rawg.isEmpty())return rawg;
     const QString cached=SteamArtwork::heroCachePath(QDir(dataDirectory_).filePath(QStringLiteral("cache/steam")),appId);
     if(QFileInfo::exists(cached))return cached;
-    if(qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0")steamArtwork_->requestHero(appId);
+    if(qEnvironmentVariable("XMB_STEAM_ARTWORK")!="0" && !diagnostics::safeMode())steamArtwork_->requestHero(appId);
     return {};
 }
 void Shell::openJellyfinSignInPage(QUrl server) {
