@@ -28,5 +28,12 @@ try {
     Move-Item -LiteralPath $old -Destination $install
     throw
 }
+# The user's config and data live next to the exe by default; carry them over so an update never loses them.
+foreach($keep in 'xmb-config.json','data') {
+    $src = Join-Path $old $keep
+    if(Test-Path -LiteralPath $src) {
+        Copy-Item -LiteralPath $src -Destination (Join-Path $install $keep) -Recurse -Force
+    }
+}
 Remove-Item -LiteralPath $markerPath -Force
 Write-Host "applied $staged; previous installation kept at $old"
