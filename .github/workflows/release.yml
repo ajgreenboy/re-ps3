@@ -1,0 +1,56 @@
+name: Release
+
+# Builds the app and the standalone updater from the full source tree and publishes the artifacts to a
+# GitHub release. Trigger on a `v*` tag (or run manually). Everything is compiled here from source; no
+# binaries are committed to the repository.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the full source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Qt 6.8 (MSVC 2022 64-bit)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.1'
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: Build the app and the updater
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH"
+          .\native-xmb\build.ps1 -OutputDirectory C:\release\out -QtRoot "$env:QT_ROOT_DIR"
+
+      - name: Package the app
+        shell: pwsh
+        run: |
+          .\native-xmb\packaging\build-package.ps1 -OutputDirectory C:\release\out -PackageDirectory C:\release\dist\re-ps3 -Zip
+
+      - name: Package the updater (exe + its Qt DLLs)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path C:\release\dist\xmb-updater -Force | Out-Null
+          Copy-Item C:\release\out\xmb-updater.exe C:\release\dist\xmb-updater\
+          & (Join-Path "$env:QT_ROOT_DIR" 'bin\windeployqt.exe') --release --no-translations --no-compiler-runtime C:\release\dist\xmb-updater\xmb-updater.exe
+          Compress-Archive -Path C:\release\dist\xmb-updater\* -DestinationPath C:\release\dist\xmb-updater.zip
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            C:\release\dist\re-ps3.zip
+            C:\release\dist\xmb-updater.zip
+          generate_release_notes: true
