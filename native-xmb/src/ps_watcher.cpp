@@ -1,4 +1,5 @@
 #include "ps_watcher.h"
+#include "render_gate.h"
 #include "pad.h"
 #include <QApplication>
 #include <QDateTime>
@@ -151,7 +152,7 @@ QString foregroundName(){return QStringLiteral("n/a");}
 #endif
 }
 
-bool renderPaused(){return g_renderPaused || g_desktopPaused;}
+bool renderPaused(){return g_renderPaused || g_desktopPaused || renderGateClosed();}
 void setDesktopRenderPause(bool paused){g_desktopPaused=paused;}
 
 TitleSession::TitleSession(QWidget* window,QWidget* view,Hooks hooks,QObject* parent)

@@ -36,6 +36,8 @@
 #include <QSet>
 #include <QScopedValueRollback>
 #include <QWindow>
+#include "idle_profile.h"
+#include "uniform_cache.h"
 #include <algorithm>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -46,6 +48,8 @@
 
 namespace xmb {
 namespace {
+using ProfScope=idleprofile::Scope;
+const bool& g_profOn=idleprofile::enabled;
 #ifdef Q_OS_WIN
 // The window manager's own answer to "who is in front"; Qt's activeWindow follows the same foreground
 // window but lags a focus change by an event hop, and the log wants the pre-raise owner precisely.
@@ -123,6 +127,7 @@ private:
 bool volumeTrace() { static const bool on=qEnvironmentVariableIsSet("XMB_VOLUME_LOG");return on; }
 }
 View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),shell_(shell),assets_(assets) {
+    idleprofile::startSampler();
     liveCaptureTimer_.setSingleShot(true);
     liveCaptureTimer_.setTimerType(Qt::PreciseTimer);
     connect(&liveCaptureTimer_,&QTimer::timeout,this,&View::captureLiveFrame);
@@ -449,6 +454,7 @@ View::~View(){
 #endif
     saveFrameTrace();if(context()){makeCurrent();gallery_.reset();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
+    uniformcache::invalidate();
     if(!initializeOpenGLFunctions()){qCritical()<<"Native renderer requires OpenGL 3.3";return;}
     textRenderer_.init(*this,QDir(assets_.root()).filePath("data/font"));
     static const char* vertex=R"(#version 330 core
@@ -609,8 +615,8 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
             time.day=float(dayCurve(t,bootSpread+(kDaySpread-bootSpread)*backgroundToClock_));
         }
         presetBlend=float(std::clamp((time.nightDayBlend-(1.-kNightBlend))/kNightBlend,0.,1.));
-        renderOriginalBackground(time,pixelWidth,pixelHeight);
-        if(originalRibbon)ribbon_.render(*this,seconds,when.time().msecsSinceStartOfDay()/86400000.,pixelWidth,pixelHeight,scene);
+        {ProfScope prof("origBackground");renderOriginalBackground(time,pixelWidth,pixelHeight);}
+        {ProfScope prof("ribbon");if(originalRibbon)ribbon_.render(*this,seconds,when.time().msecsSinceStartOfDay()/86400000.,pixelWidth,pixelHeight,scene);}
     }
     glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);
     if(original){glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE);} else glDisable(GL_BLEND);
@@ -647,6 +653,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     // Particles belong to the HDR scene: the firmware draws particles_quads before the tone map and its
     // radial halo into the glare source (audit/PARTICLES.md), so dust picks up the tone map and the glare.
     if(originalParticles) {
+        ProfScope profParticles("particles");
         // The emitter grid: the ribbon's 128 x 128 sheet in the particle world with each point's velocity (FUN_0002b288).
         int side=0;std::vector<QVector3D> sheet,motion;ribbon_.sheetMotion(sheet,motion,side);
         particles_.setEmitter(std::move(sheet),std::move(motion),side);
@@ -655,6 +662,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
         glBindFramebuffer(GL_FRAMEBUFFER,GLuint(scene)); particles_.render(*this,seconds,pixelWidth,pixelHeight);
     }
     if(hdr)hdr_.setNoiseClock(seconds);
+    ProfScope profHdr("hdr finish");
     if(hdr)hdr_.finish(*this,presetBlend,GLuint(target),[this,seconds,originalParticles](int width,int height){
         // Second firmware pass: the same dust drawn into the glare source so the mip blur blooms it
         // (particles_second). Re-running the sim for the same `seconds` advances no steps.
@@ -883,6 +891,16 @@ bool View::measureReference(const QString& path) {
     return out.status()==QTextStream::Ok;
 }
 void View::paintGL() {
+    ProfScope profPaint("paintGL total");
+    if(g_profOn) {
+        static QElapsedTimer window;
+        if(!window.isValid())window.start();
+        if(window.elapsed()>=5000) {
+            QString line=QStringLiteral("idle-profile (5 s):");
+            for(int i=0;i<idleprofile::slotCount;++i){line+=QString(" | %1 %2 ms/s (%3 calls)").arg(idleprofile::table[i].name).arg(idleprofile::table[i].ns/1e6/(window.elapsed()/1000.),0,'f',1).arg(idleprofile::table[i].calls);idleprofile::table[i].ns=0;idleprofile::table[i].calls=0;}
+            qInfo().noquote()<<line;window.restart();
+        }
+    }
     const qint64 frameStart=frameTracePath_.isEmpty()?0:clock_.nsecsElapsed();
     const qint64 nowNs=clock_.nsecsElapsed(),now=nowNs/1000000;
     const double dt=std::clamp(double(nowNs-previousFrameNs_)/1.e9,0.,.1);previousFrameNs_=nowNs;
@@ -1037,9 +1055,9 @@ void View::paintGL() {
     else if(!inGameBackdrop_.isNull()){stopLiveCapture();inGameBackdrop_=QImage();}
     if(glReady_ && !shell_.inGame()) {
         const auto time=QTime::currentTime();
-        renderBackground(float(renderSeconds),float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
-            int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
-        coldboot_.render(*this,int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()),defaultFramebufferObject());
+        {ProfScope prof("renderBackground");renderBackground(float(renderSeconds),float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
+            int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));}
+        {ProfScope prof("coldboot render");coldboot_.render(*this,int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()),defaultFramebufferObject());}
     }
     if(introRunning()){grabIntroFrame();++frames_;return;}
     // UI layer on the GPU: Qt's OpenGL paint engine draws into a 4x multisampled framebuffer at twice the window size;
@@ -1147,6 +1165,7 @@ void View::paintGL() {
         rebuild=true;
     }
     if(rebuild) {
+        ProfScope profUi("ui rebuild");
         uiSignature_=signature;
         uiMsaa_->bind();glViewport(0,0,pixels.width(),pixels.height());glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
         // Glyphs are rasterised for the layer's own scale (twice the window): at the window's scale they were
@@ -1170,7 +1189,7 @@ void View::paintGL() {
     const bool screensaver=shell_.screensaverMinutes()>0 && shell_.idleDisplayAllowed()
         && shell_.idleMilliseconds()>qint64(shell_.screensaverMinutes())*60000;
     icons_.setColourScale(screensaver?.2f:1.f);
-    if(glReady_ && icons_.ready())icons_.render(*this,iconQueue_,renderSeconds,presetBlend_,device.width(),device.height(),defaultFramebufferObject());
+    {ProfScope prof("icons");if(glReady_ && icons_.ready())icons_.render(*this,iconQueue_,renderSeconds,presetBlend_,device.width(),device.height(),defaultFramebufferObject());}
     iconNs_=clock_.nsecsElapsed()-iconStart;
     // Composite (premultiplied alpha) over the background in the widget's framebuffer.
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());

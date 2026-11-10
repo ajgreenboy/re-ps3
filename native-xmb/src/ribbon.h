@@ -104,6 +104,17 @@ private:
     GLuint vao_=0,vbo_=0,ibo_=0,emptyVao_=0;
     GLsizei indexCount_=0;
     std::array<float,4*128> fieldPixels_{};
+    // The FFD shader's only per-frame input is the cloth's wave clock, which moves on a cloth step (60 Hz), not on every
+    // drawn frame: the read-back (a GPU sync) is redone only when it changed. D12, audit/IDLE-COST.md.
+    float fieldTime_=0;bool fieldValid_=false;
+    // The read-back of the next cloth step's field is started one step early into a pixel buffer, so the step that needs
+    // it finds it finished instead of stalling the CPU on the GPU (D12). The values are the same shader's, bit for bit.
+    GLuint fieldPbo_=0;GLsync fieldFence_=nullptr;float fieldPrefetchTime_=0;bool fieldPrefetched_=false;
+    void drawField(QOpenGLFunctions_3_3_Core& gl,float time);
+    // The lines program's constant banks, rebuilt only when a preset value they carry moves (D12).
+    std::array<float,5> linesKey_{};bool linesValid_=false;
+    std::vector<QVector4D> linesVc_;QVector<QVector4D> linesFc_;
+    float lodBias_=0;bool lodBiasValid_=false;
     std::array<QVector4D,539> deform_{};
     std::array<QVector4D,points_> clipLattice_{};
     std::vector<float> vertices_;

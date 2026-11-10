@@ -1,6 +1,8 @@
 #include "ribbon.h"
 #include "particles.h"      // sceneMaterials(): the shared run-time reader
 #include "rco_objects.h"
+#include "idle_profile.h"
+#include "uniform_cache.h"
 #include <algorithm>
 #include <cmath>
 #include <QDebug>
@@ -10,6 +12,16 @@
 #include <QMatrix4x4>
 #include <QtEndian>
 #include <cstring>
+#include <immintrin.h>
+#ifdef Q_OS_WIN
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace xmb {
 namespace {
@@ -372,6 +384,7 @@ void main(){
             cloth_.target=saved;
         }
     }
+    fieldValid_=false;fieldPrefetched_=false;fieldFence_=nullptr;fieldPbo_=0;lodBiasValid_=false;linesValid_=false; // GL objects were just (re)created: nothing cached applies to them
     ready_=true;
     qInfo()<<"ribbon: ffd_shader1"<<ffdCg_.instructionCount<<"+ lines1"<<linesVertexCg_.instructionCount<<"/"<<linesFragmentCg_.instructionCount
            <<"instructions, FresLUT"<<lut.size()<<(fromTables?"cloth from plugin preset 1":"cloth from a settled flat grid (no --vsh-modules)");
@@ -380,14 +393,51 @@ void main(){
 
 // FUN_0004a220 / FUN_00047b1c: ffd_shader1 over the node grid at _Time = 10 x the cloth's wave clock, read back,
 // scaled by FFD SCALE1 plus FFD OFFSET, and padded to 11x7x7 (index clamp(x-1,0,7), clamp(y-1,0,3), clamp(z-1,0,3)).
-void Ribbon::deformLattice(QOpenGLFunctions_3_3_Core& gl,const Preset& p) {
+void Ribbon::drawField(QOpenGLFunctions_3_3_Core& gl,float time) {
     QVector<QVector4D> fc=ffdCg_.constants;
-    for(int slot:ffdCg_.parameters.value("_Time").constantSlots)if(slot<fc.size())fc[slot]=QVector4D(1,1,1,1)*(cloth_.target*10);
+    for(int slot:ffdCg_.parameters.value("_Time").constantSlots)if(slot<fc.size())fc[slot]=QVector4D(1,1,1,1)*time;
     field_->bind();gl.glViewport(0,0,128,1);gl.glDisable(GL_BLEND);
-    ffd_.bind();ffd_.setUniformValueArray("fc",fc.constData(),fc.size());ffd_.setUniformValue("tex0",0);uvw_->bind(0);
+    ffd_.bind();uniformcache::setVec4Array(ffd_,"fc",fc);uniformcache::set(ffd_,"tex0",0);uvw_->bind(0);
     gl.glBindVertexArray(emptyVao_);gl.glDrawArrays(GL_TRIANGLES,0,3);
-    gl.glReadPixels(0,0,128,1,GL_RGBA,GL_FLOAT,fieldPixels_.data());
-    uvw_->release(0);ffd_.release();
+}
+
+void Ribbon::deformLattice(QOpenGLFunctions_3_3_Core& gl,const Preset& p) {
+    const float time=cloth_.target*10;
+    if(!fieldValid_ || time!=fieldTime_) {
+        bool have=false;
+        if(fieldPrefetched_ && fieldPrefetchTime_==time && fieldFence_) {
+            // The field for exactly this clock value was drawn and queued for read-back a step ago.
+            gl.glClientWaitSync(fieldFence_,GL_SYNC_FLUSH_COMMANDS_BIT,1000000000ull);
+            gl.glBindBuffer(GL_PIXEL_PACK_BUFFER,fieldPbo_);
+            gl.glGetBufferSubData(GL_PIXEL_PACK_BUFFER,0,GLsizeiptr(fieldPixels_.size()*sizeof(float)),fieldPixels_.data());
+            gl.glBindBuffer(GL_PIXEL_PACK_BUFFER,0);
+            have=true;
+        }
+        if(fieldFence_){gl.glDeleteSync(fieldFence_);fieldFence_=nullptr;}
+        fieldPrefetched_=false;
+        if(!have) { // first use, a pinned clock, or a preset whose time step moved the prediction: the synchronous read
+            drawField(gl,time);
+            gl.glReadPixels(0,0,128,1,GL_RGBA,GL_FLOAT,fieldPixels_.data());
+            uvw_->release(0);ffd_.release();
+        }
+        fieldTime_=time;fieldValid_=true;
+        // Start the next step's field now: a cloth step adds TIMESTEP x 1e-4 to the clock (Cloth::step) and wraps it past 10.
+        float next=cloth_.target+p.timestep*1e-4f;
+        if(next>10)next=0;
+        const float nextTime=next*10;
+        static const bool prefetchEnabled=qEnvironmentVariable("XMB_RIBBON_NO_PREFETCH")!=QStringLiteral("1");
+        if(nextTime!=time && prefetchEnabled) {
+            if(!fieldPbo_){gl.glGenBuffers(1,&fieldPbo_);}
+            gl.glBindBuffer(GL_PIXEL_PACK_BUFFER,fieldPbo_);
+            gl.glBufferData(GL_PIXEL_PACK_BUFFER,GLsizeiptr(fieldPixels_.size()*sizeof(float)),nullptr,GL_STREAM_READ);
+            drawField(gl,nextTime);
+            gl.glReadPixels(0,0,128,1,GL_RGBA,GL_FLOAT,nullptr);   // into the bound pixel buffer: queued, not waited for
+            gl.glBindBuffer(GL_PIXEL_PACK_BUFFER,0);
+            uvw_->release(0);ffd_.release();
+            fieldFence_=gl.glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE,0);
+            fieldPrefetchTime_=nextTime;fieldPrefetched_=true;
+        }
+    }
     for(int z=0;z<7;++z)for(int y=0;y<7;++y)for(int x=0;x<11;++x) {
         const int node=(std::clamp(z-1,0,3)*4+std::clamp(y-1,0,3))*8+std::clamp(x-1,0,7);
         const float* f=&fieldPixels_[size_t(node)*4];
@@ -417,16 +467,79 @@ void Ribbon::splineSheet(const Preset& p,float aspect) {
     }
     std::array<int,grid_> segment{};std::array<std::array<float,4>,grid_> value{},slope{};
     for(int k=0;k<grid_;++k){segment[size_t(k)]=k/8;const float t=float(k%8)*16/127.f;value[size_t(k)]=basis(t);slope[size_t(k)]=basisDerivative(t);}
-    for(int r=0;r<grid_;++r)for(int c=0;c<grid_;++c) {
-        QVector4D position,du,dv;
-        const auto &bv=value[size_t(r)],&dvw=slope[size_t(r)],&bu=value[size_t(c)],&duw=slope[size_t(c)];
+    // The 16 weight products of a sample depend only on (r % 8, c % 8), so they are formed once, with the very same float
+    // products the per-sample form used; the accumulation below is the same ordered mul/add per lane (SSE, no FMA), so the
+    // vertices are bit-identical to the QVector4D loop it replaces (D12, checked with XMB_RIBBON_CLIP_DUMP).
+    struct PatchWeights { float position[16],du[16],dv[16]; };
+    static_assert(sizeof(QVector4D)==4*sizeof(float));
+    std::array<std::array<PatchWeights,8>,8> weights;
+    for(int rm=0;rm<8;++rm)for(int cm=0;cm<8;++cm) {
+        const auto &bv=value[size_t(rm)],&dvw=slope[size_t(rm)],&bu=value[size_t(cm)],&duw=slope[size_t(cm)];
+        PatchWeights& w=weights[size_t(rm)][size_t(cm)];
         for(int a=0;a<4;++a)for(int b=0;b<4;++b) {
-            const QVector4D& q=clipLattice_[size_t((segment[size_t(r)]+a)*side_+segment[size_t(c)]+b)];
-            position+=q*(bv[size_t(a)]*bu[size_t(b)]);du+=q*(bv[size_t(a)]*duw[size_t(b)]);dv+=q*(dvw[size_t(a)]*bu[size_t(b)]);
+            w.position[a*4+b]=bv[size_t(a)]*bu[size_t(b)];w.du[a*4+b]=bv[size_t(a)]*duw[size_t(b)];w.dv[a*4+b]=dvw[size_t(a)]*bu[size_t(b)];
         }
-        const QVector3D normal=QVector3D::crossProduct(dv.toVector3D(),du.toVector3D());
+    }
+    // AVX: the eight columns of a patch row are eight lanes. Each lane runs the same ordered multiply/add chain as the
+    // scalar form (no FMA, no reassociation), so the result is bit-identical; it is four times fewer instructions.
+    static const bool avx=[]{
+#ifdef Q_OS_WIN
+        return IsProcessorFeaturePresent(PF_AVX_INSTRUCTIONS_AVAILABLE)!=0 && qEnvironmentVariable("XMB_RIBBON_NO_AVX")!=QStringLiteral("1");
+#else
+        return false;
+#endif
+    }();
+    if(avx) {
+        alignas(32) static thread_local float lanePosition[8][16][8],laneDu[8][16][8],laneDv[8][16][8]; // [r % 8][a*4+b][c % 8]
+        for(int rm=0;rm<8;++rm)for(int cm=0;cm<8;++cm)for(int ab=0;ab<16;++ab) {
+            const PatchWeights& w=weights[size_t(rm)][size_t(cm)];
+            lanePosition[rm][ab][cm]=w.position[ab];laneDu[rm][ab][cm]=w.du[ab];laneDv[rm][ab][cm]=w.dv[ab];
+        }
+        for(int r=0;r<grid_;++r) {
+            const int rm=r%8,patchRow=segment[size_t(r)];
+            for(int patchColumn=0;patchColumn<grid_/8;++patchColumn) {
+                const QVector4D* patch=&clipLattice_[size_t(patchRow*side_+patchColumn)];
+                __m256 position[4],du[4],dv[4];
+                for(int k=0;k<4;++k)position[k]=du[k]=dv[k]=_mm256_setzero_ps();
+                for(int a=0;a<4;++a)for(int b=0;b<4;++b) {
+                    const int ab=a*4+b;
+                    const float* q=reinterpret_cast<const float*>(patch+a*side_+b);
+                    const __m256 wp=_mm256_load_ps(lanePosition[rm][ab]),wu=_mm256_load_ps(laneDu[rm][ab]),wv=_mm256_load_ps(laneDv[rm][ab]);
+                    for(int k=0;k<4;++k) {
+                        const __m256 component=_mm256_set1_ps(q[k]);
+                        position[k]=_mm256_add_ps(position[k],_mm256_mul_ps(component,wp));
+                        du[k]=_mm256_add_ps(du[k],_mm256_mul_ps(component,wu));
+                        dv[k]=_mm256_add_ps(dv[k],_mm256_mul_ps(component,wv));
+                    }
+                }
+                alignas(32) float outPosition[4][8],outDu[4][8],outDv[4][8];
+                for(int k=0;k<4;++k){_mm256_store_ps(outPosition[k],position[k]);_mm256_store_ps(outDu[k],du[k]);_mm256_store_ps(outDv[k],dv[k]);}
+                for(int lane=0;lane<8;++lane) {
+                    const QVector3D normal=QVector3D::crossProduct(QVector3D(outDv[0][lane],outDv[1][lane],outDv[2][lane]),QVector3D(outDu[0][lane],outDu[1][lane],outDu[2][lane]));
+                    float* v=&vertices_[(size_t(r)*grid_+size_t(patchColumn*8+lane))*12];
+                    v[0]=outPosition[0][lane];v[1]=outPosition[1][lane];v[2]=outPosition[2][lane];v[3]=outPosition[3][lane];
+                    v[8]=normal.x();v[9]=normal.y();v[10]=normal.z();v[11]=0;
+                }
+            }
+        }
+        _mm256_zeroupper();
+        return;
+    }
+    for(int r=0;r<grid_;++r)for(int c=0;c<grid_;++c) {
+        const PatchWeights& w=weights[size_t(r%8)][size_t(c%8)];
+        const QVector4D* patch=&clipLattice_[size_t(segment[size_t(r)]*side_+segment[size_t(c)])];
+        __m128 position=_mm_setzero_ps(),du=_mm_setzero_ps(),dv=_mm_setzero_ps();
+        for(int a=0;a<4;++a)for(int b=0;b<4;++b) {
+            const __m128 q=_mm_loadu_ps(reinterpret_cast<const float*>(patch+a*side_+b));
+            position=_mm_add_ps(position,_mm_mul_ps(q,_mm_set1_ps(w.position[a*4+b])));
+            du=_mm_add_ps(du,_mm_mul_ps(q,_mm_set1_ps(w.du[a*4+b])));
+            dv=_mm_add_ps(dv,_mm_mul_ps(q,_mm_set1_ps(w.dv[a*4+b])));
+        }
+        alignas(16) float dvOut[4],duOut[4];
+        _mm_store_ps(dvOut,dv);_mm_store_ps(duOut,du);
+        const QVector3D normal=QVector3D::crossProduct(QVector3D(dvOut[0],dvOut[1],dvOut[2]),QVector3D(duOut[0],duOut[1],duOut[2]));
         float* v=&vertices_[(size_t(r)*grid_+c)*12];
-        v[0]=position.x();v[1]=position.y();v[2]=position.z();v[3]=position.w();
+        _mm_storeu_ps(v,position);
         v[8]=normal.x();v[9]=normal.y();v[10]=normal.z();v[11]=0;
     }
 }
@@ -574,6 +687,7 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
     // comparison with the console's cloth (custom_render_plugin FUN_0004bed0, counter at +0x2d4; audit/PARTICLES.md).
     static FILE* clothLog=[]{const QByteArray path=qgetenv("XMB_RIBBON_CLOTH_LOG");return path.isEmpty()?nullptr:std::fopen(path.constData(),"w");}();
     static long long clothSteps=0;
+    {idleprofile::Scope profCloth("ribbon cloth");
     while(cloth_.acc>1) {
         if(clothLog) {
             std::fprintf(clothLog,"%lld %d",clothSteps,cloth_.seed);
@@ -583,10 +697,11 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
         cloth_.step(p);cloth_.acc-=1;++clothSteps;
     }
     cloth_.swell(p);
+    }
     // 2. The FFD lattice from ffd_shader1, 3. spline.elf's sheet.
-    deformLattice(gl,p);
+    {idleprofile::Scope prof("ribbon deformLattice");deformLattice(gl,p);}
     const float aspect=float(pixelWidth)/float(pixelHeight);
-    splineSheet(p,aspect);
+    {idleprofile::Scope prof("ribbon splineSheet");splineSheet(p,aspect);}
     // XMB_RIBBON_CLIP_DUMP=<prefix>: the 128 x 128 clip-space sheet (x y z w per vertex, raw floats) on frames
     // XMB_RIBBON_CLIP_FROM..+XMB_RIBBON_CLIP_COUNT, for comparison with the console sheet the particle emitter reads
     // (custom_render_plugin layer+0x40, audit/PARTICLES.md).
@@ -601,6 +716,7 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
         }
         ++frame;
     }
+    {idleprofile::Scope prof("ribbon crest");
     // Crest of the centre line (row 64), for the procedural background and measurement.
     for(int k=0;k<int(crest_.size());++k) { // centre line, screen x -> fraction from the top
         const float sx=float(k)/(crest_.size()-1);float best=-1,bestDistance=1e9f;
@@ -612,25 +728,32 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
         }
         crest_[size_t(k)]=best;
     }
+    }
     // 4. lines1 into a float sum, additively (the firmware sums RGBA8 through _Encode).
     if(!sum_ || sum_->size()!=QSize(pixelWidth,pixelHeight)) {
         QOpenGLFramebufferObjectFormat format;format.setInternalTextureFormat(GL_RGBA16F);
         sum_=std::make_unique<QOpenGLFramebufferObject>(pixelWidth,pixelHeight,format);
     }
+    idleprofile::Scope profGl("ribbon gl draw");
     sum_->bind();gl.glViewport(0,0,pixelWidth,pixelHeight);gl.glClearColor(0,0,0,0);gl.glClear(GL_COLOR_BUFFER_BIT);
     gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_ONE,GL_ONE);
-    std::vector<QVector4D> vc(468);
-    for(const auto& param:linesVertexCg_.parameters)if(param.resourceIndex>=0 && param.resourceIndex<468 && !param.defaults.isEmpty())
-        vc[size_t(param.resourceIndex)]=QVector4D(param.defaults.value(0),param.defaults.value(1),param.defaults.value(2),param.defaults.value(3));
-    const auto setVc=[&](const char* name,float value){const auto it=linesVertexCg_.parameters.constFind(name);if(it!=linesVertexCg_.parameters.cend() && it->resourceIndex>=0 && it->resourceIndex<468)vc[size_t(it->resourceIndex)]=QVector4D(value,value,value,value);};
-    setVc("_Fresnel",p.fresnel);setVc("_Brightness",p.brightness);setVc("_MipmapBias",p.mipmapBias);
-    QVector<QVector4D> lfc=linesFragmentCg_.constants;
-    const auto setFc=[&](const char* name,float value){for(int slot:linesFragmentCg_.parameters.value(name).constantSlots)if(slot<lfc.size())lfc[slot]=QVector4D(value,value,value,value);};
-    setFc("_Spacing",p.spacing);setFc("_Thinness",thinness);
+    const std::array<float,5> linesKey={p.fresnel,p.brightness,p.mipmapBias,p.spacing,thinness};
+    if(!linesValid_ || linesKey_!=linesKey) {
+        linesKey_=linesKey;linesValid_=true;
+        std::vector<QVector4D>& vc=linesVc_;
+        vc.assign(468,QVector4D());
+        for(const auto& param:linesVertexCg_.parameters)if(param.resourceIndex>=0 && param.resourceIndex<468 && !param.defaults.isEmpty())
+            vc[size_t(param.resourceIndex)]=QVector4D(param.defaults.value(0),param.defaults.value(1),param.defaults.value(2),param.defaults.value(3));
+        const auto setVc=[&](const char* name,float value){const auto it=linesVertexCg_.parameters.constFind(name);if(it!=linesVertexCg_.parameters.cend() && it->resourceIndex>=0 && it->resourceIndex<468)vc[size_t(it->resourceIndex)]=QVector4D(value,value,value,value);};
+        setVc("_Fresnel",p.fresnel);setVc("_Brightness",p.brightness);setVc("_MipmapBias",p.mipmapBias);
+        linesFc_=linesFragmentCg_.constants;
+        const auto setFc=[&](const char* name,float value){for(int slot:linesFragmentCg_.parameters.value(name).constantSlots)if(slot<linesFc_.size())linesFc_[slot]=QVector4D(value,value,value,value);};
+        setFc("_Spacing",p.spacing);setFc("_Thinness",thinness);
+    }
     lines_.bind();
-    lines_.setUniformValueArray("vc",vc.data(),int(vc.size()));lines_.setUniformValueArray("fc",lfc.constData(),lfc.size());
-    lines_.setUniformValue("tex0",0);lines_.setUniformValue("tex1",1);lines_.setUniformValue("tex2",2);
-    stripes_->setLevelofDetailBias(p.mipmapBias);
+    uniformcache::setVec4Array(lines_,"vc",linesVc_);uniformcache::setVec4Array(lines_,"fc",linesFc_);
+    uniformcache::set(lines_,"tex0",0);uniformcache::set(lines_,"tex1",1);uniformcache::set(lines_,"tex2",2);
+    if(!lodBiasValid_ || lodBias_!=p.mipmapBias){stripes_->setLevelofDetailBias(p.mipmapBias);lodBias_=p.mipmapBias;lodBiasValid_=true;}
     stripes_->bind(0);fresLut_->bind(1);encode_->bind(2);
     gl.glBindVertexArray(vao_);gl.glBindBuffer(GL_ARRAY_BUFFER,vbo_);
     gl.glBufferSubData(GL_ARRAY_BUFFER,0,GLsizeiptr(vertices_.size()*sizeof(float)),vertices_.data());
@@ -639,7 +762,7 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
     encode_->release(2);fresLut_->release(1);stripes_->release(0);lines_.release();
     // 5. Composite onto the target (LinesController: background + lines x gradient).
     gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.glViewport(0,0,pixelWidth,pixelHeight);
-    composite_.bind();composite_.setUniformValue("sum",0);composite_.setUniformValue("colour3",colour3_);composite_.setUniformValue("colour4",colour4_);
+    composite_.bind();uniformcache::set(composite_,"sum",0);uniformcache::set(composite_,"colour3",colour3_);uniformcache::set(composite_,"colour4",colour4_);
     gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,sum_->texture());
     gl.glBindVertexArray(emptyVao_);gl.glDrawArrays(GL_TRIANGLES,0,3);gl.glBindVertexArray(0);
     gl.glBindTexture(GL_TEXTURE_2D,0);composite_.release();

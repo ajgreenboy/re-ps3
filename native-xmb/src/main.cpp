@@ -4,6 +4,7 @@
 #include <QNetworkReply>
 #include <QEventLoop>
 #include "updater.h"
+#include "render_gate.h"
 #include "desktop_mode.h"
 #include "diagnostics.h"
 #include "setup.h"
@@ -1463,6 +1464,10 @@ int main(int argc,char** argv) {
     QObject::connect(&shell,&xmb::Shell::changed,titleSession,&xmb::TitleSession::evaluate);
     // ---- Desktop Mode (PHASES-HTPC D1, audit/DESKTOP-MODE.md) ----
     auto* desktop=new xmb::DesktopMode(&window,view,&shell,kiosk,kioskScreen,&app);
+    // Stop rendering while nobody can see the window: display off, session locked, minimised or fully covered (D12).
+    // A scripted or pinned-clock run is a capture: it has to keep painting whatever else is on the desktop.
+    if(!scriptedRun && !parser.isSet("render-clock") && !parser.isSet("background-clock") && !parser.isSet("measure-reference"))
+        new xmb::RenderGate(&window,view,&app);
     // Deferred one turn: the row's confirmation runs inside the view's key handler, which must finish before the window hides.
     QObject::connect(&shell,&xmb::Shell::requestDesktop,&app,[desktop]{QTimer::singleShot(0,desktop,[desktop]{desktop->enter(QStringLiteral("Switch to Desktop row"));});});
     QObject::connect(&shell,&xmb::Shell::requestExitToDesktop,&app,[&app]{

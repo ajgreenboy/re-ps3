@@ -238,6 +238,10 @@ private:
     // tree without the qrc (or XMB_PARTICLES_FALLBACK=1).
     CgProgram firmwareVertex_[2],firmwareFragment_[2];
     QOpenGLShaderProgram firmwareProgram_[2];
+    // The firmware passes' constant banks are a pure function of the look, the alpha, the light and the viewport, which hold
+    // still between clock keyframes; they are rebuilt only when one moves (D12).
+    std::array<float,36> passKey_[2]{};bool passValid_[2]={false,false};
+    std::vector<QVector4D> passVc_[2];QVector<QVector4D> passFc_[2];
     bool firmwareReady_[2]={false,false};
     QVector3D spotAttenuation_=QVector3D(1,0,0); // fallback: PARTICLES.mnu spot attn x/y/z
     void initFirmwarePass(Assets& assets,int pass);

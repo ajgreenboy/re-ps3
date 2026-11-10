@@ -1,4 +1,5 @@
 #include "particles.h"
+#include "uniform_cache.h"
 #include "assets.h"
 #include "qrc.h"
 #include "rco_objects.h"
@@ -1050,7 +1051,16 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     QOpenGLShaderProgram& program=firmwareProgram_[pass];
     // Vertex constants exactly as FUN_0005c254 (custom_render_plugin 0x5c254) packs them from the renderer's PARTICLES.mnu
     // fields (audit/PARTICLES.md "The firmware particle programs"); both passes get the same values.
-    std::vector<QVector4D> vc(468);
+    static_assert(std::is_trivially_copyable_v<Look> && sizeof(Look)==26*sizeof(float));
+    std::array<float,36> key{};
+    std::memcpy(key.data(),&look_,sizeof(Look));
+    key[26]=globalAlpha_;key[27]=spotPosition_.x();key[28]=spotPosition_.y();key[29]=spotPosition_.z();
+    key[30]=spotAttenuation_.x();key[31]=spotAttenuation_.y();key[32]=spotAttenuation_.z();key[33]=float(pixelWidth);key[34]=float(pixelHeight);
+    std::vector<QVector4D>& vc=passVc_[pass];
+    QVector<QVector4D>& fc=passFc_[pass];
+    if(!passValid_[pass] || passKey_[pass]!=key) {
+    passKey_[pass]=key;passValid_[pass]=true;
+    vc.assign(468,QVector4D());
     for(const auto& p:vertexCg.parameters)
         if(p.resourceIndex>=0 && p.resourceIndex<468 && !p.defaults.isEmpty())
             vc[size_t(p.resourceIndex)]=QVector4D(p.defaults.value(0),p.defaults.value(1),p.defaults.value(2),p.defaults.value(3));
@@ -1092,7 +1102,7 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     // world as the camera above; the vpo fades a particle over the last 0.2 units inside each face.
     setV("_LifeBoundsMin",QVector4D(kLifeBoxMin[0],kLifeBoxMin[1],kLifeBoxMin[2],0));
     setV("_LifeBoundsMax",QVector4D(kLifeBoxMax[0],kLifeBoxMax[1],kLifeBoxMax[2],0));
-    QVector<QVector4D> fc=fragmentCg.constants;
+    fc=fragmentCg.constants;
     const auto setF=[&](const char* name,const QVector4D& v){for(int slot:fragmentCg.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=v;};
     for(int r=0;r<4;++r)setF(QStringLiteral("_LightPack[%1]").arg(r).toLatin1().constData(),pack[r]);
     setF("_NearControl",QVector4D(l.sizeAlign,l.nearFuzziness,l.nearAlign,0));
@@ -1110,6 +1120,7 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     const QVector4D glare(l.glare,l.glareScale,l.glareP1,l.glareP2);
     setV("_Glare",glare);
     setF("_Glare",glare);
+    }
     gl.glViewport(0,0,pixelWidth,pixelHeight);
     gl.glDisable(GL_DEPTH_TEST);
     gl.glDisable(GL_CULL_FACE);
@@ -1118,9 +1129,9 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     gl.glBindVertexArray(vao_);
     if(iridescent_)iridescent_->bind(0);
     program.bind();
-    program.setUniformValueArray("vc",vc.data(),int(vc.size()));
-    program.setUniformValueArray("fc",fc.constData(),fc.size());
-    program.setUniformValue("tex0",0);
+    uniformcache::setVec4Array(program,"vc",vc);
+    uniformcache::setVec4Array(program,"fc",fc);
+    uniformcache::set(program,"tex0",0);
     gl.glDrawElements(GL_TRIANGLES,GLsizei(size_t(live_)*6),GL_UNSIGNED_INT,reinterpret_cast<const void*>(indexOffset_));
     program.release();
     if(iridescent_)iridescent_->release(0);

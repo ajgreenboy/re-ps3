@@ -1,6 +1,7 @@
 #include "hdr.h"
 #include "particles.h"      // sceneMaterials(): the shared run-time reader
 #include "rco_objects.h"
+#include "uniform_cache.h"
 #include <QElapsedTimer>
 #include <cmath>
 #include <array>
@@ -180,6 +181,7 @@ GLuint Hdr::begin(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeight) 
 // clamped to 1; byte = trunc(x * 255). DITHER is the HDR parameter registered at 1/255 (DAT_000921a4) that no
 // HDR.mnu sets, so a texel is trunc(8 u): 0..7, 8 at u = 1. Shaders read it x 0.125: up to 7/8 of a level.
 void Hdr::fillNoise(QOpenGLFunctions_3_3_Core& gl) {
+    if(noiseCurrent_ && noiseTexture_ && noiseCounter_==noiseBase_ && noiseBase_==noiseUploadedBase_){noiseCounter_=noiseUploadedBase_+1024;return;}
     constexpr float dither=1.f/255.f;
     std::array<quint8,32*32*4> texels{};
     for(int i=0;i<32*32;++i) {
@@ -201,6 +203,7 @@ void Hdr::fillNoise(QOpenGLFunctions_3_3_Core& gl) {
         gl.glTexSubImage2D(GL_TEXTURE_2D,0,0,0,32,32,GL_RGBA,GL_UNSIGNED_BYTE,texels.data());
     }
     gl.glBindTexture(GL_TEXTURE_2D,0);
+    noiseUploadedBase_=noiseBase_;noiseCurrent_=true;
 }
 
 void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint targetFbo,const std::function<void(int,int)>& extraGlare) {
@@ -215,30 +218,56 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
     const float sumPow=mix(coldboot1_.sumPow,night_.sumPow,day_.sumPow);
     const float radius[3]={mix(coldboot1_.radius[0],night_.radius[0],day_.radius[0]),mix(coldboot1_.radius[1],night_.radius[1],day_.radius[1]),
                            mix(coldboot1_.radius[2],night_.radius[2],day_.radius[2])};
+    // The constant banks depend only on the preset values (and the mip count), which hold still for long stretches of the
+    // day; the per-frame name lookups, exp() weights and uploads are skipped while they do (D12).
+    const std::array<float,10> key={exposure,white,glareLevel,threshold,sumPow,radius[0],radius[1],radius[2],float(blurX_.size()),0.f};
+    if(!constants_.valid || constants_.key!=key) {
+        constants_.key=key;constants_.valid=true;
+        constants_.toneMap=toneMap_.cg.constants;
+        setFc(toneMap_,constants_.toneMap,"_Exposure",QVector4D(1,1,1,1)*exposure);setFc(toneMap_,constants_.toneMap,"_WhiteSqrRcp",QVector4D(1,1,1,1)/(white*white));
+        constants_.glareTable=QVector3D(exposure,1.f/(white*white),threshold);
+        constants_.glareSource=glareSource_.cg.constants;
+        setFc(glareSource_,constants_.glareSource,"_Exposure",QVector4D(1,1,1,1)*exposure);setFc(glareSource_,constants_.glareSource,"_WhiteSqrRcp",QVector4D(1,1,1,1)/(white*white));
+        QVector<QVector4D> weights(8);
+        for(int c=0;c<3;++c) {
+            float sum=0;for(int k=-7;k<=7;++k)sum+=std::exp(-float(k*k)/(2*radius[c]*radius[c]));
+            for(int k=0;k<8;++k)weights[k][c]=std::exp(-float(k*k)/(2*radius[c]*radius[c]))/sum;
+        }
+        float levelSum=0;for(size_t level=0;level<blurX_.size();++level)levelSum+=std::pow(sumPow,float(level));
+        constants_.gaussian=gaussian_.cg.constants;
+        for(int k=0;k<8;++k)setFc(gaussian_,constants_.gaussian,QString("_Weights%1").arg(k).toUtf8().constData(),weights[k]);
+        constants_.accGlare.clear();
+        for(size_t level=0;level<blurX_.size();++level) {
+            QVector<QVector4D> fc=accGlare_.cg.constants;
+            // The firmware's per-level weight (custom_render_all.c ~55005 and ~55852) multiplies GLARE LEVEL in twice:
+            // arr[l] = SUM POW^l / sum x GLARE LEVEL, then _Weight = arr[l] x GLARE LEVEL (renderer +0x2a4, set from the
+            // HDR menu's GLARE LEVEL record). So the accumulated glare already carries GLARE LEVEL^2.
+            setFc(accGlare_,fc,"_Weight",QVector4D(1,1,1,1)*(std::pow(sumPow,float(level))/levelSum*glareLevel*glareLevel));
+            constants_.accGlare.push_back(std::move(fc));
+        }
+        constants_.gaussianVc.assign(468,QVector4D());
+        for(int row=0;row<4;++row)constants_.gaussianVc[256+row][row]=1; // _ModelviewProjection = identity
+    }
     gl.glDisable(GL_DEPTH_TEST);gl.glDisable(GL_SCISSOR_TEST);gl.glDisable(GL_BLEND);
     const auto fullscreen=[&](QOpenGLShaderProgram& program,const QVector<QVector4D>& fc) {
-        program.setUniformValueArray("fc",fc.constData(),fc.size());
+        uniformcache::setVec4Array(program,"fc",fc);
         gl.glBindVertexArray(emptyVao_);gl.glDrawArrays(GL_TRIANGLES,0,3);gl.glBindVertexArray(0);
     };
     const auto bindTexture=[&](int unit,GLuint texture){gl.glActiveTexture(GLenum(GL_TEXTURE0+unit));gl.glBindTexture(GL_TEXTURE_2D,texture);};
     // 1. ToneMap: the scene at EXPOSURE through the white-level curve.
     {
-        QVector<QVector4D> fc=toneMap_.cg.constants;
-        setFc(toneMap_,fc,"_Exposure",QVector4D(1,1,1,1)*exposure);setFc(toneMap_,fc,"_WhiteSqrRcp",QVector4D(1,1,1,1)/(white*white));
         toned_->bind();gl.glViewport(0,0,width_,height_);
-        toneMap_.program.bind();toneMap_.program.setUniformValue("tex0",0);bindTexture(0,scene_->texture());
-        toneMap_.program.setUniformValue("uGlareTable",QVector3D(exposure,1.f/(white*white),threshold));
-        toneMap_.program.setUniformValue("uNoise",13);bindTexture(13,noiseTexture_);
-        fullscreen(toneMap_.program,fc);toneMap_.program.release();bindTexture(13,0);
+        toneMap_.program.bind();uniformcache::set(toneMap_.program,"tex0",0);bindTexture(0,scene_->texture());
+        uniformcache::set(toneMap_.program,"uGlareTable",constants_.glareTable);
+        uniformcache::set(toneMap_.program,"uNoise",13);bindTexture(13,noiseTexture_);
+        fullscreen(toneMap_.program,constants_.toneMap);toneMap_.program.release();bindTexture(13,0);
     }
     // 2. Glare source: GlareSourcePre on the encoded screen, colour x weight x 8 = the tone-mapped colour times
     //    max(1,t)(t - GLARE THRESH) in display units (its alpha, the scene luminance, is not read). Then its mips.
     {
-        QVector<QVector4D> fc=glareSource_.cg.constants;
-        setFc(glareSource_,fc,"_Exposure",QVector4D(1,1,1,1)*exposure);setFc(glareSource_,fc,"_WhiteSqrRcp",QVector4D(1,1,1,1)/(white*white));
         source_->bind();gl.glViewport(0,0,source_->width(),source_->height());
-        glareSource_.program.bind();glareSource_.program.setUniformValue("tex0",0);bindTexture(0,toned_->texture());
-        fullscreen(glareSource_.program,fc);glareSource_.program.release();
+        glareSource_.program.bind();uniformcache::set(glareSource_.program,"tex0",0);bindTexture(0,toned_->texture());
+        fullscreen(glareSource_.program,constants_.glareSource);glareSource_.program.release();
         if(extraGlare) {
             source_->bind();gl.glViewport(0,0,source_->width(),source_->height());
             extraGlare(source_->width(),source_->height());
@@ -249,24 +278,15 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
     // 3. Per level: 15-tap Gaussian across then down (captured: k = -7..7, weights 0..7), each channel with its own
     //    radius (in texels of that level), then AccGlare adds the level with weight SUM POW^level (normalised):
     //    narrow levels dominate, wide ones haze. The source is already in display units, so no EXPOSURE factor.
-    QVector<QVector4D> weights(8);
-    for(int c=0;c<3;++c) {
-        float sum=0;for(int k=-7;k<=7;++k)sum+=std::exp(-float(k*k)/(2*radius[c]*radius[c]));
-        for(int k=0;k<8;++k)weights[k][c]=std::exp(-float(k*k)/(2*radius[c]*radius[c]))/sum;
-    }
-    float levelSum=0;for(size_t level=0;level<blurX_.size();++level)levelSum+=std::pow(sumPow,float(level));
     accumulated_->bind();gl.glViewport(0,0,accumulated_->width(),accumulated_->height());gl.glClearColor(0,0,0,0);gl.glClear(GL_COLOR_BUFFER_BIT);
-    QVector<QVector4D> gaussianFc=gaussian_.cg.constants;
-    for(int k=0;k<8;++k)setFc(gaussian_,gaussianFc,QString("_Weights%1").arg(k).toUtf8().constData(),weights[k]);
-    std::vector<QVector4D> vc(468);
-    for(int row=0;row<4;++row)vc[256+row][row]=1; // _ModelviewProjection = identity
+    std::vector<QVector4D>& vc=constants_.gaussianVc;
     for(size_t level=0;level<blurX_.size();++level) {
         const int w=blurX_[level]->width(),h=blurX_[level]->height();
-        gaussian_.program.bind();gaussian_.program.setUniformValue("tex0",0);
-        gaussian_.program.setUniformValueArray("fc",gaussianFc.constData(),gaussianFc.size());
+        gaussian_.program.bind();uniformcache::set(gaussian_.program,"tex0",0);
+        uniformcache::setVec4Array(gaussian_.program,"fc",constants_.gaussian);
         for(int pass=0;pass<2;++pass) {
             vc[467]=pass==0?QVector4D(1.f/w,0,0,0):QVector4D(0,1.f/h,0,0);
-            gaussian_.program.setUniformValueArray("vc",vc.data(),int(vc.size()));
+            uniformcache::setVec4Array(gaussian_.program,"vc",vc);
             if(pass==0) { // read this level of the source
                 bindTexture(0,source_->texture());
                 gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_BASE_LEVEL,GLint(level));gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAX_LEVEL,GLint(level));
@@ -276,15 +296,10 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
             gl.glBindVertexArray(gaussianVao_);gl.glDrawArrays(GL_TRIANGLES,0,3);gl.glBindVertexArray(0);
         }
         gaussian_.program.release();
-        QVector<QVector4D> fc=accGlare_.cg.constants;
-        // The firmware's per-level weight (custom_render_all.c ~55005 and ~55852) multiplies GLARE LEVEL in twice:
-        // arr[l] = SUM POW^l / sum x GLARE LEVEL, then _Weight = arr[l] x GLARE LEVEL (renderer +0x2a4, set from the
-        // HDR menu's GLARE LEVEL record). So the accumulated glare already carries GLARE LEVEL^2.
-        setFc(accGlare_,fc,"_Weight",QVector4D(1,1,1,1)*(std::pow(sumPow,float(level))/levelSum*glareLevel*glareLevel));
         accumulated_->bind();gl.glViewport(0,0,accumulated_->width(),accumulated_->height());
         gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_ONE,GL_ONE);
-        accGlare_.program.bind();accGlare_.program.setUniformValue("tex0",0);bindTexture(0,blurY_[level]->texture());
-        fullscreen(accGlare_.program,fc);accGlare_.program.release();
+        accGlare_.program.bind();uniformcache::set(accGlare_.program,"tex0",0);bindTexture(0,blurY_[level]->texture());
+        fullscreen(accGlare_.program,constants_.accGlare[level]);accGlare_.program.release();
         gl.glDisable(GL_BLEND);
     }
     bindTexture(0,source_->texture());
@@ -292,13 +307,16 @@ void Hdr::finish(QOpenGLFunctions_3_3_Core& gl,float nightDayBlend,GLuint target
     // 4. ApplyGlare: tone-mapped screen x 1 + glare x 1. ToneApplyDisplay's _GlareWeight is bound to the constant
     //    1.0 (DAT_00093250, record +0xc0 of the 0x150-byte ToneApplyDisplay class): the level is in the accumulation.
     {
-        QVector<QVector4D> fc=applyGlare_.cg.constants;
-        setFc(applyGlare_,fc,"_Weight1",QVector4D(1,1,0,0));
+        if(!constants_.applyGlareValid) {
+            constants_.applyGlare=applyGlare_.cg.constants;
+            setFc(applyGlare_,constants_.applyGlare,"_Weight1",QVector4D(1,1,0,0));
+            constants_.applyGlareValid=true;
+        }
         gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.glViewport(0,0,width_,height_);
-        applyGlare_.program.bind();applyGlare_.program.setUniformValue("tex0",0);applyGlare_.program.setUniformValue("tex1",1);
+        applyGlare_.program.bind();uniformcache::set(applyGlare_.program,"tex0",0);uniformcache::set(applyGlare_.program,"tex1",1);
         bindTexture(0,toned_->texture());bindTexture(1,accumulated_->texture());
-        applyGlare_.program.setUniformValue("uNoise",13);bindTexture(13,noiseTexture_);
-        fullscreen(applyGlare_.program,fc);applyGlare_.program.release();
+        uniformcache::set(applyGlare_.program,"uNoise",13);bindTexture(13,noiseTexture_);
+        fullscreen(applyGlare_.program,constants_.applyGlare);applyGlare_.program.release();
         bindTexture(13,0);bindTexture(1,0);bindTexture(0,0);
     }
 }

@@ -1,4 +1,5 @@
 #include "icons.h"
+#include "uniform_cache.h"
 #include "particles.h"      // sceneMaterials(): the shared run-time reader
 #include <QDebug>
 #include <QElapsedTimer>
@@ -290,12 +291,12 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         vc[259]=QVector4D(0,0,-1,float(distance));
         vc[467]=QVector4D(float(ndcX),float(ndcY),0,0);
         if(!glass) {
-            opaque_.bind();opaque_.setUniformValueArray("vc",vc.data(),int(vc.size()));
+            opaque_.bind();uniformcache::setVec4Array(opaque_,"vc",vc);
             const float peak=std::max({fixedTint_.x(),fixedTint_.y(),fixedTint_.z()});
-            opaque_.setUniformValue("tint",fixedTint_/peak);opaque_.setUniformValue("brightness",float(icon.brightness));
-            opaque_.setUniformValue("light1",l1);
-            opaque_.setUniformValue("tintStrength",tintStrength_);
-            opaque_.setUniformValue("opacity",float(icon.opacity));opaque_.setUniformValue("colourScale",colourScale_);opaque_.setUniformValue("tex0",0);
+            uniformcache::set(opaque_,"tint",fixedTint_/peak);uniformcache::set(opaque_,"brightness",float(icon.brightness));
+            uniformcache::set(opaque_,"light1",l1);
+            uniformcache::set(opaque_,"tintStrength",tintStrength_);
+            uniformcache::set(opaque_,"opacity",float(icon.opacity));uniformcache::set(opaque_,"colourScale",colourScale_);uniformcache::set(opaque_,"tex0",0);
             gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,normals);
             gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
             gl.glBindVertexArray(vao_);gl.glDrawArrays(GL_TRIANGLES,0,6);gl.glBindVertexArray(0);
@@ -318,13 +319,13 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
             }
         }
         program_.bind();
-        program_.setUniformValueArray("vc",vc.data(),int(vc.size()));program_.setUniformValueArray("fc",fc.constData(),fc.size());
-        program_.setUniformValue("tex0",0);program_.setUniformValue("tex1",1);program_.setUniformValue("tex2",2);program_.setUniformValue("tex3",3);
+        uniformcache::setVec4Array(program_,"vc",vc);uniformcache::setVec4Array(program_,"fc",fc);
+        uniformcache::set(program_,"tex0",0);uniformcache::set(program_,"tex1",1);uniformcache::set(program_,"tex2",2);uniformcache::set(program_,"tex3",3);
         gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,normals);
         gl.glActiveTexture(GL_TEXTURE1);gl.glBindTexture(GL_TEXTURE_2D,diffuse_);
         gl.glActiveTexture(GL_TEXTURE2);gl.glBindTexture(GL_TEXTURE_2D,environment_);
         gl.glActiveTexture(GL_TEXTURE3);gl.glBindTexture(GL_TEXTURE_2D,cut_);
-        program_.setUniformValue("layoutOpacity_",float(icon.opacity));program_.setUniformValue("colourScale_",colourScale_);
+        uniformcache::set(program_,"layoutOpacity_",float(icon.opacity));uniformcache::set(program_,"colourScale_",colourScale_);
         gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
         gl.glBindVertexArray(vao_);gl.glDrawArrays(GL_TRIANGLES,0,6);gl.glBindVertexArray(0);
         gl.glDisable(GL_BLEND);

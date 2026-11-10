@@ -64,9 +64,20 @@ private:
     // 60 Hz frame of render time (setNoiseClock), so a pinned --render-clock gives the same tile every run.
     GLuint noiseTexture_=0;
     quint32 noiseCounter_=0;
+    // The tile is a pure function of the counter value setNoiseClock chose, and that moves once per 60 Hz frame of render
+    // time: at a higher frame rate the same tile is regenerated and re-uploaded several times in a row (D12).
+    quint32 noiseBase_=0,noiseUploadedBase_=0;bool noiseCurrent_=false;
 public:
-    void setNoiseClock(double seconds) { noiseCounter_=quint32(qint64(std::floor(std::max(0.,seconds)*60.))*1024); }
+    void setNoiseClock(double seconds) { noiseCounter_=noiseBase_=quint32(qint64(std::floor(std::max(0.,seconds)*60.))*1024); }
 private:
+    // The per-pass constant banks for one set of preset values; rebuilt only when a value moves (D12).
+    struct PassConstants {
+        std::array<float,10> key{};bool valid=false;
+        QVector<QVector4D> toneMap,glareSource,gaussian;QVector3D glareTable;
+        std::vector<QVector<QVector4D>> accGlare; // one per mip level
+        std::vector<QVector4D> gaussianVc;         // identity projection; element 467 is the pass direction
+        QVector<QVector4D> applyGlare;bool applyGlareValid=false;
+    } constants_;
     void fillNoise(QOpenGLFunctions_3_3_Core& gl);
     int width_=0,height_=0;
 };
