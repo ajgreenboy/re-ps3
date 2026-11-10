@@ -68,6 +68,7 @@ public:
     static bool parseHotkey(const QString& text,unsigned* modifiers,unsigned* virtualKey);
 signals:
     void exitRequested(const QString& source);
+    void returnedToXmb(const QString& source);   // D9: the window is back (HDMI-CEC TV wake hooks here)
 private:
     void ensureTray();
     bool registerHotkey();

@@ -372,6 +372,7 @@ void DesktopMode::leave(const QString& source) {
         .arg(window_->isFullScreen()?1:0).arg(window_->screen()?window_->screen()->name():QStringLiteral("?"))
         .arg(window_->width()).arg(window_->height()).arg(window_->x()).arg(window_->y()).arg(selection()).arg(selection()==selectionAtEnter_?1:0);
     probeForeground(returnedAt);
+    emit returnedToXmb(source);
 }
 
 void DesktopMode::probeForeground(qint64 returnedAt) {

@@ -30,7 +30,8 @@ bool hasOnlyKnownKeys(const QJsonObject& object, QString& error, const QString& 
         QStringLiteral("id"), QStringLiteral("title"), QStringLiteral("kind"),
         QStringLiteral("category"), QStringLiteral("executable"),
         QStringLiteral("workingDirectory"), QStringLiteral("url"),
-        QStringLiteral("artwork"), QStringLiteral("arguments"), QStringLiteral("window")
+        QStringLiteral("artwork"), QStringLiteral("arguments"), QStringLiteral("window"),
+        QStringLiteral("display")
     };
     for (auto it = object.begin(); it != object.end(); ++it) {
         if (!known.contains(it.key()))
@@ -160,6 +161,46 @@ bool validateAppForWrite(ContentApp& app, const QString& baseDirectory, QString&
     return true;
 }
 
+// D9: "display": { "width", "height", "refresh", "hdr": "on"|"off"|"keep" }; every member optional, width and height together.
+bool parseDisplay(const QJsonObject& object, const QString& where, DisplaySpec& display, QString& error) {
+    display = DisplaySpec{};
+    const auto it = object.constFind(QStringLiteral("display"));
+    if (it == object.constEnd())
+        return true;
+    if (!it->isObject())
+        return fail(error, QStringLiteral("%1 field 'display' must be an object").arg(where));
+    const QJsonObject d = it->toObject();
+    static const QStringList known = {QStringLiteral("width"), QStringLiteral("height"),
+                                      QStringLiteral("refresh"), QStringLiteral("hdr")};
+    for (auto k = d.begin(); k != d.end(); ++k)
+        if (!known.contains(k.key()))
+            return fail(error, QStringLiteral("%1 display has unknown field '%2'").arg(where, k.key()));
+    const auto number = [&](const QString& key, int minimum, int maximum, int& out) {
+        const auto v = d.constFind(key);
+        if (v == d.constEnd()) { out = 0; return true; }
+        const double n = v->toDouble(-1);
+        if (!v->isDouble() || n != int(n) || n < minimum || n > maximum)
+            return fail(error, QStringLiteral("%1 display %2 must be a whole number from %3 to %4").arg(where, key).arg(minimum).arg(maximum));
+        out = int(n);
+        return true;
+    };
+    if (!number(QStringLiteral("width"), 320, 16384, display.width)
+        || !number(QStringLiteral("height"), 200, 16384, display.height)
+        || !number(QStringLiteral("refresh"), 20, 1000, display.refresh))
+        return false;
+    if ((display.width > 0) != (display.height > 0))
+        return fail(error, QStringLiteral("%1 display needs width and height together").arg(where));
+    const auto hdr = d.constFind(QStringLiteral("hdr"));
+    if (hdr != d.constEnd()) {
+        const QString text = hdr->isString() ? hdr->toString().trimmed().toLower() : QString();
+        if (text != QStringLiteral("on") && text != QStringLiteral("off") && text != QStringLiteral("keep"))
+            return fail(error, QStringLiteral("%1 display hdr must be \"on\", \"off\" or \"keep\"").arg(where));
+        display.hdr = text;
+    }
+    display.present = display.width > 0 || display.refresh > 0 || display.hdr == QStringLiteral("on") || display.hdr == QStringLiteral("off");
+    return true;
+}
+
 bool parseApp(const QJsonValue& value, qsizetype index, const QString& baseDirectory,
               ContentApp& app, QString& error) {
     const QString where = QStringLiteral("apps[%1]").arg(index);
@@ -178,6 +219,8 @@ bool parseApp(const QJsonValue& value, qsizetype index, const QString& baseDirec
         || !readString(object, QStringLiteral("url"), app.url, false, where, error)
         || !readString(object, QStringLiteral("artwork"), app.artwork, false, where, error)
         || !readString(object, QStringLiteral("window"), app.window, false, where, error))
+        return false;
+    if (!parseDisplay(object, where, app.display, error))
         return false;
     if (!webLaunch::isValidWindow(app.window))
         return fail(error, QStringLiteral("%1 window must be app, kiosk or browser").arg(where));
@@ -324,6 +367,13 @@ QJsonObject serializeApp(const ContentApp& app) {
     if (!app.url.isEmpty()) object.insert(QStringLiteral("url"), app.url);
     if (!app.artwork.isEmpty()) object.insert(QStringLiteral("artwork"), app.artwork);
     if (!app.window.isEmpty()) object.insert(QStringLiteral("window"), app.window);
+    if (app.display.present) {
+        QJsonObject d;
+        if (app.display.width > 0) { d.insert(QStringLiteral("width"), app.display.width); d.insert(QStringLiteral("height"), app.display.height); }
+        if (app.display.refresh > 0) d.insert(QStringLiteral("refresh"), app.display.refresh);
+        if (!app.display.hdr.isEmpty()) d.insert(QStringLiteral("hdr"), app.display.hdr);
+        object.insert(QStringLiteral("display"), d);
+    }
     QJsonArray arguments;
     for (const QString& argument : app.arguments)
         arguments.append(argument);

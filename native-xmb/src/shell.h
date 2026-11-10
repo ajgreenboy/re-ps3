@@ -531,6 +531,9 @@ public:
     bool setupActive() const;
     QString desktopHotkey() const { return preferences_.value("desktop/hotkey").toString(); }
     bool keepMusicInDesktop() const { return preferences_.value("desktop/keepMusic").toBool(); }
+    // D9 part 2: the two HDMI-CEC preferences (both default off; the rows are unavailable without cec-client).
+    bool cecTvOnAtStart() const { return preferences_.value("cec/tvOnAtStart").toBool(); }
+    bool cecStandbyOnTurnOff() const { return preferences_.value("cec/standbyOnTurnOff").toBool(); }
     // Controller-driven desktop (desktop_pad.h): desktop/controllerMouse (default on) and desktop/pointerSpeed (1-5, default 3).
     bool desktopControllerMouse() const { return preferences_.value("desktop/controllerMouse").toBool(); }
     int desktopPointerSpeed() const { return preferences_.value("desktop/pointerSpeed").toInt(); }
@@ -872,7 +875,7 @@ private:
     void refreshOwnedGames();
     bool stageOwnedForRefresh() const;
     QString collectionLabel(const QString& appId) const;
-    bool startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title);
+    bool startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title,const DisplaySpec& display={});
     bool gameRunning() const;
     bool launchWebApp(const Entry& entry);   // true when the entry was handled here (Chromium window or an error page)
     bool inGame_=false;              // the XMB was raised over the running title (setInGame)

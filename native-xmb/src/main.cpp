@@ -7,6 +7,8 @@
 #include "desktop_mode.h"
 #include "diagnostics.h"
 #include "setup.h"
+#include "display_mode.h"
+#include "cec.h"
 #include <QProcess>
 #include "desktop_pad.h"
 #include "ps_watcher.h"
@@ -383,7 +385,21 @@ int main(int argc,char** argv) {
     QSurfaceFormat format;format.setVersion(3,3);format.setProfile(QSurfaceFormat::CoreProfile);format.setSwapInterval(1);format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);app.setApplicationName("re-ps3-native");app.setApplicationVersion("0.2.0");QImageReader::setAllocationLimit(128);
     qInfo().noquote()<<QString("boot: QApplication ready after %1 ms").arg(processAgeMs(),0,'f',0);
+    // D9: --display-mode-test <w>x<h>@<hz> <seconds> [--data-dir <dir>]. Applies one mode the monitor lists, holds it for a few
+    // seconds and restores it, even when something fails (display_mode.h). Handled before the option parser: it takes the
+    // seconds as a second value and must never reach a window.
+    {
+        const QStringList args=app.arguments();
+        const int at=args.indexOf(QStringLiteral("--display-mode-test"));
+        if(at>=0) {
+            if(at+2>=args.size()){qCritical()<<"use --display-mode-test <w>x<h>@<hz> <seconds> [--data-dir <dir>]";return 2;}
+            const int dataAt=args.indexOf(QStringLiteral("--data-dir"));
+            const QString dir=dataAt>=0 && dataAt+1<args.size()?args[dataAt+1]:QDir(QCoreApplication::applicationDirPath()).filePath("data");
+            return xmb::display::runModeTest(args[at+1],args[at+2].toInt(),dir);
+        }
+    }
     QCommandLineParser parser;parser.setApplicationDescription("Native C++ XMB recreation");parser.addHelpOption();parser.addVersionOption();
+    parser.addOption({"display-mode-test","Apply one display mode the monitor lists for a few seconds and restore it, then exit: --display-mode-test <w>x<h>@<hz> <seconds> (XMB_DISPLAY_DRY_RUN=1 only logs)","mode"});
     parser.addOption({"dev-flash","Local dev_flash asset directory","directory"});
     parser.addOption({"dev-hdd0","Local dev_hdd0 directory (default: next to dev_flash)","directory"});
     parser.addOption({"vsh-modules","Local directory of decrypted VSH modules (*.prx), for data tables the plugins carry (default: XMB_VSH_MODULES)","directory"});
@@ -743,6 +759,13 @@ int main(int argc,char** argv) {
                 qWarning().noquote()<<"instance: could not listen on the single-instance pipe:"<<error<<"- continuing without the guard";
                 instanceServer.reset();
             } else qInfo().noquote()<<QString("instance: listening on %1").arg(name);
+        }
+        // D9: a display left changed by a previous run (crash, kill, watchdog restart while a title had its own mode) is put
+        // back before anything is shown. Only a real interactive run gets here, past the single-instance guard.
+        if(interactive) {
+            xmb::display::Controller startupDisplay(xmb::display::makeWin32Backend({},xmb::display::dryRunRequested()),
+                QDir(data).filePath("display-restore.json"));
+            startupDisplay.restoreIfPending();
         }
     }
     if(parser.isSet("steam-downloads-report")) {
@@ -1370,6 +1393,8 @@ int main(int argc,char** argv) {
     // audit/SESSION-POWER.md), this glue is unnecessary and should be deleted.
     QObject::connect(&shell,&xmb::Shell::requestQuit,&app,[&app,&shell,kiosk]{
         if(shell.psMenuConfirmingOff()) {
+            // D9 part 2: the TV goes to standby first; cec-client gets a few seconds because Windows may power off right after.
+            if(shell.cecStandbyOnTurnOff())xmb::cec::send({xmb::cec::Action::Standby},QStringLiteral("Turn Off the System"),true,6000);
             // The console's Turn Off powers the machine off. In appliance mode (--kiosk, the HTPC) this PC shuts
             // down (not forced: apps may hold it to save); elsewhere (a desktop, development) the XMB only quits,
             // so a confirmed Turn Off never powers off a workstation by surprise. A failed shutdown quits too.
@@ -1410,6 +1435,20 @@ int main(int argc,char** argv) {
     QObject::connect(view,&QOpenGLWidget::frameSwapped,&app,[]{
         qInfo().noquote()<<QString("boot: first frame after %1 ms").arg(processAgeMs(),0,'f',0);
     },Qt::SingleShotConnection);
+    // ---- Display modes (PHASES-HTPC D9, audit/DISPLAY-MODES.md) ----
+    // Per-app resolution / refresh / HDR on launch, restored when the title ends (Shell::startTracked). The XMB's own screen is
+    // the display that changes. On a clean quit with a title still running the mode goes back here too.
+    auto* displayController=new xmb::display::Controller(
+        xmb::display::makeWin32Backend([&window]{return window.screen()?window.screen()->name():QString{};},xmb::display::dryRunRequested()),
+        QDir(shell.dataDirectory()).filePath("display-restore.json"));
+    xmb::display::setActiveController(displayController);
+    QObject::connect(&app,&QApplication::aboutToQuit,&app,[displayController]{displayController->restore(QStringLiteral("XMB quit"));});
+    // ---- HDMI-CEC (D9 part 2; unverified without an adapter): TV on and input at start and on return from Desktop Mode ----
+    const auto cecWake=[&shell](const char* why){
+        if(!shell.cecTvOnAtStart())return;
+        xmb::cec::send({xmb::cec::Action::TvOn,xmb::cec::Action::ActiveSource},QString::fromLatin1(why));
+    };
+    QTimer::singleShot(0,&app,[cecWake]{cecWake("XMB start");});
     // ---- Launch and return (PHASES H5) ----
     // Idle while a launched title owns the foreground, and restore the window, fullscreen state, foreground and
     // keyboard focus when it ends however it ends (ps_watcher.h, TitleSession). "A title is running" is the same
@@ -1429,6 +1468,7 @@ int main(int argc,char** argv) {
     QObject::connect(&shell,&xmb::Shell::requestExitToDesktop,&app,[&app]{
         QTimer::singleShot(0,&app,[&app]{qInfo()<<"desktop: exit to desktop (row); exiting with code 0 so the watchdog stops";app.exit(0);});
     });
+    QObject::connect(desktop,&xmb::DesktopMode::returnedToXmb,&app,[cecWake]{cecWake("return from Desktop Mode");});
     QObject::connect(desktop,&xmb::DesktopMode::exitRequested,&app,[&app](const QString& source){
         qInfo().noquote()<<QString("desktop: exit via %1; exiting with code 0 so the watchdog stops").arg(source);app.exit(0);
     });

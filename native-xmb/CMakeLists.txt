@@ -60,7 +60,7 @@ qt_add_executable(re-ps3-native
     src/jellyfin_shell.cpp
     src/rsx_program.cpp src/rsx_program.h src/ribbon.cpp src/ribbon.h src/hdr.cpp src/hdr.h src/icons.cpp src/icons.h src/particles.cpp src/particles.h src/coldboot.cpp src/coldboot.h
     src/setup.cpp src/setup.h src/setup_shell.cpp
-    src/autostart.cpp src/autostart.h src/diagnostics.cpp src/diagnostics.h src/game_capture.cpp src/game_capture.h src/shell.cpp src/shell.h src/host.cpp src/host.h src/pad.cpp src/pad.h src/ps_watcher.cpp src/ps_watcher.h src/desktop_mode.cpp src/desktop_mode.h src/desktop_pad.cpp src/desktop_pad_win.cpp src/desktop_pad.h src/view.cpp src/view.h src/dialogs.cpp)
+    src/autostart.cpp src/autostart.h src/cec.cpp src/cec.h src/display_mode.cpp src/display_mode.h src/display_spec.h src/diagnostics.cpp src/diagnostics.h src/game_capture.cpp src/game_capture.h src/shell.cpp src/shell.h src/host.cpp src/host.h src/pad.cpp src/pad.h src/ps_watcher.cpp src/ps_watcher.h src/desktop_mode.cpp src/desktop_mode.h src/desktop_pad.cpp src/desktop_pad_win.cpp src/desktop_pad.h src/view.cpp src/view.h src/dialogs.cpp)
 target_link_libraries(re-ps3-native PRIVATE Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::Network)
 option(XMB_UPDATER_BUILD_TESTS "Build the updater fixture runner" OFF)
 if(XMB_UPDATER_BUILD_TESTS)

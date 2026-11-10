@@ -1,5 +1,6 @@
 #include "shell.h"
 #include "diagnostics.h"
+#include "display_mode.h"
 #include "notify_overlay.h"
 #include "glyphs.h"
 #include "service_icons.h"
@@ -545,15 +546,22 @@ void Shell::resolveMediaColumns() {
 // Launches a child and keeps it parented so the XMB knows when it returns. While it runs the
 // idle auto-close is suppressed; on exit the library is rescanned and the column restored,
 // which is the return lifecycle a launched game needs (audit/FEATURE-COVERAGE.md, ISC-20).
-bool Shell::startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title) {
+bool Shell::startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title,const DisplaySpec& displaySpec) {
     if(!game_.isNull()){showMessage(QObject::tr("A title is already running."),MessageKind::Page);return false;}
+    // D9: the title's own resolution / refresh / HDR, applied before it starts and put back exactly when it ends however it
+    // ends (the restore state is on disk before the first change; audit/DISPLAY-MODES.md). An unsupported request is logged
+    // and skipped by the controller, never forced.
+    auto* displayController=displaySpec.present?display::activeController():nullptr;
+    const bool displayChanged=displayController && displayController->apply(displaySpec,title);
+    const auto restoreDisplay=[displayController,displayChanged](const QString& why){if(displayChanged)displayController->restore(why);};
     auto* process=new QProcess(this);
     process->setProgram(program);
     process->setArguments(arguments);
     if(!workingDirectory.isEmpty())process->setWorkingDirectory(workingDirectory);
     process->setProcessChannelMode(QProcess::ForwardedChannels);
-    connect(process,&QProcess::errorOccurred,this,[this,process,title](QProcess::ProcessError error){
+    connect(process,&QProcess::errorOccurred,this,[this,process,title,restoreDisplay](QProcess::ProcessError error){
         if(error!=QProcess::FailedToStart)return;
+        restoreDisplay(QStringLiteral("title failed to start"));
         const QString cause=QObject::tr("This title could not be started.")+
             (process->errorString().isEmpty()?QString{}:QStringLiteral(" (")+process->errorString()+QStringLiteral(")"));
         process->deleteLater();game_.clear();
@@ -565,8 +573,9 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
         emit changed();
     });
     connect(process,QOverload<int,QProcess::ExitStatus>::of(&QProcess::finished),this,
-            [this,process,title](int code,QProcess::ExitStatus status){
+            [this,process,title,restoreDisplay](int code,QProcess::ExitStatus status){
         process->deleteLater();game_.clear();gameTitle_.clear();gameIsRpcs3_=false;touch();
+        restoreDisplay(status==QProcess::CrashExit?QStringLiteral("title crashed"):QStringLiteral("title ended"));
         qInfo().noquote()<<"returned from"<<title<<"exit"<<code<<(status==QProcess::NormalExit?"normal":"crashed");
         clearInGame();
         if(quitStage_>0) {
@@ -592,6 +601,7 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
     });
     process->start();
     if(!process->waitForStarted(4000)){
+        restoreDisplay(QStringLiteral("title did not start"));
         const QString cause=QObject::tr("This title could not be started.")+
             (process->errorString().isEmpty()?QString{}:QStringLiteral(" (")+process->errorString()+QStringLiteral(")"));
         process->deleteLater();
@@ -618,7 +628,7 @@ bool Shell::launchWebApp(const Entry& entry) {
     QDir().mkpath(profile);
     if(gameRunning()){showMessage(QObject::tr("A title is already running."),MessageKind::Page);return true;}
     qInfo().noquote()<<"web: "+app->id<<"window="+window<<"browser="+exe<<"profile="+profile;
-    startTracked(exe,webLaunch::arguments(exe,app->url,window,profile),QString(),entry.title);
+    startTracked(exe,webLaunch::arguments(exe,app->url,window,profile),QString(),entry.title,app->display);
     return true;
 }
 bool Shell::gameRunning() const {
@@ -2257,8 +2267,8 @@ void Shell::activate() {
             showMessage(entry.title,"This application could not be started.",MessageKind::Page);
         else if(app->kind==QLatin1String("game") && !gameRunning()) {
             const auto copy=*app;
-            GameBoot::begin([this,copy,title=entry.title]{startTracked(copy.executable,copy.arguments,copy.workingDirectory,title);});
-        } else startTracked(app->executable,app->arguments,app->workingDirectory,entry.title);
+            GameBoot::begin([this,copy,title=entry.title]{startTracked(copy.executable,copy.arguments,copy.workingDirectory,title,copy.display);});
+        } else startTracked(app->executable,app->arguments,app->workingDirectory,entry.title,app->display);
         break;
     }
     case Action::OpenUrl:

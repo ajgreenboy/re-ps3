@@ -1,6 +1,7 @@
 #include "host.h"
 #include "pad.h"
 #include "autostart.h"
+#include "display_mode.h"
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QHostInfo>
@@ -1800,6 +1801,8 @@ Reading rowValue(const QString& pageId,const QString& rowId) {
     if(pageId==QLatin1String("display")) {
         if(rowId==QLatin1String("display_output_setting"))return value(displayProfileText(state),"win32","read-only");
         if(rowId==QLatin1String("screensaver"))return {};          // the app's own preference
+        if(rowId==QLatin1String("display_mode"))return value(display::currentSummary(),"win32","read-only");   // D9, INFERRED row
+        if(rowId==QLatin1String("cec_tv_on") || rowId==QLatin1String("cec_standby"))return {};   // the app's own preferences
         // The three HDMI colour options (SETTINGS section 4's no-invention list): the host reports a desktop
         // colour space and bit depth, but exposes no switch for the console's output options.
         if(rowId==QLatin1String("cross_color_filter"))
@@ -2171,6 +2174,13 @@ QString rowDetail(const QString& pageId,const QString& rowId) {
     }
     // ---- display ----------------------------------------------------------------------------------
     if(pageId==QLatin1String("display")) {
+        if(rowId==QLatin1String("display_mode"))
+            return lines({QStringLiteral("Current Display Mode"),
+                display::currentSummary(),
+                QString{},
+                QStringLiteral("This is the mode Windows reports for the display the XMB is on. An app or game entry in apps.json"),
+                QStringLiteral("can carry a \"display\" request (width, height, refresh, hdr); the XMB applies it while that title"),
+                QStringLiteral("runs and puts this mode back when it ends, even after a crash or a restart of the XMB.")});
         if(rowId==QLatin1String("cross_color_filter"))
             return lines({QStringLiteral("Cross Color Reduction Filter"),
                 QStringLiteral("A composite-video filter with no digital counterpart"),

@@ -3,6 +3,7 @@
 #include "assets.h"
 #include "host.h"
 #include "autostart.h"
+#include "cec.h"
 #include "diagnostics.h"
 #include "p3t.h"
 #include "xmbml_view.h"
@@ -452,6 +453,17 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
         {"desktop_hotkey",nullptr,nullptr,Action::SettingChoices,"desktop/hotkey",nullptr,"Desktop Mode - Return Hotkey",
             "The global shortcut that brings the XMB back from Desktop Mode. It is registered only while the XMB is hidden. Other combinations can be set in preferences.json (desktop/hotkey)."}};
     if(id=="power")return &power;
+    // D9 (audit/DISPLAY-MODES.md): this build's own rows at the end of Display Settings. INFERRED, the firmware has none.
+    // The first is read-only (the output mode and HDR state of the display the XMB is on); the two CEC rows are
+    // preferences, unavailable with a reason unless Pulse-Eight's cec-client is installed.
+    static const QVector<RowSpec> displayExtra{
+        {"display_mode",nullptr,nullptr,Action::Information,nullptr,nullptr,"Current Display Mode",
+            "Shows the resolution, refresh rate and HDR state of the display the XMB is on. An app or game can ask for its own mode in apps.json (display); the XMB sets it while that title runs and puts this one back afterwards."},
+        {"cec_tv_on",nullptr,nullptr,Action::SettingChoices,"cec/tvOnAtStart",nullptr,"HDMI-CEC - TV On and Input",
+            "Turns the TV on and switches it to this PC (HDMI-CEC) when the XMB starts and when it returns from Desktop Mode. Needs a Pulse-Eight USB-CEC adapter and its software."},
+        {"cec_standby",nullptr,nullptr,Action::SettingChoices,"cec/standbyOnTurnOff",nullptr,"HDMI-CEC - TV Standby on Turn Off",
+            "Puts the TV in standby (HDMI-CEC) when you choose Turn Off the System. Needs a Pulse-Eight USB-CEC adapter and its software."}};
+    if(id=="display")return &displayExtra;
     return nullptr;
 }
 // A page's rows, plus what the definition said and what was left out: one record the app logs, dumps and
@@ -619,6 +631,11 @@ PageRows pageRows(const QString& id,Assets& assets,const QString& dateTimeInfo) 
             // A dev build has no watchdog.ps1 beside the exe: list the row as unavailable with the reason.
             QString reason;
             if(!autostart::available(&reason)){entry.action=Action::Unavailable;entry.disabled=true;entry.detail=reason;entry.setting.clear();}
+        }
+        if(entry.id==QLatin1String("cec_tv_on") || entry.id==QLatin1String("cec_standby")) {
+            // Without cec-client the row is listed as unavailable with the reason (nothing to detect an adapter without it).
+            const auto cecState=cec::detect();
+            if(!cecState.available){entry.action=Action::Unavailable;entry.disabled=true;entry.detail=cecState.reason;entry.setting.clear();}
         }
         data.nativeOnly<<entry.id;
         data.entries.push_back(std::move(entry));

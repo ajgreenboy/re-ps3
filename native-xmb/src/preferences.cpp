@@ -33,7 +33,9 @@ QStringList Preferences::sharedKeys() {
             QStringLiteral("power/idleMinutes"),QStringLiteral("display/screensaverMinutes"),
             // Desktop Mode (audit/DESKTOP-MODE.md) belongs to the machine, not to a user profile.
             QStringLiteral("desktop/keepMusic"),QStringLiteral("desktop/hotkey"),
-            QStringLiteral("desktop/controllerMouse"),QStringLiteral("desktop/pointerSpeed")};
+            QStringLiteral("desktop/controllerMouse"),QStringLiteral("desktop/pointerSpeed"),
+            // D9: HDMI-CEC TV control belongs to the TV and the machine, not to a profile.
+            QStringLiteral("cec/tvOnAtStart"),QStringLiteral("cec/standbyOnTurnOff")};
 }
 bool Preferences::isSharedKey(const QString& key) {
     return sharedKeys().contains(key);
@@ -100,7 +102,8 @@ QVariant Preferences::defaultValue(const QString& key) {
     if(key=="desktop/keepMusic" || key=="desktop/controllerMouse")return true;
     if(key=="desktop/pointerSpeed")return 3;
     if(key=="desktop/hotkey")return QString("Ctrl+Alt+Home");
-    if(key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen")return false;
+    if(key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen" ||
+       key=="cec/tvOnAtStart" || key=="cec/standbyOnTurnOff")return false;
     if(key=="system/name")return QSysInfo::machineHostName().left(64);
     if(key=="clock/timeZone")return QString("System");
     if(key=="appearance/wallpaper" || key=="appearance/theme" || key.startsWith("library/") ||
@@ -125,7 +128,8 @@ bool Preferences::validBare(const QString& key,const QVariant& value) {
     if(key=="desktop/pointerSpeed")return integer(1,5);
     if(key=="display/screensaverMinutes")return integer(0,30) && (value.toInt()==0 || value.toInt()==5 || value.toInt()==10 || value.toInt()==20 || value.toInt()==30);
     if(key=="audio/keyTone" || key=="system/notificationMessages" || key=="system/notificationTrophy" ||
-       key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen" || key=="desktop/keepMusic" || key=="desktop/controllerMouse")return value.metaType().id()==QMetaType::Bool;
+       key=="audio/muted" || key=="media/repeat" || key=="media/shuffle" || key=="display/fullscreen" || key=="desktop/keepMusic" || key=="desktop/controllerMouse" ||
+       key=="cec/tvOnAtStart" || key=="cec/standbyOnTurnOff")return value.metaType().id()==QMetaType::Bool;
     if(value.metaType().id()!=QMetaType::QString)return false;
     const auto text=value.toString();
     if(text.contains(QChar(0)))return false;

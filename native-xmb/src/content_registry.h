@@ -3,6 +3,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include "display_spec.h"
 
 namespace xmb {
 
@@ -17,6 +18,7 @@ struct ContentApp {
     QString artwork;
     QString window;   // web apps only: "app" (default, empty = app), "kiosk" or "browser" (P6)
     QStringList arguments;
+    DisplaySpec display;   // D9: per-app resolution / refresh / HDR while the title runs (present=false = untouched)
 };
 
 class ContentRegistry {
