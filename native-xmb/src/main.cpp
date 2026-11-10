@@ -14,6 +14,7 @@
 #include <QProcess>
 #include "desktop_pad.h"
 #include "ps_watcher.h"
+#include "firmware_fetcher.h"
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
@@ -424,6 +425,7 @@ int main(int argc,char** argv) {
     parser.addOption({"start-windowed","Start in a window even when the stored preference is fullscreen (local testing)"});
     parser.addOption({"pad-report","Write the attached PlayStation controller's kind, connection and battery as JSON, then exit","json-file"});
     parser.addOption({"check-update","Check GitHub for a newer release without downloading or installing"});
+    parser.addOption({"firmware-check","Check Sony's current PS3 firmware version without downloading it"});
     parser.addOption({"desktop-pad-test","Run a pad scenario through the Desktop Mode controller mapper, write the resulting input actions as JSON (second argument), then exit","json-in"});
     parser.addOption({"desktop-pad-sink","Open a small window that logs the mouse and key events it receives (JSON lines) for the given log file; optional second argument: seconds to run (default 30)","log-file"});
     parser.addOption({"desktop-pad-inject","Run a pad scenario through the mapper and deliver it with SendInput, only while the named sink window is foreground and under the pointer; result JSON is the second argument","json-in"});
@@ -476,6 +478,12 @@ int main(int argc,char** argv) {
     parser.addOption({"after-pid","Wait for this process id to exit before starting (used by the XMB's own restart after setup)","pid"});
     parser.addOption({"quit","Ask the running XMB to exit with code 0 (the kiosk watchdog then stops) and exit; does nothing when none runs"});
     parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
+    if(parser.isSet("firmware-check")) {
+        QString error; const auto release=xmb::latestFirmware(QStringLiteral("us"),&error);
+        if(!error.isEmpty()){std::fprintf(stderr,"Firmware check: %s\n",error.toUtf8().constData());return 2;}
+        std::fprintf(stdout,"Version: %s\nURL: %s\nMatches %s: %s\n",release.version.toUtf8().constData(),release.url.toUtf8().constData(),xmb::expectedFirmwareVersion().toUtf8().constData(),release.version==xmb::expectedFirmwareVersion()?"yes":"no");
+        return 0;
+    }
     if(parser.isSet("bluetooth-list")) {
         QString error;
         auto future=QtConcurrent::run([&error] { return xmb::listBluetooth(&error); });

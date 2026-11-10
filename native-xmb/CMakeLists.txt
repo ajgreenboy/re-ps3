@@ -37,6 +37,7 @@ qt_add_executable(re-ps3-native
     src/weather_client.cpp src/weather_client.h src/weather_shell.cpp
     src/self_check.cpp src/self_check.h src/system_check_shell.cpp
     src/updater.cpp src/updater.h src/updater_shell.cpp
+    src/firmware_fetcher.cpp src/firmware_fetcher.h
     src/wifi_client.cpp src/wifi_client.h src/wifi_shell.cpp
     src/bluetooth_client.cpp src/bluetooth_client.h src/bluetooth_shell.cpp
     src/wol_client.cpp src/wol_client.h src/homeassistant_client.cpp src/homeassistant_client.h src/home_shell.cpp
