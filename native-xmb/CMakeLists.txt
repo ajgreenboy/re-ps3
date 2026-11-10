@@ -36,6 +36,7 @@ qt_add_executable(re-ps3-native
     src/self_check.cpp src/self_check.h src/system_check_shell.cpp
     src/updater.cpp src/updater.h src/updater_shell.cpp
     src/wifi_client.cpp src/wifi_client.h src/wifi_shell.cpp
+    src/bluetooth_client.cpp src/bluetooth_client.h
     src/wol_client.cpp src/wol_client.h src/homeassistant_client.cpp src/homeassistant_client.h src/home_shell.cpp
     src/photo_viewport.cpp src/photo_viewport.h
     src/gallery_params.cpp src/gallery_params.h src/gallery_model.cpp src/gallery_model.h src/gallery_thumbs.cpp src/gallery_thumbs.h

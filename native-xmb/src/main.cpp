@@ -38,6 +38,8 @@
 #include "steam_family.h"
 #include "host.h"
 #include "wifi_client.h"
+#include "bluetooth_client.h"
+#include <QtConcurrentRun>
 #include "pad.h"
 #include "settings_menu.h"
 #include <QJsonDocument>
@@ -390,6 +392,7 @@ int main(int argc,char** argv) {
     parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
     parser.addOption({"phone-remote-test","Check the localhost phone remote and exit"});
     parser.addOption({"wifi-list","List available Wi-Fi networks and exit"});
+    parser.addOption({"bluetooth-list","List Windows Bluetooth devices and exit"});
     parser.addOption({"background-clock","Fix background and icon-material time for reference captures (ISO date/time); UI clock stays live","date-time"});
     parser.addOption({"render-clock","Fix the background/ribbon/particles/icon animation time in seconds for deterministic A/B captures","seconds"});
     parser.addOption({"ui-clock","Fix the displayed UI date/time for local captures; never changes the host clock","date-time"});
@@ -446,6 +449,16 @@ int main(int argc,char** argv) {
     parser.addOption({"safe","Safe mode (the watchdog passes it after repeated crashes): no network clients, no artwork or icon fetches, the default theme, no cold-boot intro; stored preferences are not changed"});
     parser.addOption({"quit","Ask the running XMB to exit with code 0 (the kiosk watchdog then stops) and exit; does nothing when none runs"});
     parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
+    if(parser.isSet("bluetooth-list")) {
+        QString error;
+        auto future=QtConcurrent::run([&error] { return xmb::listBluetooth(&error); });
+        future.waitForFinished();
+        const auto devices=future.result();
+        if(!error.isEmpty()) { std::fprintf(stderr,"%s\n",error.toUtf8().constData()); return 2; }
+        for(const auto& device:devices)
+            std::fprintf(stdout,"%s\t%s\t%s\n",device.name.toUtf8().constData(),device.address.toUtf8().constData(),device.paired?"paired":"not paired");
+        return devices.isEmpty()?1:0;
+    }
     if(parser.isSet("wifi-list")) {
         QString error;
         const auto networks=xmb::listNetworks(&error);
