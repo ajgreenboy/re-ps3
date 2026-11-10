@@ -3,6 +3,7 @@
 #include "edge_decode.h"
 #include "gtf_decode.h"
 #include <QHash>
+#include <QDebug>
 #include <QMatrix4x4>
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
@@ -10,6 +11,7 @@
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QSurfaceFormat>
+#include <QSet>
 #include <QtMath>
 #include <cstddef>
 
@@ -37,22 +39,37 @@ QImage renderRafStill(const QByteArray& raf,const QString& devFlash,int width,in
     QOpenGLFramebufferObjectFormat fboFormat;fboFormat.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
     QOpenGLFramebufferObject fbo(width,height,fboFormat);
     if(!fbo.isValid() || !fbo.bind())return fail(QStringLiteral("cannot create framebuffer"));
-    QOpenGLShaderProgram program;
+    QOpenGLShaderProgram litProgram,textureProgram,edgeProgram;
     const char* vertex=R"(#version 330 core
 layout(location=0) in vec3 position; layout(location=1) in vec3 normal; layout(location=2) in vec2 uv;
 uniform mat4 mvp,model; uniform mat3 normalMatrix; uniform vec4 uvTransform;
 out vec3 worldPos,worldNormal; out vec2 texCoord;
 void main(){ vec4 p=model*vec4(position,1); worldPos=p.xyz; worldNormal=normalMatrix*normal;
  texCoord=uv*uvTransform.zw+uvTransform.xy; gl_Position=mvp*vec4(position,1); })";
-    const char* fragment=R"(#version 330 core
+    const char* fragment=R"(
 in vec3 worldPos,worldNormal; in vec2 texCoord; out vec4 outColor;
-uniform sampler2D diffuseMap; uniform vec4 actorColor; uniform vec3 lightPos,lightColor,attenuation,ambient;
-void main(){ vec4 tex=texture(diffuseMap,texCoord); vec3 delta=lightPos-worldPos; float d=length(delta);
- float lambert=max(dot(normalize(worldNormal),normalize(delta)),0.0);
+uniform sampler2D diffuseMap; uniform vec4 actorColor; uniform vec3 lightPos,lightColor,attenuation,ambient,eyePos;
+void main(){ vec4 tex=texture(diffuseMap,texCoord);
+#ifdef UNLIT
+ outColor=tex*actorColor;
+#else
+ vec3 delta=lightPos-worldPos; float d=length(delta);
+ vec3 n=normalize(worldNormal), l=normalize(delta), v=normalize(eyePos-worldPos);
+ float lambert=max(dot(n,l),0.0);
  float falloff=1.0/max(dot(attenuation,vec3(1,d,d*d)),0.001);
  vec3 lighting=ambient+lightColor*lambert*falloff;
- outColor=vec4(tex.rgb*actorColor.rgb*lighting,tex.a*actorColor.a); })";
-    if(!program.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) || !program.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment) || !program.link())return fail(QStringLiteral("shader: ")+program.log());
+ float specular=lambert>0.0 ? pow(max(dot(n,normalize(l+v)),0.0),32.0)*0.2 : 0.0;
+ vec3 color=tex.rgb*actorColor.rgb*lighting+lightColor*specular*falloff;
+#ifdef EDGE_LIT
+ color+=tex.rgb*actorColor.rgb*pow(1.0-max(dot(n,v),0.0),3.0)*0.35;
+#endif
+ outColor=vec4(color,tex.a*actorColor.a);
+#endif
+ })";
+    const auto compile=[&](QOpenGLShaderProgram& program,const QByteArray& define) {
+        return program.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex) && program.addShaderFromSourceCode(QOpenGLShader::Fragment,QByteArray("#version 330 core\n")+define+fragment) && program.link();
+    };
+    if(!compile(litProgram,{}) || !compile(textureProgram,"#define UNLIT\n") || !compile(edgeProgram,"#define EDGE_LIT\n"))return fail(QStringLiteral("shader: ")+litProgram.log()+textureProgram.log()+edgeProgram.log());
     QHash<QString,Mesh> meshes;QHash<QString,GLuint> textures;
     const auto cleanup=[&] {
         for(const auto& m:meshes){gl.glDeleteBuffers(1,&m.vbo);gl.glDeleteBuffers(1,&m.ibo);gl.glDeleteVertexArrays(1,&m.vao);}
@@ -80,7 +97,8 @@ void main(){ vec4 tex=texture(diffuseMap,texCoord); vec3 delta=lightPos-worldPos
         gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
         textures.insert(texture.id,id);
     }
-    QHash<QString,QString> materials;for(const auto& material:scene.materials)materials.insert(material.id,material.colorMap);
+    // Normal and specular maps are currently ignored; only the colour map is sampled.
+    QHash<QString,P3t::Raf::Material> materials;for(const auto& material:scene.materials)materials.insert(material.id,material);
     const auto& c=scene.camera;QVector3D eye=vec(c.position),direction=vec(c.direction),up=vec(c.up);
     const bool cameraFallback=!c.present || c.yfov<=0 || c.yfov>=3.14159 || c.znear<=0 || c.zfar<=c.znear || direction.lengthSquared()<1e-8f || up.lengthSquared()<1e-8f || QVector3D::crossProduct(direction,up).lengthSquared()<1e-8f;
     // RAF camera vectors can be absent; use a perspective view of the origin in that case.
@@ -91,16 +109,28 @@ void main(){ vec4 tex=texture(diffuseMap,texCoord); vec3 delta=lightPos-worldPos
     for(const auto& light:scene.lights)if(light.type==0 && vec(light.color).lengthSquared()>0){lightPos=vec(light.position);lightColor=vec(light.color);attenuation=vec(light.attenuation);if(attenuation.lengthSquared()<1e-8f)attenuation={1,0,0};lightFallback=false;break;}
     gl.glViewport(0,0,width,height);gl.glClearColor(0,0,0,1);gl.glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     gl.glDisable(GL_CULL_FACE);gl.glDisable(GL_DEPTH_TEST);gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-    program.bind();program.setUniformValue("diffuseMap",0);program.setUniformValue("lightPos",lightPos);program.setUniformValue("lightColor",lightColor);program.setUniformValue("attenuation",attenuation);program.setUniformValue("ambient",ambient);
+    QSet<QString> unknownEffects;
     for(const auto& actor:scene.actors) {
-        if(!meshes.contains(actor.model) || !materials.contains(actor.material) || !textures.contains(materials.value(actor.material))){cleanup();return fail(QStringLiteral("actor %1 has unresolved model or diffuse texture").arg(actor.id));}
+        if(!meshes.contains(actor.model) || !materials.contains(actor.material) || !textures.contains(materials.value(actor.material).colorMap)){cleanup();return fail(QStringLiteral("actor %1 has unresolved model or diffuse texture").arg(actor.id));}
+        const auto material=materials.value(actor.material);const QString effect=material.effect.toLower();
+        const bool alpha=effect==QStringLiteral("pure_texture_alpha_0_depth_1");
+        QOpenGLShaderProgram* selected=&litProgram;
+        if(effect==QStringLiteral("pure_texture") || alpha)selected=&textureProgram;
+        else if(effect==QStringLiteral("basic_lighting_edge_lit"))selected=&edgeProgram;
+        else if(effect!=QStringLiteral("basic_lighting") && effect!=QStringLiteral("sce01") && !unknownEffects.contains(effect)){qInfo()<<"Unknown RAF effect, using basic lighting:"<<material.effect;unknownEffects.insert(effect);}
+        auto& program=*selected;program.bind();
+        program.setUniformValue("diffuseMap",0);program.setUniformValue("lightPos",lightPos);program.setUniformValue("lightColor",lightColor);program.setUniformValue("attenuation",attenuation);program.setUniformValue("ambient",ambient);program.setUniformValue("eyePos",eye);
         QMatrix4x4 model;model.translate(vec(actor.position));model.rotate(qRadiansToDegrees(float(actor.rotation.z)),0,0,1);model.rotate(qRadiansToDegrees(float(actor.rotation.y)),0,1,0);model.rotate(qRadiansToDegrees(float(actor.rotation.x)),1,0,0);model.scale(vec(actor.scale));
         program.setUniformValue("model",model);program.setUniformValue("mvp",projection*view*model);program.setUniformValue("normalMatrix",model.normalMatrix());
         program.setUniformValue("uvTransform",QVector4D(float(actor.uvOffset.x),float(actor.uvOffset.y),float(actor.uvScale.x),float(actor.uvScale.y)));
         program.setUniformValue("actorColor",QVector4D(float(actor.color.x),float(actor.color.y),float(actor.color.z),float(actor.color.w)));
-        gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,textures.value(materials.value(actor.material)));const Mesh m=meshes.value(actor.model);gl.glBindVertexArray(m.vao);gl.glDrawElements(GL_TRIANGLES,m.count,GL_UNSIGNED_INT,nullptr);
+        GLboolean depthMask=GL_TRUE;const GLboolean blend=gl.glIsEnabled(GL_BLEND);
+        if(alpha){gl.glGetBooleanv(GL_DEPTH_WRITEMASK,&depthMask);gl.glEnable(GL_BLEND);gl.glDepthMask(GL_FALSE);}
+        gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,textures.value(material.colorMap));const Mesh m=meshes.value(actor.model);gl.glBindVertexArray(m.vao);gl.glDrawElements(GL_TRIANGLES,m.count,GL_UNSIGNED_INT,nullptr);
+        if(alpha){gl.glDepthMask(depthMask);if(!blend)gl.glDisable(GL_BLEND);}
+        program.release();
     }
-    gl.glBindVertexArray(0);program.release();QImage result=fbo.toImage();cleanup();
+    gl.glBindVertexArray(0);QImage result=fbo.toImage();cleanup();
     if(stats){stats->actors=int(scene.actors.size());stats->models=int(meshes.size());stats->textures=int(textures.size());stats->triangles=triangles;stats->cameraFallback=cameraFallback;stats->lightFallback=lightFallback;}
     return result;
 }
