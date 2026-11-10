@@ -223,6 +223,10 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&psWatcher_,&PsWatcher::released,this,&View::psReleasedEvent);
     connect(&psWatcher_,&PsWatcher::cancelled,this,[this]{psPressActionable_=false;});
     psWatcher_.start();
+    // Phone Remote (D11): the paired LAN remote drives the same key path a scripted or keyboard press takes, so
+    // its input behaves identically. The PS button goes through the tap handler.
+    connect(&shell_.phoneRemote(),&PhoneRemote::keyRequested,this,&View::replayKeyTap);
+    connect(&shell_.phoneRemote(),&PhoneRemote::psRequested,this,[this]{psTappedEvent(120);});
     // renderPaused() (ps_watcher.h, H5): while a launched title owns the foreground the loop stops re-arming;
     // TitleSession calls update() to restart it when the XMB is back in front.
     connect(this,&QOpenGLWidget::frameSwapped,this,[this]{++framesSwapped_;if(isVisible() && !renderPaused())update();},Qt::QueuedConnection);

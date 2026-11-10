@@ -14,6 +14,7 @@
 #include "homeassistant_client.h"
 #include "file_ops.h"
 #include "weather_client.h"
+#include "phone_remote.h"
 #include "self_check.h"
 #include "steam_friends.h"
 #include "content_registry.h"
@@ -107,7 +108,10 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // Game column's seg_manual row. Both exist only while a title runs and the XMB was raised over it (inGame()).
     QuitGame, GameManual,
     // Photo > Photo Gallery (category_photo.xml #seg_hakoniwa): the recreated hakoniwa library area (gallery_*.cpp, audit/PHOTO-GALLERY.md).
-    PhotoGallery };
+    PhotoGallery,
+    // Network > Phone Remote (phone_remote_shell.cpp, audit/HANDOFF-2026-11-09 D11): a LAN web page that drives the
+    // XMB from a phone. The column row toggles it on and shows the pairing code and URL. Native-only, off by default.
+    PhoneRemote };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -340,6 +344,8 @@ public:
     int galleryIndex() const { return galleryIndex_; }
     // The gallery found no photos: the console's own message page (msg_error_no_image).
     void galleryMessage(const QString& text);
+    // Network > Phone Remote (D11): the paired LAN remote; the view connects its keyRequested/psRequested signals.
+    PhoneRemote& phoneRemote() { return phoneRemote_; }
     bool slideshowActive() const { return slideshow_.isActive(); }
     // The console's busy state (audit DIALOGS-FIRMWARE 2.8 page_busy; FIDELITY-BEHAVIOUR N10/N12/X5).
     // True from the moment a list scan is asked for until its rows land, and while a settings write's
@@ -699,6 +705,9 @@ private:
     QString weatherSummary() const;
     QVector<Entry> weatherRows() const;
     void refreshWeatherRows();
+    PhoneRemote phoneRemote_;
+    void initPhoneRemote();
+    void activatePhoneRemote(const Entry& entry);
     SelfCheck* systemCheck_=nullptr;
     void openSystemCheck();   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
     void spotifyCommand(OptionCommand command);
