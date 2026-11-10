@@ -37,6 +37,7 @@
 #include "steam_overrides.h"
 #include "steam_family.h"
 #include "host.h"
+#include "wifi_client.h"
 #include "pad.h"
 #include "settings_menu.h"
 #include <QJsonDocument>
@@ -388,6 +389,7 @@ int main(int argc,char** argv) {
     parser.addOption({"no-health-warning","Skip the health warning the cold boot shows after its intro (also settings.ini [boot] healthWarning=false)"});
     parser.addOption({"script","Replay key presses and save framebuffer grabs (local verification)","tokens"});
     parser.addOption({"phone-remote-test","Check the localhost phone remote and exit"});
+    parser.addOption({"wifi-list","List available Wi-Fi networks and exit"});
     parser.addOption({"background-clock","Fix background and icon-material time for reference captures (ISO date/time); UI clock stays live","date-time"});
     parser.addOption({"render-clock","Fix the background/ribbon/particles/icon animation time in seconds for deterministic A/B captures","seconds"});
     parser.addOption({"ui-clock","Fix the displayed UI date/time for local captures; never changes the host clock","date-time"});
@@ -444,6 +446,15 @@ int main(int argc,char** argv) {
     parser.addOption({"safe","Safe mode (the watchdog passes it after repeated crashes): no network clients, no artwork or icon fetches, the default theme, no cold-boot intro; stored preferences are not changed"});
     parser.addOption({"quit","Ask the running XMB to exit with code 0 (the kiosk watchdog then stops) and exit; does nothing when none runs"});
     parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
+    if(parser.isSet("wifi-list")) {
+        QString error;
+        const auto networks=xmb::listNetworks(&error);
+        if(!error.isEmpty()) { std::fprintf(stderr,"%s\n",error.toUtf8().constData()); return 2; }
+        for(const auto& network:networks)
+            std::fprintf(stdout,"%s\t%d%%\t%s\t%s\t%s\n",network.ssid.toUtf8().constData(),network.signalQuality,
+                         network.secured?"secured":"open",network.auth.toUtf8().constData(),network.connected?"connected":"not connected");
+        return networks.isEmpty()?1:0;
+    }
     if(parser.isSet("phone-remote-test")) {
         xmb::PhoneRemote remote;
         if(!remote.setEnabled(true)){qCritical()<<"phone remote: bind failed"<<remote.errorString();return 1;}

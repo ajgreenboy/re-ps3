@@ -35,6 +35,7 @@ qt_add_executable(re-ps3-native
     src/weather_client.cpp src/weather_client.h src/weather_shell.cpp
     src/self_check.cpp src/self_check.h src/system_check_shell.cpp
     src/updater.cpp src/updater.h
+    src/wifi_client.cpp src/wifi_client.h
     src/wol_client.cpp src/wol_client.h src/homeassistant_client.cpp src/homeassistant_client.h src/home_shell.cpp
     src/photo_viewport.cpp src/photo_viewport.h
     src/gallery_params.cpp src/gallery_params.h src/gallery_model.cpp src/gallery_model.h src/gallery_thumbs.cpp src/gallery_thumbs.h
@@ -79,7 +80,7 @@ if(MSVC)
     target_compile_options(re-ps3-native PRIVATE /W4 /permissive- /utf-8 /Zi)
     # Program database for the crash handler's stack traces (main.cpp); optimisation is unchanged.
     target_link_options(re-ps3-native PRIVATE /DEBUG /OPT:REF /OPT:ICF)
-    target_link_libraries(re-ps3-native PRIVATE dbghelp windowsapp d3d11 dxgi dwmapi shell32)
+    target_link_libraries(re-ps3-native PRIVATE dbghelp windowsapp d3d11 dxgi dwmapi shell32 wlanapi)
 endif()
 
 # XMB Manager: the standalone companion tool (CLI + Qt UI). It shares the
