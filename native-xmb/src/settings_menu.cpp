@@ -434,7 +434,11 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
         // INFERRED (PHASES-HTPC D7): the firmware's System Update is a PSN wizard. This checks GitHub releases for a
         // newer version and reports; download-and-install is the next step.
         {"system_update",nullptr,nullptr,Action::SystemUpdate,nullptr,nullptr,"System Update",
-            "Checks the update server for a newer version of this build. Downloading and installing is opt-in and not automatic."}};
+            "Checks the update server for a newer version of this build. Downloading and installing is opt-in and not automatic."},
+        // INFERRED (PHASES-HTPC D8): the 4.93 console runs its Initial Setup once, at first boot (sysconf_plugin msg_initsetup); this
+        // build runs its own first-run sequence (firmware folder, library folders, display, controller, Start at Sign-in) and offers it again here.
+        {"run_setup",nullptr,nullptr,Action::Setup,nullptr,nullptr,"Run Setup Again",
+            "Runs the first-run setup again: the firmware folder, library folders, display, controller test and Start at Sign-in. Every step can be skipped."}};
     if(id=="system")return &system;
     // Desktop Mode (PHASES-HTPC D1; audit/DESKTOP-MODE.md): this build's own settings, so native-only rows at the end of
     // the Power Saving page. Both keys are also settable in preferences.json.

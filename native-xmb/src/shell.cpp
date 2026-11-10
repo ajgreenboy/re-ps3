@@ -1908,6 +1908,7 @@ int Shell::boxChoiceSlot() const {
         (messageBoxChoice_==BoxChoice::Yes?0:1):-1;
 }
 void Shell::horizontal(int delta) {
+    if(delta && setupCaptureInput(delta<0?QStringLiteral("Left"):QStringLiteral("Right")))return;   // D8 pad test
     touch();if(!delta)return;
     columnSink_=0;
     if(!message_.isEmpty()) {
@@ -1948,6 +1949,7 @@ void Shell::horizontal(int delta) {
     if(previous!=category_)interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();
 }
 void Shell::vertical(int delta) {
+    if(delta && setupCaptureInput(delta<0?QStringLiteral("Up"):QStringLiteral("Down")))return;   // D8 pad test
     touch();
     if(mediaOpen_) {
         // Photo viewer, Up/Down (BEHAVIOUR-GAP-AUDIT A32; MEDIA-PANELS-FIRMWARE 6.2). The console's photo
@@ -1970,6 +1972,7 @@ void Shell::vertical(int delta) {
     else emit changed();
 }
 void Shell::activate() {
+    if(setupCaptureInput(QStringLiteral("Cross / Enter")))return;   // D8 pad test
     touch();
     // A modal box's confirm is its own path: TRACED 0x00341870 plays snd_decide (Cue::Confirm) when the
     // box's confirm button is pressed and then hides the label and the button. The other four kinds are
@@ -2285,6 +2288,7 @@ void Shell::activate() {
     case Action::SystemUpdate:activateSystemUpdate(entry);break;
     case Action::WifiApp:activateWifi(entry);break;
     case Action::BluetoothApp:case Action::BluetoothPair:activateBluetooth(entry);break;
+    case Action::Setup:activateSetup(entry);break;
     case Action::SystemCheck:openSystemCheck();break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;
@@ -2324,7 +2328,7 @@ void Shell::activate() {
     case Action::Unavailable:
         // A Continue Watching row whose file has gone says why, instead of the generic line, which would be
         // false: the feature exists, the file does not.
-        showMessage(entry.title,(entry.id.startsWith("continue:") || entry.id==QLatin1String("start_at_signin")) && !entry.detail.isEmpty()
+        showMessage(entry.title,(entry.id.startsWith("continue:") || entry.id==QLatin1String("start_at_signin") || entry.id.startsWith("setup:")) && !entry.detail.isEmpty()
             ?entry.detail
             :QObject::tr("This feature is not available in the native recreation yet."),MessageKind::Page);
         break;
@@ -4100,6 +4104,7 @@ void Shell::sortPageByDate(bool ascending,bool created) {
         <<(ascending?"ascending":"descending")<<page.entries.size()<<"rows";
 }
 void Shell::back() {
+    if(setupCaptureInput(QStringLiteral("Circle / Esc")))return;   // D8 pad test
     touch();
     // The busy page blocks list actions (DIALOGS-FIRMWARE 2.8; FIDELITY-BEHAVIOUR N10), and Circle is a list
     // action: the console has no way out of page_busy and neither does this. The one exception is kept below -
@@ -4139,6 +4144,7 @@ void Shell::back() {
         audioTracks_.clear();audioRejected_.clear();activeAudioTrack_=-1;}
     // Circle on a sign-in page is the page's Cancel row: it leaves the page and aborts a request still in
     // flight, so Back can never strand an authentication the user has walked away from.
+    else if(setupHandleBack());   // D8: Circle on the setup Welcome page asks before leaving
     else if(!pages_.isEmpty() && pages_.last().signIn)cancelJellyfinSignInPage();
     else if(!pages_.isEmpty()){library_.cancel();scanRequest_=0;jellyfinRequest_=0;loading_=false;status_.clear();pages_.removeLast();}
     emit changed();
@@ -5714,6 +5720,7 @@ void Shell::refreshJellyfinSignInPage() {
     page.selection=std::clamp(page.selection,0,std::max(0,int(page.entries.size())-1));
 }
 void Shell::setJellyfinSignInField(const QString& field,const QString& value) {
+    if(field.startsWith(QStringLiteral("setup:"))){setupText(field,value);return;}   // D8: the setup pages type a folder path on the same keyboard
     // The one field-edit signal also carries the Jellyfin search term: the row that asks for it sends
     // the key "search", and the accepted text opens a result page. It is not a credential field, so it
     // is kept (for the next keyboard prefill) but only its length is logged.

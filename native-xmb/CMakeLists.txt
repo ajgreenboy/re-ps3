@@ -59,6 +59,7 @@ qt_add_executable(re-ps3-native
     src/jellyfin_client.cpp src/jellyfin_client.h src/jellyfin_stream.cpp src/jellyfin_stream.h
     src/jellyfin_shell.cpp
     src/rsx_program.cpp src/rsx_program.h src/ribbon.cpp src/ribbon.h src/hdr.cpp src/hdr.h src/icons.cpp src/icons.h src/particles.cpp src/particles.h src/coldboot.cpp src/coldboot.h
+    src/setup.cpp src/setup.h src/setup_shell.cpp
     src/autostart.cpp src/autostart.h src/diagnostics.cpp src/diagnostics.h src/game_capture.cpp src/game_capture.h src/shell.cpp src/shell.h src/host.cpp src/host.h src/pad.cpp src/pad.h src/ps_watcher.cpp src/ps_watcher.h src/desktop_mode.cpp src/desktop_mode.h src/desktop_pad.cpp src/desktop_pad_win.cpp src/desktop_pad.h src/view.cpp src/view.h src/dialogs.cpp)
 target_link_libraries(re-ps3-native PRIVATE Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::Network)
 option(XMB_UPDATER_BUILD_TESTS "Build the updater fixture runner" OFF)
@@ -66,6 +67,12 @@ if(XMB_UPDATER_BUILD_TESTS)
     qt_add_executable(xmb-updater-tests tests/updater_tests.cpp src/updater.cpp src/updater.h)
     target_include_directories(xmb-updater-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(xmb-updater-tests PRIVATE Qt6::Core Qt6::Network)
+endif()
+option(XMB_SETUP_BUILD_TESTS "Build the first-run setup test runner" OFF)
+if(XMB_SETUP_BUILD_TESTS)
+    qt_add_executable(xmb-setup-tests tests/setup_tests.cpp src/setup.cpp src/setup.h)
+    target_include_directories(xmb-setup-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(xmb-setup-tests PRIVATE Qt6::Core)
 endif()
 if(Freetype_FOUND)
     target_link_libraries(re-ps3-native PRIVATE Freetype::Freetype)

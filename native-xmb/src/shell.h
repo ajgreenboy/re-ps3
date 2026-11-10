@@ -120,7 +120,10 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     WifiApp,
     // Accessory Settings > Bluetooth Devices (bluetooth_shell.cpp, D10): lists and pairs Bluetooth controllers and
     // headsets. Native-only.
-    BluetoothApp, BluetoothPair };
+    BluetoothApp, BluetoothPair,
+    // First-run setup (setup_shell.cpp, D8, audit/FIRST-RUN.md): every row of the setup pages and Settings > System Settings > Run Setup Again.
+    // Entry::value is the command ("next", "fw:use|<path>", ...); the page it sits on is told apart by its first row id "setup:<step>...".
+    Setup };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -519,6 +522,13 @@ public:
     // it counts as activity. keepMusicInDesktop() is the desktop/keepMusic preference (default on).
     void setDesktopMode(bool on);
     bool desktopMode() const { return desktopMode_; }
+    // ---- First-run setup (setup_shell.cpp, D8; audit/FIRST-RUN.md) ----
+    // main.cpp tells the shell which dev_flash this run loaded (and whether it is usable) and which screen --kiosk uses,
+    // then calls beginSetup() when no <data>/setup.json says completed (or --first-run). The sequence is a stack of ordinary
+    // pages, so the pad reaches it through the same horizontal/vertical/activate/back path as every other page.
+    void setSetupContext(const QString& devFlashRoot,int kioskDisplay);
+    void beginSetup(bool forced);
+    bool setupActive() const;
     QString desktopHotkey() const { return preferences_.value("desktop/hotkey").toString(); }
     bool keepMusicInDesktop() const { return preferences_.value("desktop/keepMusic").toBool(); }
     // Controller-driven desktop (desktop_pad.h): desktop/controllerMouse (default on) and desktop/pointerSpeed (1-5, default 3).
@@ -621,6 +631,8 @@ signals:
     // Desktop Mode (INFERRED rows; audit/DESKTOP-MODE.md): main.cpp owns the window, the tray and the ways back.
     void requestDesktop();
     void requestExitToDesktop();
+    // Setup chose a new dev_flash (or Finish after choosing one): main.cpp restarts the process so the firmware loads.
+    void setupRestartRequested();
     void psTapIndicator();
     void requestNewUser();
     // Information on a user row: the name page in rename mode, prefilled with the current name.
@@ -728,6 +740,39 @@ private:
     void initWifi();
     void activateWifi(const Entry& entry);
     void activateBluetooth(const Entry& entry);
+    // ---- First-run setup (setup_shell.cpp) ----
+    struct SetupState {
+        bool active=false;
+        int baseDepth=0;                 // pages_.size() before the first setup page; Finish returns to it
+        QString devFlash;                // the dev_flash this run loaded
+        bool firmwareOk=false;           // it passes setup::checkFirmware
+        QString chosenFlash;             // a different folder chosen this session, saved to xmb-config.json
+        int kioskDisplay=-1;             // --display of this run, -1 when none
+        QString browseKind;              // "firmware", "photo", "music" or "video" while a folder chooser is open
+        QString browsePath;              // the folder the chooser lists ("" = the drive list)
+        bool capturing=false;            // the pad test is swallowing navigation
+        QString lastInput;               // the last navigation input the shell saw
+        QElapsedTimer idle;              // time since the last input while capturing
+        QString heldText;                // the live "held now" text last drawn
+        QString padList;                 // detected controllers, refreshed every 2 s
+        QElapsedTimer padListAge;
+        QTimer* timer=nullptr;
+    } setup_;
+    void activateSetup(const Entry& entry);
+    bool setupCaptureInput(const QString& label);   // true = swallowed by the pad test
+    bool setupHandleBack();                          // true = Circle on the Welcome page was handled
+    QString setupStepOfTopPage() const;
+    void setupPush(const QString& step);
+    void setupNext();
+    void setupRefresh();
+    void setupFinish(bool skipped);
+    void setupOpenChooser(const QString& kind,const QString& start);
+    void setupChooserList();
+    void setupUseFolder(const QString& folder);
+    void setupPadTick();
+    void setupText(const QString& field,const QString& value);   // the OSK result for "setup:path"
+    QVector<Entry> setupRows(const QString& step);
+    QStringList setupOrder() const;
     SelfCheck* systemCheck_=nullptr;
     void openSystemCheck();   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
     void spotifyCommand(OptionCommand command);

@@ -6,6 +6,8 @@
 #include "updater.h"
 #include "desktop_mode.h"
 #include "diagnostics.h"
+#include "setup.h"
+#include <QProcess>
 #include "desktop_pad.h"
 #include "ps_watcher.h"
 #include <QApplication>
@@ -452,6 +454,8 @@ int main(int argc,char** argv) {
     parser.addOption({"show","Bring the running XMB to the front (leaving Desktop Mode), or start it; a plain launch means the same"});
     parser.addOption({"desktop","Put the running XMB into Desktop Mode (hidden, process kept), or start it in Desktop Mode"});
     parser.addOption({"safe","Safe mode (the watchdog passes it after repeated crashes): no network clients, no artwork or icon fetches, the default theme, no cold-boot intro; stored preferences are not changed"});
+    parser.addOption({"first-run","Run the first-run setup sequence now, even when setup.json says it was completed"});
+    parser.addOption({"after-pid","Wait for this process id to exit before starting (used by the XMB's own restart after setup)","pid"});
     parser.addOption({"quit","Ask the running XMB to exit with code 0 (the kiosk watchdog then stops) and exit; does nothing when none runs"});
     parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
     if(parser.isSet("bluetooth-list")) {
@@ -685,7 +689,25 @@ int main(int argc,char** argv) {
         });
         return app.exec();
     }
-    const QString data=parser.isSet("data-dir")?parser.value("data-dir"):QDir(QCoreApplication::applicationDirPath()).filePath("data");
+#ifdef Q_OS_WIN
+    // D8: a restart the XMB asked for (setup chose a new dev_flash) starts before the old process has finished exiting.
+    if(parser.isSet("after-pid")) {
+        if(HANDLE old=OpenProcess(SYNCHRONIZE,FALSE,DWORD(parser.value("after-pid").toUInt()))){WaitForSingleObject(old,15000);CloseHandle(old);}
+    }
+#endif
+    // D8: a plain interactive launch (no report mode, no --script) reads xmb-config.json next to the exe for what the command line
+    // leaves out: {"devFlash","dataDir","vshModules","display"}. The same file run-kiosk.ps1 and watchdog.ps1 read.
+    static const QStringList interactiveOptions{"dev-flash","dev-hdd0","vsh-modules","data-dir","no-intro","no-health-warning","kiosk",
+        "display","start-windowed","steam-root","gallery-root","gallery-sort","show","desktop","quit","safe","first-run","after-pid"};
+    bool interactiveLaunch=parser.positionalArguments().isEmpty() && qEnvironmentVariable("XMB_INPUT_SCRIPT_ONLY")!=QLatin1String("1");
+    for(const QString& name:parser.optionNames())if(!interactiveOptions.contains(name))interactiveLaunch=false;
+    const QJsonObject launchConfig=interactiveLaunch?xmb::setup::loadConfig(xmb::setup::configPath()):QJsonObject{};
+    const auto configPathValue=[&](const char* key)->QString{
+        const QString value=launchConfig.value(QLatin1String(key)).toString();
+        return value.isEmpty()?QString():QDir::cleanPath(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(value));
+    };
+    const QString data=parser.isSet("data-dir")?parser.value("data-dir"):!configPathValue("dataDir").isEmpty()?configPathValue("dataDir")
+        :QDir(QCoreApplication::applicationDirPath()).filePath("data");
     xmb::diagnostics::setCrashDirectory(data);
     if(xmb::diagnostics::safeMode())qWarning().noquote()<<"safe mode:"<<xmb::diagnostics::kSafeModeNotice;
     if(parser.isSet("steam-root"))qputenv("XMB_STEAM_ROOT",parser.value("steam-root").toUtf8());
@@ -696,10 +718,7 @@ int main(int argc,char** argv) {
     std::unique_ptr<xmb::InstanceServer> instanceServer;
     const bool commandGiven=parser.isSet("show") || parser.isSet("desktop") || parser.isSet("quit");
     {
-        static const QStringList interactiveOptions{"dev-flash","dev-hdd0","vsh-modules","data-dir","no-intro","no-health-warning","kiosk",
-            "display","start-windowed","steam-root","gallery-root","gallery-sort","show","desktop","quit","safe"};
-        bool interactive=parser.positionalArguments().isEmpty() && qEnvironmentVariable("XMB_INPUT_SCRIPT_ONLY")!=QLatin1String("1");
-        for(const QString& name:parser.optionNames())if(!interactiveOptions.contains(name))interactive=false;
+        const bool interactive=interactiveLaunch;
         if(commandGiven && !interactive){qCritical()<<"--show, --desktop and --quit belong to a plain interactive launch (no report, --script or capture options)";return 2;}
         if(commandGiven && !xmb::singleInstanceEnabled()){qCritical()<<"--show, --desktop and --quit need the single-instance guard, which XMB_SINGLE_INSTANCE=0 turned off";return 2;}
         if(interactive && xmb::singleInstanceEnabled()) {
@@ -901,9 +920,17 @@ int main(int argc,char** argv) {
         QTimer::singleShot(0,&app,[&store,term]{if(term.isEmpty())store.topSellers();else store.search(term);});
         return app.exec();
     }
-    if(!parser.isSet("dev-flash"))parser.showHelp(2);
+    // D8: an interactive launch may have no --dev-flash: the config next to the exe names it, and when nothing does the XMB still starts
+    // (with the first-run setup explaining what is missing) rather than printing usage on a TV.
+    QString devFlashPath=parser.value("dev-flash");
+    if(!parser.isSet("dev-flash")) {
+        if(!interactiveLaunch)parser.showHelp(2);
+        devFlashPath=configPathValue("devFlash");
+        if(devFlashPath.isEmpty())devFlashPath=QDir(QCoreApplication::applicationDirPath()).filePath("dev_flash");
+        qInfo().noquote()<<"dev_flash:"<<QDir::toNativeSeparators(devFlashPath)<<"(from xmb-config.json or the default beside the exe)";
+    }
     if(parser.isSet("inventory")) {
-        const auto inventory=xmb::inventoryXmb(parser.value("dev-flash"));
+        const auto inventory=xmb::inventoryXmb(devFlashPath);
         if(inventory.value("documentCount").toInt()==0){qCritical()<<"No local XMBML files found";return 2;}
         QFile output(parser.value("inventory"));
         if(!output.open(QIODevice::WriteOnly)){qCritical()<<output.errorString();return 2;}
@@ -912,7 +939,7 @@ int main(int argc,char** argv) {
         qInfo()<<"catalog inventory:"<<inventory.value("documentCount").toInt()<<"documents,"<<inventory.value("viewCount").toInt()<<"views,"<<inventory.value("itemCount").toInt()<<"items,"<<inventory.value("errorCount").toInt()<<"errors";
         return inventory.value("errorCount").toInt()?1:0;
     }
-    xmb::Assets assets(parser.value("dev-flash"));
+    xmb::Assets assets(devFlashPath);
     if(parser.isSet("motion-report")) {
         QJsonArray cases;
         for(const auto& spec:{std::pair{5,200},std::pair{4,300}}) {
@@ -940,6 +967,7 @@ int main(int argc,char** argv) {
     if(parser.isSet("dev-hdd0"))assets.setHddRoot(parser.value("dev-hdd0"));
     // The ribbon's rest state is in custom_render_plugin.prx; without it the cloth settles an approximate start.
     if(parser.isSet("vsh-modules"))assets.setModulesRoot(parser.value("vsh-modules"));
+    else if(!configPathValue("vshModules").isEmpty())assets.setModulesRoot(configPathValue("vshModules"));   // D8: xmb-config.json
     else if(qEnvironmentVariableIsSet("XMB_VSH_MODULES"))assets.setModulesRoot(qEnvironmentVariable("XMB_VSH_MODULES"));
     if(parser.isSet("settings-report")) {
         // The whole Settings surface as one JSON document (audit/SETTINGS-COVERAGE.md 5.1): the machine
@@ -999,7 +1027,7 @@ int main(int argc,char** argv) {
         QFile out(parser.value("rco-images"));
         if(!out.open(QIODevice::WriteOnly|QIODevice::Text)){qCritical()<<out.errorString();return 2;}
         QTextStream stream(&out);
-        for(const auto& file:QDir(QDir(parser.value("dev-flash")).filePath("vsh/resource")).entryInfoList({"*.rco"},QDir::Files,QDir::Name)) {
+        for(const auto& file:QDir(QDir(devFlashPath).filePath("vsh/resource")).entryInfoList({"*.rco"},QDir::Files,QDir::Name)) {
             QStringList names;
             try { names=assets.imageNames(file.completeBaseName()); } catch(const std::exception& e) { stream<<file.completeBaseName()<<": "<<e.what()<<"\n";continue; }
             names.sort();stream<<file.completeBaseName()<<": "<<names.join(' ')<<"\n";
@@ -1129,14 +1157,14 @@ int main(int argc,char** argv) {
         return assets.failedImages()?1:0;
     }
     if(parser.isSet("gallery-params") || parser.isSet("gallery-layout")) {
-        xmb::GalleryReportRequest request;request.devFlash=parser.value("dev-flash");request.dataDir=data;
+        xmb::GalleryReportRequest request;request.devFlash=devFlashPath;request.dataDir=data;
         request.layout=parser.isSet("gallery-layout");request.outputPath=parser.value(request.layout?"gallery-layout":"gallery-params");
         request.roots=parser.values("gallery-root");if(parser.isSet("gallery-sort"))request.sort=parser.value("gallery-sort");
         request.warmThumbs=parser.isSet("gallery-thumbs");
         return xmb::runGalleryReport(request);
     }
     if(parser.isSet("gallery-replay")) {
-        xmb::GalleryReplayRequest request;request.devFlash=parser.value("dev-flash");request.dataDir=data;
+        xmb::GalleryReplayRequest request;request.devFlash=devFlashPath;request.dataDir=data;
         request.tokens=parser.value("gallery-replay");request.outputPath=parser.isSet("gallery-replay-out")?parser.value("gallery-replay-out"):QStringLiteral("gallery-replay.json");
         request.roots=parser.values("gallery-root");if(parser.isSet("gallery-sort"))request.sort=parser.value("gallery-sort");
         return xmb::runGalleryReplay(request);
@@ -1243,6 +1271,7 @@ int main(int argc,char** argv) {
             .arg(parser.isSet("script")?QStringLiteral("--script")
                 :scriptOnlyEnv?QStringLiteral("XMB_INPUT_SCRIPT_ONLY"):QStringLiteral("none"));
     xmb::Shell shell(data,assets);
+    shell.setSetupContext(devFlashPath,parser.isSet("display")?parser.value("display").toInt():-1);
     // Game boot and the Auto-Off guide (coldboot.h GameBoot): the sequence reads its textures from the assets, and the
     // guide is fed the shell's idle time and the Auto-Off setting four times a second. The setting is read from the
     // preferences file (a shared key, so a bare "power/idleMinutes"); Shell has no accessor for it.
@@ -1277,6 +1306,12 @@ int main(int argc,char** argv) {
             return 2;
         }
         kioskScreen=screens[index];
+    } else if(kiosk && launchConfig.contains("display")) {
+        // D8: the screen first-run setup chose (xmb-config.json "display"); a stale index falls back to the primary screen.
+        const int index=launchConfig.value("display").toInt(-1);
+        const auto screens=QGuiApplication::screens();
+        if(index>=0 && index<screens.size())kioskScreen=screens[index];
+        else qWarning().noquote()<<QString("kiosk: xmb-config.json display %1 is not a connected screen; using the primary screen").arg(index);
     }
     if(kiosk && !kioskScreen)kioskScreen=QGuiApplication::primaryScreen();
     if(kiosk && !kioskScreen){qCritical()<<"kiosk: no screen is available";return 2;}
@@ -1412,6 +1447,34 @@ int main(int argc,char** argv) {
     // Safe mode says so on screen, through the ordinary notification pop-up, once the first frames are up.
     if(xmb::diagnostics::safeMode())
         QTimer::singleShot(2500,&shell,[&shell]{shell.notify(QObject::tr("Started in safe mode"),QObject::tr("after repeated errors"));});
+    // ---- First-run setup (PHASES-HTPC D8, audit/FIRST-RUN.md) ----
+    // Runs on a plain interactive start while <data>/setup.json does not say completed, and always with --first-run. Never in a
+    // --script run, a report mode, a safe start or a second-launch command unless --first-run asks for it, so captures stay as they were.
+    shell.setSetupContext(devFlashPath,kioskScreen?QGuiApplication::screens().indexOf(kioskScreen):-1);
+    QObject::connect(&shell,&xmb::Shell::setupRestartRequested,&app,[&app]{
+        QTimer::singleShot(0,&app,[&app]{
+            // Under the watchdog exit 75 means "restart me" (it re-reads xmb-config.json); alone, the XMB starts a successor.
+            if(qEnvironmentVariable("XMB_WATCHDOG")==QLatin1String("1")){qInfo()<<"setup: exiting with code 75 so the watchdog restarts the XMB";app.exit(75);return;}
+            QStringList arguments,previous=QCoreApplication::arguments().mid(1);
+            for(int i=0;i<previous.size();++i) {
+                if(previous[i]==QLatin1String("--first-run"))continue;
+                if(previous[i]==QLatin1String("--after-pid") || previous[i]==QLatin1String("--dev-flash")){++i;continue;}
+                if(previous[i].startsWith(QLatin1String("--dev-flash=")) || previous[i].startsWith(QLatin1String("--after-pid=")))continue;
+                arguments<<previous[i];
+            }
+            const QString chosen=xmb::setup::loadConfig(xmb::setup::configPath()).value(QStringLiteral("devFlash")).toString();
+            if(!chosen.isEmpty())arguments<<QStringLiteral("--dev-flash")<<chosen;
+            arguments<<QStringLiteral("--after-pid")<<QString::number(QCoreApplication::applicationPid());
+            if(QProcess::startDetached(QCoreApplication::applicationFilePath(),arguments)){qInfo()<<"setup: started a new XMB; this one exits";app.exit(0);}
+            else qWarning()<<"setup: could not start the new XMB; restart it by hand";
+        });
+    });
+    {
+        const bool forced=parser.isSet("first-run");
+        const bool automatic=interactiveLaunch && !scriptedRun && !xmb::diagnostics::safeMode() && !commandGiven
+            && qEnvironmentVariable("XMB_FIRST_RUN")!=QLatin1String("0") && !xmb::setup::completed(data);
+        if(forced || automatic)shell.beginSetup(forced);
+    }
     if(parser.isSet("script")) {
         // Local verification: replay key presses and save framebuffer grabs at the window's real resolution, e.g.
         // --script "full,wait,LEFT,DOWN,grab=C:/tmp/a.png,quit". One token every 300 ms.
