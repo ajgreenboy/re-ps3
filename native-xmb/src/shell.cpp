@@ -1313,7 +1313,7 @@ void Shell::rebuildFriends() {
         const bool hadFriends=std::any_of(entries.cbegin(),entries.cend(),[](const Entry& e){return e.id.startsWith("discord-friend:");});
         entries=staticFriendEntries_;
         for(const auto& person:discordFriendList_) {
-            auto e=item("discord-friend:"+person.id,person.name,"tex_Avatar_Default","explore_category_friend",Action::OpenUrl,"https://discord.com/channels/@me");
+            auto e=item("discord-friend:"+person.id,person.name,"tex_Avatar_Default","explore_category_friend",Action::OpenUrl,"https://discord.com/channels/@me/"+person.id);
             e.friendRow=true;e.artworkUrl=person.avatarUrl;e.artwork=discordFriends_.avatar(person.avatarUrl);entries.push_back(std::move(e));
         }
         auto open=item("discord-friends:open","Open Discord Friends","item_tex_NewFriend","explore_category_friend",Action::OpenUrl,"https://discord.com/channels/@me");
