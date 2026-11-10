@@ -136,6 +136,12 @@ AppEditor::AppEditor(QString registryPath, QWidget* parent)
     argumentsEdit_->setPlaceholderText(QStringLiteral("Optional; one argument per line"));
     argumentsEdit_->setMaximumHeight(120);
     form->addRow(QStringLiteral("Arguments"), argumentsEdit_);
+    windowCombo_ = new QComboBox(this);
+    windowCombo_->setObjectName(QStringLiteral("appWindowCombo"));
+    windowCombo_->addItem(QStringLiteral("App window"), QStringLiteral("app"));
+    windowCombo_->addItem(QStringLiteral("Kiosk window"), QStringLiteral("kiosk"));
+    windowCombo_->addItem(QStringLiteral("Default browser"), QStringLiteral("browser"));
+    form->addRow(QStringLiteral("Launch window"), windowCombo_);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
 
     errorLabel_ = new QLabel(this);
@@ -258,6 +264,7 @@ void AppEditor::populateEditor(const QString& id) {
     workingDirectoryEdit_->setText(found->workingDirectory);
     artworkEdit_->setText(found->artwork);
     argumentsEdit_->setPlainText(found->arguments.join(QLatin1Char('\n')));
+    windowCombo_->setCurrentIndex(windowCombo_->findData(found->window.isEmpty()?QStringLiteral("app"):found->window));
     stagedId_ = id;
     updateFieldState();
 }
@@ -277,6 +284,8 @@ void AppEditor::updateFieldState() {
     }
     workingDirectoryEdit_->setEnabled(game);
     argumentsEdit_->setEnabled(game);
+    const bool web = kindCombo_->currentData().toString() == QStringLiteral("web");
+    windowCombo_->setEnabled(web);
     categoryCombo_->setEnabled(true);
 }
 
@@ -299,10 +308,11 @@ ContentApp AppEditor::currentApp(QString& error) const {
         app.url = targetEdit_->text().trimmed();
     }
     app.artwork = artworkEdit_->text().trimmed();
-    // The editor has no field for the web launch style (P6); an edit keeps whatever apps.json already says.
+    // The web launch style (P6): "app" (an app-mode window), "kiosk" or "browser" (the OS default). The value
+    // is stored empty for the default, so "app" clears it.
     if (app.kind == QStringLiteral("web")) {
-        const auto staged = std::find_if(apps_.cbegin(), apps_.cend(), [&app](const ContentApp& candidate) { return candidate.id == app.id; });
-        if (staged != apps_.cend()) app.window = staged->window;
+        const QString window=windowCombo_->currentData().toString();
+        app.window = (window==QStringLiteral("app"))?QString():window;
     }
     error.clear();
     return app;

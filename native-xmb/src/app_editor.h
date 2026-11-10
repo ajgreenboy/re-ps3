@@ -49,6 +49,7 @@ private:
     QLineEdit* workingDirectoryEdit_ = nullptr;
     QLineEdit* artworkEdit_ = nullptr;
     QTextEdit* argumentsEdit_ = nullptr;
+    QComboBox* windowCombo_ = nullptr;   // web apps only: app / kiosk / browser (P6)
     QLabel* errorLabel_ = nullptr;
 };
 
