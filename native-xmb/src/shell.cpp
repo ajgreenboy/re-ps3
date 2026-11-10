@@ -2284,6 +2284,7 @@ void Shell::activate() {
     case Action::PhoneRemote:activatePhoneRemote(entry);break;
     case Action::SystemUpdate:activateSystemUpdate(entry);break;
     case Action::WifiApp:activateWifi(entry);break;
+    case Action::BluetoothApp:case Action::BluetoothPair:activateBluetooth(entry);break;
     case Action::SystemCheck:openSystemCheck();break;
     case Action::JellyfinApp:openJellyfin(entry);break;
     case Action::JellyfinFolder:loadJellyfinPage(entry.value,entry.title);break;

@@ -566,6 +566,17 @@ PageRows segmentRows(const QString& id,Assets& assets) {
         "(groups %4, sha256 %5): listed %6, left out %7, rco titles %8")
         .arg(id).arg(int(data.entries.size())).arg(QFileInfo(column.path).fileName()).arg(column.queries)
         .arg(column.sha256.left(12)).arg(int(data.entries.size())).arg(data.notes.size()).arg(column.rcoRows);
+    if(id==QStringLiteral("device")) {
+        // Native-only (D10): this build's own Bluetooth list/pair; the console's accessory page binds its pad to
+        // PSN through the PS3's own controller stack, which a PC has no analogue for.
+        Entry bluetooth;
+        bluetooth.id=QStringLiteral("bluetooth");bluetooth.title=QStringLiteral("Bluetooth Devices");
+        bluetooth.action=Action::BluetoothApp;
+        bluetooth.detail=QStringLiteral("List and pair Bluetooth controllers and headsets.");
+        bluetooth.settingsPage=QStringLiteral("device");bluetooth.source=QStringLiteral("native");
+        data.nativeOnly<<bluetooth.id;
+        data.entries.push_back(std::move(bluetooth));
+    }
     return data;
 }
 PageRows pageRows(const QString& id,Assets& assets,const QString& dateTimeInfo) {

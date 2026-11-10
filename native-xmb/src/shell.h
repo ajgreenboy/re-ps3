@@ -117,7 +117,10 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     SystemUpdate,
     // Network > Wi-Fi Networks (wifi_shell.cpp, D10): lists the host's wireless networks. Native-only; connecting
     // (with a passphrase prompt) is the next step.
-    WifiApp };
+    WifiApp,
+    // Accessory Settings > Bluetooth Devices (bluetooth_shell.cpp, D10): lists and pairs Bluetooth controllers and
+    // headsets. Native-only.
+    BluetoothApp, BluetoothPair };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -717,6 +720,7 @@ private:
     void activateSystemUpdate(const Entry& entry);
     void initWifi();
     void activateWifi(const Entry& entry);
+    void activateBluetooth(const Entry& entry);
     SelfCheck* systemCheck_=nullptr;
     void openSystemCheck();   // localconfig.vdf's LastPlayed / Playtime per app (steam_activity.h)
     void spotifyCommand(OptionCommand command);
