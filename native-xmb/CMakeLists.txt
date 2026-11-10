@@ -33,6 +33,7 @@ qt_add_executable(re-ps3-native
     src/file_ops.cpp src/file_ops.h
     src/weather_client.cpp src/weather_client.h src/weather_shell.cpp
     src/self_check.cpp src/self_check.h src/system_check_shell.cpp
+    src/updater.cpp src/updater.h
     src/wol_client.cpp src/wol_client.h src/homeassistant_client.cpp src/homeassistant_client.h src/home_shell.cpp
     src/photo_viewport.cpp src/photo_viewport.h
     src/gallery_params.cpp src/gallery_params.h src/gallery_model.cpp src/gallery_model.h src/gallery_thumbs.cpp src/gallery_thumbs.h
@@ -57,6 +58,12 @@ qt_add_executable(re-ps3-native
     src/rsx_program.cpp src/rsx_program.h src/ribbon.cpp src/ribbon.h src/hdr.cpp src/hdr.h src/icons.cpp src/icons.h src/particles.cpp src/particles.h src/coldboot.cpp src/coldboot.h
     src/autostart.cpp src/autostart.h src/game_capture.cpp src/game_capture.h src/shell.cpp src/shell.h src/host.cpp src/host.h src/pad.cpp src/pad.h src/ps_watcher.cpp src/ps_watcher.h src/desktop_mode.cpp src/desktop_mode.h src/view.cpp src/view.h src/dialogs.cpp)
 target_link_libraries(re-ps3-native PRIVATE Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::Network)
+option(XMB_UPDATER_BUILD_TESTS "Build the updater fixture runner" OFF)
+if(XMB_UPDATER_BUILD_TESTS)
+    qt_add_executable(xmb-updater-tests tests/updater_tests.cpp src/updater.cpp src/updater.h)
+    target_include_directories(xmb-updater-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(xmb-updater-tests PRIVATE Qt6::Core Qt6::Network)
+endif()
 if(Freetype_FOUND)
     target_link_libraries(re-ps3-native PRIVATE Freetype::Freetype)
 else()

@@ -1,4 +1,5 @@
 #include "view.h"
+#include "updater.h"
 #include "desktop_mode.h"
 #include "ps_watcher.h"
 #include <QApplication>
@@ -390,6 +391,7 @@ int main(int argc,char** argv) {
     parser.addOption({"display","Screen index for --kiosk (0 = first screen; default: the primary screen)","index"});
     parser.addOption({"start-windowed","Start in a window even when the stored preference is fullscreen (local testing)"});
     parser.addOption({"pad-report","Write the attached PlayStation controller's kind, connection and battery as JSON, then exit","json-file"});
+    parser.addOption({"check-update","Check GitHub for a newer release without downloading or installing"});
     parser.addOption({"pad-check","Run documented synthetic DualSense/DualShock 4 input reports through the pad parser, write JSON, then exit","json-file"});
     parser.addOption({"motion-report","Write easing samples at different host frame rates without opening a window","json-file"});
     parser.addOption({"steam-root","Override the local Steam installation directory","directory"});
@@ -435,6 +437,19 @@ int main(int argc,char** argv) {
     parser.addOption({"desktop","Put the running XMB into Desktop Mode (hidden, process kept), or start it in Desktop Mode"});
     parser.addOption({"quit","Ask the running XMB to exit with code 0 (the kiosk watchdog then stops) and exit; does nothing when none runs"});
     parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
+    if(parser.isSet("check-update")) {
+        const auto release=xmb::latestRelease();
+        const QString current=app.applicationVersion();
+        QString why;const bool newer=release.error.isEmpty() && xmb::newerVersion(current,release.tag,&why);
+        const auto asset=xmb::updateAsset(release);
+        const QString error=release.error.isEmpty()?why:release.error;
+        const QString line=QStringLiteral("current=%1 latest=%2 newer=%3 asset=%4 hash=%5%6")
+            .arg(current,release.tag.isEmpty()?QStringLiteral("-"):release.tag,newer?QStringLiteral("yes"):QStringLiteral("no"),
+                 asset.name.isEmpty()?QStringLiteral("-"):asset.name,xmb::updateHashSource(release,asset),
+                 error.isEmpty()?QString():QStringLiteral(" error=")+error);
+        std::printf("%s\n",line.toUtf8().constData());std::fflush(stdout);
+        return error.isEmpty()?(newer?0:1):2;
+    }
     if(parser.isSet("raf-render")) {
         const QString spec=parser.value("raf-render");const int separator=spec.lastIndexOf('@');
         if(separator<=0 || separator==spec.size()-1){std::fprintf(stderr,"use --raf-render file@image.png\n");return 2;}
