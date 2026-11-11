@@ -416,6 +416,15 @@ private:
     // Surface A, the direct-key hint: the eight tex_cp_help_* 86x30 icons paired with the container's own
     // msg_*_with_icon strings, in place of the advice sentence this build wrote out in ASCII.
     void drawVideoHelpStrip(QPainter& painter);
+    void drawVideoPanel(QPainter& painter);
+    void toggleVideoPanel();
+    void videoPanelMove(int dx,int dy);
+    void videoPanelActivate();
+    bool videoPanelOpen_=false;
+    int videoPanelFocus_=15; // RCO play button, including the dummy slot
+    QString videoPanelNotice_;
+    QString videoPanelStatus_;
+    qint64 videoPanelStatusUntil_=0;
     // Surface B2, the XMB music control panel (explore_plugin_full control_panel_page): tex_cp_panel 72x72
     // scaled 1.3 (0x270a54), the 10 status planes, progress_bar_playing_time 200x6 with label_playing_time,
     // and the 7-button group at 90x60 over the shared tex_cp_focus. Triangle opens it (audit 7.2); R keeps

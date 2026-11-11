@@ -5,6 +5,8 @@
 
 namespace xmb {
 namespace {
+// FIT, not firmware timing: videoplayer_plugin.rco has animations=0. Preserve the native contract:
+// full opacity through 3000 ms, 0.5 at 3125 ms, hidden at >=3250 ms (MEDIA-CONTROLS.md boundary probe).
 constexpr qint64 ShowDurationMs = 3000;
 constexpr qint64 FadeDurationMs = 250;
 }

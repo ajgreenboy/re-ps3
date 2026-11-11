@@ -2387,7 +2387,10 @@ void View::drawScene(QPainter& p) {
     };
     if(shell_.mediaOpen()) {
         const auto now=clock_.elapsed();
-        if(!previousMediaOpen_ || previousMediaTitle_!=shell_.mediaTitle())mediaControls_.opened(now);
+        if(!previousMediaOpen_ || previousMediaTitle_!=shell_.mediaTitle()) {
+            mediaControls_.opened(now);
+            videoPanelOpen_=false;videoPanelFocus_=15;videoPanelNotice_.clear();videoPanelStatus_.clear();
+        }
         previousMediaOpen_=true;previousMediaTitle_=shell_.mediaTitle();
         mediaControls_.setPaused(shell_.mediaPaused() || shell_.busy(),now);
         // Where the video picture sits on the 1920x1080 frame (letterboxed or pillarboxed); an image
@@ -2432,7 +2435,15 @@ void View::drawScene(QPainter& p) {
             text({110,1020,1700,35},QString("Circle Back   Cross ")+(shell_.slideshowActive()?"Pause":"Slideshow")+"   L1/R1 or +/- Zoom   Square/0 Reset   Triangle/Q/E Rotate   Arrows Pan when zoomed   [/] Photo",21,QColor(230,230,230));
         else if(!shell_.videoOpen() && !mediaAudioOnly())
             text({110,1020,1700,35},"Circle Back   Cross Play/Pause   Left/Right Seek   L1/R1 or [/] Track   Square/M Shuffle   R Repeat   Triangle Control Panel",21,QColor(230,230,230));
-        if(shell_.busy())text({110,910,1000,45},"Loading…",26,Qt::white);
+        if(shell_.busy()) {
+            if(shell_.videoOpen()) {
+                text({310,910,1300,36},assets_.text("videoplayer_plugin","msg_buffering"),26,Qt::white);
+                const QImage& loading=assets_.image("videoplayer_plugin","tex_loading_icon");
+                const QImage& wait=assets_.image("videoplayer_plugin","tex_wait_bar");
+                if(!loading.isNull())p.drawImage(QRectF(110,805,90,90),loading);
+                if(!wait.isNull())p.drawImage(QRectF(110,895,90,38),wait);
+            } else text({110,910,1000,45},"Loading…",26,Qt::white);
+        }
         else if(!shell_.photoOpen()) {
             // The queue line's separator arrives doubled ("A-circumflex middot") from
             // Shell::mediaQueueSummary(): shell.cpp is another pass's fence, so the root fix is RETURNED there
@@ -2444,13 +2455,14 @@ void View::drawScene(QPainter& p) {
             // shell side is fixed.
             QString queueLine=shell_.mediaQueueSummary();
             queueLine.replace(QString(QChar(0x00C2))+QChar(0x00B7),QString(QChar(0x00B7)));
-            if(!mediaAudioOnly())text({110,895,1700,36},queueLine,21,QColor(230,230,230));
+            if(!mediaAudioOnly() && !videoPanelOpen_)text({110,895,1700,36},queueLine,21,QColor(230,230,230));
         }
         else if(photoViewport_.valid())text({110,895,1700,36},QString("Zoom %1%").arg(photoViewport_.zoomPercent(),0,'f',0),21,QColor(230,230,230));
         if(shell_.videoOpen() && !shell_.photoOpen()) {
+            if(videoPanelOpen_)drawVideoPanel(p);
             // Surface A is the video player's own surface: the firmware's time page and its hint strip.
             if(shell_.mediaDuration()>0)
-                drawVideoTimeBar(p,shell_.mediaPosition(),shell_.mediaDuration());
+                drawVideoTimeBar(p,shell_.mediaPosition(),shell_.mediaDuration(),controlOpacity);
             drawVideoHelpStrip(p);
         } else if(mediaAudioOnly()) {
             // Surface B1: the music player's own page replaces the generic bar, time string and hint sentence.
@@ -2470,6 +2482,7 @@ void View::drawScene(QPainter& p) {
         if(mediaAudioOnly() && (musicPanelOpen_ || musicPanelEase_.value>.002))
             drawMusicPanel(p,musicPanelEase_.value);
     } else {
+        videoPanelOpen_=false;
         previousMediaOpen_=false;
         const auto& categories=shell_.categories();
         // Two depth channels (audit/PAGE-MOVE.md section 15). `childAmount` is the page content's progress
@@ -3509,6 +3522,7 @@ bool View::triangleAction(const QString& source) {
     if(shell_.psMenuOpen())return decide(false,"declined (the system menu binds no Triangle)");
     if(osk_.open || userCreate_.open || plEdit_.open)return decide(false,"declined (a text page owns input)");
     if(shell_.optionsOpen()){shell_.toggleOptions();update();return decide(true,"Triangle: options closed");}
+    if(shell_.videoOpen()){toggleVideoPanel();return decide(true,"Triangle: video control matrix");}
     if(musicPanelOpen_){closeMusicPanel();update();return decide(true,"Triangle: music panel closed");}
     if(shell_.photoOpen()){shell_.rotatePhoto(1);update();return decide(true,"Triangle: photo rotated");}
     if(!shell_.mediaOpen() || shell_.videoOpen()){shell_.toggleOptions();update();return decide(true,QString("Triangle: options %1").arg(shell_.optionsOpen()?"opened":"not available here"));}
@@ -3678,8 +3692,16 @@ void View::drawVideoTimeBar(QPainter& p,qint64 position,qint64 duration,double o
     }
     // Two 8-cell groups, as the firmware lays them out (videoplayer_display_playing_time_h1..c2 and
     // play_time_h1..c2, all 16x16): the playing time on the left, the duration on the right.
-    drawTimeCells(p,MediaControls::formatTime(position),bar.left(),bar.bottom()+2.,false,opacity);
-    drawTimeCells(p,MediaControls::formatTime(duration),bar.right(),bar.bottom()+2.,true,opacity);
+    const auto time=[&](qint64 ms) {
+        QString value=MediaControls::formatTime(ms);
+        if(shell_.videoOpen() && ms>=0) {
+            if(value.size()==5)value.prepend(QStringLiteral("00:"));
+            else if(value.size()==7)value.prepend(QLatin1Char('0'));
+        }
+        return value;
+    };
+    drawTimeCells(p,time(position),bar.left(),bar.bottom()+2.,false,opacity);
+    drawTimeCells(p,time(duration),bar.right(),bar.bottom()+2.,true,opacity);
 }
 void View::drawTimeCells(QPainter& p,const QString& value,qreal edge,qreal top,bool rightAligned,double opacity) {
     constexpr qreal cell=16.;                 // FC: every time digit cell is 16x16
@@ -3700,6 +3722,16 @@ void View::drawTimeCells(QPainter& p,const QString& value,qreal edge,qreal top,b
 // seek bindings. Circle's label is msg_quit_playback: this container has no Back/Cancel string, and Circle
 // here leaves playback, which is what that string says.
 void View::drawVideoHelpStrip(QPainter& p) {
+    if(videoPanelOpen_) {
+        // All eight direct-key materials provided by this RCO. Pixel spacing is a fit in 110..1810;
+        // the template help plane has no image/rect and its runtime composition is not available.
+        const char* keys[]={"circle","cross","l1","l2_left","r1","r2_right","select","start"};
+        for(int i=0;i<8;++i) {
+            const QImage& art=assets_.image("videoplayer_plugin",QStringLiteral("tex_cp_help_")+keys[i]);
+            if(!art.isNull())p.drawImage(QRectF(110.+i*(1700.-86.)/7.,1026.,86.,30.),art);
+        }
+        return;
+    }
     struct Help { const char* icon; QString label; };
     const bool paused=shell_.mediaPaused()||shell_.busy();
     const auto text=[&](const char* key,const char* fallback) {
@@ -3737,10 +3769,158 @@ void View::drawVideoHelpStrip(QPainter& p) {
     const qreal slot=stripWidth/double(help.size());
     for(int i=0;i<help.size();++i) {
         const qreal x=stripLeft+i*slot;
-        drawImage(p,"videoplayer_plugin",help[i].icon,QRectF(x,1026.,iconWidth,iconHeight));
+        drawImage(p,"videoplayer_plugin",help[i].icon,QRectF(x,1026.,iconWidth,iconHeight),p.opacity());
         mediaPanelText(p,QRectF(x+iconWidth+6.,1026.,slot-iconWidth-10.,iconHeight),help[i].label,19,
             QColor(238,238,238),Qt::AlignLeft|Qt::AlignVCenter);
     }
+}
+namespace {
+enum class VideoCommand { Unavailable, Audio, Subtitle, Volume, Display, Beginning, Next, SeekBack,
+    SeekForward, Play, Pause, Stop, Repeat };
+struct VideoButton {
+    int x,y;
+    const char* icon;
+    const char* label;
+    VideoCommand command;
+    const char* reason=nullptr;
+};
+// videoplayer_plugin.rco @0xc1e0..0xd740. Preserve the iconless dummy, not a fabricated 25th icon.
+const VideoButton videoButtons[]={
+    {-6,1,nullptr,nullptr,VideoCommand::Unavailable,"The firmware dummy slot has no control."},
+    {-5,1,"tex_cp_scene_search","msg_scene_search",VideoCommand::Unavailable,"Scene thumbnails and scene search are not implemented by this player."},
+    {-4,1,"tex_cp_jump","msg_goto",VideoCommand::Unavailable,"This player has bounded relative seeking, but no time-entry or chapter selector."},
+    {-3,1,"tex_cp_audio","msg_audio_change",VideoCommand::Audio},
+    {-2,1,"tex_cp_subtitle","msg_subtitle_change",VideoCommand::Subtitle},
+    {-1,1,"tex_cp_volume","msg_volume_control",VideoCommand::Volume},
+    {0,1,"tex_cp_av_settings","msg_audio_video_settings",VideoCommand::Unavailable,"PS3 AV output settings have no equivalent in this video backend."},
+    {1,1,"tex_cp_screen_mode","msg_viewmode",VideoCommand::Unavailable,"Video is aspect-preserving and letterboxed; no video screen-mode selector exists."},
+    {2,1,"tex_cp_change_icon","msg_icon_change",VideoCommand::Unavailable,"The PC library has no PS3 video-icon database to update."},
+    {3,1,"tex_cp_delete","msg_del",VideoCommand::Unavailable,"The media library does not expose file deletion."},
+    {4,1,"tex_cp_display","msg_display_display_with_icon",VideoCommand::Display},
+    {-6,0,"tex_cp_prev","msg_beginning_with_icon",VideoCommand::Beginning},
+    {-5,0,"tex_cp_next","msg_next_with_icon",VideoCommand::Next},
+    {-4,0,"tex_cp_search_b","msg_fast_r_with_icon",VideoCommand::SeekBack},
+    {-3,0,"tex_cp_search_f","msg_fast_f_with_icon",VideoCommand::SeekForward},
+    {-2,0,"tex_cp_play","msg_play_with_icon",VideoCommand::Play},
+    {-1,0,"tex_cp_pause","msg_pause_with_icon",VideoCommand::Pause},
+    {0,0,"tex_cp_stop","msg_stop",VideoCommand::Stop},
+    {1,0,"tex_cp_flash_b","msg_flash_r",VideoCommand::SeekBack},
+    {2,0,"tex_cp_flash_f","msg_flash_f",VideoCommand::SeekForward},
+    {3,0,"tex_cp_slow_b","msg_slow_r",VideoCommand::Unavailable,"Qt playback has no implemented reverse slow-motion transport."},
+    {4,0,"tex_cp_slow_f","msg_slow_f",VideoCommand::Unavailable,"This player has no slow-motion rate control."},
+    {5,0,"tex_cp_step_b","msg_oneframe_r",VideoCommand::Unavailable,"Qt seeking is not frame-accurate; reverse frame stepping cannot be promised."},
+    {6,0,"tex_cp_step","msg_oneframe_f",VideoCommand::Unavailable,"Qt seeking is not frame-accurate; frame advance cannot be promised."},
+    {0,-1,"tex_cp_repeat","msg_repeat",VideoCommand::Repeat}
+};
+QString videoButtonLabel(Assets& assets,const VideoButton& button) {
+    QString value=assets.text("videoplayer_plugin",button.label,QString::fromLatin1(button.label));
+    while(!value.isEmpty() && value.back().unicode()>=0xE000 && value.back().unicode()<=0xF8FF)value.chop(1);
+    return value.trimmed();
+}
+}
+void View::toggleVideoPanel() {
+    if(!shell_.videoOpen() || !shell_.message().isEmpty())return;
+    videoPanelOpen_=!videoPanelOpen_;
+    mediaControls_.activity(clock_.elapsed());
+    videoPanelNotice_.clear();
+    qInfo()<<"media: video control matrix"<<(videoPanelOpen_?"opened":"closed");
+    update();
+}
+void View::videoPanelMove(int dx,int dy) {
+    const auto& current=videoButtons[videoPanelFocus_];
+    int best=-1,score=10000;
+    for(int i=1;i<int(std::size(videoButtons));++i) {
+        const auto& candidate=videoButtons[i];
+        const int x=candidate.x-current.x,y=candidate.y-current.y;
+        if(dx && (y!=0 || x*dx<=0))continue;
+        if(dy && y*dy<=0)continue; // RCO +y points up
+        const int distance=dx?std::abs(x):std::abs(y)*20+std::abs(x); // 20 > the grid's maximum 12-cell x distance
+        if(distance<score){score=distance;best=i;}
+    }
+    if(best>=0)videoPanelFocus_=best;
+    videoPanelNotice_.clear();mediaControls_.activity(clock_.elapsed());update();
+}
+void View::videoPanelActivate() {
+    const auto& button=videoButtons[videoPanelFocus_];
+    const bool seek=button.command==VideoCommand::SeekBack || button.command==VideoCommand::SeekForward || button.command==VideoCommand::Beginning;
+    const QString reason=button.reason?QString::fromLatin1(button.reason):
+        seek && !shell_.mediaSeekable()?QStringLiteral("This source is not seekable."):
+        button.command==VideoCommand::Volume && volumeLevel_<0?QStringLiteral("No Windows audio endpoint is available."):QString{};
+    if(!reason.isEmpty()) {
+        // Same parity classification as XMB rows. No fake successful action and no file/system mutation.
+        Entry refused;refused.action=Action::Unavailable;refused.title=videoButtonLabel(assets_,button);refused.detail=reason;
+        videoPanelNotice_=refused.detail;
+        qInfo().noquote()<<"media: Action::Unavailable"<<refused.title<<"-"<<refused.detail;
+        update();return;
+    }
+    qInfo().noquote()<<"media: video button"<<videoButtonLabel(assets_,button);
+    videoPanelStatus_.clear();
+    if(seek)videoPanelStatus_=videoPanelFocus_==18?"tex_i_flash_b":videoPanelFocus_==19?"tex_i_flash_f":"tex_i_jump";
+    else if(button.command==VideoCommand::Next)videoPanelStatus_="tex_i_next";
+    // FIT: the action indication shares the existing 3000 ms native control hold, never a speed badge.
+    videoPanelStatusUntil_=clock_.elapsed()+3000;
+    switch(button.command) {
+    case VideoCommand::Audio:shell_.openMediaOption("audio");break;
+    case VideoCommand::Subtitle:shell_.openMediaOption("subtitle");break;
+    case VideoCommand::Volume:volumeApply(volumeLevel_,QStringLiteral("VideoPanel"));break;
+    case VideoCommand::Display:shell_.toggleMediaDisplay();break;
+    case VideoCommand::Beginning:shell_.seekMedia(-shell_.mediaPosition());break;
+    case VideoCommand::Next:shell_.skipMedia(1);break;
+    case VideoCommand::SeekBack:shell_.seekMedia(-10000);break;
+    case VideoCommand::SeekForward:shell_.seekMedia(10000);break;
+    case VideoCommand::Play:if(shell_.mediaPaused())shell_.togglePlayback();videoPanelOpen_=false;break;
+    case VideoCommand::Pause:if(!shell_.mediaPaused())shell_.togglePlayback();break;
+    case VideoCommand::Stop:videoPanelOpen_=false;shell_.back();break;
+    case VideoCommand::Repeat:shell_.cycleMediaRepeat();break;
+    default:break;
+    }
+    mediaControls_.activity(clock_.elapsed());update();
+}
+void View::drawVideoPanel(QPainter& p) {
+    // FIT: 100 px pitch bounds the 70 px icons (30 px separation), 13 columns span 1270 px.
+    // Anchor: x=960, row +1 at y=650, leaving 80 px before the existing y=941 time bar.
+    // No tex_cp_panel exists here: use this container's under-bar, not the music player's plate.
+    const QImage& under=assets_.image("videoplayer_plugin","tex_i_under_bar");
+    if(!under.isNull())p.drawImage(QRectF(110,610,1700,320),under);
+    const double inherited=p.opacity();
+    for(int i=1;i<int(std::size(videoButtons));++i) {
+        const auto& button=videoButtons[i];
+        const QString name=QString::fromLatin1(button.icon);
+        const QImage& art=assets_.image("videoplayer_plugin",name);
+        const QRectF box(960.+button.x*100.-(i==24?49.:35.),650.+(1-button.y)*70.,i==24?98.:70.,70.);
+        // Reuse the XMB's existing disabled-row icon dim, not a claimed firmware availability alpha.
+        p.save();p.setOpacity(inherited*(button.command==VideoCommand::Unavailable?.5:1.));
+        const QImage& shadow=assets_.image("videoplayer_plugin",name+"_shadow");
+        if(!shadow.isNull())p.drawImage(box,shadow);
+        if(!art.isNull())p.drawImage(box,art);
+        p.restore();
+        if(i==videoPanelFocus_) {
+            const QImage& focus=assets_.image("videoplayer_plugin",name+"_focus");
+            if(!focus.isNull())p.drawImage(box,focus);
+        }
+    }
+    const auto& button=videoButtons[videoPanelFocus_];
+    mediaPanelText(p,QRectF(560,864,800,28),videoButtonLabel(assets_,button),19,Qt::white,Qt::AlignCenter);
+    QString note=videoPanelNotice_;
+    if(note.isEmpty() && button.reason)note=QString::fromLatin1(button.reason);
+    if(note.isEmpty() && (button.command==VideoCommand::SeekBack || button.command==VideoCommand::SeekForward))
+        note=QStringLiteral("10-second bounded seek; continuous speed scanning is not implemented.");
+    if(!note.isEmpty() && !shell_.busy())mediaPanelText(p,QRectF(210,897,1500,30),note,17,QColor(225,225,225),Qt::AlignCenter);
+    // The 14 tex_i_* transport variants share status_icon; only actual states are published.
+    // No slow/search/step badge is manufactured for an instantaneous seek.
+    const QString statusName=!videoPanelStatus_.isEmpty() && clock_.elapsed()<videoPanelStatusUntil_
+        ?videoPanelStatus_:QString(shell_.mediaPaused()?"tex_i_pause":"tex_i_play");
+    const QImage& status=assets_.image("videoplayer_plugin",statusName);
+    if(!status.isNull())p.drawImage(QRectF(110,530,74,74),status);
+    if(shell_.mediaRepeatMode()!=0) {
+        const QImage& repeat=assets_.image("videoplayer_plugin","tex_i_repeat");
+        if(!repeat.isNull())p.drawImage(QRectF(194,530,98,74),repeat);
+        if(shell_.mediaRepeatMode()==1) {
+            const QImage& title=assets_.image("videoplayer_plugin","tex_i_title_repeat");
+            if(!title.isNull())p.drawImage(QRectF(207,604,72,36),title);
+        }
+    }
+    mediaPanelText(p,QRectF(310,550,1400,36),shell_.mediaTitle(),23,Qt::white,Qt::AlignLeft|Qt::AlignVCenter);
 }
 // Surface B2, the XMB music control panel (audit/MEDIA-PANELS-FIRMWARE.md 4.2-4.3): explore_plugin_full's
 // control_panel_page - a 72x72 tex_cp_panel plate scaled 1.3 (0x270a54), ten status planes, a 200x6
@@ -4643,6 +4823,17 @@ void View::keyPressEvent(QKeyEvent* e) {
         default:break;
         }
     }
+    if(videoPanelOpen_ && shell_.videoOpen() && shell_.message().isEmpty()) {
+        switch(e->key()) {
+        case Qt::Key_Left:videoPanelMove(-1,0);e->accept();return;
+        case Qt::Key_Right:videoPanelMove(1,0);e->accept();return;
+        case Qt::Key_Up:videoPanelMove(0,1);e->accept();return;
+        case Qt::Key_Down:videoPanelMove(0,-1);e->accept();return;
+        case Qt::Key_Return:case Qt::Key_Enter:videoPanelActivate();e->accept();return;
+        case Qt::Key_Escape:case Qt::Key_Backspace:case Qt::Key_T:case Qt::Key_S:toggleVideoPanel();e->accept();return;
+        default:break;
+        }
+    }
     if(shell_.photoOpen() && shell_.message().isEmpty()) {
         switch(e->key()) {
         case Qt::Key_Plus:case Qt::Key_Equal:zoomPhoto(1);e->accept();return;
@@ -4672,11 +4863,11 @@ void View::keyPressEvent(QKeyEvent* e) {
     // Triangle on the XMB: the selected entry's options (keyboard substitute; controllers send Y). While a
     // local audio item plays it opens the firmware's own music control panel instead (audit 7.2: the console
     // opens control_panel_page there; this build used to cycle Repeat on this key - R still does).
-    case Qt::Key_T:if(mediaAudioOnly())toggleMusicPanel();else shell_.toggleOptions();break;
+    case Qt::Key_T:if(shell_.videoOpen())toggleVideoPanel();else if(mediaAudioOnly())toggleMusicPanel();else shell_.toggleOptions();break;
     // SELECT/START keyboard substitutes while media is open (the console's own keys have no keyboard
     // equivalent): I is the Display key, S the control panel. Neither key does anything at the XMB root.
     case Qt::Key_I:if(shell_.mediaOpen())shell_.toggleMediaDisplay();break;
-    case Qt::Key_S:if(shell_.mediaOpen())shell_.toggleOptions();break;
+    case Qt::Key_S:if(shell_.videoOpen())toggleVideoPanel();else if(shell_.mediaOpen())shell_.toggleOptions();break;
     case Qt::Key_F11:shell_.setFullscreen(!window()->isFullScreen());break;
     default:QOpenGLWidget::keyPressEvent(e);return;
     }
@@ -4818,6 +5009,20 @@ void View::pollController() {
         if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
         buttons_=buttons;return;
     }
+    if(videoPanelOpen_ && shell_.videoOpen() && shell_.message().isEmpty()) {
+        if(movement&XINPUT_GAMEPAD_DPAD_LEFT)videoPanelMove(-1,0);
+        if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)videoPanelMove(1,0);
+        if(movement&XINPUT_GAMEPAD_DPAD_UP)videoPanelMove(0,1);
+        if(movement&XINPUT_GAMEPAD_DPAD_DOWN)videoPanelMove(0,-1);
+        if(edge&XINPUT_GAMEPAD_A)videoPanelActivate();
+        if(edge&(XINPUT_GAMEPAD_B|XINPUT_GAMEPAD_Y|XINPUT_GAMEPAD_START))toggleVideoPanel();
+        if(edge&XINPUT_GAMEPAD_BACK)shell_.toggleMediaDisplay();
+        if(edge&XINPUT_GAMEPAD_X)shell_.toggleMediaShuffle();
+        if(edge&XINPUT_GAMEPAD_LEFT_SHOULDER)shell_.skipMedia(-1);
+        if(edge&XINPUT_GAMEPAD_RIGHT_SHOULDER)shell_.skipMedia(1);
+        if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
+        buttons_=buttons;return;
+    }
     if(movement&XINPUT_GAMEPAD_DPAD_LEFT)shell_.horizontal(-1);
     if(movement&XINPUT_GAMEPAD_DPAD_RIGHT)shell_.horizontal(1);
     if(movement&XINPUT_GAMEPAD_DPAD_UP)shell_.vertical(-1);
@@ -4828,7 +5033,8 @@ void View::pollController() {
     // control_panel_page) while a local track plays - which is where the console puts it (audit 7.2). Repeat
     // moved off this key and keeps R (and the panel's own Repeat button), so nothing lost a binding.
     if(edge&XINPUT_GAMEPAD_Y) {
-        if(!shell_.mediaOpen() || shell_.videoOpen())shell_.toggleOptions();
+        if(shell_.videoOpen())toggleVideoPanel();
+        else if(!shell_.mediaOpen())shell_.toggleOptions();
         else if(mediaAudioOnly())toggleMusicPanel();
         else shell_.cycleMediaRepeat();
     }
@@ -4849,7 +5055,7 @@ void View::pollController() {
         // *_with_icon carries a START glyph), so it opens the one surface the container's keys reach - the
         // control panel Triangle opens - instead of staying dead (FIDELITY-BEHAVIOUR I48).
         if(edge&XINPUT_GAMEPAD_BACK)shell_.toggleMediaDisplay();
-        if(edge&XINPUT_GAMEPAD_START)shell_.toggleOptions();
+        if(edge&XINPUT_GAMEPAD_START){if(shell_.videoOpen())toggleVideoPanel();else shell_.toggleOptions();}
     }
     if(edge&0x000f)repeatAt_=now+repeatDelay;else if(movement&0x000f)repeatAt_=nextRepeat;
     buttons_=buttons;
