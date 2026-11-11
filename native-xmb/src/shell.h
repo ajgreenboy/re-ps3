@@ -123,7 +123,9 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     BluetoothApp, BluetoothPair,
     // First-run setup (setup_shell.cpp, D8, audit/FIRST-RUN.md): every row of the setup pages and Settings > System Settings > Run Setup Again.
     // Entry::value is the command ("next", "fw:use|<path>", ...); the page it sits on is told apart by its first row id "setup:<step>...".
-    Setup };
+    Setup,
+    // Game > Saved Data / Memory Card Utility: presentation only, no console save-data backend.
+    SaveData };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -476,6 +478,7 @@ public:
     // result page carrying prompt.outcomeText or the real failure. No credential is read, written or logged;
     // nothing starts before both steps are confirmed (SteamSwitchConfirmation).
     void openSteamAccounts();
+    void openSaveData(const QString& kind);
     bool steamAccountsOpen() const;
     // The accounts on the open page, for the dump and the scripted check.
     int steamAccountCount() const { return steamAccounts_.size(); }

@@ -8,6 +8,7 @@
 #include "coldboot.h"
 #include <QPainter>
 #include "settings_menu.h"
+#include "save_data.h"
 #include "media_controls.h"
 #include <QApplication>
 #include "assets.h"
@@ -1424,8 +1425,10 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
             // explore_category_game.rco, so its row carries that container. The resolved table is logged and
             // dumped (resolveGameColumnProof below is the same list the audit's table cites).
             item("vita","PS Vita System Application Utility","tex_album_icon","explore_plugin_full"),item("data","Game Data Utility","tex_album_icon","explore_plugin_full"),
-            item("memory","Memory Card Utility","item_tex_ps12util","explore_plugin_full"),item("ps2","Saved Data Utility (PS2)","item_tex_ps3util","explore_plugin_full"),
-            item("psp","Saved Data Utility (PSP)","item_tex_psputil","explore_category_game"),item("ps3","Saved Data Utility (PS3)","item_tex_ps3util","explore_plugin_full"),
+            item("memory",saveDataTitle(assets_,"memory"),"item_tex_ps12util","explore_plugin_full",Action::SaveData,"memory"),
+            item("ps2",saveDataTitle(assets_,"ps2"),"item_tex_ps3util","explore_plugin_full",Action::SaveData,"ps2"),
+            item("psp",saveDataTitle(assets_,"psp"),"item_tex_psputil","explore_category_game",Action::SaveData,"psp"),
+            item("ps3",saveDataTitle(assets_,"ps3"),"item_tex_ps3util","explore_plugin_full",Action::SaveData,"ps3"),
             item("store","PlayStation Store","item_tex_ps_store","explore_plugin_full"),
             item("artwork-settings",QObject::tr("Artwork Settings"),"item_tex_plain_folder","explore_plugin_full",Action::ArtworkSettings)}},
         {"network","Network","qgl/icontex","7n",{
@@ -2082,6 +2085,7 @@ void Shell::activate() {
         showMessage(entry.title,QObject::tr("No manual is available for this title."),MessageKind::Page);
         break;
     case Action::SettingsPage:openSettings(entry.value);break;
+    case Action::SaveData:openSaveData(entry.value);break;
     case Action::SettingChoices:openChoices(entry.setting,entry.title);break;
     case Action::SetSetting:
         // The two file pickers that live inside the Theme and Background lists (`Install` and `Select
@@ -2351,7 +2355,7 @@ void Shell::activate() {
     case Action::Unavailable:
         // A Continue Watching row whose file has gone says why, instead of the generic line, which would be
         // false: the feature exists, the file does not.
-        showMessage(entry.title,(entry.id.startsWith("continue:") || entry.id==QLatin1String("start_at_signin") || entry.id.startsWith("setup:")) && !entry.detail.isEmpty()
+        showMessage(entry.title,(entry.id.startsWith("continue:") || entry.id.startsWith("savedata:") || entry.id==QLatin1String("start_at_signin") || entry.id.startsWith("setup:")) && !entry.detail.isEmpty()
             ?entry.detail
             :QObject::tr("This feature is not available in the native recreation yet."),MessageKind::Page);
         break;
@@ -3952,6 +3956,11 @@ void Shell::chooseAudioTrack(int index) {
     emit changed();
 }
 void Shell::showEntryInformation(const Entry& entry) {
+    // Empty save-data utility rows are notices/commands, not saves with metadata to inspect.
+    if(entry.id.startsWith("savedata:")) {
+        showMessage(entry.title,entry.detail,MessageKind::Page);
+        return;
+    }
     // The firmware's information page (D5; audit/DIALOGS-FIRMWARE.md 2.5) labels its rows with its own
     // strings from explore_plugin_full: Format, Size, Created, Filmed, Resolution, Details, plus Unknown
     // and "-" for values the system does not have. There is no firmware string for a filesystem path or
@@ -5655,6 +5664,7 @@ QString Shell::jellyfinSignInState() const {
 QString Shell::pageKind() const {
     if(pages_.isEmpty())return QStringLiteral("root");
     const auto& page=pages_.last();
+    if(!page.entries.isEmpty() && page.entries.first().id.startsWith("savedata:"))return QStringLiteral("saveData");
     if(page.signIn)return QStringLiteral("jellyfinSignIn");
     if(page.steamAccounts)return QStringLiteral("steamAccounts");
     if(page.jellyfin)return page.jellyfinViews?QStringLiteral("jellyfinViews"):page.jellyfinSearch?QStringLiteral("jellyfinSearch"):QStringLiteral("jellyfinFolder");
