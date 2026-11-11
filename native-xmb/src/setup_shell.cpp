@@ -14,6 +14,8 @@
 #include "pad.h"
 #include "setup.h"
 #include "service_installer.h"
+#include "firmware_fetcher.h"
+#include "firmware_extract.h"
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
@@ -144,6 +146,8 @@ QVector<Entry> Shell::setupRows(const QString& step) {
             rows<<cont();
             rows<<row(prefix+QStringLiteral(":browse"),tr("Choose a Different Folder"),QStringLiteral("fw:browse"),
                 tr("Pick another dev_flash folder with the controller. It is saved to xmb-config.json next to the program and loaded at the next start."));
+            rows<<row(prefix+QStringLiteral(":download"),tr("Download from Sony"),QStringLiteral("fw:download"),
+                tr("Downloads the latest PS3 system software from Sony and unpacks it into a dev_flash folder in the XMB's data folder. Needs an internet connection and a few minutes."));
         } else {
             QString what;
             if(!check.exists)what=tr("No dev_flash folder is set (looked for %1).").arg(nativePath(root));
@@ -157,6 +161,8 @@ QVector<Entry> Shell::setupRows(const QString& step) {
                 tr("Pick the dev_flash folder with the controller."));
             rows<<row(prefix+QStringLiteral(":type"),tr("Type the Path"),QStringLiteral("fw:type"),
                 tr("Opens the on-screen keyboard for a path such as D:\\PS3\\dev_flash."));
+            rows<<row(prefix+QStringLiteral(":download"),tr("Download from Sony"),QStringLiteral("fw:download"),
+                tr("Downloads the latest PS3 system software from Sony and unpacks it into a dev_flash folder in the XMB's data folder. Needs an internet connection and a few minutes."));
             rows<<cont(tr("Continue Without It"),tr("Goes on without firmware. You can come back with Settings > System Settings > Run Setup Again."));
         }
         if(!check.ok)rows<<skip();
@@ -282,6 +288,7 @@ void Shell::activateSetup(const Entry& entry) {
         setup_.browseKind=QStringLiteral("firmware");
         emit requestJellyfinFieldEdit(QStringLiteral("setup:path"),tr("dev_flash Folder"),setup_.devFlash,false);return;
     }
+    if(command==QLatin1String("fw:download")) {setupDownloadFirmware();return;}
     if(command==QLatin1String("lib:defaults")) {
         for(const char* kind:{"photo","music","video"}) {
             const QString path=setup::defaultLibraryFolder(QLatin1String(kind));
@@ -392,6 +399,45 @@ void Shell::setupUseFolder(const QString& folder) {
     // Leave the chooser: the step page under it shows the new value.
     if(!pages_.isEmpty() && setupStepOfTopPage()==QLatin1String("browse"))pages_.removeLast();
     setupRefresh();emit changed();
+}
+void Shell::setupDownloadFirmware() {
+    const QString dest=QDir::cleanPath(dataDirectory_+QStringLiteral("/dev_flash"));
+    if(qEnvironmentVariable("XMB_FIRMWARE_DRY_RUN")==QLatin1String("1")) {
+        qInfo().noquote()<<"would download the PS3 firmware and extract to"<<nativePath(dest);
+        showMessage(tr("Firmware"),tr("Dry run: would download the PS3 system software from Sony and unpack it into %1.").arg(nativePath(dest)),MessageKind::Page);
+        emit changed();return;
+    }
+    auto* watcher=new QFutureWatcher<QPair<QString,QString>>(this);
+    connect(watcher,&QFutureWatcher<QPair<QString,QString>>::finished,this,[this,watcher,dest]{
+        const auto result=watcher->result();watcher->deleteLater();
+        if(!result.second.isEmpty()) {
+            showMessage(tr("Firmware"),tr("Could not download and unpack the system software:\n%1").arg(result.second),MessageKind::Page);
+            emit changed();return;
+        }
+        auto config=setup::loadConfig(setup::configPath());
+        config.insert(QStringLiteral("devFlash"),nativePath(result.first));
+        QString error;
+        if(!setup::saveConfig(setup::configPath(),config,&error)) {
+            showMessage(tr("Firmware"),tr("Downloaded and unpacked, but could not save the folder to %1:\n%2").arg(nativePath(setup::configPath()),error),MessageKind::Page);
+            emit changed();return;
+        }
+        setup_.chosenFlash=QDir::cleanPath(result.first);
+        qInfo().noquote()<<"setup: firmware downloaded and unpacked to"<<nativePath(result.first);
+        interactionAudio_.play(InteractionAudio::Cue::Accept);
+        showMessage(tr("Firmware"),tr("Downloaded and unpacked to %1. It loads at the next restart.").arg(nativePath(result.first)),MessageKind::Page);
+        setupRefresh();emit changed();
+    });
+    watcher->setFuture(QtConcurrent::run([dest]{
+        QString error;
+        const auto release=xmb::latestFirmware(QStringLiteral("us"),&error);
+        if(!error.isEmpty())return qMakePair(QString(),error);
+        QString pup;
+        if(!xmb::downloadPup(release.url,&pup,&error))return qMakePair(QString(),error);
+        if(!xmb::extractPup(pup,dest,&error))return qMakePair(QString(),error);
+        return qMakePair(dest,QString());
+    }));
+    showMessage(tr("Firmware"),tr("Downloading the latest PS3 system software from Sony and unpacking it. This takes a few minutes."),MessageKind::Page);
+    emit changed();
 }
 void Shell::setupText(const QString& field,const QString& value) {
     Q_UNUSED(field)

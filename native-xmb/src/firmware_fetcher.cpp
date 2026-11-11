@@ -15,7 +15,8 @@ namespace {
 void fail(QString* error, const QString& message) { if(error) *error = message; }
 bool fetch(const QUrl& url, QIODevice* output, qint64 limit, int timeoutMs, QString* error,
            const std::function<void(qint64, qint64)>& progress = {}) {
-    if(url.scheme() != QStringLiteral("https") || url.host().isEmpty()) { fail(error, QStringLiteral("Invalid HTTPS URL")); return false; }
+    const QString scheme=url.scheme();
+    if((scheme != QStringLiteral("https") && scheme != QStringLiteral("http")) || url.host().isEmpty()) { fail(error, QStringLiteral("Invalid HTTP(S) URL")); return false; }
     QNetworkAccessManager manager;
     QNetworkRequest request(url);
     request.setRawHeader("User-Agent", "XMB-Firmware-Fetcher/0.2");
@@ -45,7 +46,10 @@ FirmwareRelease latestFirmware(const QString& region, QString* error) {
     if(error) error->clear();
     static const QRegularExpression regionPattern(QStringLiteral("^[a-z]{2}$"));
     if(!regionPattern.match(region).hasMatch()) { fail(error, QStringLiteral("Invalid firmware region")); return {}; }
-    const QUrl listUrl(QStringLiteral("https://dus01.ps3.update.playstation.net/update/ps3/list/%1/ps3-updatelist.txt").arg(region));
+    // Sony's PS3 update host serves plain HTTP only (its TLS certificate fails hostname validation,
+    // SEC_E_WRONG_PRINCIPAL). The PUP is HMAC-SHA1 signed and every entry is verified by extractPup,
+    // so authenticity is preserved over HTTP.
+    const QUrl listUrl(QStringLiteral("http://dus01.ps3.update.playstation.net/update/ps3/list/%1/ps3-updatelist.txt").arg(region));
     QByteArray bytes; QBuffer buffer(&bytes); buffer.open(QIODevice::WriteOnly);
     if(!fetch(listUrl, &buffer, 256*1024, 15000, error)) return {};
     FirmwareRelease best; QVersionNumber bestVersion;
@@ -64,7 +68,6 @@ FirmwareRelease latestFirmware(const QString& region, QString* error) {
         if(url.host() != QStringLiteral("dus01.ps3.update.playstation.net") ||
            (url.scheme() != QStringLiteral("http") && url.scheme() != QStringLiteral("https")) ||
            !url.path().endsWith(QStringLiteral("/PS3UPDAT.PUP"), Qt::CaseInsensitive)) continue;
-        url.setScheme(QStringLiteral("https"));
         const QVersionNumber parsed = QVersionNumber::fromString(version).normalized();
         if(best.version.isEmpty() || QVersionNumber::compare(parsed, bestVersion) > 0) {
             bestVersion = parsed; best = {parsed.toString(), url.toString()};

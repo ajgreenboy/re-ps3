@@ -772,6 +772,7 @@ private:
     void setupOpenChooser(const QString& kind,const QString& start);
     void setupChooserList();
     void setupUseFolder(const QString& folder);
+    void setupDownloadFirmware();   // "Download from Sony": fetch the PUP, verify + unpack into <data>/dev_flash
     void setupPadTick();
     void setupText(const QString& field,const QString& value);   // the OSK result for "setup:path"
     QVector<Entry> setupRows(const QString& step);
