@@ -39,6 +39,8 @@
 #include "content_registry.h"
 #include "steam_library.h"
 #include "steam_downloads.h"
+#include "release_source.h"
+#include "preferences.h"
 #include "steam_accounts.h"
 #include "steam_store.h"
 #include "steam_owned.h"
@@ -447,6 +449,7 @@ int main(int argc,char** argv) {
     parser.addOption({"steam-downloads-report","Write Steam's own download/update queue without opening a window","json-file"});
     parser.addOption({"steam-accounts-report","Write the remembered Steam accounts and the honest switch plan, without opening a window","json-file"});
     parser.addOption({"import-apps","Validate and merge a games/service-app manifest into the native library, then exit","json-file"});
+    parser.addOption({"import-source","Fetch and import a release-index JSON URL, then exit","url"});
     parser.addOption({"export-image","Export RCO images (container:name,...@directory) as local PNGs and exit","spec"});
     parser.addOption({"rco-text","Write the English strings of RCO containers (a,b@file) to a local text file and exit","spec"});
     parser.addOption({"rco-images","Write the image names of every vsh/resource RCO to a local text file and exit","text-file"});
@@ -828,6 +831,18 @@ int main(int argc,char** argv) {
         if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size()){qCritical()<<file.errorString();return 2;}
         qInfo().noquote()<<QString("steam accounts: %1 remembered, %2 active").arg(rows.size()).arg(activeCount);
         return 0;
+    }
+    if(parser.isSet("import-source")) {
+        xmb::Preferences preferences(data);xmb::ReleaseSources sources(data,preferences);QString error;
+        const QUrl url(parser.value("import-source"));
+        if(!sources.importSource(url,&error)){std::fprintf(stderr,"Import source: %s\n",error.toUtf8().constData());return 2;}
+        const auto stored=sources.listSources(&error);
+        if(!error.isEmpty()){std::fprintf(stderr,"Import source: %s\n",error.toUtf8().constData());return 2;}
+        for(const auto& source:stored)if(source.url==url) {
+            std::printf("Imported %lld releases from %s (%s)\n",static_cast<long long>(source.releases.size()),source.name.toUtf8().constData(),source.slug.toUtf8().constData());
+            std::fflush(stdout);return 0;
+        }
+        std::fprintf(stderr,"Import source: saved source not found\n");return 2;
     }
     if(parser.isSet("import-apps")) {
         QString error;
