@@ -208,6 +208,10 @@ enum class OptionCommand { Activate, Information,
     PlaylistEdit, AddAllToPlaylist, AddAllToPlaylistTarget,
     // Copy's destination level (file_ops.h): one library folder (MenuOption::index into copyTargets_).
     CopyTarget,
+    // Multi-select copy/delete (BEHAVIOUR-GAPS 5, DIALOGS-FIRMWARE D6/D7): Copy Multiple / Delete Multiple
+    // open a marking mode on the page; Cross toggles a row, Triangle opens the decide menu (Select All /
+    // Clear All / OK / Cancel), and OK fans the marked set into fileOps_.copy()/deleteToRecycleBin().
+    CopyPlural, DeletePlural, SelectAll, DeselectAll, MultiSelectDecide, MultiSelectCancel,
     // A Steam game row's hand-offs to the Steam client (steam:// links); MenuOption::index picks which.
     SteamLink,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
@@ -373,8 +377,14 @@ public:
     // (the default) for the indeterminate wait page the console frame shows.
     double busyProgress() const { return busyProgress_; }
     // The D8 busy_icon sweep, 0..1 per turn. -1 draws no ring: the measured wait page has none and
-    // page_busy's children carry no rect in the RCO, so no frame can place one.
-    double busySpinnerPhase() const { return busySpinnerPhase_; }
+    // page_busy's children carry no rect in the RCO, so no frame can place one. When a file operation
+    // publishes a phase (>= 0) the ring turns once a second off busyClock_ (a stated fit: the sweep rate
+    // has no console frame), which is the indeterminate copy/delete wait's ring.
+    double busySpinnerPhase() const {
+        if(busySpinnerPhase_ < 0.) return -1.;
+        if(!busyClock_.isValid()) return 0.;
+        return double(busyClock_.elapsed() % 1000) / 1000.;
+    }
     qint64 mediaPosition() const;
     qint64 mediaDuration() const;
     bool mediaPaused() const;
@@ -730,9 +740,24 @@ private:
     QStringList libraryRoots() const;
     QString deleteRefusal(const Entry& entry);
     void deleteLocalFile(const Entry& entry);
+    // Multi-select copy/delete (BEHAVIOUR-GAPS 5).
+    void startMultiSelect(const QString& kind);
+    void exitMultiSelect();
+    void toggleMarked(const Entry& entry);
+    void buildMultiSelectOptions();
+    QStringList markedSources() const { return QStringList(checkedIds_.values()); }
+    void openCopyDestinations(const QString& here,const QStringList& sources);
+    void runPluralDelete();
     QStringList copyTargets_;   // the destinations the open Copy level lists, by MenuOption::index
     QString copySource_,copyTitle_;
     QString fileOpsKind_;       // "copy" or "delete": what the request in flight is
+    // Multi-select copy/delete (BEHAVIOUR-GAPS 5): Cross marks the focused local file, Triangle opens the
+    // decide menu, OK fans checkedIds_ (entry ids = file paths) into fileOps_. The view owner's check/count
+    // indicator on the rows is a separate fence; until it lands the count is the status line.
+    bool multiSelect_=false;
+    QString multiSelectKind_;   // "copy" or "delete": what the plural command will do
+    QSet<QString> checkedIds_;
+    bool copyPlural_=false;     // the Copy destination level fans the marked set, not copySource_
     WeatherClient weather_;
     WeatherReport weatherReport_;
     QString weatherError_;
@@ -908,8 +933,11 @@ private:
     // The settings-chain proceed stage holds the busy page (see busy()). Separate from loading_ so a scan
     // and a write can never clear each other's state.
     bool busy_=false;
-    // The two values the busy page's determinate form reads (see busyProgress()/busySpinnerPhase()); both
-    // stay -1 until an operation publishes a total or a phase.
+    // The two values the busy page's determinate form reads (see busyProgress()/busySpinnerPhase()).
+    // busyProgress_ is the 0..1 ratio an operation with a known total publishes; -1 (the default) is the
+    // indeterminate wait page. busySpinnerPhase_ is the D8 ring's enable flag (>= 0 sweeps, computed from
+    // busyClock_); -1 draws no ring. A file operation sets the ring while its total is unknown and flips
+    // to busyProgress_ once the backend publishes a total.
     double busyProgress_=-1.;
     double busySpinnerPhase_=-1.;
     QElapsedTimer busyClock_;

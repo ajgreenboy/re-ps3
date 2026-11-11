@@ -1778,9 +1778,31 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     initWeather();
     initPhoneRemote();
     initWifi();
+    // The copy/delete busy page's determinate form (SETTINGS-SUBFLOWS 4.3/4.6, DIALOGS-FIRMWARE 15.7):
+    // the backend streams done/total and the current file while it runs. A known total flips the page from
+    // the indeterminate ring to the progress bar; total <= 0 keeps the ring (the firmware's indeterminate
+    // wait). The current file name is published to status_ so the busy line names what is copying.
+    connect(&fileOps_,&FileOperations::progress,this,[this](quint64 request,qint64 done,qint64 total,const QString& currentFile){
+        if(request!=fileOpsRequest_)return;
+        if(total>0) {
+            busyProgress_=std::clamp(double(done)/double(total),0.,1.);
+            busySpinnerPhase_=-1.;   // determinate: the bar takes over from the ring
+        } else {
+            busyProgress_=-1.;       // unknown total: stay on the indeterminate ring
+        }
+        if(!currentFile.isEmpty())
+            status_=(fileOpsKind_==QLatin1String("copy")
+                ?assets_.text("explore_plugin_full","msg_copying","Copying...")
+                :assets_.text("explore_plugin_full","msg_deleting","Deleting..."))
+                +QStringLiteral(" ")+currentFile;
+        qInfo().noquote()<<QStringLiteral("files: progress #%1 %2/%3").arg(request).arg(done).arg(total)
+            <<(currentFile.isEmpty()?QString():QStringLiteral(" %1").arg(currentFile));
+        emit changed();
+    });
     connect(&fileOps_,&FileOperations::finished,this,[this](quint64 request,bool ok,const QString& message,const QStringList&){
         if(request!=fileOpsRequest_)return;
         fileOpsRequest_=0;loading_=false;status_.clear();
+        busyProgress_=-1.;busySpinnerPhase_=-1.;   // the busy page returns to the indeterminate wait form
         const bool copying=fileOpsKind_==QLatin1String("copy");
         if(ok) {
             if(copying)notify(assets_.text("explore_plugin_full","msg_copied","Copy completed."),message);
@@ -2034,6 +2056,9 @@ void Shell::activate() {
         return;
     }
     const auto entry=entries()[selection()];
+    // Multi-select marking (BEHAVIOUR-GAPS 5): while the mode is on, Cross marks the focused local file
+    // instead of activating it; Triangle is the decide menu, Circle leaves the mode.
+    if(multiSelect_) { toggleMarked(entry); return; }
     // Committing a value is the firmware's module-action path: snd_system_ok when the action completes
     // (explore_plugin.prx FUN_00030954 / FUN_00062e6c). SetSetting is silent here and plays Cue::Accept
     // after its write below (audit/INTERACTION-AUDIO.md section 10).
@@ -2918,6 +2943,15 @@ void Shell::buildOptions() {
         const QString refusal=deleteRefusal(entry);
         addOption({"msg_del","Delete"},OptionCommand::Delete,"local-content",refusal.isEmpty(),
                   refusal.isEmpty()?tr("Moves this file to the Recycle Bin."):refusal);
+        // Copy Multiple / Delete Multiple (msg_copy_plural / msg_del_plural): the firmware's marking mode
+        // behind a select-all / deselect-all / decide row (BEHAVIOUR-GAPS 5, DIALOGS-FIRMWARE D6/D7). They
+        // need a set to mark, so they appear only when the page lists more than one local file.
+        int files=0;
+        for(const auto& row:entries())if(row.action==Action::File && optionIsLocalContent(row))++files;
+        if(files>1) {
+            addOption({"msg_copy_plural","Copy Multiple"},OptionCommand::CopyPlural,"local-content");
+            addOption({"msg_del_plural","Delete Multiple"},OptionCommand::DeletePlural,"local-content");
+        }
     }
     // The Continue Watching row is this build's own record, not a firmware item: the firmware has no row
     // for forgetting a resume point. Its label is the firmware's own generic remove word (`msg_eject` =
@@ -3058,6 +3092,17 @@ void Shell::toggleOptions() {
         return;
     }
     if(entries().isEmpty())return;
+    // Multi-select marking: Triangle is the decide menu (Select All / Clear All / OK / Cancel), not the
+    // item menu (BEHAVIOUR-GAPS 5). Cross on a row keeps marking it, so the item menu stays out of the way.
+    if(multiSelect_) {
+        buildMultiSelectOptions();
+        optionsOpen_=true;
+        interactionAudio_.play(InteractionAudio::Cue::Options);
+        qInfo().noquote()<<"shell: multi-select decide menu open kind="<<multiSelectKind_
+            <<"marked="<<checkedIds_.size();
+        emit changed();
+        return;
+    }
     // A settings choice column already is the options panel; Triangle there adds nothing.
     bool choiceColumn=true;
     for(const auto& e:entries())if(e.action!=Action::SetSetting){choiceColumn=false;break;}
@@ -3473,29 +3518,10 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     }
-    // Listed but not choosable (the copy/delete backend does not exist yet), so this is unreachable until a
-    // future backend enables the row and opens its own page here.
     case OptionCommand::Copy:
         if(optionIsLocalContent(entry) && entry.action==Action::File) {
-            copySource_=entry.value;copyTitle_=entry.title;copyTargets_.clear();
-            optionsParent_=options_;optionsNested_=true;
-            optionsTitle_=assets_.text("explore_plugin_full","msg_copy","Copy");
-            options_.clear();
-            const QString here=QFileInfo(entry.value).absolutePath();
-            static const char* const kinds[][2]={{"video","Video Library"},{"music","Music Library"},{"photo","Photo Library"}};
-            for(const auto& kind:kinds) {
-                const QString root=preferences_.value(QStringLiteral("library/")+QLatin1String(kind[0])).toString();
-                if(root.isEmpty() || QDir::cleanPath(root)==QDir::cleanPath(here))continue;
-                MenuOption row{tr(kind[1]),OptionCommand::CopyTarget};
-                row.index=int(copyTargets_.size());row.note=QDir::toNativeSeparators(root);
-                const QString refusal=fileOps_.checkCopy({entry.value},root);
-                if(!refusal.isEmpty()){row.enabled=false;row.note=refusal;}
-                copyTargets_<<root;options_.push_back(row);
-            }
-            MenuOption same{tr("This Folder"),OptionCommand::CopyTarget};
-            same.index=int(copyTargets_.size());same.note=tr("Makes a numbered copy next to the original.");
-            copyTargets_<<here;options_.push_back(same);
-            optionsSelection_=0;
+            copySource_=entry.value;copyTitle_=entry.title;copyPlural_=false;
+            openCopyDestinations(QFileInfo(entry.value).absolutePath(),{entry.value});
             interactionAudio_.play(InteractionAudio::Cue::Options);
             emit changed();
             break;
@@ -3504,15 +3530,85 @@ void Shell::optionsActivate() {
         emit changed();
         break;
     case OptionCommand::CopyTarget: {
-        if(option.index<0 || option.index>=copyTargets_.size() || copySource_.isEmpty())break;
-        const QString target=copyTargets_[option.index],source=copySource_,title=copyTitle_;
+        if(option.index<0 || option.index>=copyTargets_.size())break;
+        const QString target=copyTargets_[option.index];
+        const QStringList sources=copyPlural_?markedSources():QStringList{copySource_};
+        if(sources.isEmpty())break;
+        const QString title=copyPlural_?QObject::tr("%1 files").arg(sources.size()):copyTitle_;
+        multiSelect_=false;multiSelectKind_.clear();checkedIds_.clear();copyPlural_=false;
         resetOptions();
-        fileOpsRequest_=fileOps_.copy({source},target);fileOpsKind_=QStringLiteral("copy");
+        fileOpsRequest_=fileOps_.copy(sources,target);fileOpsKind_=QStringLiteral("copy");
         loading_=true;status_=assets_.text("explore_plugin_full","msg_copying","Copying...");
+        busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();   // indeterminate until the backend totals the copy
         qInfo().noquote()<<"files: copy asked for"<<title<<"to"<<QDir::toNativeSeparators(target);
         emit changed();
         break;
     }
+    case OptionCommand::CopyPlural:
+        if(optionIsLocalContent(entry)) {
+            resetOptions();
+            startMultiSelect(QStringLiteral("copy"));
+            emit changed();
+            break;
+        }
+        interactionAudio_.play(InteractionAudio::Cue::Error);
+        emit changed();
+        break;
+    case OptionCommand::DeletePlural:
+        if(optionIsLocalContent(entry)) {
+            resetOptions();
+            startMultiSelect(QStringLiteral("delete"));
+            emit changed();
+            break;
+        }
+        interactionAudio_.play(InteractionAudio::Cue::Error);
+        emit changed();
+        break;
+    case OptionCommand::SelectAll:
+        for(const auto& row:entries())if(row.action==Action::File && optionIsLocalContent(row))checkedIds_.insert(row.id);
+        status_=QObject::tr("%1 selected").arg(checkedIds_.size());
+        interactionAudio_.play(InteractionAudio::Cue::Move);
+        qInfo().noquote()<<"shell: multi-select select all marked="<<checkedIds_.size();
+        emit changed();
+        break;
+    case OptionCommand::DeselectAll:
+        checkedIds_.clear();
+        status_=QObject::tr("%1 selected").arg(0);
+        interactionAudio_.play(InteractionAudio::Cue::Move);
+        qInfo().noquote()<<"shell: multi-select deselect all";
+        emit changed();
+        break;
+    case OptionCommand::MultiSelectDecide: {
+        const QStringList sources=markedSources();
+        if(sources.isEmpty()) {
+            interactionAudio_.play(InteractionAudio::Cue::Error);
+            status_=QObject::tr("Mark at least one file first.");
+            qInfo().noquote()<<"shell: multi-select decide refused (nothing marked)";
+            emit changed();
+            break;
+        }
+        if(multiSelectKind_==QLatin1String("copy")) {
+            copyPlural_=true;copyTitle_.clear();
+            const QString here=pages_.isEmpty()?QString():pages_.last().directory;
+            openCopyDestinations(here,sources);
+            emit changed();
+        } else {
+            resetOptions();
+            // Reuse msg_del_content_ask ("The content will be deleted. Are you sure you want to continue?"):
+            // the same generic string single Delete asks, so the plural confirm stays kind-agnostic (the
+            // firmware's msg_del_images_ask is the Photo column's own wording).
+            showConfirm(assets_.text("explore_plugin_full","msg_del_content_ask",
+                            QObject::tr("The content will be deleted.\nAre you sure you want to continue?")),
+                        QObject::tr("%1 files will be moved to the Recycle Bin.").arg(sources.size()),
+                        [this]{runPluralDelete();});
+            emit changed();
+        }
+        break;
+    }
+    case OptionCommand::MultiSelectCancel:
+        resetOptions();
+        exitMultiSelect();
+        break;
     case OptionCommand::Delete:
         if(optionIsLocalContent(entry) && deleteRefusal(entry).isEmpty()) {
             const Entry row=entry;
@@ -4192,6 +4288,7 @@ void Shell::back() {
     // flight, so Back can never strand an authentication the user has walked away from.
     else if(setupHandleBack());   // D8: Circle on the setup Welcome page asks before leaving
     else if(!pages_.isEmpty() && pages_.last().signIn)cancelJellyfinSignInPage();
+    else if(multiSelect_)exitMultiSelect();   // Circle leaves the marking mode before it leaves the page
     else if(!pages_.isEmpty()){library_.cancel();scanRequest_=0;jellyfinRequest_=0;loading_=false;status_.clear();pages_.removeLast();}
     emit changed();
 }
@@ -5003,9 +5100,83 @@ void Shell::deleteLocalFile(const Entry& entry) {
         fileOps_.setAllowedRoots(libraryRoots());
         fileOpsRequest_=fileOps_.deleteToRecycleBin({path});fileOpsKind_=QStringLiteral("delete");
         loading_=true;status_=assets_.text("explore_plugin_full","msg_deleting","Deleting...");
+        busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();   // indeterminate until the shell reports item counts
         qInfo().noquote()<<"files: delete asked for"<<title;
         emit changed();
     });
+}
+void Shell::startMultiSelect(const QString& kind) {
+    multiSelect_=true;multiSelectKind_=kind;checkedIds_.clear();copyPlural_=false;
+    status_=QObject::tr("Cross marks a file, Triangle decides, Circle cancels.");
+    interactionAudio_.play(InteractionAudio::Cue::Confirm);
+    qInfo().noquote()<<"shell: multi-select started kind="<<kind;
+    emit changed();
+}
+void Shell::exitMultiSelect() {
+    multiSelect_=false;multiSelectKind_.clear();checkedIds_.clear();copyPlural_=false;
+    status_.clear();
+    interactionAudio_.play(InteractionAudio::Cue::Back);
+    qInfo().noquote()<<"shell: multi-select cancelled";
+    emit changed();
+}
+void Shell::toggleMarked(const Entry& entry) {
+    if(entry.id.isEmpty() || entry.action!=Action::File || !optionIsLocalContent(entry)) {
+        interactionAudio_.play(InteractionAudio::Cue::Error);
+        emit changed();
+        return;
+    }
+    const bool marked=checkedIds_.contains(entry.id);
+    if(marked)checkedIds_.remove(entry.id);else checkedIds_.insert(entry.id);
+    status_=QObject::tr("%1 selected").arg(checkedIds_.size());
+    interactionAudio_.play(InteractionAudio::Cue::Move);
+    qInfo().noquote()<<"shell: multi-select toggle"<<(marked?"off":"on")<<entry.title
+        <<"marked="<<checkedIds_.size();
+    emit changed();
+}
+void Shell::buildMultiSelectOptions() {
+    resetOptions();
+    const bool copy=multiSelectKind_==QLatin1String("copy");
+    optionsTitle_=assets_.text("explore_plugin_full",copy?"msg_copy_plural":"msg_del_plural",
+                               copy?"Copy Multiple":"Delete Multiple");
+    // msg_select_all / msg_deselect_all / msg_fix are the firmware's own decide-button labels
+    // (RCO-OBJECT-MODEL.md: cmdbtn_select_all / cmdbtn_deselect_all / cmdbtn_decide_src -> "OK").
+    addOption({"msg_select_all","Select All"},OptionCommand::SelectAll,"multi-select");
+    addOption({"msg_deselect_all","Clear All"},OptionCommand::DeselectAll,"multi-select");
+    addOption({"msg_fix","OK"},OptionCommand::MultiSelectDecide,"multi-select",true,
+              copy?tr("Copies the marked files."):tr("Moves the marked files to the Recycle Bin."));
+    addOption({"msg_cancel","Cancel"},OptionCommand::MultiSelectCancel,"multi-select");
+    optionsSelection_=0;
+}
+void Shell::openCopyDestinations(const QString& here,const QStringList& sources) {
+    copyTargets_.clear();
+    optionsParent_=options_;optionsNested_=true;
+    optionsTitle_=assets_.text("explore_plugin_full","msg_copy","Copy");
+    options_.clear();
+    static const char* const kinds[][2]={{"video","Video Library"},{"music","Music Library"},{"photo","Photo Library"}};
+    for(const auto& kind:kinds) {
+        const QString root=preferences_.value(QStringLiteral("library/")+QLatin1String(kind[0])).toString();
+        if(root.isEmpty() || QDir::cleanPath(root)==QDir::cleanPath(here))continue;
+        MenuOption row{tr(kind[1]),OptionCommand::CopyTarget};
+        row.index=int(copyTargets_.size());row.note=QDir::toNativeSeparators(root);
+        const QString refusal=fileOps_.checkCopy(sources,root);
+        if(!refusal.isEmpty()){row.enabled=false;row.note=refusal;}
+        copyTargets_<<root;options_.push_back(row);
+    }
+    MenuOption same{tr("This Folder"),OptionCommand::CopyTarget};
+    same.index=int(copyTargets_.size());same.note=tr("Makes a numbered copy next to the original.");
+    copyTargets_<<here;options_.push_back(same);
+    optionsSelection_=0;
+}
+void Shell::runPluralDelete() {
+    const QStringList sources=markedSources();
+    if(sources.isEmpty())return;
+    multiSelect_=false;multiSelectKind_.clear();checkedIds_.clear();copyPlural_=false;
+    fileOps_.setAllowedRoots(libraryRoots());
+    fileOpsRequest_=fileOps_.deleteToRecycleBin(sources);fileOpsKind_=QStringLiteral("delete");
+    loading_=true;status_=assets_.text("explore_plugin_full","msg_deleting","Deleting...");
+    busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();
+    qInfo().noquote()<<"files: delete asked for"<<sources.size()<<"files";
+    emit changed();
 }
 void Shell::refreshDirectory(){
     if(!mediaOpen_ && !pages_.isEmpty() && pages_.last().jellyfin) {
