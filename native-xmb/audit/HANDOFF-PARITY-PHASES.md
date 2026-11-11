@@ -136,6 +136,13 @@ cost). **Carried over and still open:**
 > background 0,0,700,200 = **34.75 dB / 0.9937** (A1 confirmed fixed), ribbon band 0,330,1920,450 =
 > **16.47 dB / 0.7138** (A2 confirmed still open — the dominant remaining gap), whole frame =
 > **18.78 dB / 0.8263**.
+>
+> **NIGHT OUTCOME (2026-11-11):** the render A-list is done. A1/A3/D8 were already fixed on HEAD (the
+> audits were stale — D8 documented in `ed69bc0`). A2 (ribbon) was improved from 16.47 → 20.14 dB band /
+> 18.78 → 22.03 dB frame (`023f7e7`, sag direction + brightness corrected); a further crest-amplitude fit
+> regressed and was reverted, so the ribbon is at a local optimum (residual crest amplitude ~46-91 px)
+> pending a real `LINE1.mnu` phase trace. A5 (TV column) remains a product decision. Remaining work is
+> B (missing surfaces), C (player panels), D (behaviours) — see the ranked lists above.
 
 Tonight's session owns the **A-list "blocks the look" render fixes**, each with a measured target in
 `FIDELITY-ROOT-BAR.md` §7/§11:
