@@ -23,6 +23,16 @@ enum class OskAction {
 };
 QString oskActionName(OskAction action);
 
+// ---- OSK input handlers (BEHAVIOUR-GAPS-SPEC section 3) ----
+// One text-caret step by grapheme (the OSK's L1/R1 and its on-screen caret arrows): a combined or accented
+// character moves as one cluster, matching the console's cursor boundary. Returns the new caret index,
+// clamped to [0, text.size()]. `forward` is +1 (right) / false (left).
+int oskCaretStep(const QString& text, int cursor, bool forward);
+// One key-page step (the OSK's L2/R2): cycles the page list in the given direction, wrapping. +1 is the next
+// page (lower -> caps -> ...), -1 the previous. With the committed two-page layout this is the lower/caps
+// toggle; once the accent page lands it becomes the three-way L2/R2 step the console has.
+int oskPageStep(int pageCount, int current, int direction);
+
 // One key of one page. column is the left cell; span is the number of 72x54 cells the key covers.
 // face is the draw role ("letter", "olive", "blue", "mint", "arrow"); faceTexture is the exact RCO
 // image name when the firmware/module assigns one. badge is the text fallback and badgeTexture the

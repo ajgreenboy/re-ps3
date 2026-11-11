@@ -6,6 +6,7 @@
 #include <QProcess>
 #include <QStringList>
 #include <QXmlStreamReader>
+#include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -116,5 +117,20 @@ bool setEnabled(bool on,QString* error){
         return false;
     }
     return true;
+}
+
+void setEnabledAsync(bool on,std::function<void(bool,QString)> done) {
+    // The write blocks ~1 s (PowerShell start-up + the script + the schtasks read-back), so it runs on a worker
+    // and only the result comes back to the GUI thread (BEHAVIOUR-GAPS-SPEC section 7 / HTPC-LEFTOVERS D3).
+    (void)QtConcurrent::run([on,done=std::move(done)] {
+        QString error;
+        const bool ok=setEnabled(on,&error);   // same write + read-back as the blocking form; updates gState
+        // Deliver on the GUI thread so a caller can touch widgets; with no event loop (never here) fall back
+        // to the worker thread rather than dropping the result.
+        if(QCoreApplication::instance())
+            QMetaObject::invokeMethod(QCoreApplication::instance(),
+                [done=std::move(done),ok,error] { if(done) done(ok,error); }, Qt::QueuedConnection);
+        else if(done) done(ok,error);
+    });
 }
 }

@@ -12,6 +12,7 @@
 #include <QImage>
 #include <QSet>
 #include <QStringList>
+#include <QTextBoundaryFinder>
 #include <QtEndian>
 #include <algorithm>
 
@@ -737,6 +738,22 @@ QString oskActionName(OskAction action) {
     case OskAction::Paste: return QStringLiteral("paste");
     }
     return QStringLiteral("unknown");
+}
+
+int oskCaretStep(const QString& text, int cursor, bool forward) {
+    // The caret moves by grapheme cluster, not by UTF-16 code unit, so an accented or combined character is
+    // one step (the console's cursor boundary; audit/OSK-FIRMWARE.md section 6). A move past either end clamps.
+    QTextBoundaryFinder boundaries(QTextBoundaryFinder::Grapheme, text);
+    boundaries.setPosition(cursor);
+    const int next = forward ? boundaries.toNextBoundary() : boundaries.toPreviousBoundary();
+    return next < 0 ? (forward ? int(text.size()) : 0) : next;
+}
+
+int oskPageStep(int pageCount, int current, int direction) {
+    // Cycles the key pages (lower -> caps -> accent once it lands), wrapping at both ends. direction is +1
+    // (next) or -1 (previous); pageCount <= 0 is a guard, not a real layout state.
+    if(pageCount <= 0) return 0;
+    return ((current + direction) % pageCount + pageCount) % pageCount;
 }
 
 const OskKey* OskRow::keyAt(int column) const {

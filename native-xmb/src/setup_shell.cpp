@@ -326,11 +326,15 @@ void Shell::activateSetup(const Entry& entry) {
         setupRefresh();emit changed();return;
     }
     if(command==QLatin1String("auto:toggle")) {
-        QString error;
+        // The write runs PowerShell + the scheduler read-back, so it goes off the GUI thread (D3); the row
+        // refresh and the result cue happen in the completion handler once the state is read back.
         const bool want=!autostart::enabled();
-        if(!autostart::setEnabled(want,&error))showMessage(tr("Start at Sign-in"),tr("It could not be changed:\n%1").arg(error),MessageKind::Page);
-        else interactionAudio_.play(InteractionAudio::Cue::Accept);
-        setupRefresh();emit changed();return;
+        autostart::setEnabledAsync(want,[this](bool ok,const QString& error){
+            if(!ok)showMessage(tr("Start at Sign-in"),tr("It could not be changed:\n%1").arg(error),MessageKind::Page);
+            else interactionAudio_.play(InteractionAudio::Cue::Accept);
+            setupRefresh();emit changed();
+        });
+        return;
     }
     emit changed();
 }

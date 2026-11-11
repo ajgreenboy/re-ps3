@@ -64,6 +64,23 @@ bool xinputLatest(XInputState& out);
 // for the Accessory Settings rows; empty when no XInput controller is connected or xinput1_4.dll is absent.
 struct XInputPad { int slot=0; QString battery; };
 QVector<XInputPad> xinputPads();
+
+// ---- On-screen keyboard pad mapping (BEHAVIOUR-GAPS-SPEC section 3) ----
+// The pad buttons and triggers that drive the OSK directly, mapped here so the view dispatches semantics
+// (caret / page / input mode) instead of XInput button bits: L1/R1 move the text caret, L2/R2 step between
+// key pages, SELECT is Input Mode. `buttons` is the merged XInput wButtons layout (HID and XInput already
+// agree on it); `l2`/`r2` are the analog trigger values, with the same 0.5 press threshold padAction uses
+// for its trace. The caller edges the result (one step per press), exactly as it edges every other button.
+enum OskPadBit : quint32 {
+    OskPadNone       = 0x0,
+    OskPadCaretLeft  = 0x1,   // L1 (XInput left shoulder / HID 0x100)
+    OskPadCaretRight = 0x2,   // R1 (XInput right shoulder / HID 0x200)
+    OskPadPagePrev   = 0x4,   // L2 analog trigger past 0.5 (accent page on the console)
+    OskPadPageNext   = 0x8,   // R2 analog trigger past 0.5 (caps page on the console)
+    OskPadMode       = 0x10   // SELECT (XInput back / HID 0x20)
+};
+quint32 oskPadActions(quint16 buttons, float l2, float r2);
+
 QString kindName(Kind kind);          // "DualShock 3", "DualShock 4", "DualSense", "None"
 QString transportName(Transport kind); // "USB", "Bluetooth", "Unknown"
 }

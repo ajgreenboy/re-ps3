@@ -1183,6 +1183,18 @@ bool setHostChoice(const QString& key,int index) {
 #endif
 }
 
+void setHostChoiceAsync(const QString& key,int index,std::function<void(bool,QString)> done) {
+    if(key==QLatin1String("host/startAtSignIn")) {
+        // The one choice that runs PowerShell: off the GUI thread, with the read-back folded into the
+        // completion handler (HTPC-LEFTOVERS-TRIAGE D3). The error is delivered to the caller, not logged here.
+        autostart::setEnabledAsync(index==1,std::move(done));
+        return;
+    }
+    // Every other host choice is synchronous; report it through the same callback so callers keep one shape.
+    const bool ok=setHostChoice(key,index);
+    if(done) done(ok,QString());
+}
+
 // ==== Core Audio volume, the existing host path ====================================================
 int masterVolume() {
 #ifdef Q_OS_WIN

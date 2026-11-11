@@ -94,6 +94,11 @@ QJsonObject networkTest(bool probe=true);
 // needs no administrator rights.
 int hostChoiceIndex(const QString& key);
 bool setHostChoice(const QString& key,int index);
+// Async host-choice write for the one choice that runs PowerShell (Start at Sign-in). `done(ok, error)` is
+// called on the GUI thread once the write and its read-back have completed; every other key reports through
+// the same callback synchronously so callers keep one shape. setHostChoice() stays synchronous for keys that
+// never block.
+void setHostChoiceAsync(const QString& key,int index,std::function<void(bool,QString)> done);
 QString hostChoiceName(const QString& key);
 // H8, Sound Settings > Audio Output Settings: `host/audioOutput` is a host choice whose items are the active
 // Windows render endpoints (snapshot().audioOutputs, in Core Audio's enumeration order) and whose index is the

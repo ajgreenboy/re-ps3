@@ -479,6 +479,19 @@ bool parseReport(Kind kind,const QVector<quint8>& report,Info& out) {
     const std::vector<quint8> bytes(report.cbegin(),report.cend());
     return parse(kind,bytes,state,out);
 }
+quint32 oskPadActions(quint16 buttons, float l2, float r2) {
+    // The pad's OSK functions (BEHAVIOUR-GAPS-SPEC section 3), mapped from the same button bits padAction
+    // already names: L1/R1 move the text caret, SELECT is Input Mode, and the two analog triggers become the
+    // page steps at the same 0.5 threshold the trace uses (a resting DualShock 3/4 trigger reads 0.0).
+    quint32 out = OskPadNone;
+    if(buttons & l1)          out |= OskPadCaretLeft;
+    if(buttons & r1)          out |= OskPadCaretRight;
+    if(buttons & selectButton)out |= OskPadMode;
+    if(l2 > 0.5f)             out |= OskPadPagePrev;
+    if(r2 > 0.5f)             out |= OskPadPageNext;
+    return out;
+}
+
 QString kindName(Kind kind) {
     switch(kind) {
     case Kind::Ds3:return QStringLiteral("DualShock 3");
