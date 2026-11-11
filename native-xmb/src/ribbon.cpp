@@ -32,6 +32,11 @@ constexpr float thinness=0.f;       // fit: the shader value; the presets say TH
 // BACKGROUND.mnu's FOVY (71.846) is the background shader's camera, not this one.
 constexpr float cameraFovy=53.f,cameraNear=.1f,cameraFar=1000.f;
 constexpr float pi=3.14159265358979f;
+// fit (2026-11-11, audit/RIBBON-A2-PHASE.md): fallback only, day-root 1920x1080.
+// 41,550 day steps put the bright half on the left instead of the right. Six-column
+// peak-y error is bounded by 91 px (was 214); crop 17.09/.7309 -> 20.14/.7868 with
+// the existing 0.7 emissive gain. This is NOT a traced phase or a few-pixel match.
+constexpr int fallbackWarmupSteps=41550;
 
 // Big-endian float table at a virtual address of a 64-bit PPU ELF (the decrypted plugin), or empty when out of range.
 std::vector<float> elfFloats(const QByteArray& elf,quint64 address,int count) {
@@ -154,19 +159,15 @@ QVector4D Ribbon::flatPoint(int i,float length) {
                      .55f+.55f*std::cos(2*pi*float(i/side_)/(side_-1)),1);
 }
 
-// The cloth warm-up the no-plugin path always ran: 14,400 fixed steps from the flat start (the x extent crumples
-// first, then recovers; work/cloth-sim.ts). A pure function of the preset - no GL, no member state - which is what
-// lets it run on a worker thread. The timer is the measurement quoted in audit/VERIFICATION-HARNESS.md 5.6.
-// measured 2026-10-28: the settle is a warm-up, not a rest state. Its end state is one phase of the swell, and the
-// sheet it draws sits up to 95 px above and 204 px short of the console's; the console's own state is the plugin's
-// preset-1 table, which reproduces it to 4 px (audit/PIPELINE.md "Ribbon extent"). Do not tune the step count, the
-// start or the camera to a reference still: every value in that chain is traced and verified.
+// A fitted fallback warm-up, not a rest state. A pure function of the day preset
+// (no GL or member state), shared by the prefetch and synchronous paths. The
+// optional plugin-table path remains traced and does not consume this fit.
 Ribbon::Settle Ribbon::settledFlat(const Preset& p) {
     Settle out;
     for(int i=0;i<points_;++i)out.cloth.pos[size_t(i)]=flatPoint(i,p.length);
     out.cloth.prev=out.cloth.pos;
     QElapsedTimer timer;timer.start();
-    for(int i=0;i<14400;++i)out.cloth.step(p);
+    for(int i=0;i<fallbackWarmupSteps;++i)out.cloth.step(p);
     out.micros=timer.nsecsElapsed()/1000;
     return out;
 }
@@ -178,8 +179,7 @@ bool Ribbon::sameClothPreset(const Preset& a,const Preset& b) {
         && a.perturbation==b.perturbation && a.endY==b.endY && a.endZ==b.endZ;
 }
 
-// Start the warm-up with the view. The first native window costs ~450 ms on this machine (VERIFICATION-HARNESS.md
-// 5.4a), so the 14,400-step settle (~220 ms) finishes long before initializeGL asks for it. The thread touches only
+// Start the warm-up with the view, overlapping the first native window's creation. The thread touches only
 // its own copy; the preset-1 table path (a --vsh-modules run) never consumes it, and the future's destructor joins
 // the thread at shutdown. XMB_RIBBON_SETTLE_SYNC=1 keeps the pre-change synchronous path for the A/B.
 Ribbon::Ribbon() {
@@ -287,7 +287,7 @@ void main(){
     field_=std::make_unique<QOpenGLFramebufferObject>(128,1,fieldFormat);
     // The cloth's rest state: the plugin starts the boot ribbon from preset 1 (FUN_0004e624: positions at 0x97c18,
     // velocities at 0x98d04, 361 x float3 each, read from the local decrypted plugin). Without it, an approximation of
-    // that state settles for four minutes of simulated time: the tables form a tube (row 0 equals row 18, each column closes
+    // that state uses the fitted warm-up above: the tables form a tube (row 0 equals row 18, each column closes
     // into a loop), columns LENGTH apart from the pinned edge at x = 0 and rows round a loop of the tables' y/z extent.
     const QByteArray plugin=assets.vshModule("custom_render_plugin.prx");
     const auto rest=elfFloats(plugin,0x97c18,points_*3),restVelocity=elfFloats(plugin,0x98d04,points_*3);
@@ -314,7 +314,7 @@ void main(){
         } else {
             if(settleFuture_.valid())settleFuture_.wait();
             QElapsedTimer settle;settle.start();
-            for(int i=0;i<14400;++i)cloth_.step(day_); // the x extent crumples first, then recovers (cloth-sim.ts)
+            for(int i=0;i<fallbackWarmupSteps;++i)cloth_.step(day_);
             qInfo().noquote()<<"ribbon: cloth warm-up"<<QString::number(settle.nsecsElapsed()/1e6,'f',1)<<"ms synchronous"
                 <<(matches?"; prefetch unavailable":"; LINE1 day preset differs from the compiled fallback");
         }

@@ -76,9 +76,9 @@ private:
     };
     // One flat-grid warm-up: the settled cloth and the wall time the steps took.
     struct Settle { Cloth cloth; qint64 micros=0; };
-    // The fallback start (FUN_0004ec90): columns LENGTH apart, rows round the tables' y/z loop.
+    // Fitted fallback start: columns LENGTH apart, rows round the tables' y/z loop (not FUN_0004ec90).
     static QVector4D flatPoint(int i,float length);
-    // 14,400 fixed steps from the flat start, as the no-plugin path always did.
+    // Fitted day-preset warm-up from the fallback start; bound documented in ribbon.cpp.
     static Settle settledFlat(const Preset& p);
     // True when two presets give the cloth identical inputs (the fields step() and flatPoint() read). Exact float
     // comparison is deliberate: a prefetched state is reused only when it is bit-identical to the synchronous one.
