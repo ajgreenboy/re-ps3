@@ -373,8 +373,14 @@ public:
     // (the default) for the indeterminate wait page the console frame shows.
     double busyProgress() const { return busyProgress_; }
     // The D8 busy_icon sweep, 0..1 per turn. -1 draws no ring: the measured wait page has none and
-    // page_busy's children carry no rect in the RCO, so no frame can place one.
-    double busySpinnerPhase() const { return busySpinnerPhase_; }
+    // page_busy's children carry no rect in the RCO, so no frame can place one. When a file operation
+    // publishes a phase (>= 0) the ring turns once a second off busyClock_ (a stated fit: the sweep rate
+    // has no console frame), which is the indeterminate copy/delete wait's ring.
+    double busySpinnerPhase() const {
+        if(busySpinnerPhase_ < 0.) return -1.;
+        if(!busyClock_.isValid()) return 0.;
+        return double(busyClock_.elapsed() % 1000) / 1000.;
+    }
     qint64 mediaPosition() const;
     qint64 mediaDuration() const;
     bool mediaPaused() const;
@@ -908,8 +914,11 @@ private:
     // The settings-chain proceed stage holds the busy page (see busy()). Separate from loading_ so a scan
     // and a write can never clear each other's state.
     bool busy_=false;
-    // The two values the busy page's determinate form reads (see busyProgress()/busySpinnerPhase()); both
-    // stay -1 until an operation publishes a total or a phase.
+    // The two values the busy page's determinate form reads (see busyProgress()/busySpinnerPhase()).
+    // busyProgress_ is the 0..1 ratio an operation with a known total publishes; -1 (the default) is the
+    // indeterminate wait page. busySpinnerPhase_ is the D8 ring's enable flag (>= 0 sweeps, computed from
+    // busyClock_); -1 draws no ring. A file operation sets the ring while its total is unknown and flips
+    // to busyProgress_ once the backend publishes a total.
     double busyProgress_=-1.;
     double busySpinnerPhase_=-1.;
     QElapsedTimer busyClock_;

@@ -1778,9 +1778,31 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     initWeather();
     initPhoneRemote();
     initWifi();
+    // The copy/delete busy page's determinate form (SETTINGS-SUBFLOWS 4.3/4.6, DIALOGS-FIRMWARE 15.7):
+    // the backend streams done/total and the current file while it runs. A known total flips the page from
+    // the indeterminate ring to the progress bar; total <= 0 keeps the ring (the firmware's indeterminate
+    // wait). The current file name is published to status_ so the busy line names what is copying.
+    connect(&fileOps_,&FileOperations::progress,this,[this](quint64 request,qint64 done,qint64 total,const QString& currentFile){
+        if(request!=fileOpsRequest_)return;
+        if(total>0) {
+            busyProgress_=std::clamp(double(done)/double(total),0.,1.);
+            busySpinnerPhase_=-1.;   // determinate: the bar takes over from the ring
+        } else {
+            busyProgress_=-1.;       // unknown total: stay on the indeterminate ring
+        }
+        if(!currentFile.isEmpty())
+            status_=(fileOpsKind_==QLatin1String("copy")
+                ?assets_.text("explore_plugin_full","msg_copying","Copying...")
+                :assets_.text("explore_plugin_full","msg_deleting","Deleting..."))
+                +QStringLiteral(" ")+currentFile;
+        qInfo().noquote()<<QStringLiteral("files: progress #%1 %2/%3").arg(request).arg(done).arg(total)
+            <<(currentFile.isEmpty()?QString():QStringLiteral(" %1").arg(currentFile));
+        emit changed();
+    });
     connect(&fileOps_,&FileOperations::finished,this,[this](quint64 request,bool ok,const QString& message,const QStringList&){
         if(request!=fileOpsRequest_)return;
         fileOpsRequest_=0;loading_=false;status_.clear();
+        busyProgress_=-1.;busySpinnerPhase_=-1.;   // the busy page returns to the indeterminate wait form
         const bool copying=fileOpsKind_==QLatin1String("copy");
         if(ok) {
             if(copying)notify(assets_.text("explore_plugin_full","msg_copied","Copy completed."),message);
@@ -3509,6 +3531,7 @@ void Shell::optionsActivate() {
         resetOptions();
         fileOpsRequest_=fileOps_.copy({source},target);fileOpsKind_=QStringLiteral("copy");
         loading_=true;status_=assets_.text("explore_plugin_full","msg_copying","Copying...");
+        busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();   // indeterminate until the backend totals the copy
         qInfo().noquote()<<"files: copy asked for"<<title<<"to"<<QDir::toNativeSeparators(target);
         emit changed();
         break;
@@ -5003,6 +5026,7 @@ void Shell::deleteLocalFile(const Entry& entry) {
         fileOps_.setAllowedRoots(libraryRoots());
         fileOpsRequest_=fileOps_.deleteToRecycleBin({path});fileOpsKind_=QStringLiteral("delete");
         loading_=true;status_=assets_.text("explore_plugin_full","msg_deleting","Deleting...");
+        busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();   // indeterminate until the shell reports item counts
         qInfo().noquote()<<"files: delete asked for"<<title;
         emit changed();
     });
