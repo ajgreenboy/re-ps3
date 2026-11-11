@@ -132,7 +132,10 @@ cost). **Carried over and still open:**
 > A3 by `shell.cpp:1426` (the vita row already uses `tex_album_icon`, not `item_tex_vitaformat`). Before
 > re-dispatching any "blocks the look" item, **re-measure it on HEAD against `col-game-r00.png`** — the
 > remaining items are A2 (ribbon crest inversion + brightness, `ribbon.cpp`), A5 (TV column, a product
-> decision), and D8 (options menu 2 vs 5 rows), and their current deltas are unconfirmed.
+> decision), and D8 (options menu 2 vs 5 rows). **Fresh measurement (night, HEAD `f45bc2d`):** top
+> background 0,0,700,200 = **34.75 dB / 0.9937** (A1 confirmed fixed), ribbon band 0,330,1920,450 =
+> **16.47 dB / 0.7138** (A2 confirmed still open — the dominant remaining gap), whole frame =
+> **18.78 dB / 0.8263**.
 
 Tonight's session owns the **A-list "blocks the look" render fixes**, each with a measured target in
 `FIDELITY-ROOT-BAR.md` §7/§11:
