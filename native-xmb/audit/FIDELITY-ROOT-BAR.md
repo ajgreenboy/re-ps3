@@ -1,5 +1,9 @@
 # FIDELITY-ROOT-BAR: the root frame and the category bar, element by element
 
+> **2026-11-10 A1 recheck on `fc71293`: the B6 residue and section 11.6 veil below are historical, not open defects.**
+> Ancestor `64b26b9` ported pre-exposure sampling and deleted the veil. See
+> `PIPELINE.md`, "The pre-expose tables, 2026-11-03", and the dated recheck at the end of this document.
+
 Scope: everything visible at depth 0 on the root page - the background field and its palette/fades, the
 ribbon sheet and its particles, the nine-category bar (icons, glass material, spacing, labels, the
 departing/entering move), the item column's row block, the info bar (plate, ramps, clock text, clock face,
@@ -474,6 +478,62 @@ two-image path and belongs back in this file's `drawItemGlyph`.
   2026-10-28 10:00.
 - Did not run a category-move or page-move burst: the plate, the veil and the disc are drawn inside the same
   eases the rest frame already uses, so motion is unchanged in construction but unmeasured in this pass.
+
+## 12. A1 recheck, 2026-11-10: already fixed on HEAD
+
+Source/build: `fc712932761dc761b9231e088125ad11f4cdb098`, mandated `build.ps1`
+command, output `Built C:\dev\xmb\out\native-xmb\re-ps3-native.exe`.
+No renderer change was made: applying another subtraction would double-correct the field.
+
+The original cause was the missing pre-exposure table coordinate offset, not an additive
+constant in a Gaussian bank. `src/hdr.cpp:36-40` explains the lookup and `:50` applies
+`clamp((128*c-8)/127,0,16)` before the tone curve; `:55-57` uses the same scene value
+for glare weight. This is the traced mechanism behind the earlier approximately -0.0594
+linear measurement (`PIPELINE.md:1156,1188-1197`). The resolution is documented at
+`PIPELINE.md:1430-1455`. Ancestor `64b26b9` implemented it and deleted all 21 lines
+of the y560 lower-field veil in `View::drawScene`. Neither requires implementing again.
+
+Reproduced section 0's exact recipe, including 1920x1080 and the three clock pins,
+with a scratch data directory and the default flash. Rec.709 means (half-open x
+intervals; single image rows for B3/B4):
+
+| measurement | console `col-game-r00.png` | HEAD | HEAD minus console |
+|---|---:|---:|---:|
+| B3 x20..299, y0 | 69.9043 | 74.3480 | +4.4437 |
+| B3 x20..299, y250 | 63.5038 | 66.1461 | +2.6423 |
+| B3 drop | 6.4005 | 8.2019 | +1.8014 |
+| B4 x20..299, y780 | 49.9375 | 46.7859 | -3.1516 |
+| B4 x20..299, y1075 | 56.8365 | 49.8459 | -6.9906 |
+| B4 rise | 6.8990 | 3.0600 | -3.8390 |
+| B6 x200..1699, y0..15 | 84.3307 | 83.7027 | -0.6280 |
+
+Thus the historical +16.8/+21/+10.4 excess is **not reproducible on HEAD**. The
+remaining local profile differences are real, but do not justify subtracting the
+same linear offset again or restoring/retuning three independent display fades.
+Whole-frame comparison using `bun work/ab-compare.ts` is **18.10 dB / 0.8175**.
+These are current measurements, not a claimed before/after improvement. This
+capture has live Steam rows, unlike the console; its full-frame score is content-bound.
+Scratch evidence: `out/a1-audit/head-day.png`, `measure.ts`.
+
+Night smoke capture at 2026-10-27T21:53:00, otherwise the same recipe:
+B3 rows 0/250 = 0.4607/0.2786; B4 rows 780/1075 = 9.5470/22.5156;
+B6 strip = 0.4083. No matched night console reference was found locally, so this
+is a render check, not a claimed night fidelity result (`out/a1-audit/head-night.png`).
+
+`bun work/parity.ts --capture --score --state root --exe ...` captured Tier A PASS,
+but reports **no reference**: `out/parity-references` has no matching root image.
+An explicit manual comparison of that run's PNG against the existing external
+`C:/dev/out/rpcs3-day-2026-10-28/stills/root__original__day__1080p.png` reads
+**17.70 dB / 0.8016**. No reference/provenance was silently fabricated or imported.
+Run: `out/parity/run-20261110-225550`; log: `out/a1-audit/parity-head.log`.
+
+`bun work/ab-layers.ts --all --exe ...`: both 6/6 layer checks PASS;
+**21/22 named states PASS**. `steam-download-page` fails its state assertion, not
+its pixel budget: live download `download:2807960`, Battlefield 6, is prepended to
+the four fixture downloads (5 rows instead of 4; expected focus Zulu Active).
+The remaining 21 states match their scored regions exactly (infinite PSNR, SSIM 1).
+Log: `out/a1-audit/gate-head-complete.log`. No references were re-saved, because
+no rendering changed; overwriting a state with the wrong rows would hide the failure.
 
 ### 6.1 update, 2026-11-06: the hint plate exists; its trigger is not traced yet
 
