@@ -46,7 +46,7 @@ public:
     void setColourScale(float scale) { colourScale_=scale; }
     // Draws the icons onto targetFbo, cutting each one's background from that same framebuffer first.
     // light: 0 night .. 1 day (the background's NightDayBlend preset blend).
-    void render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& icons,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo);
+    void render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& icons,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo,bool compositeAlpha=false);
 private:
     bool ready_=false;
     Assets* assets_=nullptr;

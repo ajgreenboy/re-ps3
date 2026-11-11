@@ -1,5 +1,8 @@
 # In-game XMB fidelity sweep
 
+**2026-11-10 follow-up:** the opt-in DirectComposition implementation in section 7 supersedes
+the earlier live-capture/out-of-scope statements below. The default is still a frozen capture.
+
 2026-11-10; native base `e3697dc36c7905b0ded13de8e21b05635f7d7cde`.
 RPCS3 source checkout `C:/dev/rpcs3`, revision
 `0b0fa082ae552ab77a70de4fc1f70110d165116b`. RPCS3 paths below are relative
@@ -207,3 +210,92 @@ No other reference was re-saved.
   `ingame-fidelity-gate.log`. The first all-state invocation hit the tool's
   120 s timeout; the completed rerun used a 600 s limit. The subsequent
   successful rebuild included the comment-only timeout-contract clarification.
+
+## 7. Opt-in live DirectComposition overlay (2026-11-10)
+
+**Landed:** `src/live_overlay.*`, `View::enterInGame/drawInGameBackdrop/paintGL/stopLiveOverlay`.
+`XMB_INGAME_LIVE=1` now selects true DWM composition, replacing the old 250 ms WGC polling.
+Default/unset remains the captured-frame path. One initial WGC capture is retained for fallback.
+
+**SDK recipe (TRACED):** paths below are relative to
+`C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/`:
+
+- Top-level `WS_POPUP`, `WS_EX_NOREDIRECTIONBITMAP` (0x00200000), `TOPMOST`, `NOACTIVATE`,
+  `TOOLWINDOW`: `um/winuser.h:2886,2845,2897,2850`. No layered-window Qt alpha blit is used
+  for presentation. The native window targets the recorded game's physical monitor rectangle.
+- Hardware D3D11 device with `D3D11_CREATE_DEVICE_BGRA_SUPPORT` (0x20), following
+  `game_capture.cpp:125`: `um/d3d11.h:15007`. `IDXGIFactory2::CreateSwapChainForComposition`,
+  BGRA8, sample count 1, two buffers, `DXGI_SCALING_STRETCH`,
+  `DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL` (3), `DXGI_ALPHA_MODE_PREMULTIPLIED` (1):
+  `shared/dxgi.h:271`, `shared/dxgi1_2.h:545,1761`.
+- `DCompositionCreateDevice` -> `CreateTargetForHwnd` -> `CreateVisual` ->
+  visual `SetContent(swapChain)` -> target `SetRoot(visual)` -> `Commit`:
+  `um/dcomp.h:67,266,273,486,403,253`. Upload with `UpdateSubresource`, then `Present(0,0)`.
+
+**Integration:** the existing GL renderer draws **both the columns and the dim** into its
+premultiplied framebuffer. The background clears to `(0,0,0,inGameDim())`; DWM supplies the
+live game underneath. Resolve the widget's 4x MSAA into a single-sample RGBA8 FBO before
+BGRA readback (direct MSAA `glReadPixels` fails with `GL_INVALID_OPERATION`, 0x502).
+For the live surface only, `IconRenderer` uses separate RGB/alpha blend factors, with
+source-over coverage rather than squared source alpha punching holes in the dim. The
+legacy path is retained otherwise: the glass shader samples target alpha as well as RGB.
+The CPU bridge flips/uploads that image to the persistent composition swap chain. Qt's main
+window is opacity zero but retains activation, keyboard/controller input and the existing
+navigation. Its 16 ms input timer also requests live paints: an invisible Qt window can stop
+emitting `frameSwapped`. No column-compositing step is deferred; no game pixels are polled.
+
+**Fallback/lifetime:** exclusive, minimized and invalid classifications decline live mode.
+Creation, allocation, GL readback, DXGI resize/present or device-removal failures log a reason,
+destroy the overlay, restore Qt opacity, and retain the captured/plain-dark backdrop. Circle/PS
+return, title self-exit and View destruction also destroy the window and restore opacity.
+The exclusive classification remains a heuristic, not a guarantee for every Vulkan/OpenGL FSE title.
+
+**Measured, not a demanding-game benchmark:** 1920x1080, same borderless D3D11 stub and
+monitor, static columns, `XMB_PS_LOG=1 XMB_OVERLAY_COST=1 XMB_FRAME_TRACE=<file>`.
+CPU paint samples exclude the first/last 120 in-game frames; live intervals use 12-24 s;
+stub times use the per-second frame averages at game time 11-16 s. CPU times are dispatch,
+not GPU/present completion. The scratch stub only adds QPC frame timing to the existing fixture.
+
+| Metric | Flag off (frozen capture) | Flag on (live overlay) |
+|---|---:|---:|
+| CPU paint median / p95 | 0.185 / 0.337 ms | 6.329 / 8.098 ms |
+| CPU bridge median | 0 ms | 5.862 ms |
+| Paint interval median / p95 | unpaced; not a presentation measurement | 16.000 / 16.802 ms |
+| Stub frame average | 4.167 ms | 4.167 ms |
+
+Host caveat: the opaque Qt control's callbacks became unpaced (sub-ms intervals), and its
+desktop GDI captures did not reliably include that window. Its scripted framebuffer grabs
+were correct/frozen. Do not treat its desktop pair or callback cadence as physical presentation
+evidence; the cause was not diagnosed here. The live desktop pair below is visually verified.
+
+This is a substantial XMB CPU regression despite the unchanged lightweight stub rate.
+**Keep the flag off by default.** A zero-copy GL/D3D shared-texture bridge with explicit GPU
+ownership/fences is the next optimization; the current MSAA resolve/readback/upload is not
+appropriate evidence for performance over a GPU-bound real game. Real-title input arbitration,
+true non-FSO FSE, HDR/mixed-DPI/multi-adapter pacing and monitor hotplug remain owner validation.
+
+**Verification/evidence (local, not committed):**
+`C:/Users/Albert/AppData/Local/Temp/opencode/xmb-dcomp-{on,off,fse,end}/` contains isolated
+data, PS logs, frame traces, stub logs, scripted `layer1.png/layer2.png` plus sidecars, and
+desktop composites `desktop1.png/desktop2.png`. Scripted grabs capture the alpha XMB layer,
+**not** DWM's final game composite. The live desktop pair, 1.580 s apart, is the live oracle:
+29,260 changed pixels in the unobstructed game bar ROI (x=1000..1919, y=650..839).
+The same ROI stays frozen (**zero** changes) in the flag-off scripted framebuffer pair.
+White game pixels are `(51,51,51)` under the live dim; columns/help remain readable.
+The scripted layer's alpha range is 204..255: the dim stays at 0.8, with opaque UI coverage.
+The stub logs foreground=0 while live, foreground=1 after Circle. The FSE stub reports qUNS=3,
+`mode=exclusive`, and `live overlay declined ... captured-frame fallback`. An 11 s self-exiting
+stub logs exit 0, overlay stopped and topmost cleared; no transparent owner is stranded.
+An MSAA readback failure during implementation also exercised the captured-frame fallback.
+
+Reproduce locally with the scratch `xmb-live-test.ts` (`on`, `off`, `fse`, `end`) and
+`xmb-dcomp-analyze.ts` in that same temporary directory. No fixtures, binaries, firmware,
+desktop screenshots or baseline images are committed.
+
+Final verification after restricting the alpha correction to the live surface:
+**Built C:\dev\xmb\out\native-xmb\re-ps3-native.exe**. Required
+`bun work/ab-layers.ts --all --exe C:\dev\xmb\out\native-xmb\re-ps3-native.exe`:
+**whole set PASS**, exit 0; stored layers 6/6, canonical capture 5 pass + 1 informative,
+named states 22/22. The in-game game-frame/guide regions remain pixel-identical to the
+existing self-reference (SSIM 1.0000). **No references were refreshed.** Full output:
+`C:/Users/Albert/AppData/Local/Temp/opencode/xmb-dcomp-gate-final.log`.

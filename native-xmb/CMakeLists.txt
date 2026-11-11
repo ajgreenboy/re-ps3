@@ -48,6 +48,7 @@ qt_add_executable(re-ps3-native
     src/gallery_controller.cpp src/gallery_controller.h src/gallery_scene.cpp src/gallery_scene.h src/gallery_chrome.cpp src/gallery_view.h src/gallery_replay.cpp
     src/interaction_audio.cpp src/interaction_audio.h
     src/notify_overlay.cpp src/notify_overlay.h
+    src/live_overlay.cpp src/live_overlay.h
     src/text_renderer.cpp src/text_renderer.h
     src/font_raster.cpp src/font_raster.h
     src/profiles.cpp src/profiles.h
@@ -105,7 +106,7 @@ if(MSVC)
     target_compile_options(re-ps3-native PRIVATE /W4 /permissive- /utf-8 /Zi)
     # Program database for the crash handler's stack traces (main.cpp); optimisation is unchanged.
     target_link_options(re-ps3-native PRIVATE /DEBUG /OPT:REF /OPT:ICF)
-    target_link_libraries(re-ps3-native PRIVATE dbghelp windowsapp d3d11 dxgi dwmapi shell32 wlanapi)
+    target_link_libraries(re-ps3-native PRIVATE dbghelp windowsapp d3d11 dxgi dcomp dwmapi shell32 wlanapi)
 endif()
 
 # XMB Manager: the standalone companion tool (CLI + Qt UI). It shares the

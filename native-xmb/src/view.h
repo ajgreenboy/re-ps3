@@ -205,12 +205,11 @@ private:
     void syncInGameWindow();
     bool inGameBack();
     void drawInGameBackdrop(int width,int height);
-    void startLiveCapture();
-    void stopLiveCapture();
-    void captureLiveFrame();
-    QTimer liveCaptureTimer_;
-    bool liveCaptureActive_=false,liveCapturePending_=false;
-    quint64 liveCaptureGeneration_=0;
+    void stopLiveOverlay();
+    std::unique_ptr<class LiveOverlay> liveOverlay_;
+    QImage liveOverlayPixels_;
+    std::unique_ptr<QOpenGLFramebufferObject> liveOverlayResolved_;
+    qreal liveOverlayOwnerOpacity_=1.;
     QImage inGameBackdrop_;           // the captured game frame, empty when capture was black/failed/unsupported
     std::unique_ptr<QOpenGLTexture> inGameTexture_;
     qint64 inGameTextureKey_=0;        // upload only when the captured QImage changes, with the GL context current

@@ -195,7 +195,7 @@ void main(){
     return true;
 }
 
-void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& icons,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo) {
+void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& icons,double seconds,float light,int pixelWidth,int pixelHeight,GLuint targetFbo,bool compositeAlpha) {
     if(!ready_ || icons.isEmpty())return;
     // The OPAQUE theme material is the fallback, not the default: an icon whose state brightness is full takes the
     // firmware's own glass program (quad.vpo + icons_no_ss_no_shad.fpo, refracting the finished frame through
@@ -299,7 +299,9 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
             uniformcache::set(opaque_,"tintStrength",tintStrength_);
             uniformcache::set(opaque_,"opacity",float(icon.opacity));uniformcache::set(opaque_,"colourScale",colourScale_);uniformcache::set(opaque_,"tex0",0);
             gl.glActiveTexture(GL_TEXTURE0);gl.glBindTexture(GL_TEXTURE_2D,normals);
-            gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+            gl.glEnable(GL_BLEND);
+            if(compositeAlpha)gl.glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+            else gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
             gl.glBindVertexArray(vao_);gl.glDrawArrays(GL_TRIANGLES,0,6);gl.glBindVertexArray(0);
             gl.glDisable(GL_BLEND);opaque_.release();continue;
         }
@@ -327,7 +329,11 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         gl.glActiveTexture(GL_TEXTURE2);gl.glBindTexture(GL_TEXTURE_2D,environment_);
         gl.glActiveTexture(GL_TEXTURE3);gl.glBindTexture(GL_TEXTURE_2D,cut_);
         uniformcache::set(program_,"layoutOpacity_",float(icon.opacity));uniformcache::set(program_,"colourScale_",colourScale_);
-        gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+        // Straight-alpha shader RGB, but source-over coverage (not squared alpha) in the target.
+        // Preserve the legacy path otherwise: the glass shader also samples the target alpha.
+        gl.glEnable(GL_BLEND);
+        if(compositeAlpha)gl.glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+        else gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
         gl.glBindVertexArray(vao_);gl.glDrawArrays(GL_TRIANGLES,0,6);gl.glBindVertexArray(0);
         gl.glDisable(GL_BLEND);
         program_.release();
