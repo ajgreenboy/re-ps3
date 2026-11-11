@@ -125,6 +125,15 @@ cost). **Carried over and still open:**
 
 ## Out of scope — tonight's render-fidelity session (do not duplicate)
 
+> **STALE-AUDIT NOTE (2026-11-10 night):** the ranked gap lists in `FIDELITY-ROOT-BAR.md` §7 and
+> `FIDELITY-VERDICT.md` §4 were measured on build `07a4fe4` and are partly superseded. **A1 (background
+> field residue) and A3 (vita row glyph) are already fixed on HEAD** — A1 by ancestor `64b26b9`
+> (pre-exposure lookup offset in `hdr.cpp:50`, re-measured `f45bc2d`: B6 strip 83.70 vs console 84.33),
+> A3 by `shell.cpp:1426` (the vita row already uses `tex_album_icon`, not `item_tex_vitaformat`). Before
+> re-dispatching any "blocks the look" item, **re-measure it on HEAD against `col-game-r00.png`** — the
+> remaining items are A2 (ribbon crest inversion + brightness, `ribbon.cpp`), A5 (TV column, a product
+> decision), and D8 (options menu 2 vs 5 rows), and their current deltas are unconfirmed.
+
 Tonight's session owns the **A-list "blocks the look" render fixes**, each with a measured target in
 `FIDELITY-ROOT-BAR.md` §7/§11:
 
