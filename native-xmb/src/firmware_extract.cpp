@@ -161,18 +161,16 @@ bool extractPup(const QString& pupPath,const QString& destDir,QString* error) {
     if(file.error()!=QFileDevice::NoError||pup.size()<48||pup.left(8)!=QByteArray("SCEUF\0\0\0",8))return fail(error,QStringLiteral("Invalid PUP header/magic"));
     const quint64 count=be64(pup,24),header=be64(pup,32),data=be64(pup,40),total=quint64(pup.size());
     if(!count||count>(total-48)/64||header<48+count*64||!range(header,data,total))return fail(error,QStringLiteral("Invalid PUP header/table lengths"));
-    QMap<quint64,QByteArray> hashes;
-    for(quint64 i=0;i<count;++i) {
-        const qsizetype at=qsizetype(48+count*32+i*32);const quint64 id=be64(pup,at);
-        if(hashes.contains(id))return fail(error,QStringLiteral("Duplicate PUP hash entry"));
-        hashes.insert(id,pup.mid(at+8,20));
-    }
+    // The hash table is parallel to the file table and matched by index (RPCS3 validate_hashes:
+    // m_hash_tbl[&file - m_file_tbl.data()]). Its "entry_id" field is a sequential index in real PUPs,
+    // NOT the file entry id, so it must not be used as a key.
     QByteArray update;QSet<quint64> seen;
     for(quint64 i=0;i<count;++i) {
-        const qsizetype at=qsizetype(48+i*32);const quint64 id=be64(pup,at),offset=be64(pup,at+8),size=be64(pup,at+16);
-        if(seen.contains(id)||!hashes.contains(id)||offset<header||!range(offset,size,header+data))return fail(error,QStringLiteral("Invalid PUP entry bounds/id"));
+        const qsizetype fat=qsizetype(48+i*32);const quint64 id=be64(pup,fat),offset=be64(pup,fat+8),size=be64(pup,fat+16);
+        const qsizetype hat=qsizetype(48+count*32+i*32);const QByteArray hash=pup.mid(hat+8,20);
+        if(seen.contains(id)||offset<header||!range(offset,size,header+data))return fail(error,QStringLiteral("Invalid PUP entry bounds/id"));
         seen.insert(id);const QByteArray contents=pup.mid(qsizetype(offset),qsizetype(size));
-        if(firmware::hmacSha1(k.pup,contents)!=hashes.value(id))return fail(error,QStringLiteral("PUP HMAC-SHA1 mismatch for entry 0x%1").arg(id,0,16));
+        if(firmware::hmacSha1(k.pup,contents)!=hash)return fail(error,QStringLiteral("PUP HMAC-SHA1 mismatch for entry 0x%1").arg(id,0,16));
         if(id==0x300)update=contents;
     }
     if(!seen.contains(0x300))return fail(error,QStringLiteral("PUP update TAR entry 0x300 is missing"));
