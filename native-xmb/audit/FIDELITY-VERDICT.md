@@ -86,6 +86,10 @@ Photo column 17.97, Music 18.05, Friends 18.10, Video 18.11, root 18.25.
 **D. Structure and behaviour:**
 8. **Options menu has 2 rows vs the console's 5** (no Sort By/Group Content group, no 199 px gap) and its band
    sits +66 px right.
+   **HEAD recheck (2026-11-11, `023f7e7`): superseded.** The Game-title utility group and measured spacing
+   are already implemented, and the band already starts at x=1320, not 1386. Row sets are context-dependent;
+   do not apply another -66 px shift or force Group Content onto every menu. See `D8-HEAD.md` for fresh
+   captures, code locations, firmware keys and gate results.
 9. **Settings writes commit and pop instantly** - no confirm chain or result page.
 10. Media columns carry a **different row set** (0 of the console's 8 media rows), Theme page has 6 rows vs 4,
     message pages lose the y=879 rule, the idle hint plate never draws, the `*User` sub-label never fills.
