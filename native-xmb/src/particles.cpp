@@ -1,4 +1,5 @@
 #include "particles.h"
+#include "design_space.h"
 #include "uniform_cache.h"
 #include "assets.h"
 #include "qrc.h"
@@ -1066,7 +1067,7 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
             vc[size_t(p.resourceIndex)]=QVector4D(p.defaults.value(0),p.defaults.value(1),p.defaults.value(2),p.defaults.value(3));
     const auto setV=[&](const char* name,const QVector4D& v){const int i=vertexCg.parameters.value(name).resourceIndex;if(i>=0&&i<468)vc[size_t(i)]=v;};
     constexpr float fovy=53.f*3.14159265f/180.f; // the ribbon camera (ribbon.cpp, captured)
-    const float aspect=float(pixelWidth)/float(pixelHeight);
+    constexpr float aspect=1920.f/1080.f;
     QMatrix4x4 projection;projection.perspective(53.f,aspect,.1f,1000.f);
     QMatrix4x4 modelview;modelview.lookAt(kCameraEye,QVector3D(0,0,-7),QVector3D(0,1,0)); // BackgroundView set B (0x93730..)
     projection*=modelview;
@@ -1121,7 +1122,7 @@ void Particles::drawFirmwarePass(QOpenGLFunctions_3_3_Core& gl,int pass,int pixe
     setV("_Glare",glare);
     setF("_Glare",glare);
     }
-    gl.glViewport(0,0,pixelWidth,pixelHeight);
+    DesignSpace(pixelWidth,pixelHeight).viewport(gl);
     gl.glDisable(GL_DEPTH_TEST);
     gl.glDisable(GL_CULL_FACE);
     gl.glEnable(GL_BLEND);
@@ -1147,7 +1148,7 @@ void Particles::drawQuads(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixel
         if(firmwareReady_[1])drawFirmwarePass(gl,1,pixelWidth,pixelHeight);
         return;
     }
-    gl.glViewport(0,0,pixelWidth,pixelHeight);
+    DesignSpace(pixelWidth,pixelHeight).viewport(gl);
     gl.glDisable(GL_DEPTH_TEST);
     gl.glDisable(GL_CULL_FACE);
     gl.glEnable(GL_BLEND);
@@ -1184,14 +1185,14 @@ void Particles::drawGlare(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixel
     // back to back into the one bound target (no framebuffer bind between them), so the glare source gets the dust only
     // through the scene, like everything else.
     if(firmwareReady_[1])return;
-    gl.glViewport(0,0,pixelWidth,pixelHeight);
+    DesignSpace(pixelWidth,pixelHeight).viewport(gl);
     gl.glDisable(GL_DEPTH_TEST);
     gl.glDisable(GL_CULL_FACE);
     gl.glEnable(GL_BLEND);
     gl.glBlendFunc(GL_ONE,GL_ONE); // additive into the glare source, then the mip blur blooms it
     gl.glBindVertexArray(vao_);
     glareProgram_.bind();
-    const float aspect=pixelWidth>0&&pixelHeight>0?float(pixelWidth)/float(pixelHeight):aspect_;
+    constexpr float aspect=1920.f/1080.f;
     glareProgram_.setUniformValue("uHalfExtent",float(kHalfHeight*aspect),kHalfHeight);
     glareProgram_.setUniformValue("uGlobalAlpha",globalAlpha_);
     glareProgram_.setUniformValue("uColorGain",kColorGammaGain);
@@ -1232,7 +1233,7 @@ void Particles::render(QOpenGLFunctions_3_3_Core& gl,double seconds,int pixelWid
     previousWasScene_=true;
     previousSeconds_=seconds;
     previousFbo_=fbo;
-    aspect_=float(pixelWidth)/float(pixelHeight);
+    aspect_=1920.f/1080.f;
     sync(gl,seconds);
     logState("quads",pixelWidth,pixelHeight);
     drawQuads(gl,pixelWidth,pixelHeight);

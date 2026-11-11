@@ -1,4 +1,5 @@
 #include "gallery_scene.h"
+#include "design_space.h"
 #include <QDir>
 #include <QFile>
 #include <QFont>
@@ -292,7 +293,7 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
     const auto& photos = controller.photos();
     const GalleryLayout& layout = controller.layout();
     const GalleryCamera camera = controller.camera();
-    const double aspect = pixelHeight > 0 ? double(pixelWidth) / pixelHeight : 16.0 / 9.0;
+    constexpr double aspect = 16.0 / 9.0;
 
     // ---- uploads: finished thumbnails, budgeted ----
     if (thumbs_) {
@@ -346,7 +347,7 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
 
     // ---- state ----
     gl.glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);
-    gl.glViewport(0, 0, pixelWidth, pixelHeight);
+    DesignSpace(pixelWidth,pixelHeight).viewport(gl);
     gl.glDisable(GL_SCISSOR_TEST);
     gl.glDisable(GL_STENCIL_TEST);
     gl.glDisable(GL_CULL_FACE);

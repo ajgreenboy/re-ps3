@@ -277,7 +277,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         const double ndcX=icon.centre.x()/960.-1,ndcY=1-icon.centre.y()/540.;
         const double distance=icon.distance,worldX=ndcX*distance/kScaleX,worldY=ndcY*distance/kScaleY;
         // 1. CookieCutter: the frame behind the icon, 128x128 reference px, into the background map.
-        const double cx=icon.centre.x()*design.x,cy=pixelHeight-icon.centre.y()*design.y;
+        const double cx=design.left+icon.centre.x()*design.x,cy=pixelHeight-design.top-icon.centre.y()*design.y;
         const double halfX=64*design.x,halfY=64*design.y;
         if(glass) {
             gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
@@ -285,7 +285,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         }
         // 2. The icon quad.
         gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);
-        gl.glViewport(0,0,pixelWidth,pixelHeight);
+        design.viewport(gl);
         vc[256]=QVector4D(float(kScaleX*icon.size),0,0,float(kScaleX*worldX));
         vc[257]=QVector4D(0,float(kScaleY*icon.size),0,float(kScaleY*worldY));
         vc[258]=QVector4D(0,0,-1,float(distance-19.95)); // captured: the icon quad's z offset in the firmware matrix

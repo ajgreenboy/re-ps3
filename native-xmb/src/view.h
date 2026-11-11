@@ -212,6 +212,9 @@ private:
     bool liveCaptureActive_=false,liveCapturePending_=false;
     quint64 liveCaptureGeneration_=0;
     QImage inGameBackdrop_;           // the captured game frame, empty when capture was black/failed/unsupported
+    std::unique_ptr<QOpenGLTexture> inGameTexture_;
+    qint64 inGameTextureKey_=0;        // upload only when the captured QImage changes, with the GL context current
+    QOpenGLShaderProgram inGameProgram_;
     quintptr inGameHwnd_=0;           // the title's window recorded at the PS press
     bool inGameWindowActive_=false;  // includes the plain-dark overlay when capture found no window
     quint32 inGamePid_=0;

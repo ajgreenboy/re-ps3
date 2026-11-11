@@ -1,4 +1,5 @@
 #include "notify_overlay.h"
+#include "design_space.h"
 #include "assets.h"
 #include <QGuiApplication>
 #include <QFontMetrics>
@@ -33,10 +34,11 @@ void NotifyOverlay::showNotification(const QString& title,const QString& detail,
 #endif
     if(!screen)return;
     const QRect area=screen->geometry();
-    // Scale the 1920x1080 XMB coordinates to the target screen, including its 24 px right margin.
-    const qreal sx=area.width()/1920.0,sy=area.height()/1080.0;
+    // Use the same centred crop-fill coordinates as the XMB's own notification pass.
+    const DesignSpace design(area.size());
+    const qreal sx=design.x,sy=design.y;
     const int width=qRound(400*sx),height=qRound((detail.isEmpty()?58:84)*sy);
-    setGeometry(area.right()+1-qRound(24*sx)-width,area.top()+qRound(145*sy),width,height);
+    setGeometry(area.left()+qRound(design.left+1896*sx)-width,area.top()+qRound(design.top+145*sy),width,height);
 #ifdef Q_OS_WIN
     const HWND hwnd=reinterpret_cast<HWND>(winId());
     const LONG_PTR styles=GetWindowLongPtr(hwnd,GWL_EXSTYLE);

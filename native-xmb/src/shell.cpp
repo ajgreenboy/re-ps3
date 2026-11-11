@@ -582,20 +582,17 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
             // Quit Game asked for this end: report which stage got the process out (audit/INGAME-XMB-DESIGN step 3).
             static const char* const stages[]={"none","cooperative (WM_CLOSE)","terminate","kill"};
             qInfo().noquote()<<"ingame: quit ended by stage"<<stages[std::clamp(quitStage_,0,3)]<<"title="+quitTitle_;
-            const QString closed=quitTitle_.isEmpty()?title:quitTitle_;
             quitStage_=0;quitTitle_.clear();
-            showMessage(closed,QObject::tr("The game was closed."),MessageKind::Page);
+            // The pre-quit Yes/No box is the only confirmation; return to the XMB silently.
             emit changed();
             refreshContent();
             return;
         }
-        // The return of a tracked title is a real event this build can report. The console itself has no
-        // return pop-up (only launches), so this one is a native event, not a firmware one.
+        // A normal title exit returns silently; keep the diagnostic surface for an unexpected crash.
         if(status==QProcess::CrashExit) {
             showMessage(title,QObject::tr("This title ended unexpectedly."),MessageKind::Page);
             notify(title,QObject::tr("This title ended unexpectedly."),"tex_notification_caution");
         }
-        else notify(title,QObject::tr("Returned to the XMB"),"tex_notification_info");
         emit changed();
         refreshContent();
     });
@@ -684,8 +681,7 @@ void Shell::pollSteamGame() {
     steamGameId_.clear();gameTitle_.clear();steamGameSeen_=false;steamGameClear_=0;
     qInfo().noquote()<<"returned from"<<title<<"(Steam reported it stopped)";
     clearInGame();
-    if(quitStage_>0){qInfo().noquote()<<"ingame: quit ended by stage steam +app_stop";quitStage_=0;quitTitle_.clear();showMessage(title,QObject::tr("The game was closed."),MessageKind::Page);}
-    notify(title,QObject::tr("Returned to the XMB"),"tex_notification_info");
+    if(quitStage_>0){qInfo().noquote()<<"ingame: quit ended by stage steam +app_stop";quitStage_=0;quitTitle_.clear();}
     restoreFocus();
     emit changed();
     refreshContent();

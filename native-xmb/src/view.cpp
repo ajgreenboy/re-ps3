@@ -453,7 +453,7 @@ View::~View(){
 #ifdef Q_OS_WIN
     if(volumeKeys_ && qApp)qApp->removeNativeEventFilter(volumeKeys_.get());
 #endif
-    saveFrameTrace();if(context()){makeCurrent();gallery_.reset();textRenderer_.release(*this);monthTexture_.reset();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
+    saveFrameTrace();if(context()){makeCurrent();gallery_.reset();textRenderer_.release(*this);monthTexture_.reset();inGameTexture_.reset();inGameProgram_.removeAllShaders();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
     uniformcache::invalidate();
     if(!initializeOpenGLFunctions()){qCritical()<<"Native renderer requires OpenGL 3.3";return;}
@@ -522,6 +522,12 @@ void main(){colour=boost>0.0?texture(layer,uv)*boost:(dimOpacity>0.0?vec4(0,0,0,
     if(!uiComposite_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) || !uiComposite_.addShaderFromSourceCode(QOpenGLShader::Fragment,compositeFragment) || !uiComposite_.link())
         qCritical().noquote()<<"UI composite shader failed:"<<uiComposite_.log();
     else {uiComposite_.bind();uiComposite_.setUniformValue("rgbScale",1.f);uiComposite_.release();} // a GLSL uniform starts at 0
+    static const char* inGameFragment=R"(#version 330 core
+in vec2 uv;out vec4 colour;uniform sampler2D frame;uniform float brightness;uniform vec2 uvScale;
+void main(){colour=vec4(texture(frame,(uv-.5)*uvScale+.5).rgb*brightness,1.);})";
+    if(!inGameProgram_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) ||
+       !inGameProgram_.addShaderFromSourceCode(QOpenGLShader::Fragment,inGameFragment) || !inGameProgram_.link())
+        qCritical().noquote()<<"In-game backdrop shader failed:"<<inGameProgram_.log();
     particles_.init(*this,assets_);
     if(introEnabled_)coldboot_.init(*this,assets_);
     if(!monthImage_.isNull()) {
@@ -621,7 +627,7 @@ void View::renderBackground(float seconds,float light,int pixelWidth,int pixelHe
     }
     glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);
     if(original){glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE);} else glDisable(GL_BLEND);
-    glViewport(0,0,pixelWidth,pixelHeight);
+    DesignSpace(pixelWidth,pixelHeight).viewport(*this);
     background_.bind();background_.setUniformValue("overlay",original);background_.setUniformValue("originalRibbon",originalRibbon);
     if(originalRibbon)background_.setUniformValueArray("ribbonCrest",ribbon_.crest().data(),int(ribbon_.crest().size()),1);background_.setUniformValue("seconds",seconds);background_.setUniformValue("dayLight",light);
     background_.setUniformValue("tint",colours[std::clamp(shell_.theme(),0,5)]);
@@ -768,7 +774,7 @@ void View::renderOriginalBackground(const BackgroundTime& time,int pixelWidth,in
     set("_DayTime",time.day);set("_NightTime",time.night);set("_MonthTime",time.month);
     set("_NightBrightness",time.nightBrightness);set("_NightDayBlend",time.nightDayBlend);set("_Alpha",time.alpha);
     glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glDisable(GL_SCISSOR_TEST);
-    glViewport(0,0,pixelWidth,pixelHeight);
+    DesignSpace(pixelWidth,pixelHeight).viewport(*this);
     original_.bind();
     original_.setUniformValueArray("fc",fc.constData(),fc.size());
     for(int i=0;i<4;++i){monthTextures_[i]->bind(i);original_.setUniformValue(QString("tex%1").arg(i).toUtf8().constData(),i);}
@@ -1053,7 +1059,10 @@ void View::paintGL() {
     // In-game XMB: no wave or particles (xmb_ingame's page_xmb_bg is empty, TRACED F15); the captured game frame,
     // darkened, is the backdrop instead (the darkening itself is INFERRED, factor unmeasured).
     if(glReady_ && shell_.inGame())drawInGameBackdrop(int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
-    else if(!inGameBackdrop_.isNull()){stopLiveCapture();inGameBackdrop_=QImage();}
+    else {
+        if(!inGameBackdrop_.isNull()){stopLiveCapture();inGameBackdrop_=QImage();}
+        inGameTexture_.reset();inGameTextureKey_=0;
+    }
     if(glReady_ && !shell_.inGame()) {
         const auto time=QTime::currentTime();
         {ProfScope prof("renderBackground");renderBackground(float(renderSeconds),float(dayLight(time.hour()+time.minute()/60.+time.second()/3600.)),
@@ -4451,12 +4460,31 @@ void View::captureLiveFrame() {
 }
 void View::drawInGameBackdrop(int width,int height) {
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,width,height);
-    QOpenGLPaintDevice device(width,height);
-    QPainter p(&device);p.setRenderHint(QPainter::SmoothPixmapTransform);
-    p.fillRect(0,0,width,height,QColor(8,8,12));   // plain dark when nothing could be captured
-    if(!inGameBackdrop_.isNull()) {
-        p.drawImage(QRectF(0,0,width,height),inGameBackdrop_);
-        p.fillRect(0,0,width,height,QColor(0,0,0,int(255.*inGameDim())));
+    glDisable(GL_BLEND);glDisable(GL_DEPTH_TEST);glDisable(GL_SCISSOR_TEST);
+    glActiveTexture(GL_TEXTURE0);
+    // No painter, image conversion, or texture upload on unchanged frames. Capture callbacks only replace the
+    // QImage; GL allocation and deletion stay here, where the widget's context is current (also for live capture).
+    if(inGameTextureKey_!=inGameBackdrop_.cacheKey()) {
+        inGameTexture_.reset();inGameTextureKey_=inGameBackdrop_.cacheKey();
+        if(!inGameBackdrop_.isNull()) {
+            inGameTexture_=std::make_unique<QOpenGLTexture>(inGameBackdrop_.flipped(Qt::Vertical),QOpenGLTexture::DontGenerateMipMaps);
+            inGameTexture_->setMinificationFilter(QOpenGLTexture::Linear);
+            inGameTexture_->setMagnificationFilter(QOpenGLTexture::Linear);
+            inGameTexture_->setWrapMode(QOpenGLTexture::ClampToEdge);
+            psLog(QStringLiteral("ingame: backdrop texture uploaded %1x%2 key=%3")
+                .arg(inGameBackdrop_.width()).arg(inGameBackdrop_.height()).arg(inGameTextureKey_));
+        }
+    }
+    if(inGameTexture_ && inGameProgram_.isLinked()) {
+        inGameProgram_.bind();inGameProgram_.setUniformValue("frame",0);
+        inGameProgram_.setUniformValue("brightness",1.f-float(int(255.*inGameDim()))/255.f);
+        const float aspect=float(width)*inGameBackdrop_.height()/(float(height)*inGameBackdrop_.width());
+        inGameProgram_.setUniformValue("uvScale",QVector2D(std::min(1.f,aspect),std::min(1.f,1.f/aspect)));
+        inGameTexture_->bind();glBindVertexArray(vao_);glDrawArrays(GL_TRIANGLES,0,3);
+        glBindVertexArray(0);inGameTexture_->release();inGameProgram_.release();
+    } else {
+        // Capture failure/black/minimised is plain dark, never the home wave or a stale game texture.
+        glClearColor(8.f/255.f,8.f/255.f,12.f/255.f,1.f);glClear(GL_COLOR_BUFFER_BIT);
     }
 }
 void View::reassertForeground(const QString& reason) {

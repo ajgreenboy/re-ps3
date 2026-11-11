@@ -1,4 +1,5 @@
 #include "ribbon.h"
+#include "design_space.h"
 #include "particles.h"      // sceneMaterials(): the shared run-time reader
 #include "rco_objects.h"
 #include "idle_profile.h"
@@ -700,7 +701,7 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
     }
     // 2. The FFD lattice from ffd_shader1, 3. spline.elf's sheet.
     {idleprofile::Scope prof("ribbon deformLattice");deformLattice(gl,p);}
-    const float aspect=float(pixelWidth)/float(pixelHeight);
+    constexpr float aspect=1920.f/1080.f;
     {idleprofile::Scope prof("ribbon splineSheet");splineSheet(p,aspect);}
     // XMB_RIBBON_CLIP_DUMP=<prefix>: the 128 x 128 clip-space sheet (x y z w per vertex, raw floats) on frames
     // XMB_RIBBON_CLIP_FROM..+XMB_RIBBON_CLIP_COUNT, for comparison with the console sheet the particle emitter reads
@@ -735,7 +736,7 @@ void Ribbon::render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFract
         sum_=std::make_unique<QOpenGLFramebufferObject>(pixelWidth,pixelHeight,format);
     }
     idleprofile::Scope profGl("ribbon gl draw");
-    sum_->bind();gl.glViewport(0,0,pixelWidth,pixelHeight);gl.glClearColor(0,0,0,0);gl.glClear(GL_COLOR_BUFFER_BIT);
+    sum_->bind();DesignSpace(pixelWidth,pixelHeight).viewport(gl);gl.glClearColor(0,0,0,0);gl.glClear(GL_COLOR_BUFFER_BIT);
     gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_ONE,GL_ONE);
     const std::array<float,5> linesKey={p.fresnel,p.brightness,p.mipmapBias,p.spacing,thinness};
     if(!linesValid_ || linesKey_!=linesKey) {

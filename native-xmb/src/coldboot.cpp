@@ -377,7 +377,7 @@ void Coldboot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeig
     set("_Material[0]",{1,1,0,.12f});set("_Material[1]",{1,.7f,6,3});set("_Material[2]",{1,40,0,0});
     std::vector<QVector4D> vc(468);
     vc[467]=QVector4D(eye_,1);
-    gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);gl.glViewport(0,0,pixelWidth,pixelHeight);
+    gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);DesignSpace(pixelWidth,pixelHeight).viewport(gl);
     gl.glDisable(GL_DEPTH_TEST);gl.glDisable(GL_SCISSOR_TEST);gl.glDisable(GL_CULL_FACE);
     gl.glEnable(GL_BLEND);gl.glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     program_.bind();
@@ -611,7 +611,7 @@ void GameBoot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeig
                             Qt::AlignLeft|Qt::AlignVCenter,lines[i].trimmed());
     }
     painter.setOpacity(guide);
-    painter.drawImage(QRectF(std::round(cover.left()*design.x),std::round(cover.top()*design.y),
+    painter.drawImage(QRectF(std::round(design.left+cover.left()*design.x),std::round(design.top+cover.top()*design.y),
                             s.guideImage.width()*design.x/design.y,s.guideImage.height()),s.guideImage);
     painter.end();
 }
