@@ -671,6 +671,7 @@ private:
     QVector<ReleaseSource> releaseSources_;
     QHash<QString,QString> releaseLocalPaths_;
     QHash<QString,QImage> releaseArt_;
+    QSet<QString> releaseRawgArt_;
     QSet<QString> releaseArtRequested_;
     std::unique_ptr<RawgArtwork> releaseArtwork_;
     void refreshReleaseSources(const QUrl& importUrl={});

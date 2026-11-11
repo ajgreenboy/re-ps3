@@ -122,6 +122,7 @@ void Shell::openReleaseSource(const QString& slug) {
         for(const auto& release:source.releases) {
             Entry entry=releaseRow(releaseId(slug,release.title),release.title,Action::ReleaseDownload,slug);
             entry.setting=release.title;entry.artwork=releaseArt_.value(entry.id);entry.iconSized=true;
+            entry.rawgArtworkVisible=releaseRawgArt_.contains(entry.id);
             entry.artworkUrl=coverUrl(release);
             entry.detail=release.sizeLabel;
             const QString local=releaseLocalPaths_.value(entry.id);
@@ -141,6 +142,7 @@ void Shell::requestReleaseArt(const Entry& entry,const IndexedRelease& release,c
         releaseArtwork_=std::make_unique<RawgArtwork>(QDir(dataDirectory_).filePath(QStringLiteral("cache/release-art")),this);
         connect(releaseArtwork_.get(),&RawgArtwork::ready,this,[this](const QString& id,const QString&,const QString&,const QImage& image){
             releaseArt_.insert(id,image);
+            releaseRawgArt_.insert(id);
             for(auto& page:pages_)for(auto& row:page.entries)if(row.id==id){row.artwork=image;row.rawgArtworkVisible=true;}
             emit changed();
         });
