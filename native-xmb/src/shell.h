@@ -517,6 +517,7 @@ public:
     void psMenuMove(int delta);
     void psMenuActivate();
     void psMenuClose();
+    void psMenuBack();               // Circle: back out of the confirm step first, then close (FIDELITY-BEHAVIOUR P7)
     bool psMenuConfirmingOff() const { return psConfirmOff_; }
     // Desktop Mode: while the XMB is hidden the idle Auto-Off must not blank a display the user is using. Leaving
     // it counts as activity. keepMusicInDesktop() is the desktop/keepMusic preference (default on).

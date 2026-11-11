@@ -2472,6 +2472,19 @@ void Shell::psMenuClose() {
     psMenu_=false;psConfirmOff_=false;
     emit changed();
 }
+// Circle backs out of the confirm step before closing the menu (FIDELITY-BEHAVIOUR P7). The console's own
+// confirm legend reads "O cancels", so a Circle at "Turn Off the System?" returns to the two entries and a
+// second Circle closes the menu. psMenuClose() stays the full close for a PS tap and Desktop Mode.
+void Shell::psMenuBack() {
+    touch();
+    if(psConfirmOff_) {
+        psConfirmOff_=false;
+        qInfo().noquote()<<"shell: PS menu confirm cancelled; returning to the entries";
+        emit changed();
+        return;
+    }
+    psMenuClose();
+}
 // --- In-game XMB (plan F5, audit/INGAME-XMB-DESIGN.md) ---------------------------------------------------------
 // The firmware's in-game XMB is the normal explore plugin with rows filtered by the `ingame` selector (TRACED,
 // xmb_ingame.prx strings, category_*.xml). Seven columns carry the in-game-only `seg_gameexit` row (class

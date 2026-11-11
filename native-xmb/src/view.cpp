@@ -4542,7 +4542,7 @@ void View::keyPressEvent(QKeyEvent* e) {
         if(e->key()==Qt::Key_Up)shell_.psMenuMove(-1);
         else if(e->key()==Qt::Key_Down)shell_.psMenuMove(1);
         else if(e->key()==Qt::Key_Return || e->key()==Qt::Key_Enter)activatePsMenuSelection();
-        else if(e->key()==Qt::Key_Escape)shell_.psMenuClose();
+        else if(e->key()==Qt::Key_Escape)shell_.psMenuBack();
         e->accept();return;
     }
     // The item options panel owns the keyboard while open: Up/Down move inside it, Cross (Return) runs the
@@ -4718,7 +4718,7 @@ void View::pollController() {
         if(edgePs&XINPUT_GAMEPAD_DPAD_UP)shell_.psMenuMove(-1);
         if(edgePs&XINPUT_GAMEPAD_DPAD_DOWN)shell_.psMenuMove(1);
         if(edgePs&XINPUT_GAMEPAD_A)activatePsMenuSelection();
-        if(edgePs&XINPUT_GAMEPAD_B)shell_.psMenuClose();
+        if(edgePs&XINPUT_GAMEPAD_B)shell_.psMenuBack();
         return;
     }
     // The item options panel owns the pad while open: D-pad moves, Cross runs, Circle/Triangle dismiss it.
