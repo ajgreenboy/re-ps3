@@ -1,4 +1,5 @@
 #include "view.h"
+#include "design_space.h"
 #include "gallery_view.h"
 #include <QDir>
 #include <QFont>
@@ -171,13 +172,13 @@ void View::paintGallery(double dt, double seconds) {
         glClearColor(.22f, .23f, .26f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT);
     }
-    const double scale = std::min(device.width() / 1920., device.height() / 1080.);
+    const DesignSpace design(device);
+    const double scale = design.y;
     textRenderer_.beginFrame(*this, device, scale, 1);
     QOpenGLPaintDevice paintDevice(device);
     QPainter p(&paintDevice);
     p.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
-    p.translate((device.width() - 1920 * scale) / 2, (device.height() - 1080 * scale) / 2);
-    p.scale(scale, scale);
+    p.setTransform(design.transform());
     drawGalleryChrome(p);
 }
 

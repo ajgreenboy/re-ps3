@@ -1,5 +1,6 @@
 #include "icons.h"
 #include "uniform_cache.h"
+#include "design_space.h"
 #include "particles.h"      // sceneMaterials(): the shared run-time reader
 #include <QDebug>
 #include <QElapsedTimer>
@@ -205,8 +206,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
     const bool forcedGlass=qEnvironmentVariableIsSet("XMB_ICON_DEBUG") || qEnvironmentVariableIsSet("XMB_ICON_UCODE") ||
         qEnvironmentVariableIntValue("XMB_ICON_FIRMWARE");
     const bool opaqueMaterial=opaqueReady_ && fixedTint_.lengthSquared()>0;
-    const double scale=pixelHeight/1080.;
-    const double offsetX=(pixelWidth-1920*scale)/2; // wider-than-16:9 windows centre the 1920-wide layout
+    const DesignSpace design(pixelWidth,pixelHeight);
     // Light directions from ICONS.mnu angles (degrees).
     const auto direction=[&](const char* z,const char* x){
         const double angleZ=qDegreesToRadians(double(value(z,light))),angleX=qDegreesToRadians(double(value(x,light)));
@@ -277,14 +277,15 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         const double ndcX=icon.centre.x()/960.-1,ndcY=1-icon.centre.y()/540.;
         const double distance=icon.distance,worldX=ndcX*distance/kScaleX,worldY=ndcY*distance/kScaleY;
         // 1. CookieCutter: the frame behind the icon, 128x128 reference px, into the background map.
-        const double cx=offsetX+icon.centre.x()*scale,cy=pixelHeight-icon.centre.y()*scale,half=64*scale;
+        const double cx=icon.centre.x()*design.x,cy=pixelHeight-icon.centre.y()*design.y;
+        const double halfX=64*design.x,halfY=64*design.y;
         if(glass) {
             gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
-            gl.glBlitFramebuffer(GLint(cx-half),GLint(cy-half),GLint(cx+half),GLint(cy+half),0,0,128,128,GL_COLOR_BUFFER_BIT,GL_LINEAR);
+            gl.glBlitFramebuffer(GLint(cx-halfX),GLint(cy-halfY),GLint(cx+halfX),GLint(cy+halfY),0,0,128,128,GL_COLOR_BUFFER_BIT,GL_LINEAR);
         }
         // 2. The icon quad.
         gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);
-        gl.glViewport(GLint(offsetX),0,GLsizei(1920*scale),pixelHeight);
+        gl.glViewport(0,0,pixelWidth,pixelHeight);
         vc[256]=QVector4D(float(kScaleX*icon.size),0,0,float(kScaleX*worldX));
         vc[257]=QVector4D(0,float(kScaleY*icon.size),0,float(kScaleY*worldY));
         vc[258]=QVector4D(0,0,-1,float(distance-19.95)); // captured: the icon quad's z offset in the firmware matrix

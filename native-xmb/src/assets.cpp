@@ -551,6 +551,21 @@ const QImage& Assets::loadImage(const QString& container,const QString& name,Ima
         else throw std::runtime_error("Unsupported RCO image compression");
         image=format==5?decodeGim(data,name):QImage::fromData(data);
         if(image.isNull())throw std::runtime_error("Image decoder returned no pixels");
+        // This firmware shadow is an RGB coverage mask, not ordinary RGBA artwork:
+        // its DXT5 alpha is 255 even in the black padding. Source-over needs black
+        // ink with that coverage as alpha, otherwise the padding becomes a black box.
+        if(source==QStringLiteral("system_plugin") && name==QStringLiteral("tex_operation_guide_base_shadow")) {
+            image=image.convertToFormat(QImage::Format_ARGB32);
+            bool opaque=true;
+            for(int y=0;y<image.height() && opaque;++y) {
+                const auto* row=reinterpret_cast<const QRgb*>(image.constScanLine(y));
+                for(int x=0;x<image.width();++x)if(qAlpha(row[x])!=255){opaque=false;break;}
+            }
+            for(int y=0;opaque && y<image.height();++y) {
+                auto* row=reinterpret_cast<QRgb*>(image.scanLine(y));
+                for(int x=0;x<image.width();++x)row[x]=qRgba(0,0,0,qGray(row[x]));
+            }
+        }
         ++decodedImages_;
         qInfo().noquote()<<"assets: decoded"<<key<<image.size();
         // Local diagnosis: XMB_TEXTURE_DUMP=<dir> writes every decoded RCO image there as <container>__<name>.png,

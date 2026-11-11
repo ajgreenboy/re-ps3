@@ -38,6 +38,7 @@
 #include <QWindow>
 #include "idle_profile.h"
 #include "uniform_cache.h"
+#include "design_space.h"
 #include <algorithm>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -1070,8 +1071,7 @@ void View::paintGL() {
         glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
         QOpenGLPaintDevice backgroundDevice(device);
         QPainter backdrop(&backgroundDevice);backdrop.setRenderHint(QPainter::SmoothPixmapTransform);
-        const double scale=std::min(device.width()/1920.,device.height()/1080.);
-        backdrop.translate((device.width()-1920*scale)/2,(device.height()-1080*scale)/2);backdrop.scale(scale,scale);
+        backdrop.setTransform(DesignSpace(device).transform());
         drawBackdrops(backdrop);
     }
     // The keyboard's caret blink. 500 ms is the audit's FIT (OSK-FIRMWARE 5.2: the capture rig tops out near
@@ -1170,13 +1170,12 @@ void View::paintGL() {
         uiMsaa_->bind();glViewport(0,0,pixels.width(),pixels.height());glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
         // Glyphs are rasterised for the layer's own scale (twice the window): at the window's scale they were
         // magnified 2x by bilinear sampling before the 2x2 resolve, which left all text soft.
-        textRenderer_.beginFrame(*this,pixels,std::min(pixels.width()/1920.,pixels.height()/1080.),2);
+        textRenderer_.beginFrame(*this,pixels,DesignSpace(pixels).y,2);
         {
             QOpenGLPaintDevice paintDevice(pixels);
             QPainter ui(&paintDevice);
             ui.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing|QPainter::SmoothPixmapTransform);
-            const double scale=std::min(pixels.width()/1920.,pixels.height()/1080.);
-            ui.translate((pixels.width()-1920*scale)/2,(pixels.height()-1080*scale)/2);ui.scale(scale,scale);
+            ui.setTransform(DesignSpace(pixels).transform());
             const qint64 sceneStart=clock_.nsecsElapsed();drawScene(ui);sceneNs_=clock_.nsecsElapsed()-sceneStart;
             particles_.trackWidgets(windSites_,renderSeconds);
         }
@@ -4456,8 +4455,7 @@ void View::drawInGameBackdrop(int width,int height) {
     QPainter p(&device);p.setRenderHint(QPainter::SmoothPixmapTransform);
     p.fillRect(0,0,width,height,QColor(8,8,12));   // plain dark when nothing could be captured
     if(!inGameBackdrop_.isNull()) {
-        const QSizeF size=QSizeF(inGameBackdrop_.size()).scaled(QSizeF(width,height),Qt::KeepAspectRatio);
-        p.drawImage(QRectF((width-size.width())/2,(height-size.height())/2,size.width(),size.height()),inGameBackdrop_);
+        p.drawImage(QRectF(0,0,width,height),inGameBackdrop_);
         p.fillRect(0,0,width,height,QColor(0,0,0,int(255.*inGameDim())));
     }
 }

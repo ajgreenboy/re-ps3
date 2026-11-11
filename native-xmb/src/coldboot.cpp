@@ -1,4 +1,5 @@
 #include "coldboot.h"
+#include "design_space.h"
 #include "view.h"
 #include <QAudioDecoder>
 #include <QAudioSink>
@@ -365,7 +366,7 @@ void Coldboot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeig
     std::array<QVector4D,3> colours;QVector3D lightPosition,lightColour,attenuation;
     state(seconds(),colours,lightPosition,lightColour,attenuation);
     QMatrix4x4 projection,view;
-    projection.perspective(qRadiansToDegrees(yfov_),float(pixelWidth)/float(pixelHeight),znear_,zfar_);
+    projection.perspective(qRadiansToDegrees(yfov_),1920.f/1080.f,znear_,zfar_);
     view.lookAt(eye_,target_,up_);
     QVector<QVector4D> fc=fragmentCg_.constants;
     const auto set=[&](const char* name,const QVector4D& v){for(int slot:fragmentCg_.parameters.value(name).constantSlots)if(slot<fc.size())fc[slot]=v;};
@@ -434,8 +435,7 @@ void Coldboot::renderNotice(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pix
     QOpenGLPaintDevice device(QSize(pixelWidth,pixelHeight));
     QPainter painter(&device);
     painter.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing);
-    const double scale=std::min(pixelWidth/1920.,pixelHeight/1080.);
-    painter.translate((pixelWidth-1920*scale)/2,(pixelHeight-1080*scale)/2);painter.scale(scale,scale);
+    painter.setTransform(DesignSpace(pixelWidth,pixelHeight).transform());
     painter.setOpacity(alpha);painter.setPen(Qt::white);
     // Line k's top is k * pitch in its layout, so its baseline lands on firstBaseline + k * pitch.
     for(const auto& layout:layouts)layout->draw(&painter,{left,firstBaseline-metrics.ascent()});
@@ -549,8 +549,7 @@ void GameBoot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeig
         // game_plugin page_gameboot_bg: ps3logo_back_color, a black plane at alpha 1 (INFERRED to sit under the logo,
         // as gamelib_plugin's page does); custom_render_plugin's ps3logo plane is the RCO's tex_ps3logo, centred.
         painter.fillRect(QRect(0,0,pixelWidth,pixelHeight),Qt::black);
-        const double scale=std::min(pixelWidth/1920.,pixelHeight/1080.);
-        painter.translate((pixelWidth-1920*scale)/2,(pixelHeight-1080*scale)/2);painter.scale(scale,scale);
+        painter.setTransform(DesignSpace(pixelWidth,pixelHeight).transform());
         const Logo logo=logoAt(gameBootPinned()>=0?gameBootPinned():s.clock.nsecsElapsed()/1e9);
         const QImage& image=s.assets->image(QStringLiteral("custom_render_plugin"),QStringLiteral("tex_ps3logo"));
         if(!image.isNull() && logo.alpha>0) {
@@ -566,7 +565,8 @@ void GameBoot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeig
     // shown at once, hidden over 200 ms (the show is FUN_00345b08 with a 0 s fade; the hide curve is not traced, linear).
     // It is painted once into a raster image at the output's scale (Qt's GL text path garbles 10 px glyphs) and drawn
     // 1:1 with the amount as opacity.
-    const double scale=std::min(pixelWidth/1920.,pixelHeight/1080.);
+    const DesignSpace design(pixelWidth,pixelHeight);
+    const double scale=design.y;
     const QString text=s.assets->text(QStringLiteral("system_plugin"),QStringLiteral("msg_help_system_off_soon_by_setting"),
         QStringLiteral("The system will turn off soon because the [System Auto-Off] setting is enabled.\n"
                        "This setting can be adjusted under [Settings] > [Power Save Settings]."));
@@ -611,7 +611,8 @@ void GameBoot::render(QOpenGLFunctions_3_3_Core& gl,int pixelWidth,int pixelHeig
                             Qt::AlignLeft|Qt::AlignVCenter,lines[i].trimmed());
     }
     painter.setOpacity(guide);
-    painter.drawImage(QPointF(std::round((pixelWidth-1920*scale)/2+cover.left()*scale),std::round((pixelHeight-1080*scale)/2+cover.top()*scale)),s.guideImage);
+    painter.drawImage(QRectF(std::round(cover.left()*design.x),std::round(cover.top()*design.y),
+                            s.guideImage.width()*design.x/design.y,s.guideImage.height()),s.guideImage);
     painter.end();
 }
 }
