@@ -124,6 +124,12 @@ QVector<ReleaseSource> ReleaseSources::listSources(QString* error) const {
     }
     return sources;
 }
+QString ReleaseSources::downloadedPath(const QString& source,const QString& title) const {
+    const QDir directory(QDir(dataDirectory_).filePath(QStringLiteral("downloads/")+safeName(source)));
+    for(const auto& file:directory.entryInfoList(QDir::Files,QDir::Time))
+        if(!file.isSymLink() && file.completeBaseName()==safeName(title))return file.absoluteFilePath();
+    return {};
+}
 QString ReleaseSources::downloadRelease(const QString& source,const QString& title,QString* error,const ReleaseProgress& progress) const {
     if(error)error->clear();
     QString storeError;const auto sources=listSources(&storeError);

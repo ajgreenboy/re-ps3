@@ -96,10 +96,14 @@ int main(int argc,char** argv) {
     check(store.importSource(QUrl::fromLocalFile(input),&error) && error.isEmpty(),"local source import");
     const auto stored=store.listSources(&error);check(stored.size()==1 && stored.first().releases.size()==2 && error.isEmpty(),"offline source readback");
     if(!stored.isEmpty()) {
+        check(store.downloadedPath(stored.first().slug,QStringLiteral("CON: Test/Game")).isEmpty(),"undownloaded release has no local path");
         check(store.downloadRelease(stored.first().slug,QStringLiteral("Magnet Only"),&error).isEmpty() && error==QStringLiteral("no Real-Debrid token configured"),"orchestration missing token");
         qint64 received=0;
         const auto path=store.downloadRelease(stored.first().slug,QStringLiteral("CON: Test/Game"),&error,[&](qint64 a,qint64){received=a;});
         QFile downloaded(path);check(!path.isEmpty() && error.isEmpty() && path.endsWith(QStringLiteral(".zip")) && downloaded.open(QIODevice::ReadOnly) && downloaded.readAll()==QByteArray("fixture") && received==7,"direct fallback streaming/progress/safe filename");
+        check(store.downloadedPath(stored.first().slug,QStringLiteral("CON: Test/Game"))==path,"download lookup uses the same sanitized title");
+        downloaded.close();check(downloaded.remove(),"remove completed fixture");
+        check(store.downloadedPath(stored.first().slug,QStringLiteral("CON: Test/Game")).isEmpty(),"deleted download is not treated as local");
     }
     check(preferences.setValue(QStringLiteral("debrid/realDebridToken"),QStringLiteral("synthetic-test-value")),"token preference accepted");
     Preferences reloaded(temporary.path());check(reloaded.value(QStringLiteral("debrid/realDebridToken")).toString()==QStringLiteral("synthetic-test-value"),"token preference survives reload");

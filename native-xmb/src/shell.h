@@ -27,6 +27,7 @@
 #include "steam_store.h"
 #include "steam_library.h"
 #include "subtitles.h"
+#include "release_source.h"
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QDateTime>
@@ -125,7 +126,7 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // Entry::value is the command ("next", "fw:use|<path>", ...); the page it sits on is told apart by its first row id "setup:<step>...".
     Setup,
     // Game > Saved Data / Memory Card Utility: presentation only, no console save-data backend.
-    SaveData };
+    SaveData, ImportSource, ReleaseFolder, ReleaseDownload, DownloadManager, DebridToken };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -667,6 +668,19 @@ signals:
     // accepted through Shell::setJellyfinSignInField. `masked` makes the keyboard compose dots.
     void requestJellyfinFieldEdit(QString field,QString title,QString initial,bool masked);
 private:
+    QVector<ReleaseSource> releaseSources_;
+    QHash<QString,QString> releaseLocalPaths_;
+    QHash<QString,QImage> releaseArt_;
+    QSet<QString> releaseArtRequested_;
+    std::unique_ptr<RawgArtwork> releaseArtwork_;
+    void refreshReleaseSources(const QUrl& importUrl={});
+    void rebuildReleaseSources();
+    void openReleaseSource(const QString& slug);
+    void activateRelease(const Entry& entry);
+    void requestReleaseArt(const Entry& entry,const IndexedRelease& release,const QUrl& sourceUrl);
+    void openDownloadManager();
+    void editDebridToken();
+    void saveDebridToken(const QString& token);
     Assets& assets_;
     std::unique_ptr<class NotifyOverlay> notifyOverlay_;
     Preferences preferences_;

@@ -19,6 +19,7 @@ public:
     ReleaseSources(const QString& dataDirectory,const Preferences& preferences);
     bool importSource(const QUrl& jsonUrl,QString* error=nullptr);
     QVector<ReleaseSource> listSources(QString* error=nullptr) const;
+    QString downloadedPath(const QString& source,const QString& title) const;
     QString downloadRelease(const QString& source,const QString& title,QString* error=nullptr,
                             const ReleaseProgress& progress={}) const;
 private:

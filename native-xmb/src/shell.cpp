@@ -1633,7 +1633,9 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     for(auto& category:categories_)if(category.id=="game") {
         category.entries.push_back(item("content:refresh","Refresh Game Library","item_tex_plain_folder",full,Action::RefreshContent));
         category.entries.push_back(item("content:import","Import Games and Apps","item_tex_plain_folder",full,Action::ImportApps));
+        category.entries.push_back(item("release:import","Import Source","item_tex_plain_folder",full,Action::ImportSource));
     }
+    refreshReleaseSources();
     QTimer::singleShot(0,this,&Shell::refreshContent);
     connect(&profiles_,&Profiles::changed,this,[this]{rebuildUsers();emit changed();});
     connect(&profiles_,&Profiles::failed,this,[this](const QString& error){showMessage(error,MessageKind::Page);emit changed();});
@@ -2253,6 +2255,12 @@ void Shell::activate() {
     case Action::PhotoGallery:emit requestPhotoGallery();break;
     case Action::Folder:openDirectory(entry.value);break;
     case Action::File:openFile(entry);break;
+    case Action::ImportSource:
+        emit requestJellyfinFieldEdit(QStringLiteral("release:url"),tr("Import Source URL"),{},false);break;
+    case Action::ReleaseFolder:openReleaseSource(entry.value);break;
+    case Action::ReleaseDownload:activateRelease(entry);break;
+    case Action::DownloadManager:openDownloadManager();break;
+    case Action::DebridToken:editDebridToken();break;
     case Action::PlaylistFolder:openPlaylists(categories_[category_].id);break;
     case Action::CreatePlaylist:
         if(playlists_.list(entry.value).size()>=PlaylistStore::MaximumPlaylists)showPlaylistResult(PlaylistStore::Result::TooManyPlaylists);
@@ -5938,6 +5946,11 @@ void Shell::refreshJellyfinSignInPage() {
     page.selection=std::clamp(page.selection,0,std::max(0,int(page.entries.size())-1));
 }
 void Shell::setJellyfinSignInField(const QString& field,const QString& value) {
+    if(field==QStringLiteral("debrid:token")){saveDebridToken(value);return;}
+    if(field==QStringLiteral("release:url")) {
+        if(!value.trimmed().isEmpty())refreshReleaseSources(QUrl(value.trimmed(),QUrl::StrictMode));
+        return;
+    }
     if(field.startsWith(QStringLiteral("setup:"))){setupText(field,value);return;}   // D8: the setup pages type a folder path on the same keyboard
     // The one field-edit signal also carries the Jellyfin search term: the row that asks for it sends
     // the key "search", and the accepted text opens a result page. It is not a credential field, so it

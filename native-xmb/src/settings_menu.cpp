@@ -482,6 +482,8 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
     // build's own input behaviour and keeps its surface here (INGAME-XMB-DESIGN step 8; the key is also settable
     // in preferences.json).
     static const QVector<RowSpec> system{
+        {"download_manager",nullptr,nullptr,Action::DownloadManager,nullptr,nullptr,"Download Manager",
+            "Configure the Real-Debrid API key used for release downloads."},
         {"ps_arbitration",nullptr,nullptr,Action::SettingChoices,"input/psArbitration",nullptr,"PS Button Over a Game",
             "Whether the PS button opens the XMB (tap and hold) or the launcher's own menu on a tap (RPCS3 Home Menu / Steam Guide), with the XMB keeping the hold."},
         // INFERRED (PHASES-HTPC D3): the firmware has no such row, the console has no sign-in. On creates the per-user

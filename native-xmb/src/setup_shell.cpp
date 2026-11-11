@@ -48,7 +48,7 @@ bool Shell::setupActive() const { return setup_.active; }
 QStringList Shell::setupOrder() const {
     QStringList order{QStringLiteral("welcome"),QStringLiteral("firmware"),QStringLiteral("library")};
     if(QGuiApplication::screens().size()>1)order<<QStringLiteral("display");
-    order<<QStringLiteral("pad")<<QStringLiteral("autostart")<<QStringLiteral("services")<<QStringLiteral("finish");
+    order<<QStringLiteral("pad")<<QStringLiteral("autostart")<<QStringLiteral("services")<<QStringLiteral("debrid")<<QStringLiteral("finish");
     return order;
 }
 QString Shell::setupStepOfTopPage() const {
@@ -77,7 +77,8 @@ void Shell::setupPush(const QString& step) {
     page.title=step==QLatin1String("welcome")?assets_.text("sysconf_plugin","msg_initsetup",tr("Initial Setup"))   // TRACED: sysconf_plugin msg_initsetup
         :step==QLatin1String("firmware")?tr("Firmware Folder"):step==QLatin1String("library")?tr("Library Folders")
         :step==QLatin1String("display")?tr("Display"):step==QLatin1String("pad")?tr("Controller")
-        :step==QLatin1String("autostart")?tr("Start at Sign-in"):step==QLatin1String("services")?tr("Services"):tr("Setup Complete");
+        :step==QLatin1String("autostart")?tr("Start at Sign-in"):step==QLatin1String("services")?tr("Services")
+        :step==QLatin1String("debrid")?tr("Download Manager"):tr("Setup Complete");
     page.entries=setupRows(step);
     // Focus the row the step is about: "Continue" when the step has nothing to choose, else its first choice.
     pages_.push_back(std::move(page));
@@ -233,6 +234,11 @@ QVector<Entry> Shell::setupRows(const QString& step) {
             rows<<entry;
         }
         rows<<cont();
+    } else if(step==QLatin1String("debrid")) {
+        rows<<row(prefix,tr("Real-Debrid API Key"),QStringLiteral("debrid:edit"),
+            tr("Optional: enter your Real-Debrid API key for release downloads. Leave it unset for ordinary direct downloads. Change it later in Settings > System Settings > Download Manager."),
+            preferences_.value(QStringLiteral("debrid/realDebridToken")).toString().isEmpty()?tr("Not set"):QStringLiteral("********"));
+        rows<<cont()<<skip();
     } else if(step==QLatin1String("finish")) {
         const auto path=[&](const char* kind){const QString value=preferences_.value(QStringLiteral("library/")+QLatin1String(kind)).toString();return value.isEmpty()?tr("not set"):nativePath(value);};
         const QString root=!setup_.chosenFlash.isEmpty()?setup_.chosenFlash:setup_.devFlash;
@@ -246,6 +252,8 @@ QVector<Entry> Shell::setupRows(const QString& step) {
         rows<<row(prefix+QStringLiteral(":sum-photo"),tr("Photo Folder"),QStringLiteral("none"),{},path("photo"),false);
         rows<<row(prefix+QStringLiteral(":sum-music"),tr("Music Folder"),QStringLiteral("none"),{},path("music"),false);
         rows<<row(prefix+QStringLiteral(":sum-video"),tr("Video Folder"),QStringLiteral("none"),{},path("video"),false);
+        rows<<row(prefix+QStringLiteral(":sum-debrid"),tr("Real-Debrid"),QStringLiteral("none"),{},
+            preferences_.value(QStringLiteral("debrid/realDebridToken")).toString().isEmpty()?tr("not set"):tr("set"),false);
         for(Entry& entry:rows)if(entry.action==Action::Unavailable){entry.action=Action::Setup;entry.disabled=false;}
     }
     return rows;
@@ -276,6 +284,7 @@ void Shell::activateSetup(const Entry& entry) {
         emit changed();return;
     }
     if(command==QLatin1String("finish")) {setupFinish(false);return;}
+    if(command==QLatin1String("debrid:edit")) {editDebridToken();return;}
     if(command==QLatin1String("why")) {
         showMessage(tr("dev_flash"),
             tr("dev_flash is the folder of PlayStation 3 system software files from your own console or your own RPCS3 installation. The XMB reads its icons, text, sounds and fonts from it. This program never downloads or includes it.\n\nLook for a folder named dev_flash that contains vsh, data and sys, for example in your RPCS3 folder. It must hold:\n%1")
