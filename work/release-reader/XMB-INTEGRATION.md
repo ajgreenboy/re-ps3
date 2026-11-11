@@ -63,5 +63,7 @@ The primary path is to hand the link to the debrid manager and then download the
 - Game-column integration in `shell.cpp` — a "Sources"/import row (paste URL via the OSK), one folder per
   source, releases with art; selecting a release triggers the debrid→download (or opens the local file if
   present).
-- A Settings row for the Real-Debrid token; a CLI flag `--import-source <url>` (or `--sources-list` /
-  `--download <source> <title>`) for headless test.
+- **Real-Debrid token entry is part of first-time setup**: a new setup-wizard step (after Services) with an
+  OSK field to paste the API key, saved to preferences. A Settings row (Settings → … → Download Manager) lets
+  the user change it later. The key is always read from preferences at runtime, never committed or logged.
+- A CLI flag `--import-source <url>` (or `--sources-list` / `--download <source> <title>`) for headless test.
