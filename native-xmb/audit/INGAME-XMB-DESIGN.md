@@ -283,6 +283,12 @@ our own, registered as an imported app; harness `C:\dev\out\ingame-test\run.ts`,
 | 7 | Notification overlay (`src/notify_overlay.*`): a frameless `WS_EX_TOPMOST\|NOACTIVATE\|TOOLWINDOW\|TRANSPARENT\|LAYERED` click-through window drawing the plaque, shown by `Shell` while a title runs and the XMB is not in-game; hidden on title end or in-game. Mirrors `View::drawNotification` geometry (software `QPainter`, no GL). | not exercised over a real game |
 | 9 | Live translucent overlay: **attempted and reverted** (commit `128d876` then `7770c4e`). `WA_TranslucentBackground` + an alpha surface + a transparent clear still gives an opaque black backdrop, because `QOpenGLWidget`'s internal FBO blit does not preserve alpha - the game never shows through (measured with the D3D stub). The proper fix is a DirectComposition premultiplied-alpha swap chain (`WS_EX_NOREDIRECTIONBITMAP`), a separate effort. | measured: does not work |
 
+2026-11-10 native policy update: the owner requested Quit Game only in the running content's column,
+not all seven firmware columns. The implementation now follows that policy and requires a confirmed
+running title, not a pending Steam handoff. Title exit also clears the view's topmost band. See
+`INGAME-RUNTIME-FIX.md` for the reproduced lifecycle defect and current verification; the table above
+and evidence below describe the original implementation.
+
 Evidence, from the stub runs (all in `C:\dev\out\ingame-test\runs\*`):
 
 - PS tap: `ps: ingame: window pid=.. mode=windowed capture=ok (223 ms) ... 786x443 maxChannel=255`, then seven `ingame: row ingame:quit inserted in <column>` lines

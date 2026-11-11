@@ -150,7 +150,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     // layout and the provenance is never guessed.
     oskLayout_=loadOskLayout(assets_,oskObjects_);
     monthImage_=assets_.image("qgl/lines",QString("textures/month_bg/rgb/%1.dds").arg(QDateTime::currentDateTime().date().month(),2,10,QChar('0')));
-    connect(&shell_,&Shell::changed,this,[this]{++uiRevision_;syncColumns();loadWallpaper();setColumnSink(shell_.columnSink());update();});
+    connect(&shell_,&Shell::changed,this,[this]{syncInGameWindow();++uiRevision_;syncColumns();loadWallpaper();setColumnSink(shell_.columnSink());update();});
     connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){
         mediaFrame_=frame;
         if(frame.isNull())photoViewport_={};
@@ -4154,10 +4154,7 @@ void View::replayPsHold() {
     QTimer::singleShot(1200,this,[this]{psWatcher_.replayRelease();});
 }
 bool View::titleRunning() const {
-    // The only public, side-effect-free window onto Shell's tracked-title state (shell.h is owned by
-    // another change): psMenuItems() adds Quit Game exactly when Shell::gameRunning() is true, for a
-    // tracked QProcess title or a Steam handoff. The console menu is two rows otherwise.
-    return shell_.psMenuItems().size()>2;
+    return shell_.titleRunning();
 }
 bool View::xmbOwnsForeground() const {
     // Qt's activeWindow follows the Win32 foreground window with an event hop; after a programmatic
@@ -4298,6 +4295,10 @@ double inGameDim() {
 }
 }
 void View::enterInGame(const QString& reason) {
+    if(!titleRunning()){
+        psLog(QStringLiteral("ingame: entry ignored (no running title)"));
+        return;
+    }
     stopLiveCapture();
     quintptr hwnd=0;
     GameWindowInfo info;
@@ -4332,6 +4333,8 @@ void View::enterInGame(const QString& reason) {
     inGameHwnd_=hwnd;inGamePid_=info.pid;inGameMode_=info.mode;
     // A fullscreen game that was minimised by the focus change: the recorded window may need SW_RESTORE on return.
     shell_.setInGame(true);
+    if(!shell_.inGame())return;   // the title may have ended while its frame was being captured
+    inGameWindowActive_=true;
     if(qEnvironmentVariable("XMB_INGAME_LIVE")==QStringLiteral("1") && !inGameBackdrop_.isNull() &&
        (inGameMode_==GameWindowMode::Windowed || inGameMode_==GameWindowMode::Borderless))startLiveCapture();
     psLog(QStringLiteral("ingame: enter reason=\"%1\" mode=%2 backdrop=%3").arg(reason,QLatin1String(gameWindowModeName(info.mode)))
@@ -4383,6 +4386,17 @@ void View::returnToGame(const QString& reason) {
     });
 #endif
     update();
+}
+void View::syncInGameWindow() {
+    if(shell_.inGame() || !inGameWindowActive_)return;
+    // A title can close itself while its overlay is open, without going through returnToGame().
+    // Do not leave a topmost, non-interactive XMB covering whichever app receives the foreground next.
+    stopLiveCapture();
+    inGameBackdrop_=QImage();inGameHwnd_=0;inGamePid_=0;inGameWindowActive_=false;
+#ifdef Q_OS_WIN
+    setTopmost(reinterpret_cast<HWND>(window()->winId()),false);
+#endif
+    psLog(QStringLiteral("ingame: cleared window state and topmost band"));
 }
 void View::startLiveCapture() {
     liveCaptureActive_=true;

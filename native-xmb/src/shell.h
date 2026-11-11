@@ -541,12 +541,13 @@ public:
     // Pauses a playing video or (when music is not kept) any playback; returns what it did, for the log.
     QString pauseMediaForDesktop();
     // ---- In-game XMB (plan F5, audit/INGAME-XMB-DESIGN.md steps 1-3) ----
-    // titleRunning(): a tracked title (our QProcess) or a Steam handoff is running. runningTitle() is its name;
+    // titleRunning(): our QProcess is running, or Steam has confirmed the title is running (not a pending handoff).
+    // runningTitle() is its name;
     // lastTitle() keeps it past the end of the process so the quit message can still name it. runningTitlePid() is
     // the tracked process id (0 for a Steam title, which is not our process). inGame(): the XMB was raised over the
     // running title by the PS button, so the in-game column set, the dimmed backdrop and "Back to Game Screen"
     // apply. setInGame() inserts or removes the firmware's in-game-only rows; the shell clears it when the title ends.
-    bool titleRunning() const { return gameRunning(); }
+    bool titleRunning() const;
     QString runningTitle() const { return gameTitle_; }
     QString lastTitle() const { return gameTitle_.isEmpty()?quitTitle_:gameTitle_; }
     quint32 runningTitlePid() const;
@@ -854,6 +855,7 @@ private:
     qint64 resumePending_=0;         // milliseconds to seek once the media reports Loaded
     QPointer<QProcess> game_;        // the launched title, kept so a return is observable
     QString gameTitle_;              // its title, for the return message
+    QString gameCategory_;           // the column that launched the tracked content
     bool gameIsRpcs3_=false;         // the tracked process is RPCS3 (launched through the emulator path)
     QString steamGameId_;            // a Steam title handed to steam.exe, watched through the registry
     QTimer steamWatch_;              // polls Steam's Running flags while steamGameId_ is set

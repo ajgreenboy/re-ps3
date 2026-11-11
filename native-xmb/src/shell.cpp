@@ -610,6 +610,7 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
     }
     game_=QPointer<QProcess>(process);
     gameTitle_=title;
+    gameCategory_=categories_.value(category_).id;
     activity_.start();
     qInfo().noquote()<<"launch:"<<program<<arguments.join(' ')<<"(tracked)";
     emit changed();
@@ -635,6 +636,11 @@ bool Shell::gameRunning() const {
     // Also true while a Steam handoff is being watched, so the idle auto-close cannot quit behind a game.
     return (!game_.isNull() && game_->state()!=QProcess::NotRunning) || !steamGameId_.isEmpty();
 }
+bool Shell::titleRunning() const {
+    // A pending Steam handoff still inhibits idle shutdown / another launch, but is not a game to overlay.
+    return (!game_.isNull() && game_->state()==QProcess::Running) ||
+        (!steamGameId_.isEmpty() && steamGameSeen_ && steamGameClear_==0);
+}
 // Steam launches itself, so the only honest lifecycle signal is Steam's own registry state. The
 // handoff records the app id, watches Apps\<id>\Running, and reports the return when it clears.
 bool Shell::startSteamTracked(const QString& appId,const QString& title) {
@@ -643,7 +649,7 @@ bool Shell::startSteamTracked(const QString& appId,const QString& title) {
         showMessage(title,"Steam could not be started. Refresh the game library and check the Steam installation.",MessageKind::Page);
         return false;
     }
-    steamGameId_=appId;gameTitle_=title;gameIsRpcs3_=false;steamGameSeen_=false;steamGameClear_=0;
+    steamGameId_=appId;gameTitle_=title;gameCategory_=QStringLiteral("game");gameIsRpcs3_=false;steamGameSeen_=false;steamGameClear_=0;
     steamWatchAge_.start();steamWatch_.start();
     activity_.start();
     qInfo().noquote()<<"launch: steam -applaunch"<<appId<<"(watched through Steam's registry)";
@@ -654,21 +660,25 @@ void Shell::pollSteamGame() {
     if(steamGameId_.isEmpty()) { steamWatch_.stop(); return; }
     const auto state=steamAppState(steamGameId_);
     constexpr qint64 startTimeoutMs=5*60*1000;   // Steam may download/update before the title runs
-    if(state.updating) { steamWatchAge_.restart(); return; }
+    if(state.updating && !steamGameSeen_) { steamWatchAge_.restart(); return; }
     if(state.running) {
+        const bool wasRunning=titleRunning();
         if(!steamGameSeen_)qInfo().noquote()<<"steam:"<<gameTitle_<<"is running";
-        steamGameSeen_=true;steamGameClear_=0;return;
+        steamGameSeen_=true;steamGameClear_=0;
+        if(!wasRunning)emit changed();
+        return;
     }
     if(!steamGameSeen_) {
         if(steamWatchAge_.elapsed()<startTimeoutMs)return;
         steamWatch_.stop();const QString title=gameTitle_;steamGameId_.clear();gameTitle_.clear();
+        clearInGame();
         showMessage(title,"Steam did not report this title as running.",MessageKind::Page);
         qWarning().noquote()<<"steam:"<<title<<"never reported running";
         emit changed();return;
     }
     // Steam clears the flag when the last process exits; require two polls so a launcher-to-game
     // handover inside Steam is not mistaken for a return.
-    if(++steamGameClear_<2)return;
+    if(++steamGameClear_<2){clearInGame();emit changed();return;}
     steamWatch_.stop();
     const QString title=gameTitle_;
     steamGameId_.clear();gameTitle_.clear();steamGameSeen_=false;steamGameClear_=0;
@@ -2034,7 +2044,7 @@ void Shell::activate() {
     // In-game XMB: an operation that needs the game's resources is refused with the firmware's quit offer
     // (explore_plugin_full msg_need_quit_game_to_operate_ask, TRACED; the set of operations that trigger it is
     // INFERRED: starting another title, media playback, a browser or store hand-off).
-    if(inGame_ && gameRunning()) {
+    if(inGame_ && titleRunning()) {
         switch(entry.action) {
         case Action::Launch:case Action::LaunchSteam:case Action::LaunchApp:case Action::File:case Action::OpenUrl:
         case Action::SteamStoreBrowse:case Action::JellyfinPlay:
@@ -2404,7 +2414,7 @@ void Shell::psHeld() {
 }
 QStringList Shell::psMenuItems() const {
     QStringList items;
-    if(gameRunning())items<<QObject::tr("Quit Game");
+    if(titleRunning())items<<QObject::tr("Quit Game");
     items<<QObject::tr("Turn Off the System")<<QObject::tr("Turn Off the Controller");
     return items;
 }
@@ -2470,15 +2480,10 @@ void Shell::psMenuClose() {
 // The firmware's in-game XMB is the normal explore plugin with rows filtered by the `ingame` selector (TRACED,
 // xmb_ingame.prx strings, category_*.xml). Seven columns carry the in-game-only `seg_gameexit` row (class
 // xmlgameexit, label msg_game_quit2 "Quit Game", icon tex_quit); Users, Settings and Friends do not. The Game
-// column also carries `seg_manual` (msg_soft_manual). Where a row sits in a column follows the XMBML root query
+// column also carries `seg_manual` (msg_soft_manual). Native policy limits these rows to the running content's
+// column, rather than duplicating Quit Game across all seven. Where a row sits follows the XMBML root query
 // order (F8, TRACED); this build's columns are shorter than the console's, so each position is the nearest
 // native row after which the console's query falls (INFERRED).
-namespace {
-bool inGameColumn(const QString& id) {
-    return id==QLatin1String("game") || id==QLatin1String("music") || id==QLatin1String("video") || id==QLatin1String("photo") ||
-           id==QLatin1String("network") || id==QLatin1String("psn") || id==QLatin1String("tv");
-}
-}
 quint32 Shell::runningTitlePid() const {
     return (!game_.isNull() && game_->state()!=QProcess::NotRunning)?quint32(game_->processId()):0;
 }
@@ -2488,9 +2493,11 @@ bool Shell::launcherOwnsPsTap() const {
     return preferences_.value("input/psArbitration").toString()==QLatin1String("launcher");
 }
 void Shell::syncInGameRows() {
+    if(!titleRunning()){clearInGame();return;}
     for(int c=0;c<categories_.size();++c) {
         auto& category=categories_[c];
-        if(!inGameColumn(category.id))continue;
+        // Native policy: one quit row, in the running content's column, not all seven firmware columns.
+        if(category.id!=gameCategory_)continue;
         const bool present=std::any_of(category.entries.cbegin(),category.entries.cend(),[](const Entry& e){return e.id==QLatin1String("ingame:quit");});
         if(present)continue;
         const QString container=QStringLiteral("explore_category_")+category.id;
@@ -2528,6 +2535,7 @@ void Shell::syncInGameRows() {
     }
 }
 void Shell::clearInGame() {
+    if(inGame_){psMenu_=false;psConfirmOff_=false;psSelection_=0;}
     inGame_=false;
     for(int c=0;c<categories_.size();++c) {
         auto& entries=categories_[c].entries;
@@ -2540,7 +2548,10 @@ void Shell::clearInGame() {
     }
 }
 void Shell::setInGame(bool on) {
-    if(on && !gameRunning())on=false;
+    if(on && !titleRunning()){
+        qInfo().noquote()<<QStringLiteral("ingame: entry ignored (no running title)");
+        on=false;
+    }
     if(inGame_==on)return;
     qInfo().noquote()<<"ingame: shell inGame="+QString::number(on?1:0)<<"title="+gameTitle_;
     if(on){inGame_=true;syncInGameRows();}
@@ -2553,7 +2564,7 @@ QString Shell::inGameHelpText() {
     return assets_.text("xmb_ingame","msg_help_back_to_game",QString(QChar(0xF892))+QStringLiteral(": Back to Game Screen"));
 }
 void Shell::requestQuitGame() {
-    if(!gameRunning()){qInfo().noquote()<<"ingame: Quit Game ignored (no title is running)";return;}
+    if(!titleRunning()){qInfo().noquote()<<"ingame: Quit Game ignored (no title is running)";return;}
     const QString ask=assets_.text("impose_plugin","msg_game_quit_ask",QObject::tr("Do you want to quit the game?"));
     qInfo().noquote()<<"ingame: Quit Game asks:"<<ask<<"title="+gameTitle_;
     showConfirm(ask,QString(),[this]{quitRunningTitle();});

@@ -202,6 +202,7 @@ private:
     // foreground back to the recorded window. inGameBack(): Circle at the column root is "Back to Game Screen".
     void enterInGame(const QString& reason);
     void returnToGame(const QString& reason);
+    void syncInGameWindow();
     bool inGameBack();
     void drawInGameBackdrop(int width,int height);
     void startLiveCapture();
@@ -212,6 +213,7 @@ private:
     quint64 liveCaptureGeneration_=0;
     QImage inGameBackdrop_;           // the captured game frame, empty when capture was black/failed/unsupported
     quintptr inGameHwnd_=0;           // the title's window recorded at the PS press
+    bool inGameWindowActive_=false;  // includes the plain-dark overlay when capture found no window
     quint32 inGamePid_=0;
     GameWindowMode inGameMode_=GameWindowMode::Invalid;
     void reassertForeground(const QString& reason);
