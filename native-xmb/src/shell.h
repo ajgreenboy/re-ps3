@@ -208,6 +208,10 @@ enum class OptionCommand { Activate, Information,
     PlaylistEdit, AddAllToPlaylist, AddAllToPlaylistTarget,
     // Copy's destination level (file_ops.h): one library folder (MenuOption::index into copyTargets_).
     CopyTarget,
+    // Multi-select copy/delete (BEHAVIOUR-GAPS 5, DIALOGS-FIRMWARE D6/D7): Copy Multiple / Delete Multiple
+    // open a marking mode on the page; Cross toggles a row, Triangle opens the decide menu (Select All /
+    // Clear All / OK / Cancel), and OK fans the marked set into fileOps_.copy()/deleteToRecycleBin().
+    CopyPlural, DeletePlural, SelectAll, DeselectAll, MultiSelectDecide, MultiSelectCancel,
     // A Steam game row's hand-offs to the Steam client (steam:// links); MenuOption::index picks which.
     SteamLink,
     // A user row's menu (explore_plugin table 0x27dc40, FUN_0008cdf4): Log Out, Automatic Login, Delete and
@@ -736,9 +740,24 @@ private:
     QStringList libraryRoots() const;
     QString deleteRefusal(const Entry& entry);
     void deleteLocalFile(const Entry& entry);
+    // Multi-select copy/delete (BEHAVIOUR-GAPS 5).
+    void startMultiSelect(const QString& kind);
+    void exitMultiSelect();
+    void toggleMarked(const Entry& entry);
+    void buildMultiSelectOptions();
+    QStringList markedSources() const { return QStringList(checkedIds_.values()); }
+    void openCopyDestinations(const QString& here,const QStringList& sources);
+    void runPluralDelete();
     QStringList copyTargets_;   // the destinations the open Copy level lists, by MenuOption::index
     QString copySource_,copyTitle_;
     QString fileOpsKind_;       // "copy" or "delete": what the request in flight is
+    // Multi-select copy/delete (BEHAVIOUR-GAPS 5): Cross marks the focused local file, Triangle opens the
+    // decide menu, OK fans checkedIds_ (entry ids = file paths) into fileOps_. The view owner's check/count
+    // indicator on the rows is a separate fence; until it lands the count is the status line.
+    bool multiSelect_=false;
+    QString multiSelectKind_;   // "copy" or "delete": what the plural command will do
+    QSet<QString> checkedIds_;
+    bool copyPlural_=false;     // the Copy destination level fans the marked set, not copySource_
     WeatherClient weather_;
     WeatherReport weatherReport_;
     QString weatherError_;
