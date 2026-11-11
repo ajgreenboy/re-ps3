@@ -1,0 +1,11 @@
+{
+  "name": "Sanitized sample",
+  "downloads": [
+    { "title": "Example Bare", "uris": ["magnet:?xt=urn:btih:ABCDEF0123456789ABCDEF0123456789ABCDEF01"], "fileSize": "2 GB", "uploadDate": "2026-01-01T00:00:00Z" },
+    { "title": "Example Full", "uris": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Example+Full&tr=https%3A%2F%2Ftracker.invalid%2Fannounce&tr=udp%3A%2F%2Ftracker.invalid%3A80", "fileSize": "13,38 GB" },
+    { "title": "Example Mirrors", "uris": ["https://example.invalid/example.torrent?download=1"], "uriGroups": [["https://mirror.invalid/example.part10.rar", "https://mirror.invalid/example.part2.rar", "https://mirror.invalid/example.part1.rar"]], "fileSize": "13.3/14.7 GB" },
+    { "title": "Example �?T Adventure", "uris": [], "fileSize": "23.3 GB\n", "uploadDate": "invalid" },
+    { "title": "Example Mixed", "uris": ["https://example.invalid/archive.zip"], "fileSize": "980 MB/1,3 GB (Selective Download)" },
+    { "title": "Example V2", "uris": ["magnet:?xt=urn:btmh:BCDEFG234567"], "fileSize": "8,8~9,5 GB SELECTIVE DOWNLOAD" }
+  ]
+}
