@@ -4,6 +4,7 @@
 // once on a machine before the first gate run (the stub game needs the MSVC toolchain):
 //
 //   bun work/v2-fixtures.ts
+//   bun work/v2-fixtures.ts --check   verify prerequisites without rewriting any fixture
 //
 // What it writes (all deterministic, so two runs write identical bytes):
 //   C:/dev/out/v2/music/Gate Tone.wav   30 s of digital silence, RIFF INFO tags
@@ -22,6 +23,22 @@ const photos = 'C:/dev/out/gal/photos';
 const musicDir = `${out}/music`;
 const stubExe = `${out}/stubgame.exe`;
 const seeds = join(repo, 'out/native-reference/v2');
+
+// The seeds contain absolute paths. A copied seed directory alone is not a ready gate environment:
+// absent media produces empty library pages, and an absent executable never reaches game boot.
+function checkFixtures() {
+  const required = [`${musicDir}/Gate Tone.wav`, `${musicDir}/folder.png`, stubExe, photos];
+  const missing = required.filter(path => !existsSync(path));
+  for (const path of missing) console.error(`fixture missing: ${path}`);
+  if (missing.includes(photos))
+    console.error('Restore the original 374-photo / 17-folder gallery library; do not synthesize it or re-save empty gallery references.');
+  return missing.length === 0;
+}
+if (process.argv.includes('--check')) {
+  const ready = checkFixtures();
+  if (ready) console.log('V2 fixture prerequisites ready');
+  process.exit(ready ? 0 : 1);
+}
 
 function ascii(s: string) { return Buffer.from(s, 'latin1'); }
 function chunk(id: string, body: Buffer) {
@@ -103,7 +120,11 @@ if (!existsSync(stubExe)) {
   const vs = Bun.spawnSync([vswhere, '-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath']).stdout.toString().trim();
   if (!vs) throw new Error('Visual Studio C++ tools are required to build the stub game');
   const cmd = `call "${vs}\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul && cl /nologo /O1 /EHsc /Fostubgame.obj /Festubgame.exe "${win(join(repo, 'work/v2-stubgame.cpp'))}" user32.lib gdi32.lib /link /SUBSYSTEM:WINDOWS`;
-  const built = Bun.spawnSync(['cmd', '/d', '/c', cmd], { cwd: win(out), stdout: 'inherit', stderr: 'inherit', env: { ...process.env, PATH: `${process.env['ProgramFiles(x86)']}\\Microsoft Visual Studio\\Installer;${process.env.PATH}` } });
+  // Passing the quoted CALL command as an argv element makes Bun escape its quotes for CRT parsing,
+  // but cmd.exe does not use those rules. A batch file preserves paths containing "Program Files".
+  writeFileSync(`${out}/build-stub.cmd`, `@echo off\r\n${cmd}\r\nexit /b %errorlevel%\r\n`);
+  const built = Bun.spawnSync(['cmd', '/d', '/c', 'build-stub.cmd'], { cwd: win(out), stdout: 'inherit', stderr: 'inherit', env: { ...process.env, PATH: `${process.env['ProgramFiles(x86)']}\\Microsoft Visual Studio\\Installer;${process.env.PATH}` } });
   if (built.exitCode !== 0) throw new Error('stub game build failed');
 }
-console.log(`fixtures ready: ${musicDir}, ${stubExe}, ${seeds}`);
+console.log(`fixtures generated: ${musicDir}, ${stubExe}, ${seeds}`);
+if (!checkFixtures()) process.exitCode = 1;
