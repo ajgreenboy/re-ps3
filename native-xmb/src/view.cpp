@@ -1057,7 +1057,7 @@ void View::paintGL() {
         ribbon_.setBootTime(1e9,Coldboot::normalBg);
     }
     // In-game XMB: no wave or particles (xmb_ingame's page_xmb_bg is empty, TRACED F15); the captured game frame,
-    // darkened, is the backdrop instead (the darkening itself is INFERRED, factor unmeasured).
+    // darkened, is the backdrop instead (display-referred estimate: audit/INGAME-FIDELITY-SWEEP.md).
     if(glReady_ && shell_.inGame())drawInGameBackdrop(int(width()*devicePixelRatioF()),int(height()*devicePixelRatioF()));
     else {
         if(!inGameBackdrop_.isNull()){stopLiveCapture();inGameBackdrop_=QImage();}
@@ -4295,11 +4295,12 @@ void setTopmost(HWND window, bool on) {
     SetWindowPos(window, on?HWND_TOPMOST:HWND_NOTOPMOST, 0,0,0,0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
 }
 #endif
-// Darkening of the captured frame. UNMEASURED: no firmware capture of the in-game XMB exists (INGAME-XMB-DESIGN F15
-// and step 5), so 50 % is a placeholder; XMB_INGAME_DIM=<0..1> overrides it for comparison runs.
+// Sony's firmware-2.40 filmed-TV demo retains approximately 18-20 % of game-region luminance after
+// exposure normalization (audit/INGAME-FIDELITY-SWEEP.md). This is an estimate, not a recovered firmware
+// blend constant; XMB_INGAME_DIM=<0..1> overrides it for direct-capture comparisons.
 double inGameDim() {
     bool ok=false;const double v=qEnvironmentVariable("XMB_INGAME_DIM").toDouble(&ok);
-    return ok?std::clamp(v,0.,1.):.5;
+    return ok?std::clamp(v,0.,1.):.8;
 }
 }
 void View::enterInGame(const QString& reason) {

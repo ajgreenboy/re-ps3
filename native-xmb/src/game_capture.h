@@ -61,9 +61,10 @@ GameWindowInfo classifyGameWindow(quintptr hwnd);
 // The visible, uncloaked top-level window of `pid` with the largest area (0 if none).
 quintptr findMainWindow(quint32 pid);
 
-// Capture one frame of `hwnd` with Windows.Graphics.Capture, bounded by
-// timeoutMs (default 2 s). Runs the WinRT work on its own MTA thread so the
-// caller's apartment (e.g. Qt's STA) is irrelevant. Never throws.
+// Capture one frame of `hwnd` with Windows.Graphics.Capture. timeoutMs (default
+// 2 s) bounds the first-frame wait only, not device creation/readback/teardown.
+// Runs WinRT work on its own MTA thread but joins it synchronously: the caller
+// blocks until capture finishes. The caller's apartment is irrelevant. Never throws.
 GameCaptureResult captureGameWindow(quintptr hwnd, int timeoutMs = 2000);
 
 // True when `pid` is `rootPid` or a descendant of it (Toolhelp snapshot; a launcher that

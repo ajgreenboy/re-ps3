@@ -316,7 +316,8 @@ GameCaptureResult captureGameWindow(quintptr handle, int timeoutMs) {
     GameCaptureResult out;
     HWND hwnd = reinterpret_cast<HWND>(handle);
     if (!hwnd || !IsWindow(hwnd)) { out.detail = QStringLiteral("not a window"); return out; }
-    // Own MTA thread: independent of the caller's apartment. Every wait inside is bounded by timeoutMs.
+    // Own MTA thread: independent of the caller's apartment. Only the first-frame wait is bounded by
+    // timeoutMs; device creation, GPU readback and teardown can extend the synchronous join below.
     std::thread worker([&] { out = captureImpl(hwnd, timeoutMs); });
     worker.join();
     return out;
