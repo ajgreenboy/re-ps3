@@ -25,6 +25,7 @@ empty.txt
 
 # Local investigation outputs; retain source tooling used by the handoff.
 /work/*
+!/work/release-reader/
 !/work/*.ts
 !/work/*.ps1
 !/work/*.cpp
