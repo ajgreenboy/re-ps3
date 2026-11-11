@@ -226,6 +226,65 @@ struct RowSpec {
     const char* literalTitle=nullptr;   // last-resort label, and the whole label of a native-only row
     const char* literalDetail=nullptr;  // native-only explanation (never used for a firmware row)
 };
+// Only entry pages are reconstructed. Destructive/progress/result pages are deliberately not
+// traversed when their operation has no PC backend: reaching "completed" would be a false claim.
+// XMBML supplies the segment entry points; sysconf_plugin's MItems supply nested labels/order.
+enum class SubpageKind { Authored, Printers, Audio, Camera, Controllers, Display, Clock, Power, About, Unavailable };
+struct SubpageSpec {
+    const char* parent; const char* row; const char* id; const char* titleKey;
+    const char* title; const char* rcoPage; SubpageKind kind; const char* reason;
+};
+const QVector<SubpageSpec>& settingsSubpages() {
+    static const QVector<SubpageSpec> pages{
+        {"system","backup_utility","settings/backup","msg_backup_utility","Backup Utility","page_backup_utility_select_ask",SubpageKind::Authored,
+            "Unavailable: this build has no PS3 system-storage backup or restore backend. PC files are not PS3 backup data; no files will be copied, restored or deleted."},
+        {"system","disc_utility","settings/format","msg_disc_utility","Format Utility","page_console_disc_utility_select",SubpageKind::Unavailable,
+            "Unavailable: there is no PS3 system storage to format. Host volumes will never be formatted by this application."},
+        {"system","init_console","settings/restore-system","msg_init_console","Restore PS3 System","page_console_init_ps3_top",SubpageKind::Unavailable,
+            "Unavailable: there is no PS3 system to restore. This application does not reset Windows or erase host files."},
+        {"system","data_transfer","settings/transfer","msg_data_transfer_utility","Data Transfer Utility",nullptr,SubpageKind::Unavailable,
+            "Unavailable: PS3-to-PS3 transfer requires two consoles and their storage protocol. No host files will be transferred."},
+        {"system","vita_list","settings/vita-list","msg_settings_reg_psvita_list","List of Registered PS Vita Systems","page_console_reg_psvita_list_no_device",SubpageKind::Unavailable,
+            "Unavailable: this application has no PS Vita registration service or registered systems."},
+        {"system","aboutps3","settings/about","msg_aboutps3","About PlayStation 3",nullptr,SubpageKind::About,nullptr},
+        {"print","printer_selection","settings/printer-selection","msg_printer_selection","Printer Selection",nullptr,SubpageKind::Printers,nullptr},
+        {"print","printer_manager","settings/printer-manager","msg_printer_manager","Printer Manager",nullptr,SubpageKind::Printers,nullptr},
+        {"device","pd_calibrate_motion_controller","settings/motion","msg_calibrate_motion_controller","Calibrate Motion Controller",nullptr,SubpageKind::Unavailable,
+            "Unavailable: PlayStation Move calibration is not implemented by the host controller driver. No calibration has been performed."},
+        {"device","pd_pad_assign","settings/controllers","msg_controller_assign2","Reassign Controllers",nullptr,SubpageKind::Controllers,nullptr},
+        {"device","pd_bdremote_reg","settings/bd-remote","msg_bdremote_registration","Register BD Remote Control",nullptr,SubpageKind::Unavailable,
+            "Unavailable: this build has no PS3 BD remote registration protocol. Use Windows Bluetooth settings to pair a supported host device."},
+        {"device","pd_camera","settings/camera","msg_camera_device_setting","Camera Device Settings","page_device_config_camera_setting",SubpageKind::Camera,nullptr},
+        {"device","pd_audio_setting","settings/audio-devices","msg_audio_device_setting","Audio Device Settings",nullptr,SubpageKind::Audio,nullptr},
+        {"display","display_output_setting","settings/video-output","msg_display_output_setting","Video Output Settings","page_display_output_config_port_tv_select",SubpageKind::Display,nullptr},
+        {"settings/video-output","tvtype","settings/tv-type","msg_tvtype","TV Type","page_display_output_config_tvtype_select",SubpageKind::Authored,
+            "Unavailable: this application's display follows the Windows desktop. It does not force a console TV aspect ratio or alter your display mode."},
+        {"date","datetime","settings/date-time","msg_datetime","Date and Time","page_date_time_config_set_date_time",SubpageKind::Clock,nullptr},
+        {"security","pw_change","settings/password","msg_pw_change","Change Password",nullptr,SubpageKind::Unavailable,
+            "Unavailable: this application has no parental-control PIN store. Your Windows password will not be read or changed."},
+        {"remote","device_registration","settings/remote-register","msg_device_registration","Register Device","page_remote_config_regist_select",SubpageKind::Authored,
+            "Unavailable: this build has no PS3 Remote Play registration server. No device will be registered and no pairing code will be fabricated."},
+        {"remote","device_registration_list","settings/remote-list","msg_device_registration_list","Registered Device List","page_remote_config_list_no_device",SubpageKind::Unavailable,
+            "Unavailable: this application has no Remote Play registrations."},
+        {"remote","custom_connection_setting","settings/remote-custom","msg_custom_connection_setting","Custom Connection Settings","page_remote_config_custom",SubpageKind::Unavailable,
+            "Unavailable: this application does not create a PS3 Remote Play wireless network. Host Wi-Fi settings will not be changed."},
+        {"power","idle","settings/auto-off","msg_system_auto_power_off","System Auto-Off","page_console_auto_power_off_option",SubpageKind::Power,nullptr}};
+    return pages;
+}
+const SubpageSpec* settingsSubpage(const QString& id) {
+    for(const auto& page:settingsSubpages())if(id==QLatin1String(page.id))return &page;
+    return nullptr;
+}
+void routeSettingsSubpage(Entry& entry) {
+    for(const auto& page:settingsSubpages()) {
+        if(entry.settingsPage!=QLatin1String(page.parent) || entry.id!=QLatin1String(page.row))continue;
+        entry.action=Action::SettingsPage;entry.value=QString::fromLatin1(page.id);entry.setting.clear();
+        break;
+    }
+    // Use the already-working host Bluetooth app, rather than a second nonfunctional pairing page.
+    if(entry.settingsPage==QLatin1String("device") && entry.id==QLatin1String("pd_bt_utility"))
+        entry.action=Action::BluetoothApp;
+}
 Entry rowEntry(const RowSpec& spec,Assets& assets,const QString& pageId) {
     const auto text=[&assets](const char* key){return key?assets.text("sysconf_plugin",QString::fromLatin1(key)):QString{};};
     const auto title=text(spec.titleKey);
@@ -247,6 +306,7 @@ Entry rowEntry(const RowSpec& spec,Assets& assets,const QString& pageId) {
     // The page the row belongs to: Shell::valueText and Shell::activate use it to resolve the live value and
     // the information page through host::rowValue / host::rowDetail.
     entry.settingsPage=pageId;
+    routeSettingsSubpage(entry);
     // Where the label came from, so the entry dump says which rows are the firmware's and which are this
     // build's own (Entry::source, audit/MENUS-XMBML.md 4).
     if(!title.isEmpty())entry.source=QStringLiteral("rco");
@@ -475,6 +535,7 @@ struct PageRows {
     QStringList nativeOnly; // ids of the rows in this build and not in the firmware's page
     QJsonArray firmware;    // the definition's own rows (or the RCO sub-page set), row for row
 };
+PageRows settingsSubpageRows(const SubpageSpec& spec,Assets& assets);
 // --- The three two-level pages: Game, Accessory, Network -------------------------------------------
 // audit/SETTINGS-FIRMWARE.md 1.1/5.1/5.9/5.15: in the definition each of the three is a child=segment
 // row whose page lists the rows of seg_<name> -> seg_*_fixed_upper|middle|lower (+ the USB-headset,
@@ -575,6 +636,7 @@ PageRows segmentRows(const QString& id,Assets& assets) {
             binding==bindings.cend()?Action::Information:binding->action,
             binding==bindings.cend()?QString{}:QString::fromLatin1(binding->value));
         entry.settingsPage=id;
+        routeSettingsSubpage(entry);
         entry.source=fieldSourceName(row.titleSource);
         data.firmware.push_back(QJsonObject{{"id",row.id},{"key",key},{"group",row.queryKey},
             {"title",row.title},{"titleRsc",row.titleRsc},{"infoRsc",row.infoRsc},{"iconRsc",row.iconRsc},
@@ -601,6 +663,7 @@ PageRows segmentRows(const QString& id,Assets& assets) {
     return data;
 }
 PageRows pageRows(const QString& id,Assets& assets,const QString& dateTimeInfo) {
+    if(const auto* subpage=settingsSubpage(id))return settingsSubpageRows(*subpage,assets);
     if(id=="game"||id=="device"||id=="network")return segmentRows(id,assets);
     PageRows data;data.id=id;
     static const QHash<QString,QString> pageTitles{
@@ -618,8 +681,9 @@ PageRows pageRows(const QString& id,Assets& assets,const QString& dateTimeInfo) 
         Entry entry=rowEntry(spec,assets,id);
         // The Date and Time row's own page carries the live clock readout (the firmware opens a set page
         // there; this build reports the host clock it follows - SETTINGS 5.7).
-        if(id=="date" && entry.id=="datetime")entry.value=dateTimeInfo;
-        data.firmware.push_back(QJsonObject{{"id",QString::fromLatin1(spec.id)},
+        if(id=="date" && entry.id=="datetime" && entry.action==Action::Information)entry.value=dateTimeInfo;
+        if(!spec.titleKey)data.nativeOnly<<entry.id; // e.g. System Check is app-owned, not a 27th firmware row
+        else data.firmware.push_back(QJsonObject{{"id",QString::fromLatin1(spec.id)},
             {"titleRsc",spec.titleKey?QString::fromLatin1(spec.titleKey):QString{}},
             {"infoRsc",spec.infoKey?QString::fromLatin1(spec.infoKey):QString{}},
             {"action",int(entry.action)}});
@@ -646,7 +710,7 @@ PageRows pageRows(const QString& id,Assets& assets,const QString& dateTimeInfo) 
 }
 // System Update: the one page whose rows come from the software-update plugin, not sysconf_plugin (SETTINGS
 // 5.16/U8). Its two rows are real dispositions here, so the page is built once and shared by the page and
-// the report: no update channel exists in this build, and there is no PS3 system software to install.
+// the report. Internet uses the app's own opt-in updater; no PS3 system software is installed.
 PageRows updateRows(Assets& assets) {
     PageRows data;data.id=QStringLiteral("update");
     data.title=assets.text("software_update_plugin",QStringLiteral("msg_update"),QStringLiteral("System Update"));
@@ -655,6 +719,7 @@ PageRows updateRows(Assets& assets) {
     auto net=rowEntry(RowSpec{"net","msg_update_net","msg_update_net_explanation",Action::Information,nullptr,
         nullptr,"Update via Internet",nullptr},assets,data.id);
     net.detail=su("msg_update_net_explanation","Checks for a system software update over the Internet.");
+    net.action=Action::SystemUpdate; // the same opt-in release updater as System Settings > System Update
     auto media=rowEntry(RowSpec{"media","msg_update_media","msg_update_media_explanation",Action::Information,nullptr,
         nullptr,"Update via Storage Media",nullptr},assets,data.id);
     media.detail=su("msg_update_media_explanation","Checks a storage device for a system software update file.");
@@ -928,6 +993,143 @@ ChoiceList themeCaptureChoices(const QVariant& current) {
     }
     return list;
 }
+// Read-only nested rows keep readings here, never in Preferences. "Unavailable" is not a real value.
+QVariantMap subpageReading(const Entry& entry) {
+    return entry.settingsPage.startsWith(QLatin1String("settings/"))?entry.option.toMap():QVariantMap{};
+}
+host::Reading settingsReading(const Entry& entry) {
+    if(entry.action==Action::SystemUpdate)return {{},QStringLiteral("app"),QStringLiteral("action"),
+        QStringLiteral("Checks this application's release server using the existing opt-in updater. PS3 system software is not installed."),true};
+    return host::rowValue(entry.settingsPage,entry.id);
+}
+PageRows settingsSubpageRows(const SubpageSpec& spec,Assets& assets) {
+    PageRows data;data.id=QString::fromLatin1(spec.id);
+    data.title=assets.text("sysconf_plugin",QString::fromLatin1(spec.titleKey),QString::fromLatin1(spec.title));
+    const auto& machine=host::snapshot();
+    const auto text=[&assets](const char* container,const char* key,const char* fallback) {
+        return assets.text(QString::fromLatin1(container),QString::fromLatin1(key),QString::fromLatin1(fallback));
+    };
+    const auto append=[&](const QString& id,const QString& title,const QString& value,const QString& body,
+                          bool real,const QString& source,bool nativeOnly=false,const QString& titleRsc=QString{}) {
+        auto entry=option(id,title,body,{},Action::Information);
+        entry.settingsPage=data.id;entry.source=source;
+        entry.option=QVariantMap{{"value",value},{"body",body},{"coverage",real?QStringLiteral("real"):QStringLiteral("placeholder")},
+            {"source",source},{"status",real?QStringLiteral("read-only"):QStringLiteral("unavailable")}};
+        if(nativeOnly)data.nativeOnly<<id;
+        else data.firmware.push_back(QJsonObject{{"id",id},{"titleRsc",titleRsc}});
+        data.entries.push_back(std::move(entry));
+    };
+    const auto unavailable=[&](const QString& reason) {
+        append(QStringLiteral("unavailable"),data.title,QStringLiteral("Unavailable"),reason,false,QStringLiteral("none"),true);
+    };
+    const auto authored=[&](const QString& reason) {
+        if(!spec.rcoPage)return;
+        const auto page=readChoicePage(assets,QStringLiteral("sysconf_plugin"),QString::fromLatin1(spec.rcoPage));
+        for(const auto* item:page.items) {
+            auto label=choiceItemLabel(*page.container,*item);
+            if(label.isEmpty())continue;
+            QString titleRsc;
+            for(const auto& property:page.container->properties(*item))
+                if(property.name==QLatin1String("text") && property.value.refKind()==RcoObjects::RefKind::Text)
+                    titleRsc=page.container->textLabel(property.value.target);
+            // The Vita MItem ships with the PSP seed text; its identity and the dedicated Vita
+            // string are separate firmware resources. Use that item's runtime label, not two PSPs.
+            if(item->name==QLatin1String("mitem_remote_config_regist_vita")) {
+                titleRsc=QStringLiteral("msg_vita_abbreviated");
+                label=assets.text("sysconf_plugin",titleRsc,QStringLiteral("PS Vita System"));
+            }
+            append(item->name,label,QStringLiteral("Unavailable"),reason,false,QStringLiteral("rco"),false,titleRsc);
+        }
+        if(!page.error.isEmpty())data.notes<<page.error;
+    };
+    switch(spec.kind) {
+    case SubpageKind::Authored:
+        authored(QString::fromLatin1(spec.reason));break;
+    case SubpageKind::Printers:
+        // print_plugin's lists are runtime-populated. These Windows spooler records are not
+        // claimed PS3-compatible printers, and enumeration does not select a default printer.
+        for(const auto& printer:machine.printers) {
+            const auto state=printer.offline?QStringLiteral("Offline"):QStringLiteral("Installed");
+            const auto body=QStringLiteral("Windows printer: %1\nDriver: %2\nPort: %3\nStatus: %4\nDefault: %5\n\nRead-only. This build does not submit print jobs, register PS3 printers or change the Windows default printer.")
+                .arg(printer.name,printer.driver,printer.port,state,printer.isDefault?QStringLiteral("Yes"):QStringLiteral("No"));
+            append(QStringLiteral("printer-%1").arg(data.entries.size()),printer.name,state,body,true,QStringLiteral("win32"),true);
+        }
+        if(data.entries.isEmpty())unavailable(QStringLiteral("No Windows printers were reported by the print spooler. This build cannot register a PS3 printer or submit print jobs."));
+        break;
+    case SubpageKind::Audio: {
+        // deviceconf_plugin's authored order: Microphone Level, Input Device, Output Device.
+        append(QStringLiteral("microphone"),text("deviceconf_plugin","msg_mic_volume","Microphone Level"),QStringLiteral("Unavailable"),
+            machine.audioInputs.isEmpty()?text("deviceconf_plugin","msg_error_no_mic","No microphone was found."):
+                QStringLiteral("Unavailable: capture-level adjustment and microphone monitoring are not implemented. No microphone is opened."),
+            false,QStringLiteral("rco"),false,QStringLiteral("msg_mic_volume"));
+        for(const bool input:{true,false}) {
+            const auto& devices=input?machine.audioInputs:machine.audioOutputs;
+            QStringList names;
+            for(const auto& device:devices)names<<QStringLiteral("%1%2 - %3 Hz, %4 channels").arg(device.name,
+                device.isDefault?QStringLiteral(" (Windows default)"):QString{}).arg(device.sampleRate).arg(device.channels);
+            const auto key=input?"msg_input_device":"msg_output_device";
+            append(input?QStringLiteral("input"):QStringLiteral("output"),text("deviceconf_plugin",key,input?"Input Device":"Output Device"),
+                devices.isEmpty()?QStringLiteral("Unavailable"):QStringLiteral("%1 device(s)").arg(devices.size()),
+                names.isEmpty()?QStringLiteral("No active Windows audio endpoint was reported."):
+                    names.join(QLatin1Char('\n'))+QStringLiteral("\n\nRead-only host endpoints. Playback output can be changed in Sound Settings > Audio Output Settings; this page does not configure console voice chat."),
+                !devices.isEmpty(),QStringLiteral("com"),false,QString::fromLatin1(key));
+        }
+        break;
+    }
+    case SubpageKind::Camera:
+        for(const auto& camera:machine.cameras)
+            append(QStringLiteral("camera-%1").arg(data.entries.size()),camera,QStringLiteral("Detected"),
+                camera+QStringLiteral("\n\nRead-only camera enumeration. Preview and camera flicker adjustment are not implemented; the camera is not opened."),true,QStringLiteral("qt"),true);
+        if(data.entries.isEmpty())unavailable(QStringLiteral("No Windows camera was reported. Camera preview and flicker adjustment are not implemented."));
+        append(QStringLiteral("flicker"),text("sysconf_plugin","msg_anti_flicker","Flicker Reduction"),QStringLiteral("Unavailable"),
+            QStringLiteral("Unavailable: no camera-control backend is implemented. No flicker-reduction value will be fabricated or written."),
+            false,QStringLiteral("rco"),false,QStringLiteral("msg_anti_flicker"));
+        break;
+    case SubpageKind::Controllers:
+        for(const auto& pad:machine.pads)
+            append(QStringLiteral("controller-%1").arg(data.entries.size()),pad.name,pad.transport,
+                QStringLiteral("%1\nTransport: %2\nVendor: %3\nProduct: %4\n\nRead-only host device. Controller reassignment belongs to the host driver; this page does not change player slots.")
+                    .arg(pad.name,pad.transport,pad.vendor,pad.product),true,QStringLiteral("hid"),true);
+        if(data.entries.isEmpty())unavailable(QStringLiteral("No supported host controller was reported. This build cannot reassign controller slots."));
+        break;
+    case SubpageKind::Display:
+        authored(QStringLiteral("Unavailable: PS3 output connectors cannot be selected on this PC. The current Windows display mode is reported below; no resolution test or connector change will be simulated."));
+        append(QStringLiteral("resolution"),text("sysconf_plugin","msg_resolution","Resolution"),{},
+            host::displayOutput(),!machine.displays.isEmpty(),QStringLiteral("win32"),false,QStringLiteral("msg_resolution"));
+        {
+            auto tv=option(QStringLiteral("tvtype"),text("sysconf_plugin","msg_tvtype","TV Type"),{},{});
+            tv.settingsPage=data.id;routeSettingsSubpage(tv);data.entries<<tv;
+            data.firmware.push_back(QJsonObject{{"id",tv.id},{"titleRsc","msg_tvtype"}});
+        }
+        break;
+    case SubpageKind::Clock:
+        append(QStringLiteral("clock"),data.title,machine.clock.now.toString(Qt::ISODate),
+            machine.clock.now.toString(Qt::ISODate)+QStringLiteral("\nTime zone: ")+machine.clock.timeZoneId+
+                QStringLiteral("\n\nRead-only host clock. This application never sets the Windows date or time. XMB display format and time zone remain adjustable on the parent page."),true,QStringLiteral("qt"));break;
+    case SubpageKind::Power: {
+        auto timer=option(QStringLiteral("media"),text("sysconf_plugin","msg_video_tv_music_photo","Video/TV/Music/Photo"),
+            QStringLiteral("This build uses one shared application idle timer for every feature, not independent console timers. The timer requests display-off; it does not shut down Windows."),QStringLiteral("power/idleMinutes"));
+        timer.settingsPage=data.id;timer.source=QStringLiteral("rco");data.entries<<timer;
+        data.firmware.push_back(QJsonObject{{"id",timer.id},{"titleRsc","msg_video_tv_music_photo"}});
+        append(QStringLiteral("game"),text("sysconf_plugin","msg_game_other_feature","Game/Other Features"),QStringLiteral("Unavailable"),
+            QStringLiteral("Unavailable: a separate Game/Other Features timer is not implemented. The preceding timer applies to every feature; no independent timer value is stored."),false,QStringLiteral("rco"),false,QStringLiteral("msg_game_other_feature"));
+        break;
+    }
+    case SubpageKind::About:
+        append(QStringLiteral("build"),data.title,machine.appVersion,
+            QStringLiteral("Native XMB %1\nQt %2\n%3\n\nThis is a Windows application, not PlayStation 3 system software. Sony firmware copyright notices describe that firmware, not this build.")
+                .arg(machine.appVersion,machine.qtVersion,machine.osName),true,QStringLiteral("app"),true);break;
+    case SubpageKind::Unavailable:
+        if(data.id==QLatin1String("settings/format"))
+            append(QStringLiteral("system-storage"),text("sysconf_plugin","msg_hdd_format","Format System Storage"),QStringLiteral("Unavailable"),
+                QString::fromLatin1(spec.reason),false,QStringLiteral("rco"),false,QStringLiteral("msg_hdd_format"));
+        else unavailable(QString::fromLatin1(spec.reason));
+        break;
+    }
+    if(data.entries.isEmpty())unavailable(QString::fromLatin1(spec.reason?spec.reason:
+        "Unavailable: the firmware page could not be read. No operation has been performed."));
+    return data;
+}
 // A list this build's own choices() produces, because the firmware has no shipped list: an empty RCO
 // page, a native-only row, or a row whose page object is absent. The labels are this build's, marked as
 // such - never presented as the firmware's.
@@ -1147,6 +1349,7 @@ QVector<ChoiceList> choiceListsForRows(const QString& pageId,const QVector<Entry
                                        const std::function<QVariant(const QString&)>& currentFor) {
     QVector<ChoiceList> lists;
     for(const auto& entry:rows) {
+        if(entry.action==Action::SettingsPage)continue; // choices moved to their own nested page
         const auto current=entry.setting.isEmpty()||!currentFor?QVariant{}:currentFor(entry.setting);
         auto list=buildChoiceList(pageId,entry,assets,current);
         // A row is a choice row when it has a page, a note about a missing page, or a native list.
@@ -1191,7 +1394,7 @@ QJsonObject choiceListJson(const ChoiceList& list) {
 // The Settings-column page order (SETTINGS 1.1/10.2), for the aggregate catalogue.
 const QStringList& choicePageOrder() {
     static const QStringList pages{"game","video","music","chat","system","theme","date","power","device",
-        "print","display","sound","security","remote","network","photo"};
+        "print","display","sound","security","remote","network","photo","settings/auto-off"};
     return pages;
 }
 // The aggregate catalogue: every page's choice rows in one file, so a run that opens any settings page
@@ -1257,7 +1460,7 @@ void dumpSettingsPage(const PageRows& data,Assets& assets,
         // the app's own store. A row with neither is an action (a picker, a page, a confirmed reset), which
         // is what the console draws too. This is the dump a verification grep can read to prove no settings
         // row shows a placeholder.
-        const auto reading=host::rowValue(data.id,entry.id);
+        const auto reading=settingsReading(entry);
         QString display=reading.text;
         QString valueSource=reading.source;
         QString valueStatus=reading.status;
@@ -1284,8 +1487,16 @@ void dumpSettingsPage(const PageRows& data,Assets& assets,
             valueStatus=QStringLiteral("live");
         }
         // The coverage verdict travels with the dump, so a page capture can be checked without the report.
-        const auto coverage=entry.action==Action::Unavailable?QStringLiteral("placeholder"):
-            (!display.isEmpty() || entry.action==Action::ResetPreferences)?QStringLiteral("real"):QStringLiteral("placeholder");
+        const auto nested=subpageReading(entry);
+        if(!nested.isEmpty()) {
+            display=nested.value("value").toString();valueSource=nested.value("source").toString();
+            valueStatus=nested.value("status").toString();
+        }
+        const auto coverage=!nested.isEmpty()?nested.value("coverage").toString():
+            entry.action==Action::Unavailable?QStringLiteral("placeholder"):
+            (!display.isEmpty() || entry.action==Action::ResetPreferences ||
+             (entry.action==Action::SettingsPage && settingsSubpage(entry.value)) ||
+             entry.action==Action::SystemUpdate || entry.action==Action::BluetoothApp)?QStringLiteral("real"):QStringLiteral("placeholder");
         rows.push_back(QJsonObject{{"id",entry.id},{"title",entry.title},{"detail",entry.detail},
             {"action",int(entry.action)},{"setting",entry.setting},{"value",entry.value.left(80)},
             {"displayValue",display},{"valueSource",valueSource},{"valueStatus",valueStatus},
@@ -1298,7 +1509,8 @@ void dumpSettingsPage(const PageRows& data,Assets& assets,
     QJsonObject object{{"page",data.id},{"title",data.title},{"count",int(data.entries.size())},
         {"rows",rows},{"firmware",data.firmware},{"choices",choices},
         {"skipped",QJsonArray::fromStringList(data.notes)}};
-    QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".settings-"+data.id+".json");
+    auto dumpId=data.id;dumpId.replace(QLatin1Char('/'),QLatin1Char('-'));
+    QFile file(qEnvironmentVariable("XMB_DUMP_ENTRIES")+".settings-"+dumpId+".json");
     if(file.open(QIODevice::WriteOnly))file.write(QJsonDocument(object).toJson());
     else qWarning().noquote()<<"settings: cannot write the"<<data.id<<"page dump";
 }
@@ -1634,6 +1846,8 @@ const QVector<OptionPage>& rowOptionPages() {
 }  // namespace
 
 QString settingsRowBody(const Entry& row,Assets& assets,const QString& renderer,const QString& systemName) {
+    const auto nested=subpageReading(row);
+    if(!nested.isEmpty())return row.title+QStringLiteral("\n\n")+nested.value("body").toString();
     QString body;
     const host::Label label=[&assets](const QString& id,const QString& fallback){
         return assets.text("sysconf_plugin",id,fallback);};
@@ -1683,6 +1897,8 @@ const char* crossName(Action action) {    switch(action) {
     case Action::Wallpaper:return "wallpaper";
     case Action::Theme:return "themeFile";
     case Action::ResetPreferences:return "confirmReset";
+    case Action::SystemUpdate:return "checkUpdate";
+    case Action::BluetoothApp:return "bluetooth";
     case Action::Unavailable:return "none";
     default:return "other";
     }
@@ -1719,7 +1935,12 @@ const InventoryPage* inventoryFor(const QString& id) {
 // row a page really draws is `placeholder`. `absent` is never returned here: a row with no native row at
 // all is counted against the inventory instead, so the report can prove that one is missing.
 QString rowCoverage(const Entry& entry,const QString& value) {
+    const auto nested=subpageReading(entry);
+    if(!nested.isEmpty())return nested.value("coverage").toString();
     if(entry.action==Action::Unavailable)return QStringLiteral("placeholder");
+    if(entry.action==Action::SettingsPage && settingsSubpage(entry.value))return QStringLiteral("real");
+    if(entry.action==Action::SystemUpdate || entry.action==Action::BluetoothApp)return QStringLiteral("real");
+    if(entry.settingsPage==QLatin1String("system") && entry.id==QLatin1String("information"))return QStringLiteral("real");
     if(!value.isEmpty())return QStringLiteral("real");
     if(entry.action==Action::ResetPreferences)return QStringLiteral("real");
     return QStringLiteral("placeholder");
@@ -1954,7 +2175,7 @@ QJsonObject settingsReport(Assets& assets,Preferences& preferences,const QString
         QJsonArray rowArray;
         int order=0,present=0,pageReal=0,pagePlaceholder=0;
         for(const auto& entry:data.entries) {
-            const auto reading=host::rowValue(pageId,entry.id);
+            const auto reading=settingsReading(entry);
             QString value=reading.text;
             QString valueSource=value.isEmpty()?QString{}:QStringLiteral("host:")+reading.source;
             QString status=reading.status;
@@ -2001,6 +2222,7 @@ QJsonObject settingsReport(Assets& assets,Preferences& preferences,const QString
                 {"hostSource",nullIfEmpty(source)},{"note",nullIfEmpty(reading.note)},
                 {"reason",value.isEmpty()?nullIfEmpty(reading.note):QJsonValue(QJsonValue::Null)},
                 {"action",QString::fromLatin1(crossName(entry.action))},{"actionId",int(entry.action)},
+                {"opensPage",entry.action==Action::SettingsPage?nullIfEmpty(entry.value):QJsonValue(QJsonValue::Null)},
                 {"cross",QString::fromLatin1(crossName(entry.action))},
                 {"coverage",coverage},
                 {"nativeOnly",nativeOnly},{"writable",writes},{"setting",entry.setting},
@@ -2030,6 +2252,47 @@ QJsonObject settingsReport(Assets& assets,Preferences& preferences,const QString
         pages.push_back(pageObject);
     }
     report["pages"]=pages;
+
+    // Additional depth-2 inventory, kept separate from the historical column/page/status-list basis.
+    // This includes every reachable nested row (also host-dependent printer/controller/camera lists),
+    // with explicit provenance and refusals. A synthetic empty-list explanation is native-only, never
+    // passed off as a firmware MItem. Parent rows above carry opensPage for a machine-checkable join.
+    QJsonArray subpages;
+    int subpageRows=0,subpageReal=0,subpagePlaceholder=0;
+    for(const auto& spec:settingsSubpages()) {
+        const auto data=settingsSubpageRows(spec,assets);
+        QJsonArray rows;
+        int order=0;
+        for(const auto& entry:data.entries) {
+            const auto reading=subpageReading(entry);
+            auto value=reading.value("value").toString();
+            if(!entry.setting.isEmpty())value=settingsChoiceLabel(entry.setting,preferences.value(entry.setting),assets);
+            const auto coverage=rowCoverage(entry,value);
+            if(coverage==QLatin1String("real"))++subpageReal;else ++subpagePlaceholder;
+            ++subpageRows;
+            QString titleRsc;
+            for(const auto& firmware:data.firmware)
+                if(firmware.toObject().value("id").toString()==entry.id)titleRsc=firmware.toObject().value("titleRsc").toString();
+            rows.push_back(QJsonObject{{"id",entry.id},{"title",entry.title},{"order",order++},
+                {"value",nullIfEmpty(value)},{"valueText",settingsRowBody(entry,assets)},
+                {"valueSource",entry.setting.isEmpty()?reading.value("source").toString():QStringLiteral("app")},
+                {"valueStatus",entry.setting.isEmpty()?reading.value("status").toString():QStringLiteral("live")},
+                {"coverage",coverage},{"action",QString::fromLatin1(crossName(entry.action))},
+                {"opensPage",entry.action==Action::SettingsPage?nullIfEmpty(entry.value):QJsonValue(QJsonValue::Null)},
+                {"setting",entry.setting},{"writable",!entry.setting.isEmpty()},
+                {"nativeOnly",data.nativeOnly.contains(entry.id)},{"firmwareRsc",nullIfEmpty(titleRsc)}});
+        }
+        subpages.push_back(QJsonObject{{"id",data.id},{"title",data.title},{"level",2},
+            {"parentPage",QString::fromLatin1(spec.parent)},{"parentRow",QString::fromLatin1(spec.row)},
+            {"firmwarePage",spec.rcoPage?QJsonValue(QString::fromLatin1(spec.rcoPage)):QJsonValue(QJsonValue::Null)},
+            {"rows",rows},{"count",rows.size()},{"notes",QJsonArray::fromStringList(data.notes)}});
+    }
+    report["subpages"]=subpages;
+    for(const auto& subpage:subpages)pages.push_back(subpage);
+    report["pages"]=pages; // also makes --settings-page work for nested ids without changing main.cpp
+    report["subpageInventory"]=QJsonObject{{"pages",subpages.size()},{"rows",subpageRows},
+        {"real",subpageReal},{"placeholder",subpagePlaceholder},{"absent",0},
+        {"note","Additional depth-2 surface; host device rows vary by machine. Historical inventory totals below retain their original counting basis."}};
 
     // ---- the inventory's own totals: 16 column entries + 112 page rows + 13 status rows = 141 --------
     int inventoryTotal=0;
@@ -2184,6 +2447,8 @@ void Shell::openChoices(const QString& key,const QString& title) {
     pages_.push_back(std::move(page));
 }
 QString Shell::valueText(const Entry& entry) const {
+    const auto nested=subpageReading(entry);
+    if(!nested.isEmpty())return nested.value("value").toString();
     if(entry.setting=="media/repeatMode")return QStringList{"Off","Repeat One","Repeat All"}.value(mediaRepeatMode());
     if(entry.action==Action::SelectUser)return !loggedOut_ && entry.value==profiles_.activeId()?QString(QChar(0x25cf)):QString{};
     // ---- the Settings pages ------------------------------------------------------------------------
