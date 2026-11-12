@@ -163,8 +163,8 @@ try {
     QProcess process; auto env = QProcessEnvironment::systemEnvironment();
     env.insert(QStringLiteral("XMB_UPDATE_ZIP"), QFileInfo(zipPath).absoluteFilePath()); env.insert(QStringLiteral("XMB_UPDATE_DEST"), destination); process.setProcessEnvironment(env);
     process.start(QStringLiteral("powershell.exe"), {QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"), QStringLiteral("-Command"), script});
-    if(!process.waitForStarted(5000) || !process.waitForFinished(120000)) { process.kill(); process.waitForFinished(); fail(error, QStringLiteral("ZIP extraction timed out or could not start")); return false; }
-    if(process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || !QFileInfo::exists(destination + QStringLiteral("/re-ps3-native.exe"))) { fail(error, QStringLiteral("ZIP extraction failed or package is missing the executable; staging folder: %1").arg(destination)); return false; }
+    if(!process.waitForStarted(5000) || !process.waitForFinished(120000)) { process.kill(); process.waitForFinished(); QDir(destination).removeRecursively(); fail(error, QStringLiteral("ZIP extraction timed out or could not start")); return false; }
+    if(process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || !QFileInfo::exists(destination + QStringLiteral("/re-ps3-native.exe"))) { QDir(destination).removeRecursively(); fail(error, QStringLiteral("ZIP extraction failed or package is missing the executable")); return false; }
     if(stagedPath) *stagedPath = destination; if(error) error->clear(); return true;
 }
 } // namespace xmb
