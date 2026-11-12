@@ -10,7 +10,7 @@ Run this on the real living-room HTPC, in order. Record each row in the Pass/Fai
 - `<native-data>`: the folder the README names for `spotify.json`, `dlna.json`, `wol.json`, `homeassistant.json`, `weather.json` and `playlists\`. It is the `<data>` folder: every service reads its json from the data directory (`dataDirectory_`, set by `--data-dir`).
 - `<log>`: the XMB log file, set with `XMB_LOG=<file>` (INSTALL.md section 7.2). Without it, crash stacks go to `<exe folder>\crash.log` (INSTALL.md section 6).
 - `<evidence>`: the evidence folder. The docs define none. TODO: the owner picks one and records its path in the run notes.
-- No tokens, passwords, refresh tokens or account details in screenshots or copied logs. Where a row says "file check", show only that the key is present or absent.
+- No tokens, passwords, refresh tokens or account details in screenshots or copied logs. Where a row says "file check", show only that the key is present or absent. The XMB log names the Windows account, the Tailscale host and audio devices, so scrub every copied log with `bun work/scrub-log.ts <in> <out>` first (audit/DIAGNOSE.md section 3.1).
 - `XMB_INPUT_TRACE=1` adds remote and pad decision lines to the log (INPUT.md section 1). Set it for sections 2.3 and 2.1.
 
 ## 1. Setup on the HTPC

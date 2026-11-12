@@ -336,6 +336,10 @@ Never put a credential in a log. The Steam key is never written to preferences, 
 logs; the Jellyfin token is either in memory or DPAPI-sealed in `jellyfin\session.bin`, and stream
 requests go through the loopback gateway.
 
+Logs are not redacted at the source: the XMB log names the Windows account, the Tailscale host and audio devices.
+Run `bun work/scrub-log.ts <in.log> <out.log>` and read the result before a log leaves the machine
+([audit/DIAGNOSE.md](audit/DIAGNOSE.md) section 3.1 lists what to remove and the redaction rules).
+
 ## 7. Environment switches
 
 Switches are read from the launch environment. A boolean is on when it is set and not `0`, except

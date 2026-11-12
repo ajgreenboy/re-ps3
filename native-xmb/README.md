@@ -68,8 +68,10 @@ captures are distinct from firmware-fidelity evidence.
 ### Sharing logs
 
 `XMB_LOG=<file>` and the launcher's session logs name the Windows account, the Tailscale host and audio devices.
-Scrub a log before it leaves the machine. The redaction rules are in [audit/DIAGNOSE.md](audit/DIAGNOSE.md) section 3
-(drop credential lines, replace user paths and account, host and Steam identities with placeholders); the bundle collector described there is a design, not yet a built option, so scrub by hand until it is.
+Scrub a log before it leaves the machine: `bun work/scrub-log.ts <in.log> <out.log>`, then read the result. The
+redaction rules (drop credential lines, replace user paths and account, host and Steam identities with placeholders)
+are in [audit/DIAGNOSE.md](audit/DIAGNOSE.md) section 3, and section 3.1 lists what to remove by hand. The bundle
+collector designed there is not a built option yet.
 
 ## Application boundaries
 

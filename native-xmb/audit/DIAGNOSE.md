@@ -76,6 +76,26 @@ replacement of an unknown token format is how secrets survive.
 The redactor should be tested with fixtures that contain a fake key, a fake bearer token and a fake
 password, and the test must assert that none of those literals appear in the produced bundle.
 
+### 3.1 Sharing a log today (before the collector exists)
+
+`XMB_LOG=<file>`, the launcher's `sessions\<timestamp>\native.stdout.txt` / `native.stderr.txt` and `crash.log`
+are raw. The XMB's own log is known to write, on a normal run, the **Windows account name**
+(`autologon: on for <user>`), the **Tailscale host name and tailnet address** (`tailscale: status ... self <host>`),
+**audio device names**, library and media paths (which contain the profile name), LAN addresses of configured
+services, and Steam ids or account names when the Steam pages are used. None of that belongs in an issue, a pull
+request, a repository document or a chat. Before a log leaves the machine:
+
+1. Run `bun work/scrub-log.ts <in.log> <out.log>`. It applies the rules above to the lines the XMB writes today:
+   it drops credential-looking lines whole, masks profile paths, the autologon user, the Tailscale host, Steam ids
+   and accounts, MAC addresses and private or tailnet IPv4 addresses, and reports how many lines it touched.
+2. Read the result. The script cannot know your media paths outside the profile folder, audio device names, server
+   host names or titles of what you were playing; replace those by hand (rule: `<path>`, `<host>`, counts only).
+3. In repository documents quote placeholders (`<user>`, `<host>`, `<server-ip>`, `%TEMP%`), never the real value.
+   `work/release-check.ps1` scans tracked files for credentials, but not for names, hosts or paths: that is a
+   review step.
+
+The same rule applies to captures: a screenshot of the Users, Network or Steam pages shows the same identifiers.
+
 ## 4. Size and truncation caps
 
 | Limit | Value |
