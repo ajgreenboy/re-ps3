@@ -90,19 +90,15 @@ void pause(int milliseconds) {
 }
 ReleaseSources::ReleaseSources(const QString& dataDirectory,const Preferences& preferences)
     :dataDirectory_(dataDirectory),preferences_(preferences) {}
-bool ReleaseSources::importSource(const QUrl& jsonUrl,QString* error) {
+bool ReleaseSources::fetchSourceJson(const QUrl& jsonUrl,QVector<IndexedRelease>* releases,QString* name,QString* error) const {
     if(error)error->clear();
     QByteArray bytes; QBuffer buffer(&bytes);buffer.open(QIODevice::WriteOnly);
     QString directError;
     const bool fetched=fetch(jsonUrl,&buffer,64LL*1024*1024,30000,&directError,{},true);
-    // Cloudflare/bot protection shows as either a failed fetch (403) or an HTML challenge body.
-    // When a FlareSolverr endpoint is configured, retry through it.
     const QString solver=preferences_.value(QStringLiteral("debrid/flareSolverrUrl")).toString().trimmed();
     if(!solver.isEmpty() && (!fetched || looksLikeHtml(bytes))) {
         QString solverError;
-        if(FlareSolverr(solver).request(jsonUrl,&bytes,&solverError)) {
-            // challenge solved; fall through to the JSON parse
-        } else {
+        if(!FlareSolverr(solver).request(jsonUrl,&bytes,&solverError)) {
             fail(error,fetched?QStringLiteral("Source returned an HTML challenge (FlareSolverr: %1)").arg(solverError)
                                :QStringLiteral("%1 (FlareSolverr: %2)").arg(directError,solverError));
             return false;
@@ -110,14 +106,23 @@ bool ReleaseSources::importSource(const QUrl& jsonUrl,QString* error) {
     } else if(!fetched) {
         fail(error,directError);return false;
     }
-    // Match Bun's replacement decoding of malformed UTF-8 before JSON parsing.
     QJsonParseError parse;
     const auto document=QJsonDocument::fromJson(QString::fromUtf8(bytes).toUtf8(),&parse);
     if(parse.error!=QJsonParseError::NoError){fail(error,QStringLiteral("Invalid source JSON: ")+parse.errorString());return false;}
-    QString parseError; const auto releases=parseReleaseIndex(document,&parseError);
+    QString parseError; const auto parsed=parseReleaseIndex(document,&parseError);
     if(!parseError.isEmpty()){fail(error,parseError);return false;}
-    QString name=document.object().value(QStringLiteral("name")).toString().trimmed();
-    if(name.isEmpty())name=releases.isEmpty()?QStringLiteral("Source"):releases.first().source;
+    if(releases)*releases=parsed;
+    if(name) {
+        QString sourceName=document.object().value(QStringLiteral("name")).toString().trimmed();
+        if(sourceName.isEmpty())sourceName=parsed.isEmpty()?QStringLiteral("Source"):parsed.first().source;
+        *name=sourceName;
+    }
+    return true;
+}
+bool ReleaseSources::importSource(const QUrl& jsonUrl,QString* error) {
+    if(error)error->clear();
+    QVector<IndexedRelease> releases; QString name;
+    if(!fetchSourceJson(jsonUrl,&releases,&name,error))return false;
     const QString slug=slugFor(name,jsonUrl);
     const QDir directory(QDir(dataDirectory_).filePath(QStringLiteral("sources")));
     if(!QDir().mkpath(directory.path())){fail(error,QStringLiteral("Cannot create sources directory"));return false;}
@@ -130,6 +135,19 @@ bool ReleaseSources::importSource(const QUrl& jsonUrl,QString* error) {
         fail(error,QStringLiteral("Cannot save source: ")+file.errorString());return false;
     }
     return true;
+}
+bool ReleaseSources::removeSource(const QString& slug,QString* error) {
+    if(error)error->clear();
+    const QDir directory(QDir(dataDirectory_).filePath(QStringLiteral("sources")));
+    const QString safe=slugFor(slug,QUrl(QStringLiteral("https://removed.invalid"))).section(QLatin1Char('-'),0,0);
+    for(const auto& entry:directory.entryInfoList({QStringLiteral("*.json")},QDir::Files)) {
+        const QString name=entry.completeBaseName();
+        if(name==slug || name.startsWith(safe+QLatin1Char('-'))) {
+            if(!QFile::remove(entry.filePath())) { fail(error,QStringLiteral("Cannot remove source: ")+name); return false; }
+            return true;
+        }
+    }
+    return true; // already absent
 }
 QVector<ReleaseSource> ReleaseSources::listSources(QString* error) const {
     if(error)error->clear();
@@ -154,6 +172,53 @@ QString ReleaseSources::downloadedPath(const QString& source,const QString& titl
         if(!file.isSymLink() && file.completeBaseName()==safeName(title))return file.absoluteFilePath();
     return {};
 }
+QString ReleaseSources::downloadResolved(const QVector<Download>& candidates,const QString& title,const QString& destDir,
+                                         QString* error,const ReleaseProgress& progress) const {
+    QString direct,magnet;
+    for(const auto& download:candidates) {
+        if(direct.isEmpty() && download.kind==QStringLiteral("direct"))direct=download.uri;
+        if(magnet.isEmpty() && download.kind==QStringLiteral("magnet"))magnet=download.uri;
+    }
+    RealDebrid debrid(preferences_);QUrl resolved;
+    QString debridError;
+    if(!direct.isEmpty()) {
+        // The spec permits ordinary HTTP downloads when no manager token was configured.
+        resolved=debrid.hasToken()?debrid.unrestrict(QUrl(direct),&debridError):QUrl(direct);
+    } else if(!magnet.isEmpty()) {
+        const QString id=debrid.addMagnet(magnet,&debridError);
+        if(id.isEmpty()){fail(error,debridError);return {};}
+        QElapsedTimer polling;polling.start();bool selected=false;
+        while(polling.elapsed()<10*60*1000) {
+            const auto info=debrid.torrentInfo(id,&debridError);
+            if(!debridError.isEmpty())break;
+            if(info.status==QStringLiteral("waiting_files_selection") && !selected) {
+                if(!debrid.selectFiles(id,QStringLiteral("all"),&debridError))break;
+                selected=true;
+            } else if(info.status==QStringLiteral("downloaded")) {
+                if(info.links.isEmpty())debridError=QStringLiteral("Real-Debrid torrent has no download links");
+                else resolved=debrid.unrestrict(QUrl(info.links.first()),&debridError);
+                break;
+            } else if(info.status==QStringLiteral("error") || info.status==QStringLiteral("magnet_error") || info.status==QStringLiteral("virus") || info.status==QStringLiteral("dead")) {
+                debridError=QStringLiteral("Real-Debrid torrent failed: ")+info.status;break;
+            }
+            if(progress)progress(0,-1);pause(2000);
+        }
+        if(resolved.isEmpty() && debridError.isEmpty())debridError=QStringLiteral("Real-Debrid torrent timed out");
+    } else {
+        fail(error,QStringLiteral("No direct download or supported magnet for this release"));return {};
+    }
+    if(!debridError.isEmpty()){fail(error,debridError);return {};}
+    QString extension=QFileInfo(safeName(resolved.fileName())).suffix();
+    if(extension.isEmpty())extension=QStringLiteral("bin");
+    const QDir directory(destDir);
+    if(!QDir().mkpath(directory.path())){fail(error,QStringLiteral("Cannot create download directory"));return {};}
+    const QString path=directory.filePath(safeName(title)+QLatin1Char('.')+extension);
+    QSaveFile file(path);file.setDirectWriteFallback(false);
+    if(!file.open(QIODevice::WriteOnly)){fail(error,QStringLiteral("Cannot open download: ")+file.errorString());return {};}
+    if(!fetch(resolved,&file,std::numeric_limits<qint64>::max(),60000,error,progress))return {};
+    if(!file.commit()){fail(error,QStringLiteral("Cannot save download: ")+file.errorString());return {};}
+    return path;
+}
 QString ReleaseSources::downloadRelease(const QString& source,const QString& title,QString* error,const ReleaseProgress& progress) const {
     if(error)error->clear();
     QString storeError;const auto sources=listSources(&storeError);
@@ -163,52 +228,27 @@ QString ReleaseSources::downloadRelease(const QString& source,const QString& tit
             if(release.title!=title)continue;
             QVector<Download> candidates=release.downloads;
             for(const auto& mirror:release.mirrors)candidates+=mirror.parts;
-            QString direct,magnet;
-            for(const auto& download:candidates) {
-                if(direct.isEmpty() && download.kind==QStringLiteral("direct"))direct=download.uri;
-                if(magnet.isEmpty() && download.kind==QStringLiteral("magnet"))magnet=download.uri;
-            }
-            RealDebrid debrid(preferences_);QUrl resolved;
-            QString debridError;
-            if(!direct.isEmpty()) {
-                // The spec permits ordinary HTTP downloads when no manager token was configured.
-                resolved=debrid.hasToken()?debrid.unrestrict(QUrl(direct),&debridError):QUrl(direct);
-            } else if(!magnet.isEmpty()) {
-                const QString id=debrid.addMagnet(magnet,&debridError);
-                if(id.isEmpty()){fail(error,debridError);return {};}
-                QElapsedTimer polling;polling.start();bool selected=false;
-                while(polling.elapsed()<10*60*1000) {
-                    const auto info=debrid.torrentInfo(id,&debridError);
-                    if(!debridError.isEmpty())break;
-                    if(info.status==QStringLiteral("waiting_files_selection") && !selected) {
-                        if(!debrid.selectFiles(id,QStringLiteral("all"),&debridError))break;
-                        selected=true;
-                    } else if(info.status==QStringLiteral("downloaded")) {
-                        if(info.links.isEmpty())debridError=QStringLiteral("Real-Debrid torrent has no download links");
-                        else resolved=debrid.unrestrict(QUrl(info.links.first()),&debridError);
-                        break;
-                    } else if(info.status==QStringLiteral("error") || info.status==QStringLiteral("magnet_error") || info.status==QStringLiteral("virus") || info.status==QStringLiteral("dead")) {
-                        debridError=QStringLiteral("Real-Debrid torrent failed: ")+info.status;break;
-                    }
-                    if(progress)progress(0,-1);pause(2000);
-                }
-                if(resolved.isEmpty() && debridError.isEmpty())debridError=QStringLiteral("Real-Debrid torrent timed out");
-            } else {
-                fail(error,QStringLiteral("No direct download or supported magnet for this release"));return {};
-            }
-            if(!debridError.isEmpty()){fail(error,debridError);return {};}
-            QString extension=QFileInfo(safeName(resolved.fileName())).suffix();
-            if(extension.isEmpty())extension=QStringLiteral("bin");
-            const QDir directory(QDir(dataDirectory_).filePath(QStringLiteral("downloads/")+safeName(stored.slug)));
-            if(!QDir().mkpath(directory.path())){fail(error,QStringLiteral("Cannot create download directory"));return {};}
-            const QString path=directory.filePath(safeName(title)+QLatin1Char('.')+extension);
-            QSaveFile file(path);file.setDirectWriteFallback(false);
-            if(!file.open(QIODevice::WriteOnly)){fail(error,QStringLiteral("Cannot open download: ")+file.errorString());return {};}
-            if(!fetch(resolved,&file,std::numeric_limits<qint64>::max(),60000,error,progress))return {};
-            if(!file.commit()){fail(error,QStringLiteral("Cannot save download: ")+file.errorString());return {};}
-            return path;
+            const QString destDir=QDir(dataDirectory_).filePath(QStringLiteral("downloads/")+safeName(stored.slug));
+            return downloadResolved(candidates,title,destDir,error,progress);
         }
     }
     fail(error,storeError.isEmpty()?QStringLiteral("Release not found in imported sources"):storeError);return {};
+}
+QString ReleaseSources::downloadGameByUrl(const QString& title,const QUrl& sourceUrl,const QString& destDir,
+                                          QString* error,const ReleaseProgress& progress) const {
+    if(error)error->clear();
+    QVector<IndexedRelease> releases; QString sourceName;
+    if(!fetchSourceJson(sourceUrl,&releases,&sourceName,error))return {};
+    const QString key=title.trimmed().toLower();
+    const IndexedRelease* found=nullptr;
+    for(const auto& release:releases) {
+        const QString r=release.title.trimmed().toLower();
+        if(r==key || r.contains(key) || key.contains(r)) { found=&release; break; }
+    }
+    if(!found){fail(error,QStringLiteral("Game not found in the selected source"));return {};}
+    QVector<Download> candidates=found->downloads;
+    for(const auto& mirror:found->mirrors)candidates+=mirror.parts;
+    const QString titleForFile=found->title.isEmpty()?title:found->title;
+    return downloadResolved(candidates,titleForFile,destDir,error,progress);
 }
 }

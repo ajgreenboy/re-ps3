@@ -1,5 +1,7 @@
 #include "shell.h"
 #include "rawg_artwork.h"
+#include "archive_extract.h"
+#include "content_registry.h"
 #include <QBuffer>
 #include <QCryptographicHash>
 #include <QDesktopServices>
@@ -289,8 +291,7 @@ void Shell::pickGameResult(int index) {
     if(index<0 || index>=gameSearch_.size())return;
     const auto& game=gameSearch_[index];
     if(game.options.size()>1){openGameSources(index);return;}
-    showMessage(tr("Download"),tr("Downloading \"%1\" is the next step.").arg(game.name),MessageKind::Page);
-    emit changed();
+    beginGameDownload(game.name,QUrl(game.options.first().sourceUrl));
 }
 void Shell::openGameSources(int index) {
     if(index<0 || index>=gameSearch_.size() || pages_.size()>=32)return;
@@ -313,7 +314,68 @@ void Shell::pickGameSource(const QString& value) {
     if(game<0 || game>=gameSearch_.size())return;
     const auto& g=gameSearch_[game];
     if(option<0 || option>=g.options.size())return;
-    showMessage(tr("Download"),tr("Downloading \"%1\" from %2 is the next step.").arg(g.name,g.options[option].source),MessageKind::Page);
+    beginGameDownload(g.name,QUrl(g.options[option].sourceUrl));
+}
+void Shell::beginGameDownload(const QString& title,const QUrl& sourceUrl) {
+    pendingGameTitle_=title;pendingGameUrl_=sourceUrl;
+    if(pages_.size()>=32)return;
+    Page page;page.title=tr("Choose a drive");
+    const auto drives=QDir::drives();
+    if(drives.isEmpty()) {
+        page.entries.append(releaseRow(QStringLiteral("drive:none"),tr("No drives found"),Action::Unavailable));
+    } else {
+        for(const auto& drive:drives) {
+            Entry entry=releaseRow(QStringLiteral("drive:")+drive.absolutePath(),drive.absolutePath(),Action::GameDownloadDrive,drive.absolutePath());
+            entry.detail=tr("Download \"%1\" here").arg(title);
+            page.entries.append(entry);
+        }
+    }
+    pages_.push_back(std::move(page));
+    emit changed();
+}
+void Shell::completeGameDownload(const QString& drive) {
+    if(pendingGameTitle_.isEmpty() || busy())return;
+    const QString title=pendingGameTitle_;
+    const QUrl url=pendingGameUrl_;
+    pendingGameTitle_.clear();pendingGameUrl_.clear();
+    busy_=true;status_=tr("Downloading %1...").arg(title);
+    busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();
+    auto* watcher=new QFutureWatcher<QPair<QString,QString>>(this);
+    connect(watcher,&QFutureWatcher<QPair<QString,QString>>::finished,this,[this,watcher,title]{
+        const auto result=watcher->result();watcher->deleteLater();
+        busy_=false;status_.clear();busyProgress_=-1.;busySpinnerPhase_=-1.;
+        if(!result.second.isEmpty()){showMessage(tr("Download"),result.second,MessageKind::Page);emit changed();return;}
+        refreshContent();
+        showMessage(tr("Download Complete"),tr("%1 is installed and ready in Games.").arg(title),MessageKind::Page);
+        emit changed();
+    });
+    connect(watcher,&QFutureWatcher<QPair<QString,QString>>::progressValueChanged,this,[this](int value){
+        busyProgress_=value>0?double(value-1)/1000.:-1.;emit changed();
+    });
+    const QString data=dataDirectory_;
+    watcher->setFuture(QtConcurrent::run([data,title,url,drive](QPromise<QPair<QString,QString>>& promise){
+        promise.setProgressRange(0,1001);
+        Preferences preferences(data);ReleaseSources store(data,preferences);QString error;
+        const QString gamesDir=QDir(drive).filePath(QStringLiteral("XMB Games"));
+        const auto progress=[&promise](qint64 received,qint64 total){
+            promise.setProgressValue(total>0?1+int(std::clamp(double(received)/double(total),0.,1.)*800):0);
+        };
+        const QString archive=store.downloadGameByUrl(title,url,gamesDir,&error,progress);
+        if(archive.isEmpty()){promise.addResult(qMakePair(QString(),error));return;}
+        promise.setProgressValue(850);
+        const QString folder=QDir(gamesDir).filePath(title);
+        if(!extractArchive(archive,folder,&error)){promise.addResult(qMakePair(QString(),error));return;}
+        promise.setProgressValue(950);
+        const QString exe=findGameExecutable(folder,&error);
+        if(exe.isEmpty()){promise.addResult(qMakePair(QString(),error));return;}
+        ContentApp app;
+        app.id=QStringLiteral("hydra-")+QString::fromLatin1(QCryptographicHash::hash(title.toUtf8(),QCryptographicHash::Sha256).toHex().left(12));
+        app.title=title;app.kind=QStringLiteral("game");app.category=QStringLiteral("game");
+        app.executable=exe;app.workingDirectory=QFileInfo(exe).absolutePath();
+        if(!ContentRegistry::upsert(QDir(data).filePath("apps.json"),app,error)){promise.addResult(qMakePair(QString(),error));return;}
+        promise.setProgressValue(1001);
+        promise.addResult(qMakePair(app.id,QString()));
+    }));
     emit changed();
 }
 } // namespace xmb

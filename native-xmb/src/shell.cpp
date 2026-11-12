@@ -2266,6 +2266,7 @@ void Shell::activate() {
     case Action::SearchGames:openGameSearch();break;
     case Action::GameSearchResult:pickGameResult(entry.value.toInt());break;
     case Action::GameSourcePick:pickGameSource(entry.value);break;
+    case Action::GameDownloadDrive:completeGameDownload(entry.value);break;
     case Action::PlaylistFolder:openPlaylists(categories_[category_].id);break;
     case Action::CreatePlaylist:
         if(playlists_.list(entry.value).size()>=PlaylistStore::MaximumPlaylists)showPlaylistResult(PlaylistStore::Result::TooManyPlaylists);

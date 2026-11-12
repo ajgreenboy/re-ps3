@@ -20,7 +20,7 @@ qt_add_executable(re-ps3-native
     src/osk_layout.cpp src/osk_layout.h
     src/xmbml_view.cpp src/xmbml_view.h
     src/preferences.cpp src/preferences.h
-    src/release_index.cpp src/release_index.h src/real_debrid.cpp src/real_debrid.h src/release_source.cpp src/release_source.h src/flare_solverr.cpp src/flare_solverr.h src/hydra_library.cpp src/hydra_library.h
+    src/release_index.cpp src/release_index.h src/real_debrid.cpp src/real_debrid.h src/release_source.cpp src/release_source.h src/flare_solverr.cpp src/flare_solverr.h src/hydra_library.cpp src/hydra_library.h src/archive_extract.cpp src/archive_extract.h
     src/phone_remote.cpp src/phone_remote.h src/phone_remote_shell.cpp
     src/media_library.cpp src/media_library.h src/settings_menu.cpp
     src/playback_queue.cpp src/playback_queue.h

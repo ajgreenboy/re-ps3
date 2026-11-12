@@ -128,7 +128,7 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     Setup,
     // Game > Saved Data / Memory Card Utility: presentation only, no console save-data backend.
     SaveData, ImportSource, ReleaseFolder, ReleaseDownload, DownloadManager, DebridToken, FlareSolverrUrl,
-    SearchGames, GameSearchResult, GameSourcePick };
+    SearchGames, GameSearchResult, GameSourcePick, GameDownloadDrive };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -677,6 +677,8 @@ private:
     QSet<QString> releaseArtRequested_;
     std::unique_ptr<RawgArtwork> releaseArtwork_;
     QVector<GameResult> gameSearch_;
+    QString pendingGameTitle_;
+    QUrl pendingGameUrl_;
     void refreshReleaseSources(const QUrl& importUrl={});
     void rebuildReleaseSources();
     void openReleaseSource(const QString& slug);
@@ -692,6 +694,8 @@ private:
     void pickGameResult(int index);
     void openGameSources(int index);
     void pickGameSource(const QString& value);
+    void beginGameDownload(const QString& title,const QUrl& sourceUrl);
+    void completeGameDownload(const QString& drive);
     Assets& assets_;
     std::unique_ptr<class NotifyOverlay> notifyOverlay_;
     Preferences preferences_;
