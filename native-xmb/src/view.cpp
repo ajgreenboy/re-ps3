@@ -168,6 +168,16 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         if (configureArtwork(this, shell_.artworkStatus())) shell_.retryArtwork();
         shell_.noteActivity();
     });
+    connect(&shell_,&Shell::requestTitleText,this,[this]{beginTitleText();});
+    connect(&titleText_,&textentry::TextDelivery::finished,this,[this](int verdict,int sent){
+        // Success is silent; every other ending says why nothing (or only part) was typed. Counts and verdict names only, never text.
+        const auto v=textentry::Verdict(verdict);
+        if(v==textentry::Verdict::Deliver)return;
+        if(v==textentry::Verdict::Elevated){shell_.notifyElevatedWindow();return;}
+        const QString detail=v==textentry::Verdict::FocusLost?tr("The window lost focus (%1 typed).").arg(sent)
+            :v==textentry::Verdict::NoForeground?tr("Could not return to the window."):tr("The window is no longer available.");
+        shell_.notify(tr("Enter Text"),detail,QStringLiteral("tex_notification_caution"));
+    });
     connect(&shell_,&Shell::requestSystemName,this,[this](const QString& value){openOsk("System Name",value,[this](const QString& name){shell_.setSystemName(name);});});
     // Create New User opens user_plugin's page_create first (prompt, prefilled field, OK; drawUserCreatePage), not
     // the keyboard: the keyboard is what Cross on the field opens.
@@ -4637,6 +4647,42 @@ void View::returnToGame(const QString& reason) {
     });
 #endif
     update();
+}
+// ZF2. Cross on "Enter Text": the XMB's own OSK in plain text-field mode (the phone remote's text feeds the same field). Circle there
+// is the ordinary OSK cancel, which leaves the in-game XMB as it was and sends nothing.
+void View::beginTitleText() {
+    if(!shell_.inGame() || !shell_.titleRunning())return;
+    openOsk(tr("Enter Text"),QString(),[this](QString text){deliverTitleText(text);});
+    osk_.maxLength=textentry::kMaxUnits;
+    osk_.preserveWhitespace=true;   // spaces at either end are part of what was typed
+}
+void View::deliverTitleText(const QString& text) {
+#ifdef Q_OS_WIN
+    if(text.isEmpty())return;
+    const quintptr recorded=inGameHwnd_;
+    const quint32 root=shell_.runningTitlePid();
+    const bool steam=shell_.runningTitleIsSteam();
+    const quint32 recordedPid=inGamePid_;
+    // The title's process tree; for a Steam title (not our process) the process that owned the recorded window.
+    const textentry::Tracked tracked=[root,steam,recordedPid](quint32 pid){
+        if(root && pidInTree(pid,root))return true;
+        return steam && recordedPid && pid==recordedPid;
+    };
+    // Checked before anything moves: a window that is gone, not the title's, or elevated stays in the in-game XMB with a notice.
+    const auto verdict=textentry::checkTarget(recorded,tracked);
+    if(verdict!=textentry::Verdict::Deliver) {
+        psLog(QStringLiteral("textentry: nothing sent, check=%1").arg(QLatin1String(textentry::verdictName(verdict))));
+        if(verdict==textentry::Verdict::Elevated)shell_.notifyElevatedWindow();
+        else shell_.notify(tr("Enter Text"),verdict==textentry::Verdict::NotTracked?tr("That window is not the running title."):tr("The window is no longer available."),
+            QStringLiteral("tex_notification_caution"));
+        update();
+        return;
+    }
+    returnToGame("Enter Text");   // hands the foreground back; TextDelivery confirms it before the first key
+    titleText_.start(recorded,text,tracked);
+#else
+    Q_UNUSED(text);
+#endif
 }
 void View::syncInGameWindow() {
     if(shell_.inGame() || !inGameWindowActive_)return;

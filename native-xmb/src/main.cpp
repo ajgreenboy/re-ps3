@@ -13,6 +13,7 @@
 #include "cec.h"
 #include <QProcess>
 #include "desktop_pad.h"
+#include "text_entry.h"
 #include "ps_watcher.h"
 #include "firmware_fetcher.h"
 #include "firmware_extract.h"
@@ -434,6 +435,10 @@ int main(int argc,char** argv) {
     parser.addOption({"desktop-pad-sink","Open a small window that logs the mouse and key events it receives (JSON lines) for the given log file; optional second argument: seconds to run (default 30)","log-file"});
     parser.addOption({"desktop-pad-inject","Run a pad scenario through the mapper and deliver it with SendInput, only while the named sink window is foreground and under the pointer; result JSON is the second argument","json-in"});
     parser.addOption({"desktop-pad-keyboard","Press the Desktop Mode Start button twice (on-screen keyboard open then close) and write what was on screen as JSON, then exit","json-out"});
+    parser.addOption({"zf-text-test","Write the SendInput key events (UTF-16 units, down/up) the in-game Enter Text row would send for the UTF-8 text in this file; JSON path is the second argument, then exit","text-file"});
+    parser.addOption({"zf-text-sink","Open a small window that records the characters SendInput delivers to it (JSON lines in the given log); optional second argument: seconds to run (default 30)","log-file"});
+    parser.addOption({"zf-text-deliver","Deliver text to the zf-text-sink window named in the spec JSON, through the same TextDelivery the in-game row uses; result JSON is the second argument","spec-json"});
+    parser.addOption({"zf-elevation-check","Write whether this process, the foreground window and each pid given as a further argument ('all' for a count over every process) run elevated, then exit","json-out"});
     parser.addOption({"pad-check","Run documented synthetic DualSense/DualShock 4 input reports through the pad parser, write JSON, then exit","json-file"});
     parser.addOption({"motion-report","Write easing samples at different host frame rates without opening a window","json-file"});
     parser.addOption({"steam-root","Override the local Steam installation directory","directory"});
@@ -667,6 +672,10 @@ int main(int argc,char** argv) {
     if(parser.isSet("desktop-pad-test"))return xmb::desktoppad::runPadTest(parser.value("desktop-pad-test"),parser.positionalArguments().value(0));
     if(parser.isSet("desktop-pad-sink"))return xmb::desktoppad::runPadSink(parser.value("desktop-pad-sink"),parser.positionalArguments().value(0,"30").toInt());
     if(parser.isSet("desktop-pad-inject"))return xmb::desktoppad::runPadInject(parser.value("desktop-pad-inject"),parser.positionalArguments().value(0));
+    if(parser.isSet("zf-text-test"))return xmb::textentry::runTextTest(parser.value("zf-text-test"),parser.positionalArguments().value(0));
+    if(parser.isSet("zf-text-sink"))return xmb::textentry::runTextSink(parser.value("zf-text-sink"),parser.positionalArguments().value(0,"30").toInt());
+    if(parser.isSet("zf-text-deliver"))return xmb::textentry::runTextDeliver(parser.value("zf-text-deliver"),parser.positionalArguments().value(0));
+    if(parser.isSet("zf-elevation-check"))return xmb::textentry::runElevationCheck(parser.value("zf-elevation-check"),parser.positionalArguments());
     if(parser.isSet("desktop-pad-keyboard"))return xmb::desktoppad::runKeyboardCheck(parser.value("desktop-pad-keyboard"));
     if(parser.isSet("pad-check")) {
         // Local verification only (audit/SESSION-POWER.md): documented synthetic input reports through the exact

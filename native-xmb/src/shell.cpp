@@ -1,5 +1,6 @@
 #include "shell.h"
 #include "diagnostics.h"
+#include "elevation.h"
 #include "display_mode.h"
 #include "notify_overlay.h"
 #include "glyphs.h"
@@ -2128,6 +2129,7 @@ void Shell::activate() {
     }
         switch(entry.action) {
     case Action::QuitGame:requestQuitGame();break;
+    case Action::EnterText:requestEnterText();break;
     case Action::GameManual:
         // seg_manual opens the running title's manual through the game_plugin `manual` module action (TRACED,
         // category_game.xml:397-409). A PC title has no manual source the XMB can reach.
@@ -2602,6 +2604,10 @@ void Shell::syncInGameRows() {
             QStringLiteral("tex_quit"),container,Action::QuitGame);
         quit.source=QStringLiteral("xmbml");   // category_*.xml #seg_gameexit
         add.push_back(std::move(quit));
+        // ZF2: next to Quit Game. INFERRED: the firmware's in-game rows have no text entry; the icon is the firmware's keypad glyph.
+        Entry text=item(QStringLiteral("ingame:text"),QObject::tr("Enter Text"),QStringLiteral("tex_notification_keypad"),QStringLiteral("system_plugin"),Action::EnterText);
+        text.source=QStringLiteral("native");
+        add.push_back(std::move(text));
         if(category.id==QLatin1String("game")) {
             Entry manual=item(QStringLiteral("ingame:manual"),assets_.text(container,"msg_soft_manual",QObject::tr("Software Manual")),
                 QStringLiteral("tex_manual"),container,Action::GameManual);
@@ -2665,6 +2671,18 @@ void Shell::requestQuitGame() {
     qInfo().noquote()<<"ingame: Quit Game asks:"<<ask<<"title="+gameTitle_;
     showConfirm(ask,QString(),[this]{quitRunningTitle();});
     emit changed();
+}
+// ZF2 (audit/TEXT-ENTRY.md): only while the in-game XMB is up over a tracked title. The view opens the OSK; nothing is sent until it
+// confirms, and Circle sends nothing.
+void Shell::requestEnterText() {
+    if(!titleRunning() || !inGame_){qInfo().noquote()<<"ingame: Enter Text ignored (no in-game XMB over a running title)";return;}
+    qInfo().noquote()<<"ingame: Enter Text opens the keyboard";
+    emit requestTitleText();
+}
+// ZF1: the line carries no window title and no text; the full sentence is the log and the docs, the pop-up the short pair.
+void Shell::notifyElevatedWindow() {
+    qInfo().noquote()<<"elevation:"<<elevation::fullMessage();
+    notify(elevation::noticeTitle(),elevation::noticeDetail(),QStringLiteral("tex_notification_caution"));
 }
 void Shell::quitRunningTitle() {
     // Only a title this XMB launched is ever closed, and only here, after the Yes answer.

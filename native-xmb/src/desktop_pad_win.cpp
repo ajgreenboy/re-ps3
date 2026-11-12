@@ -3,6 +3,7 @@
 #include "desktop_pad.h"
 #include "pad.h"
 #include "ps_watcher.h"
+#include "elevation.h"
 #include <QApplication>
 #include <QDebug>
 #include <QElapsedTimer>
@@ -19,6 +20,7 @@
 #include <QWidget>
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #ifdef Q_OS_WIN
 #define NOMINMAX
 #include <windows.h>
@@ -205,7 +207,40 @@ void DesktopPadDriver::setActive(bool on) {
     }
 }
 
-void DesktopPadDriver::deliver(const std::vector<Action>& actions) {
+// ZF1. Detection only (elevation.h): no helper, no bridge, no setting is touched. The answer is cached for 250 ms; the pop-up and the
+// log line (a process id, never a window title) come once per elevated window, when it first takes the foreground.
+bool DesktopPadDriver::foregroundBlockedByElevation() {
+    const qint64 now=monotonicMs();
+    if(now-elevationCheckedAt_<250)return elevationBlocked_;
+    elevationCheckedAt_=now;
+    const DWORD pid=windowPid(GetForegroundWindow());
+    bool blocked=false;
+    if(pid && pid!=GetCurrentProcessId()) {
+        const auto state=elevation::processState(quint32(pid));
+        blocked=elevation::blocksDelivery(state);
+        if(blocked && elevatedPid_!=quint32(pid)) {
+            qInfo().noquote()<<QString("desktop-pad: foreground process %1 is %2 and this XMB is %3; input is not delivered (%4)")
+                .arg(pid).arg(QLatin1String(elevation::name(state)),QLatin1String(elevation::name(elevation::selfState())),elevation::fullMessage());
+            if(hooks_.elevatedForeground)hooks_.elevatedForeground();
+        }
+    }
+    elevatedPid_=blocked?quint32(pid):0;
+    elevationBlocked_=blocked;
+    return blocked;
+}
+
+void DesktopPadDriver::deliver(const std::vector<Action>& input) {
+    if(input.empty())return;
+    std::vector<Action> filtered;
+    const std::vector<Action>* list=&input;
+    if(foregroundBlockedByElevation()) {
+        // Do not try to drive an elevated window. Releases still go out (a key-up or button-up is not driving anything) so that
+        // nothing this driver pressed stays down; the keyboard toggle is not input injection and is kept.
+        std::copy_if(input.begin(),input.end(),std::back_inserter(filtered),[](const Action& a){
+            return a.kind==Kind::ToggleKeyboard || ((a.kind==Kind::Key || a.kind==Kind::Button) && !a.down);});
+        list=&filtered;
+    }
+    const std::vector<Action>& actions=*list;
     if(actions.empty())return;
     qint64 moved=0;
     const int sent=sendActions(actions,moved);
@@ -217,7 +252,8 @@ void DesktopPadDriver::deliver(const std::vector<Action>& actions) {
         if(a.kind==Kind::ToggleKeyboard)toggleKeyboard();
     }
     if(sent==0 && std::any_of(actions.begin(),actions.end(),[](const Action& a){return a.kind!=Kind::ToggleKeyboard;}))
-        qWarning().noquote()<<QString("desktop-pad: SendInput delivered nothing (error %1); the foreground window may be elevated").arg(GetLastError());
+        qWarning().noquote()<<QString("desktop-pad: SendInput delivered nothing (error %1); the foreground window was not found elevated (%2)")
+            .arg(GetLastError()).arg(QLatin1String(elevation::name(elevation::windowState(quintptr(GetForegroundWindow())))));
 }
 
 bool DesktopPadDriver::yieldToFullscreenApp() {

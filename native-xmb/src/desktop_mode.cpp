@@ -1,4 +1,5 @@
 #include "desktop_mode.h"
+#include "elevation.h"
 #include "ps_watcher.h"
 #include "shell.h"
 #include "view.h"
@@ -201,7 +202,12 @@ DesktopMode::DesktopMode(QMainWindow* window,View* view,Shell* shell,bool kiosk,
         [this]{return shell_->desktopControllerMouse();},
         [this]{return shell_->desktopPointerSpeed();},
         [this]{return shell_->titleRunning();},
-        [this]{return window_->isVisible();}},this);
+        [this]{return window_->isVisible();},
+        [this]{
+            // ZF1. The XMB window is hidden in Desktop Mode, so the queued pop-up is seen on return; the tray balloon says it now.
+            shell_->notifyElevatedWindow();
+            if(tray_)tray_->showMessage(QObject::tr("XMB (desktop mode)"),elevation::fullMessage(),QSystemTrayIcon::Warning,6000);
+        }},this);
     connect(pad_,&desktoppad::DesktopPadDriver::idleReasonChanged,this,[this]{updateTrayTip();});
     // The Guide/PS button on any pad. The watcher is the one that already reads the HID/XInput Guide bit independent of
     // window focus; View's own handlers ignore a press while the window is hidden (not actionable), so this is the only

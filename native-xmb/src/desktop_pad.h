@@ -99,6 +99,7 @@ struct Hooks {
     std::function<int()> pointerSpeed;    // desktop/pointerSpeed
     std::function<bool()> blocked;        // a tracked title or web app is running (Shell::titleRunning)
     std::function<bool()> xmbVisible;     // the XMB window is on screen
+    std::function<void()> elevatedForeground;   // optional (ZF1): the window in front runs as administrator; called once per such window
 };
 
 class DesktopPadDriver final : public QObject {
@@ -135,6 +136,12 @@ private:
     quint64 oskPid_=0;
     void* oskProcess_=nullptr;
     qint64 activeSince_=0,injected_=0;
+    // ZF1: the foreground window's process is looked up at most every 250 ms; while it runs elevated over this (non-elevated)
+    // XMB nothing but releases is sent, because UIPI drops the rest and the old log line only said "may be elevated".
+    bool foregroundBlockedByElevation();
+    qint64 elevationCheckedAt_=-1000;
+    quint32 elevatedPid_=0;
+    bool elevationBlocked_=false;
 };
 
 // --desktop-pad-sink <log>: a small window that logs the mouse and key events it receives, one JSON object per line, so

@@ -109,6 +109,8 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // F5 in-game XMB (audit/INGAME-XMB-DESIGN.md): the firmware's seg_gameexit row (class xmlgameexit, key gameexit) and the
     // Game column's seg_manual row. Both exist only while a title runs and the XMB was raised over it (inGame()).
     QuitGame, GameManual,
+    // ZF2 (audit/TEXT-ENTRY.md, INFERRED: the firmware has no such row): type into the running title through the XMB's own keyboard.
+    EnterText,
     // Photo > Photo Gallery (category_photo.xml #seg_hakoniwa): the recreated hakoniwa library area (gallery_*.cpp, audit/PHOTO-GALLERY.md).
     PhotoGallery,
     // Network > Phone Remote (phone_remote_shell.cpp, audit/HANDOFF-2026-11-09 D11): a LAN web page that drives the
@@ -590,6 +592,10 @@ public:
     void setInGame(bool on);
     // Quit Game (the PS menu row and the in-game rows): impose_plugin:msg_game_quit_ask, Yes -> quitRunningTitle().
     void requestQuitGame();
+    // ZF2: the in-game "Enter Text" row. The view opens the OSK and delivers the confirmed text (text_entry.h).
+    void requestEnterText();
+    // ZF1: the pop-up for an elevated window the controller cannot drive (elevation.h). Used by Desktop Mode and the text delivery.
+    void notifyElevatedWindow();
     // Cooperative close: WM_CLOSE to the title's windows, a grace period for save-on-exit (XMB_QUIT_GRACE_MS, default
     // 10000), then terminate(), then kill(). Steam titles go through steam.exe +app_stop. Asynchronous.
     void quitRunningTitle();
@@ -656,6 +662,7 @@ signals:
     void requestWallpaper();
     void requestTheme();
     void requestSystemName(const QString& value);
+    void requestTitleText();   // ZF2: open the OSK for text to type into the running title
     void requestQuit();
     void requestUpdateRestart();
     // Desktop Mode (INFERRED rows; audit/DESKTOP-MODE.md): main.cpp owns the window, the tray and the ways back.

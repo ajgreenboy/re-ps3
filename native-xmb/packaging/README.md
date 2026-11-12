@@ -106,6 +106,35 @@ reads or stores a password.
 
 Both store a credential on this PC, so only the owner should do it, and only on a machine in a trusted room.
 
+## Elevated windows and the controller
+
+Windows does not let a program send keyboard or mouse input to a window that runs at a higher privilege level (UIPI). While a
+window running as administrator is in front (an installer, a program started with "Run as administrator", a UAC prompt), a
+normally started XMB cannot drive it with the controller, in Desktop Mode or with the in-game "Enter Text" row. A UAC consent
+prompt is worse: it appears on Windows' secure desktop, which no program's input reaches, not even an elevated one.
+
+The XMB detects this and says so instead of failing silently. It asks Windows, with no elevation of its own, whether the process
+that owns the foreground window runs with an elevated token. If it does, nothing is sent (key and button releases still go out, so
+nothing stays pressed), the XMB shows "Administrator window / The controller cannot drive it", and the log gets one line with the
+process id and no window title: "The window in front is running as administrator, so the controller cannot drive it." If the
+question cannot be answered, the window is treated as not elevated and the XMB tries as before.
+
+There is no way around the limit from inside the XMB, and none is built: an elevated helper that injects input for the XMB would
+let any program running as you drive elevated windows. Two options are left to the owner. The XMB implements neither and never
+changes a Windows or UAC setting.
+
+- **Run the XMB at highest privilege.** Register your own scheduled task with "Run with highest privileges" (needs an
+  administrator once), or start it with "Run as administrator". An elevated XMB can then drive other elevated windows. Trade-offs:
+  everything it launches (games, web apps, emulators) also runs elevated and can change the whole system; the Start at Sign-in
+  task the XMB registers is not elevated, so you would replace it with your own; and the UAC consent prompt on the secure desktop
+  is still out of reach.
+- **Change the UAC prompt behaviour in Windows** (Settings, or Local Security Policy for the administrator elevation prompt, for
+  example elevating without prompting). The prompt then never appears. Trade-offs: this is a machine-wide security setting; any
+  program running as that administrator can elevate silently. Only the owner should decide it, on a machine in a trusted room.
+
+For most HTPCs the better answer is to avoid elevated programs: do installs and updates that need administrator rights once, at
+the keyboard.
+
 ## Boot time and the cursor
 
 The app logs `boot: first frame after N ms` (process creation to the first buffer swap) to the Qt log; set
