@@ -337,7 +337,8 @@ XmbmlResolvedColumn resolveCategoryColumn(const QString& category,const XmbmlTex
             if(row.nested)row.source=childSource.isEmpty()?row.source:childSource;
             row.id=nativeId(row.itemKey.isEmpty()?queryKey:row.itemKey,options.idAliases);
             const auto attr=child.attributes.value(QStringLiteral("attr"));
-            append(std::move(row),*view,attr.isEmpty()?row.itemKey:attr,row.itemKey,rowNodes==1);
+            const QString lookupKey=row.itemKey; // copied first: the by-value row parameter is move-constructed from row
+            append(std::move(row),*view,attr.isEmpty()?lookupKey:attr,lookupKey,rowNodes==1);
         }
     }
     if(column.rows.isEmpty())
