@@ -1,7 +1,7 @@
 # Handoff for Codex: native XMB, 2026-11-06
 
 This is a native C++/Qt recreation of the PS3 4.93 XMB, traced from the firmware. The repo is `C:\dev\xmb`
-(`ajgreenboy/XMB-Rewritten`, branch `main`), and the app lives in `native-xmb/`. Findings are written up in
+(`origin`, branch `main`), and the app lives in `native-xmb/`. Findings are written up in
 `native-xmb/audit/*.md`; most recently `PAGE-MOVE.md`, `PARTICLES.md`, `SETTINGS-COVERAGE.md` and `TEXT-RENDERER.md`.
 
 ## Hard rules
@@ -14,7 +14,7 @@ This is a native C++/Qt recreation of the PS3 4.93 XMB, traced from the firmware
   1. Build the file as HEAD plus your edit.
   2. `git hash-object -w --no-filters <file>`
   3. `git update-index --cacheinfo <mode>,<blob>,<path>`
-- **Commit identity and push:** `git -c user.name=Al -c user.email=ajgreenboy@gmail.com commit`, then
+- **Commit identity and push:** `git -c user.name=Al -c user.email=<author email> commit`, then
   `git push origin main`.
 - **Tooling:** Bun/TypeScript only (never npm). No Python without approval.
 - **Never touch the user's RPCS3 data.** `C:\dev\rpcs3\bin\config\input_configs\global\Default.yml` must stay at

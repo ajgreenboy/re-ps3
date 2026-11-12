@@ -18,7 +18,7 @@ Do not report this checkpoint as full XMB functionality or visual parity.
 ## Workspace and quick start
 
 Repository: `C:\dev\xmb`, branch `main`, private remote
-[ajgreenboy/XMB-Rewritten](https://github.com/ajgreenboy/XMB-Rewritten).
+XMB-Rewritten.
 Native sources: `native-xmb/`. Executable: `out/native-xmb/re-ps3-native.exe`.
 Original assets: sibling `rpcs3/bin/dev_flash` by default, configurable.
 

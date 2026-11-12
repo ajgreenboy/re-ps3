@@ -45,7 +45,7 @@ Follow the repo's standing rules from `AGENT-HANDOFF.md` §4:
 - **Bun/TypeScript only** for scripts (`~/.bun/bin/bun.exe`). Never `npm`. No new dependencies — use
   `bun:test` and the Node/Bun stdlib only.
 - **Do not commit the source dump.** The real file stays local (currently
-  `C:\Users\Albert\Desktop\{nameFitGirl,downloads[{titleSledde.txt`). Commit only a small **sanitized
+  `<Desktop>\<local scrape files>`). Commit only a small **sanitized
   fixture** in `fixtures/`.
 - **This tool reads and normalizes only.** It must not download, resolve, or automate obtaining the
   files the index points at. That boundary is intentional and stays out of scope (§2).

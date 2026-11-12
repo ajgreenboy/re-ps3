@@ -79,7 +79,7 @@ bun work/ab-layers.ts --all --exe C:\dev\xmb\out\native-xmb\re-ps3-native.exe
 * `steam-download-page`: the known live/download-page pixel mismatch, unchanged and
   not re-saved (frame PSNR 33.84, rows PSNR 32.22).
 * `photo-gallery-piles`, `photo-gallery-grid`: the original gallery prerequisite remains
-  absent. Final capture `C:/Users/Albert/AppData/Local/Temp/xmb-layers-state-qBMaiZ/native.messages.log`
+  absent. Final capture `%TEMP%/xmb-layers-state-qBMaiZ/native.messages.log`
   explicitly logs `gallery: opened; indexing C:\dev\out\gal\photos` followed by
   `gallery: indexed 0 photos in 0 folders`. Neither gallery reference was re-saved.
 * `ingame-xmb`: **all state and log assertions pass** (`titleRunning`, `inGame`,
@@ -90,17 +90,17 @@ bun work/ab-layers.ts --all --exe C:\dev\xmb\out\native-xmb\re-ps3-native.exe
   another 2,671 pixels at y>940 are the intended PSP utility title change. There are
   zero differing pixels in y=130..940. The isolated retry produces the identical PNG
   SHA-256 `ca6ef78712f2d1a75bbbbce5334cf17e8a69552f9b7a171475273786d5f3840e`.
-  Evidence: `C:/Users/Albert/AppData/Local/Temp/xmb-layers-state-DunBqa/` and
-  `C:/Users/Albert/AppData/Local/Temp/xmb-layers-state-KuesVx/`.
+  Evidence: `%TEMP%/xmb-layers-state-DunBqa/` and
+  `%TEMP%/xmb-layers-state-KuesVx/`.
   This reference was deliberately **not** refreshed to avoid blessing an unrelated
   compositor/title-bar change together with the wanted label change.
 
 The two refreshed local references are `out/native-reference/layers/subtitle-cue.png`
 and `auto-off-guide.png`; these artifacts are ignored/untracked, like the pre-existing
 references. Their originals are preserved at
-`C:/Users/Albert/AppData/Local/Temp/opencode/breadth-reference-backup/`.
+`%TEMP%/opencode/breadth-reference-backup/`.
 The full run log is retained at
-`C:/Users/Albert/.local/share/opencode/shell/5d5811725a0d7d73544685cad0b98bccfe8fdeb7/sh_1ccf007c9001tU9bTkbTYIa8f5.out`.
+`<tool scratch output file>`.
 
 `bun work/v2-fixtures.ts --check` now reports exactly the missing gallery prerequisite
 and exits 1. A separate hash check verifies this mode leaves all generated media, game

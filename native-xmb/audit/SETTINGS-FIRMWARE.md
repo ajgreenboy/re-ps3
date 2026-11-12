@@ -2061,7 +2061,7 @@ Tooling (helpers outside the repo, `C:\dev\work\`): `m.py` (RGB -> Rec.709 luma,
 profiles and ink-run detection), `align.py` (two frames' profiles aligned on a chosen x), `dim.py` (a
 two-frame luma ratio over a fixed ROI with a threshold mask), `series.py` (a fixed ROI across a burst of
 crop frames, using each burst's own `rect.txt` origin). Python is the bundled runtime
-(`C:\Users\Albert\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe`, Pillow 12.3.0).
+(`<python>`, Pillow 12.3.0).
 Frame paths are relative to `C:\dev\out\rpcs3-ref2-2026-10-28\` (`b2`) or `C:\dev\out\rpcs3-ref-2026-10-28\`
 (`b1`); every image is 1920x1080.
 

@@ -113,7 +113,7 @@ Frames live under `C:\dev\out\rpcs3-*` (gitignored, never committed). PS = Backs
 controller desktop, safe start, updater, first-run setup, display/CEC, bluetooth/wifi, phone remote, idle
 cost). **Carried over and still open:**
 
-- V1 release run on the real HTPC (the release is live at `ajgreenboy/XMB-Rewritten`; the on-hardware run
+- V1 release run on the real HTPC (the release is live on the project repository; the on-hardware run
   is the owner's step).
 - In-game XMB step 4 (fullscreen D3D capture) and step 10 (owner validation matrix) — see
   `INGAME-XMB-DESIGN.md`.
@@ -186,9 +186,9 @@ The parity default exe is `C:/dev/out/native-parity/re-ps3-native.exe`, default 
 
 ## Conventions (hard rules)
 
-- Commit as `git -c user.name=Al -c user.email=ajgreenboy@gmail.com commit`, no AI attribution.
+- Commit as `git -c user.name=Al -c user.email=<author email> commit`, no AI attribution.
 - **No firmware, keys, captures, or binaries committed.** Reference frames, `out/`, `dist/`,
-  `firmware_keys.inc` are gitignored. The repo is public (`ajgreenboy/XMB-Rewritten`).
+  `firmware_keys.inc` are gitignored. The repo is public.
 - A fitted constant must be labelled `fit` and carry its bounding measurement; an RCO value must be read at
   runtime or generated from a documented extraction with provenance. No hardcoded number where an RCO value
   exists.

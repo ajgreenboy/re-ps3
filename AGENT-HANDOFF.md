@@ -51,7 +51,7 @@ $env:PATH="C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH"
 
 - **Firmware stays private.** Firmware, decrypted modules, extracted assets, recordings, console
   identity and API keys never go into Git or anywhere public. Only source, docs and approved UI
-  screenshots are committed. The remote is `ajgreenboy/XMB-Rewritten` (public); still ask before pushing.
+  screenshots are committed. The remote is the public `origin`; still ask before pushing.
 - **Use only the firmware already on this machine.** Don't download any other.
 - **Other agents work here too.** Run `git status` before editing and commit only your own files.
 - **Report only what you observed.** A successful build, a surviving window or a logged FPS is not a
@@ -82,6 +82,6 @@ visualizer, info-bar avatar slot).
 
 1. Update `native-xmb/HANDOFF-2026-11-09.md` (or the newest handoff) and `native-xmb/ISA.md` with what
    was observed and what remains open.
-2. Commit only your own files, with author `-c user.name=Al -c user.email=ajgreenboy@gmail.com`.
+2. Commit only your own files, with author `-c user.name=Al -c user.email=<author email>`.
    No AI attribution in commits, PRs or files.
 3. Keep this file's section 2 pointing at the newest handoff.

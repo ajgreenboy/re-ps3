@@ -111,7 +111,7 @@ question. Silent success remains preferable to the removed invented
 ## 3. Dim estimate and implemented change
 
 All local evidence is under
-`C:/Users/Albert/AppData/Local/Temp/opencode/` (not committed):
+`%TEMP%/opencode/` (not committed):
 
 - `ps3-xmb-demo.mp4`: source video.
 - `ps3-demo-035.png` through `ps3-demo-040.png`: before/after samples.
@@ -275,7 +275,7 @@ appropriate evidence for performance over a GPU-bound real game. Real-title inpu
 true non-FSO FSE, HDR/mixed-DPI/multi-adapter pacing and monitor hotplug remain owner validation.
 
 **Verification/evidence (local, not committed):**
-`C:/Users/Albert/AppData/Local/Temp/opencode/xmb-dcomp-{on,off,fse,end}/` contains isolated
+`%TEMP%/opencode/xmb-dcomp-{on,off,fse,end}/` contains isolated
 data, PS logs, frame traces, stub logs, scripted `layer1.png/layer2.png` plus sidecars, and
 desktop composites `desktop1.png/desktop2.png`. Scripted grabs capture the alpha XMB layer,
 **not** DWM's final game composite. The live desktop pair, 1.580 s apart, is the live oracle:
@@ -298,4 +298,4 @@ Final verification after restricting the alpha correction to the live surface:
 **whole set PASS**, exit 0; stored layers 6/6, canonical capture 5 pass + 1 informative,
 named states 22/22. The in-game game-frame/guide regions remain pixel-identical to the
 existing self-reference (SSIM 1.0000). **No references were refreshed.** Full output:
-`C:/Users/Albert/AppData/Local/Temp/opencode/xmb-dcomp-gate-final.log`.
+`%TEMP%/opencode/xmb-dcomp-gate-final.log`.

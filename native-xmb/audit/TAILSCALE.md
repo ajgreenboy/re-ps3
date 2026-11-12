@@ -31,7 +31,7 @@ VPN row. The row sits after Download Management and wears the Windows client's o
 - Standalone client: 61/61 self-test checks against a fake CLI (parsing, argument validation, timeouts, output cap,
   login-URL early stop).
 - Real tailnet on this PC (Tailscale 1.104.5 installed with winget, already signed in): the row read "Connected as
-  al-workstation - 100.118.251.42"; the page listed 8 devices; Cross on homelab-node2 answered
-  "pong from homelab-node2 (100.108.36.91) via 192.168.1.122:41641 in 1ms"; the Exit Node page opened.
+  <computer name> - <tailnet-ip>"; the page listed 8 devices; Cross on <server> answered
+  "pong from <server> (<tailnet-ip>) via <server-lan-ip>:41641 in 1ms"; the Exit Node page opened.
 - **Not exercised on purpose** (they change this PC's live network): turning Tailscale off/on and choosing an exit
   node. They run the client calls above, which the fake-CLI tests cover.

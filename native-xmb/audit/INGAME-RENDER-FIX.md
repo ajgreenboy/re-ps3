@@ -31,12 +31,12 @@ Built on `b67ad99`. Verification uses an imported Win32 stand-in, not a real gam
 ## Reproduction and evidence
 
 Scratch root (logs, frame traces, PNGs and JSON sidecars; not committed):
-`C:/Users/Albert/AppData/Local/Temp/opencode/ingame-perf`.
+`%TEMP%/opencode/ingame-perf`.
 
 Manifest imported through `--import-apps apps.json --data-dir <root>/data`:
 
 ```json
-{"version":1,"apps":[{"id":"perf-stub","title":"Performance Stub","kind":"game","category":"game","executable":"C:/dev/out/ps-standin.exe","arguments":["C:/Users/Albert/AppData/Local/Temp/opencode/ingame-perf/stub.log"]}]}
+{"version":1,"apps":[{"id":"perf-stub","title":"Performance Stub","kind":"game","category":"game","executable":"C:/dev/out/ps-standin.exe","arguments":["%TEMP%/opencode/ingame-perf/stub.log"]}]}
 ```
 
 All GUI runs use `--dev-flash C:/dev/rpcs3/bin/dev_flash --data-dir <root>/data --no-intro`,

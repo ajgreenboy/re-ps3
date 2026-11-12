@@ -2,7 +2,7 @@
 
 Verified locally on Windows, 2026-11-10. Firmware: `C:/dev/rpcs3/bin/dev_flash`.
 All firmware exports, captures, state sidecars and scratch settings remain outside the repository in
-`C:/Users/Albert/AppData/Local/Temp/opencode/xmb-render-fix`.
+`%TEMP%/opencode/xmb-render-fix`.
 
 ## Options hint black rectangle
 
@@ -50,7 +50,7 @@ At 16:9 both scales equal the previous scale and the former offsets are zero.
 Representative invocation (PowerShell, from the repository root):
 
 ```powershell
-$d='C:/Users/Albert/AppData/Local/Temp/opencode/xmb-render-fix'
+$d='%TEMP%/opencode/xmb-render-fix'
 $env:XMB_LOG="$d/repro.log"
 $env:XMB_TEXTURE_DUMP=$d
 & out/native-xmb/re-ps3-native.exe --dev-flash C:/dev/rpcs3/bin/dev_flash `

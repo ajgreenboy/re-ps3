@@ -1007,7 +1007,7 @@ Evidence: `C:\dev\out\settings-accept\capture\col-settings-r01.png` (Game: `Adju
 | AT-5 | PASS | `getmac` `04:7C:16:13:45:A4` == the MAC line of `system/information`'s page |
 | AT-6 | PASS | `C: 91.9 GB free` vs `Get-PSDrive C` 91.9 GiB |
 | AT-7 | PASS | `AMD Ryzen 5 5600X 6-Core Processor at 3.70 GHz, 7 cores`; RAM 47.9 GiB vs 47.9 GiB |
-| AT-8 | PASS | default `al-workstation` (the computer's name); seeded `system/name=TESTNAME` wins (`accept/settings-report-name.json`) |
+| AT-8 | PASS | default `<computer name>` (the computer's name); seeded `system/name=TESTNAME` wins (`accept/settings-report-name.json`) |
 | AT-9 | PASS | the System page rows are the console's 25-row order plus `Install Other OS` where the firmware's own sequence puts it |
 | AT-10 | NOT MET, by design | the six language rows and BD - Internet Connection carry no value: the host has none and section 4 forbids inventing `English`/`Confirm` |
 | AT-11 | PASS | 19 Video rows in console order, 3 native-only flagged; `absent=0` |
@@ -1017,7 +1017,7 @@ Evidence: `C:\dev\out\settings-accept\capture\col-settings-r01.png` (Game: `Adju
 | AT-15 | PASS | `Speakers (3- DualSense Wireless Controller)`, volume 25 |
 | AT-16 | PASS | 5 active render endpoints listed |
 | AT-17 | PARTIAL | Key Tone shows the stored `On`; Audio Multi-Output shows no value (no fan-out setting) |
-| AT-18 | PASS | ip 192.168.1.120, mask 255.255.255.0, gw 192.168.1.1, dns 192.168.1.122, mtu 1500 (all host reads) |
+| AT-18 | PASS | ip <host-ip>, mask 255.255.255.0, gw <gateway>, dns <dns-ip>, mtu 1500 (all host reads) |
 | AT-19 | PASS | MAC `04:7C:16:13:45:A4`, `AA:BB:..` formatted, equals `getmac` |
 | AT-20 | PASS | 13 labels, console order, host value on every one (`capture/page-network-status-list.png`) |
 | AT-21 | PARTIAL | the row runs a real test: interface state plus one bounded TCP connection to 1.1.1.1:53, logged and reported as `network.test`; no adapter setting is touched. It is not an HTTP fetch of a known endpoint |

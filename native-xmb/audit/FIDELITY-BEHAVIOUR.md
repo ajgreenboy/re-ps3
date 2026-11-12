@@ -769,8 +769,8 @@ command lines and starts nothing):
 
   ```
   steam accounts: page opened rows=2 active=0 steamExe=C:/program files (x86)/steam/steam.exe
-  state ... "pageKind":"steamAccounts" ... "entryCount":2 ... "entryTitle":"ajgreenboy"
-  steam: switch requested account=c1234po steps=2 hold=1
+  state ... "pageKind":"steamAccounts" ... "entryCount":2 ... "entryTitle":"<account-1>"
+  steam: switch requested account=<account-2> steps=2 hold=1
   steam: prompt 1 heading="Switch Steam Account" confirm="Close Steam" cancel="Cancel" nothing started yet
   dialog: box enter choice= yes commit= 1
   steam: step 1 accepted (1/2)
@@ -787,7 +787,7 @@ The page's dump (`...steam-accounts.json`) carries both accounts, `active`/`auto
 `XMB_STEAM_ROOT` at an empty directory (`steam-error.png`): the page is the scanner's own sentence, "Steam was
 not found. Looked for XMB_STEAM_ROOT, the registry Steam path and the default installation folders."
 
-Two accounts are remembered on this machine (`ajgreenboy`, `c1234po`, neither signed in, both
+Two accounts are remembered on this machine (`<account-1>`, `<account-2>`, neither signed in, both
 `switchPossible:true`); that is why the page marks the auto-login one in words instead of a dot.
 
 ### 16.4 Media input mapping (I43/I45/I48-I50)

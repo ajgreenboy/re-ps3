@@ -15,7 +15,7 @@ at-ceiling surfaces. Existing uncommitted ribbon work is not part of this change
   `steam:2807960`, **nine rows in two groups**: `Sort By|Group Content`, then
   `Start|Open in Steam Library|Store Page|Screenshots|Verify Game Files|Delete|Information`.
   Evidence: `out/d8/game-options.png` and
-  `C:\Users\Albert\AppData\Local\Temp\xmb-layers-state-KMzygf\entries.json.options.json`.
+  `%TEMP%\xmb-layers-state-KMzygf\entries.json.options.json`.
 - `src/shell.cpp:2700-2710`: grouping requires a titled multi-row page; provider/form/download/Continue
   Watching pages are excluded. `src/shell.cpp:2854-2865` adds Sort By to a sortable filesystem page,
   not a universal Group Content row. The existing `video-options-panel` recipe asserts exactly
@@ -69,7 +69,7 @@ not the last-row-to-next-row gap**; replacing it with 199 would incorrectly comp
 - Requested `native-xmb/build.ps1 -OutputDirectory C:/dev/xmb/out/native-xmb`: PASS; printed
   `Built C:\dev\xmb\out\native-xmb\re-ps3-native.exe`.
 - Targeted `--state video-options-panel`: PASS, frame and panel both PSNR infinity / SSIM 1.0000;
-  fresh capture `C:\Users\Albert\AppData\Local\Temp\xmb-layers-state-KKfxlj\native.png` is identical to
+  fresh capture `%TEMP%\xmb-layers-state-KKfxlj\native.png` is identical to
   the existing reference. Its y100 edge is also x1320. Targeted `--state continue-watching`: PASS.
 - Full `bun work/ab-layers.ts --all --exe C:\dev\xmb\out\native-xmb\re-ps3-native.exe`:
   stored pair **6/6**, canonical capture **6/6** (5 gated passes, 1 informative), named states **21/22**.

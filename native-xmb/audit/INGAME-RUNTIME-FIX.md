@@ -31,7 +31,7 @@ original firmware findings in `INGAME-XMB-DESIGN.md` remain historical evidence,
 ## Local evidence
 
 All test configuration and captures are isolated beneath
-`C:\Users\Albert\AppData\Local\Temp\opencode`, not the real user data directory.
+`%TEMP%\opencode`, not the real user data directory.
 
 - `ingame-runtime-before`: baseline PS taps, column/row navigation and Circle return. Logs show
   `title: render resumed`, then `idle frames=454 ... paused=0`, `idle frames=480 ... paused=0`;

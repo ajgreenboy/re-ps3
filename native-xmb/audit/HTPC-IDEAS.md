@@ -339,7 +339,7 @@ so it could not spawn the tasks itself; the dispatch has to happen one level up.
   firmware assets, credentials and accounts never enter Git.
 - No fabricated data, no new online service, no privileged or silent system change: a power
   action is confirmed first. Commit only the task's own files, as
-  `Al <ajgreenboy@gmail.com>`, and only when asked.
+  `Al <author email>`, and only when asked.
 
 ### G0 - Shared groundwork: panel, HUD, sidecar fields
 

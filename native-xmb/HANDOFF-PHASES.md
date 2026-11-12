@@ -15,7 +15,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 - Firmware, decrypted modules, extracted assets, captures, recordings, console identity and the VFS overlay never go
   into Git. Commit only source, docs and approved screenshots.
 - Use only the local firmware. Scripts use Bun/TypeScript; no Python without approval.
-- Commit as `Al <ajgreenboy@gmail.com>` to the origin `ajgreenboy/XMB-Rewritten`. Other agents also commit here:
+- Commit as `Al <author email>` to origin. Other agents also commit here:
   run `git status` first and commit only your own files.
 - Build with `native-xmb/build.ps1`. It fails with LNK1104 while `re-ps3-native.exe` is running; stop the process
   first. The build log is UTF-16.

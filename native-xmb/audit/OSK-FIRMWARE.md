@@ -1260,7 +1260,7 @@ smaller than a 19 px triangle).
 | `17/18/19` | palette open, moved (Right+Down), and a symbol inserted at the caret - `19` differs from `16` only in the field |
 | `20/21` | `a/A` to the caps page (`!@#$%^&*()` / `QWERTYUIOP` / `ASDFGHJKL"` / `ZXCVBNM-_/`, mode cell `A`) and back to the lower page |
 | `22/25` | Escape closes the keyboard and leaves the page byte-identical |
-| `sysname/30-36` | System Name: the Settings column (`30`), `System Settings` row 5 (`31`), the page (`32`), row 1 `System Name` (`33`), the keyboard prefilled with the host name (`34`), `XMB` typed at the caret (`35`), accepted with the Enter key (`36`), and `preferences.json` gains `"system/name": "al-workstationXMB"` |
+| `sysname/30-36` | System Name: the Settings column (`30`), `System Settings` row 5 (`31`), the page (`32`), row 1 `System Name` (`33`), the keyboard prefilled with the host name (`34`), `XMB` typed at the caret (`35`), accepted with the Enter key (`36`), and `preferences.json` gains `"system/name": "<computer name>XMB"` |
 
 Masking evidence, over every `.log` and every `.png.json` sidecar in the evidence directory:
 

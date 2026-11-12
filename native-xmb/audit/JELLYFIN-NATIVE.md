@@ -800,7 +800,7 @@ This change wires it into playback.
   (transcode)". Subtitles Off (or a client-drawn track) re-opens the original stream. The choice is per item
   for the session.
 
-Real server check (read-only, no credentials): `GET /System/Info/Public` on 192.168.1.122 reports Jellyfin
+Real server check (read-only, no credentials): `GET /System/Info/Public` on <server-ip> reports Jellyfin
 12.2.0; its `/api-docs/openapi.json` lists `GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/Stream.{routeFormat}`
 with no security requirement ("Gets subtitles in a specified format"), and `SubtitleDeliveryMethod` includes
 `Encode`. That the route returns the original PGS bytes for `routeFormat=sup` is **INFERRED** (no item id is
