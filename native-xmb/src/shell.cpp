@@ -325,8 +325,7 @@ void Shell::resolveNetworkColumn() {
         switch(kind) {
         case RowKind::DownloadControl:
             return {Action::SteamDownloads,QStringLiteral("the console's download plugin lists its queue; "
-                "this build lists Steam's own download queue from the manifests Steam writes "
-                "(src/steam_downloads.cpp, audit/STEAM-DOWNLOADS.md)")};
+                "this build lists Steam's own download queue from the app manifests Steam writes")};
         case RowKind::WebBrowser:
             return {Action::Unavailable,QStringLiteral("the firmware hands this node to the PS3 Internet Browser; "
                 "this build has no browser and the XMBML carries no URL to hand to the host one")};
@@ -427,7 +426,7 @@ void Shell::resolveMediaColumns() {
             "no Blu-ray drive and no PS3 BD data store, so there is nothing to manage."}},
         {"video:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_video",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
-            "This build runs it natively (src/dlna_client.*, audit/DLNA.md): SSDP discovery, then ContentDirectory browsing."}},
+            "This build runs it natively: SSDP discovery, then ContentDirectory browsing."}},
         {"video:seg_editingvideo_mgmt",{"video-editor",Action::Unavailable,"msg_video_editor_and_upload","item_tex_upload","explore_category_video",
             "Video Editor & Uploader is the console's own scene editor (scenefolder_plugin) for clips recorded on the "
             "system. No capture device and no editor exist in this build, so the row lists the firmware's function "
@@ -435,12 +434,12 @@ void Shell::resolveMediaColumns() {
         // Music (category_music.xml)
         {"music:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_music",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
-            "This build runs it natively (src/dlna_client.*, audit/DLNA.md): SSDP discovery, then ContentDirectory browsing."}},
+            "This build runs it natively: SSDP discovery, then ContentDirectory browsing."}},
         {"music:seg_playlist_mgmt",{"playlists",Action::PlaylistFolder,"msg_playlists","tex_playlist","explore_category_music",""}},
         // Photo (category_photo.xml)
         {"photo:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_photo",
             "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
-            "This build runs it natively (src/dlna_client.*, audit/DLNA.md): SSDP discovery, then ContentDirectory browsing."}},
+            "This build runs it natively: SSDP discovery, then ContentDirectory browsing."}},
         // Photo Gallery (hakoniwa, hknw_plugin): the library area is recreated in gallery_*.cpp (audit/PHOTO-GALLERY.md);
         // the Playlist and Network areas, the 15 package floors and the face groupings are not.
         {"photo:seg_hakoniwa",{"gallery",Action::PhotoGallery,"msg_photo_gallery","","file",""}},
@@ -1095,7 +1094,7 @@ QString downloadInformationText(const SteamDownload& download) {
         +downloadSize(done)+QStringLiteral(" of ")+downloadSize(total);
     rows<<QStringLiteral("Steam state: ")+download.state;
     rows<<QStringLiteral("Pause/resume: not supported");
-    rows<<QStringLiteral("Note: Steam has no per-title pause or resume command (audit/STEAM-CLI.md)");
+    rows<<QStringLiteral("Note: Steam has no per-title pause or resume command");
     return download.title+QStringLiteral("\n\n")+rows.join('\n');
 }
 }
@@ -2377,7 +2376,11 @@ void Shell::activate() {
             body=settingsRowBody(entry,assets_,renderer_,preferences_.value("system/name").toString());
         if(body.isEmpty())
             body=entry.value.isEmpty()?host::systemInformation(renderer_,label,preferences_.value("system/name").toString()):entry.value;
-        showMessage(body,MessageKind::Info);break;
+        // A one-line answer (the empty states "No players were found." and "No persons have been added.") would
+        // become the heading of an otherwise blank information page; it is shown as the row's own message page.
+        if(!body.contains(QLatin1Char('\n')) && !entry.title.isEmpty())showMessage(entry.title,body,MessageKind::Page);
+        else showMessage(body,MessageKind::Info);
+        break;
     }
     case Action::Library: {
         // The Video column's Continue Watching row: a page built from this shell's own resume points, not a
@@ -4296,7 +4299,7 @@ void Shell::showEntryInformation(const Entry& entry) {
             rows<<QObject::tr("Items: %1").arg(rememberedResumeCount());
             rows<<QObject::tr("Note: a position is kept only while a title is half-watched, and a finished title is removed.");
         } else {
-            if(!entry.value.isEmpty())rows<<QStringLiteral("Path (native): ")+QDir::toNativeSeparators(entry.value);
+            if(!entry.value.isEmpty())rows<<QStringLiteral("Path: ")+QDir::toNativeSeparators(entry.value);
             const auto record=resumeMap(preferences_.value("media/resume").toString())
                 .value(entry.id.mid(QStringLiteral("continue:").size())).toObject();
             if(!record.isEmpty()) {
@@ -4334,9 +4337,9 @@ void Shell::showEntryInformation(const Entry& entry) {
         }
         rows<<row("msg_resolution","Resolution",resolution);
     }
-    if(!entry.detail.isEmpty())rows<<row("msg_info_detail","Details",entry.detail);
+    if(!entry.detail.isEmpty() && !onDisk)rows<<row("msg_info_detail","Details",entry.detail);   // a file on disk already shows its size and date above
     if(entry.action==Action::Folder || entry.action==Action::File || entry.action==Action::Library)
-        rows<<QStringLiteral("Path (native): ")+QDir::toNativeSeparators(entry.value);
+        rows<<QStringLiteral("Path: ")+QDir::toNativeSeparators(entry.value);
     // Title, blank line, then "Key: value" rows: the information page's own shape.
     showMessage(entry.title,rows.join('\n'),MessageKind::Info);
     qInfo().noquote()<<"shell: options information title="<<entry.title<<"rows="<<rows.size();

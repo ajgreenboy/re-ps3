@@ -82,6 +82,8 @@ void NotifyOverlay::paintEvent(QPaintEvent*) {
     const qreal textWidth=400.-16.-left;
     QFont titleFont(fontFamily_);titleFont.setPixelSize(22);
     const QString title=QFontMetrics(titleFont).elidedText(title_,Qt::ElideRight,int(textWidth));
+    QFont detailFont(fontFamily_);detailFont.setPixelSize(18);
+    const QString detail=QFontMetrics(detailFont).elidedText(detail_,Qt::ElideRight,int(textWidth));
     const auto label=[&](const QRectF& rect,const QString& text,int size,const QColor& colour) {
         QFont font(fontFamily_);font.setPixelSize(size);font.setStyleStrategy(QFont::PreferAntialias);
         font.setHintingPreference(QFont::PreferNoHinting);p.setFont(font);
@@ -90,7 +92,7 @@ void NotifyOverlay::paintEvent(QPaintEvent*) {
     };
     if(!detail_.isEmpty()) {
         label(QRectF(left,10.,textWidth,28.),title,22,QColor(245,245,245));
-        label(QRectF(left,36.,textWidth,24.),detail_,18,QColor(206,206,206));
+        label(QRectF(left,36.,textWidth,24.),detail,18,QColor(206,206,206));
     } else label(QRectF(left,8.,textWidth,height-16.),title,22,QColor(245,245,245));
 }
 }

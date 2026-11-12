@@ -1452,6 +1452,9 @@ void View::drawNotification(QPainter& p,double amount) {
     const int titleSize=22,detailSize=18;
     QFont titleFont(shell_.fontFamily());titleFont.setPixelSize(titleSize);
     const QString title=QFontMetrics(titleFont).elidedText(notificationShown_.title,Qt::ElideRight,int(textRight-textLeft));
+    // The detail line gets the same ellipsis as the title; it used to run past the plaque and off the screen edge.
+    QFont detailFont(shell_.fontFamily());detailFont.setPixelSize(detailSize);
+    const QString detail=QFontMetrics(detailFont).elidedText(notificationShown_.detail,Qt::ElideRight,int(textRight-textLeft));
     const auto label=[&](const QRectF& rect,const QString& value,int size,QColor colour) {
         if(textRenderer_.ready()) {
             QFont font(shell_.fontFamily());font.setPixelSize(size);
@@ -1465,7 +1468,7 @@ void View::drawNotification(QPainter& p,double amount) {
     if(twoLines) {
         label(QRectF(textLeft,plaque.top()+10.,textRight-textLeft,titleSize+6.),title,titleSize,QColor(245,245,245));
         label(QRectF(textLeft,plaque.top()+10.+titleSize+4.,textRight-textLeft,detailSize+6.),
-            notificationShown_.detail,detailSize,QColor(206,206,206));
+            detail,detailSize,QColor(206,206,206));
     } else label(QRectF(textLeft,plaque.top()+8.,textRight-textLeft,plaque.height()-16.),title,titleSize,QColor(245,245,245));
 }
 // The operation guide behind "Triangle : Options" (audit/FIDELITY-ROOT-BAR.md 6.1 update 3), all TRACED:

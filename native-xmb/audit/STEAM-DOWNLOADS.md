@@ -372,8 +372,8 @@ the page dump:
 - A resolvable Steam root whose `steamapps` holds no interesting manifest: `Nothing is downloading.`
   (that exact sentence). Log: `steam downloads: page empty (nothing is downloading)`; dump `count 0`,
   `error ""`, `message "Nothing is downloading."`.
-- No `steamapps` under any root: the scanner's own sentence, `Steam installation not found (no
-  steamapps directory under the configured roots).` Log: `steam downloads: page unavailable: ...`;
+- No `steamapps` under any root: `Steam was not found on this computer, so there are no downloads to show.` (changed
+  from the scanner's earlier developer wording in the 2026-11-12 sweep). Log: `steam downloads: page unavailable: ...`;
   dump `count 0` with `error` and `message` both set to that text.
 
 Neither pushes an empty page, the same convention the Steam library folders use ("This folder is

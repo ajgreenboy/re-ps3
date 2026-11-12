@@ -405,8 +405,7 @@ QVector<SteamDownload> scanSteamDownloads(const QString& steamRoot, QString* err
     const QString root = resolveSteamRoot(steamRoot);
     if (root.isEmpty()) {
         if (error)
-            *error = QStringLiteral("Steam installation not found (no steamapps directory under the "
-                                    "configured roots).");
+            *error = QStringLiteral("Steam was not found on this computer, so there are no downloads to show.");
         return {};
     }
     const QHash<QString, RegistryApp> registry = readRegistryApps();

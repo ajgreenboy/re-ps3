@@ -12,6 +12,8 @@ namespace {
 void fail(QString* error, const QString& message) { if(error)*error = message; }
 #ifdef Q_OS_WIN
 QString winError(const QString& operation, DWORD code) {
+    // 0x80342002 (ERROR_NDIS_DOT11_POWER_STATE_INVALID) is the WLAN service's answer when the radio is switched off.
+    if(code == 0x80342002UL) return operation + QStringLiteral(": Wi-Fi is turned off on this computer.");
     wchar_t* text = nullptr;
     FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
                    nullptr, code, 0, reinterpret_cast<wchar_t*>(&text), 0, nullptr);

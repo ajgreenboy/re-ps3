@@ -784,8 +784,8 @@ command lines and starts nothing):
 
 The page's dump (`...steam-accounts.json`) carries both accounts, `active`/`autoLogin`, `switchPossible`,
 `alreadyActive`, `clientSignedIn`, the step count and the blocked body. The failure path is proved by pointing
-`XMB_STEAM_ROOT` at an empty directory (`steam-error.png`): the page is the scanner's own sentence, "Steam was
-not found. Looked for XMB_STEAM_ROOT, the registry Steam path and the default installation folders."
+`XMB_STEAM_ROOT` at an empty directory (`steam-error.png`): the page is the scanner's own sentence (since 2026-11-12: "Steam was
+not found on this computer. Install Steam and sign in, then open this page again.")
 
 Two accounts are remembered on this machine (`<account-1>`, `<account-2>`, neither signed in, both
 `switchPossible:true`); that is why the page marks the auto-login one in words instead of a dot.

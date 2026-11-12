@@ -29,8 +29,14 @@ void Shell::activatePhoneRemote(const Entry& entry) {
             return;
         }
         // The pairing code and URL: the URL embeds the code so a phone can open it and pair in one step.
+        // The server listens on this computer only unless XMB_PHONE_REMOTE_LAN=1, and a loopback address cannot be
+        // opened from a phone, so the page says so instead of inviting a phone to open it.
+        const QUrl url=phoneRemote_.url();
+        const bool loopback=url.host()==QLatin1String("127.0.0.1");
         showMessage(tr("Phone Remote"),
-            tr("Open this on a phone on your network:\n%1\n\nPairing code: %2").arg(phoneRemote_.url().toString(),phoneRemote_.pairingCode()),
+            loopback
+                ?tr("The remote is limited to this computer, so a phone cannot reach it yet.\nTo allow phones on your network, start the XMB with XMB_PHONE_REMOTE_LAN=1.\n\nThis computer: %1\nPairing code: %2").arg(url.toString(),phoneRemote_.pairingCode())
+                :tr("Open this on a phone on your network:\n%1\n\nPairing code: %2").arg(url.toString(),phoneRemote_.pairingCode()),
             MessageKind::Page);
     }
     emit changed();

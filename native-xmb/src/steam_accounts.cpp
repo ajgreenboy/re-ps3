@@ -148,8 +148,7 @@ QString resolveSteamRoot(const QString& explicitRoot, QString* error) {
     }
     if (error) {
         *error = QStringLiteral(
-            "Steam was not found. Looked for XMB_STEAM_ROOT, the registry Steam path and the default "
-            "installation folders.");
+            "Steam was not found on this computer. Install Steam and sign in, then open this page again.");
     }
     return {};
 }
