@@ -338,7 +338,8 @@ CgProgram CgProgram::load(const QByteArray& b,QString* error) {
     auto u32=[&](int at)->quint32{return at>=0 && at+4<=b.size()?qFromBigEndian<quint32>(b.constData()+at):0;};
     const quint32 profile=u32(0),paramCount=u32(12),paramArray=u32(16),info=u32(20),ucodeSize=u32(24),ucode=u32(28);
     if(profile!=7003 && profile!=7004)return fail(QString("unknown Cg profile %1").arg(profile));
-    if(ucode+ucodeSize>quint32(b.size()) || paramArray+paramCount*48>quint32(b.size()))return fail("Cg binary offsets out of range");
+    if(quint64(ucode)+ucodeSize>quint64(b.size()) || quint64(paramArray)+quint64(paramCount)*48>quint64(b.size()) || paramCount>4096)return fail("Cg binary offsets out of range");
+    if(profile==7004 && (quint64(info)+21>quint64(b.size())))return fail("Cg binary info offset out of range");
     const QByteArray code=b.mid(int(ucode),int(ucodeSize));
     auto cstr=[&](quint32 at){return at && at<quint32(b.size())?QString::fromUtf8(b.constData()+at):QString();};
     program.vertex=profile==7003;
