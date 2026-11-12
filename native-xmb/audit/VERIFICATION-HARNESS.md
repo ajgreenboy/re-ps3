@@ -819,3 +819,28 @@ identical results. The generator refuses to touch a folder it did not write.
 | `raf-static-scene` | `rafRender` recipes run `--raf-render` on dev_flash `coldboot.raf`; no window, no clock. Gates the renderer only: no XMB surface shows a RAF scene yet. |
 
 Recipe fields added for these: `stubLog`, `rafRender`; `pause=` is an allowed script token.
+
+### V2b: the 2026-11-11 surfaces (2026-11-12)
+
+Five more named states, same self-baseline rule, for the surfaces that landed on 2026-11-11 (audit/AUTOLOGON.md,
+audit/ZF-TEXT-ENTRY.md, audit/FIRST-RUN.md). New recipe field: `appArgs` (extra `--options` for the app itself; the
+first-run wizard needs `--first-run`). New seed `out/native-reference/v2/plain`, written by `bun work/v2-fixtures.ts`,
+which now leaves a fixture file alone when its bytes are already right, so adding a seed never disturbs a run that is
+reading the others. Every recipe sets `XMB_SINGLE_INSTANCE=0` and `XMB_AUTOSTART_TASK=re-ps3-native-kiosk-v2btest`
+(a task that does not exist); the Windows sign-in status is pinned with `XMB_AUTOLOGON_FAKE`, so the registry is never
+read and nothing is changed. Each state passed twice in a row on one build with PSNR infinity.
+
+| State | What pins it |
+|---|---|
+| `settings-autologon-info` | Settings > System Settings, row 30 of 34, Cross: the information page. `XMB_AUTOLOGON_FAKE="1\|gate-user\|gate-user"` gives "On for gate-user". The page is a message page over the list, so the sidecar still says depth 1 on `windows_autologon`; the log line `autologon: on for gate-user` is the oracle that the fake was used. |
+| `settings-autologon-row` | The same list with the row focused (30 DOWN): value "On for gate-user" and the description. Start at Sign-in above it is dimmed with no value because a dev build has no watchdog.ps1 beside the exe (a packaged exe would show On/Off there). Regions start at y 140 and skip the About row, which carries the build and Qt version text. Row index 30 assumes 34 rows (`entryCount` is asserted). |
+| `first-run-autologon-step` | `--first-run` on a scratch data dir, scripted to the Windows Automatic Sign-in step, status faked to Off (`0\|gate-user\|gate-user`). Cross is pressed only on Set Up This System, Continue (firmware, index 1), Skip This Step (library, index 5), Skip This Step (Controllers) and Skip This Step (Start at Sign-in, index 2). It never reaches the Download from Sony row (index 3), the Use the Windows Folders row or the Start at Sign-in toggle; nothing is fetched. One screen is assumed: a second screen adds a Choose the Screen step and the `entryId` assertion fails instead of capturing a wrong page. |
+| `ingame-enter-text` | The `ingame-xmb` set-up plus 8 DOWN: the Enter Text row (keypad icon, after Quit Game) focused. |
+| `ingame-enter-text-keyboard` | Same, then Cross: the XMB keyboard (title Enter Text) with "Gate 42" typed through the `type=` token. The keyboard's Enter is never pressed and the script ends with quit while it is open, so nothing is delivered; the text is in no log line. |
+
+The two in-game states go through the compositor window capture like `ingame-xmb`. The title bar of the captured window is
+drawn by Windows and its backdrop drifts by up to 2 levels over time (the stored `ingame-xmb` frame shows the same 62 dB over
+its top 75 rows), so the new in-game recipes score regions from y 140 down and are exact there; `ingame-xmb` itself is
+unchanged and keeps its full-frame region.
+
+Nothing was skipped: all five scenarios could be pinned.

@@ -1109,6 +1109,462 @@
           ]
         }
       ]
+    },
+    {
+      "name": "settings-autologon-info",
+      "description": "Settings > System Settings > Windows automatic sign-in, the information page Cross opens on that row (row 30 of the 34-row page): the status line and the netplwiz / Sysinternals Autologon steps. XMB_AUTOLOGON_FAKE=\"1|gate-user|gate-user\" replaces the Winlogon read, so the status is \"On for gate-user\" on every PC and the registry is never read for the capture; XMB_AUTOSTART_TASK names a task that does not exist, so nothing can touch the real logon task. The page is a message page over the list, so the sidecar still says depth 1 on that row; the boot log line `autologon: on for gate-user` is the oracle that the faked state was used (audit/AUTOLOGON.md).",
+      "reference": "out/native-reference/layers/settings-autologon-info.png",
+      "dataSeed": "out/native-reference/v2/plain",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_SINGLE_INSTANCE": "0",
+        "XMB_AUTOSTART_TASK": "re-ps3-native-kiosk-v2btest",
+        "XMB_AUTOLOGON_FAKE": "1|gate-user|gate-user"
+      },
+      "waits": 10,
+      "settleWaits": 3,
+      "path": [
+        {
+          "categoryId": "settings",
+          "catalogueId": "system"
+        },
+        {
+          "rowIndex": 30
+        }
+      ],
+      "expect": {
+        "category": "settings",
+        "depth": 1,
+        "entryId": "windows_autologon",
+        "entryTitle": "Windows automatic sign-in",
+        "pageKind": "page",
+        "log": [
+          {
+            "pattern": "autologon: on for gate-user",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "status and steps",
+          "crop": [
+            440,
+            240,
+            1040,
+            590
+          ]
+        },
+        {
+          "name": "title",
+          "crop": [
+            100,
+            140,
+            900,
+            70
+          ]
+        }
+      ]
+    },
+    {
+      "name": "settings-autologon-row",
+      "description": "The Settings > System Settings list with the Windows automatic sign-in row focused: its value column reads \"On for gate-user\" (XMB_AUTOLOGON_FAKE=\"1|gate-user|gate-user\", so no registry read) and its description is under the title. Start at Sign-in above it is dimmed with no value because a dev build has no watchdog.ps1 beside the exe (a packaged build would show On/Off there). Regions leave out the About row and the clock plate: the About row carries the build version and Qt version text, which changes with every version bump.",
+      "reference": "out/native-reference/layers/settings-autologon-row.png",
+      "dataSeed": "out/native-reference/v2/plain",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_SINGLE_INSTANCE": "0",
+        "XMB_AUTOSTART_TASK": "re-ps3-native-kiosk-v2btest",
+        "XMB_AUTOLOGON_FAKE": "1|gate-user|gate-user"
+      },
+      "waits": 10,
+      "settleWaits": 3,
+      "path": [
+        {
+          "categoryId": "settings",
+          "catalogueId": "system"
+        }
+      ],
+      "expect": {
+        "category": "settings",
+        "depth": 1,
+        "entryCount": 34,
+        "entryId": "windows_autologon",
+        "entryTitle": "Windows automatic sign-in",
+        "pageKind": "page",
+        "log": [
+          {
+            "pattern": "autologon: on for gate-user",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "list below About",
+          "crop": [
+            0,
+            140,
+            1920,
+            940
+          ]
+        },
+        {
+          "name": "focused row",
+          "crop": [
+            500,
+            440,
+            1300,
+            150
+          ]
+        }
+      ],
+      "preGrab": [
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "wait",
+        "wait"
+      ]
+    },
+    {
+      "name": "first-run-autologon-step",
+      "description": "The first-run wizard (--first-run on a scratch data dir) stopped on its Windows Automatic Sign-in step, with the status faked to Off (XMB_AUTOLOGON_FAKE=\"0|gate-user|gate-user\", no registry read): the row, its value Off, the guidance for that state, Continue and Skip This Step. The script only ever presses Cross on rows it names: Set Up This System (welcome), Continue (firmware, index 1; the Download from Sony row is index 3 and is never reached), Skip This Step (library, index 5; the Use the Windows Folders row at index 0 is never pressed), Skip This Step (Controllers), Skip This Step (Start at Sign-in, index 2; its toggle row at index 0 is never pressed). Nothing is fetched, no folder or setting is written outside the scratch data dir and XMB_AUTOSTART_TASK names a task that does not exist. The step order assumes one screen (a second screen adds a Choose the Screen step before the controller step and the entryId assertion then fails); recipe field appArgs passes --first-run (audit/FIRST-RUN.md, audit/AUTOLOGON.md).",
+      "reference": "out/native-reference/layers/first-run-autologon-step.png",
+      "dataSeed": "out/native-reference/v2/plain",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini"
+      ],
+      "appArgs": [
+        "--first-run"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_SINGLE_INSTANCE": "0",
+        "XMB_AUTOSTART_TASK": "re-ps3-native-kiosk-v2btest",
+        "XMB_AUTOLOGON_FAKE": "0|gate-user|gate-user"
+      },
+      "waits": 10,
+      "settleWaits": 2,
+      "preGrab": [
+        "ENTER",
+        "wait",
+        "wait",
+        "DOWN",
+        "ENTER",
+        "wait",
+        "wait",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "ENTER",
+        "wait",
+        "wait",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "ENTER",
+        "wait",
+        "wait",
+        "DOWN",
+        "DOWN",
+        "ENTER",
+        "wait",
+        "wait"
+      ],
+      "expect": {
+        "category": "game",
+        "depth": 6,
+        "entryCount": 3,
+        "entryId": "setup:autologon",
+        "entryTitle": "Windows automatic sign-in",
+        "pageKind": "page",
+        "log": [
+          {
+            "pattern": "autologon: off",
+            "count": 1
+          },
+          {
+            "pattern": "setup: starting .forced., dev_flash",
+            "count": 1
+          },
+          {
+            "pattern": "setup: step autologon rows 3",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "frame",
+          "crop": [
+            0,
+            0,
+            1920,
+            1080
+          ]
+        },
+        {
+          "name": "step rows",
+          "crop": [
+            500,
+            440,
+            1400,
+            380
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ingame-enter-text",
+      "description": "The in-game XMB with the Enter Text row focused (ZF2): keypad icon, the row title, Quit Game above it, Software Manual and the Artwork rows below, Back to Game Screen in the guide. The stand-in game window of our own (work/v2-stubgame.cpp) is launched by this script's own Enter on its imported row, game boot off, then a PS tap opens the in-game XMB over the captured window frame (the same set-up as ingame-xmb), and 8 DOWN steps land on the Enter Text row that follows Quit Game (audit/ZF-TEXT-ENTRY.md, ZF2). The stub is ended afterwards by pid (stubLog). The window capture goes through the compositor, so the frame is pinned for this machine's window theme, not across machines. Regions start below the compositor-drawn title bar (y 140): its backdrop shifts by up to 2 levels over time on this machine (the stored ingame-xmb frame shows the same 62 dB drift over its top 75 rows), which is noise, not a drawing change.",
+      "reference": "out/native-reference/layers/ingame-enter-text.png",
+      "dataSeed": "out/native-reference/v2/game",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini",
+        "apps.json"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_NO_GAMEBOOT": "1",
+        "XMB_PS_LOG": "1",
+        "XMB_SINGLE_INSTANCE": "0"
+      },
+      "stubLog": "C:/dev/out/v2/stub.log",
+      "waits": 10,
+      "settleWaits": 1,
+      "path": [
+        {
+          "catalogueId": "custom:v2-stub"
+        }
+      ],
+      "preGrab": [
+        "pause=3000",
+        "ps",
+        "pause=3000",
+        "wait",
+        "wait",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "wait",
+        "wait"
+      ],
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "entryId": "ingame:text",
+        "entryTitle": "Enter Text",
+        "entryCount": 13,
+        "sidecar": {
+          "titleRunning": true,
+          "inGame": true,
+          "runningTitle": "Gate Stub",
+          "selection": 8
+        },
+        "log": [
+          {
+            "pattern": "ingame: row ingame:quit inserted in game",
+            "count": 1
+          },
+          {
+            "pattern": "mode=windowed capture=ok",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "below the title bar",
+          "crop": [
+            0,
+            140,
+            1920,
+            940
+          ]
+        },
+        {
+          "name": "focused row",
+          "crop": [
+            450,
+            430,
+            900,
+            140
+          ]
+        },
+        {
+          "name": "guide",
+          "crop": [
+            1480,
+            940,
+            400,
+            70
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ingame-enter-text-keyboard",
+      "description": "Cross on the Enter Text row opens the XMB's own keyboard over the in-game XMB (title Enter Text, field limit 256) and the script types the short fixed text \"Gate 42\" with the type= token: the field shows it, the focused key is g (the first character the keyboard cursor rests on), Prediction and Enter keys are drawn as the firmware layout. The stand-in game window of our own (work/v2-stubgame.cpp) is launched by this script's own Enter on its imported row, game boot off, then a PS tap opens the in-game XMB over the captured window frame (the same set-up as ingame-xmb), and 8 DOWN steps then Cross on the Enter Text row that follows Quit Game (audit/ZF-TEXT-ENTRY.md, ZF2). The stub is ended afterwards by pid (stubLog). The window capture goes through the compositor, so the frame is pinned for this machine's window theme, not across machines. Nothing is ever delivered: the keyboard's Enter is never pressed (the script ends with quit while the keyboard is open), the typed text is held only in the keyboard's field and is in no log line, and the only window that could receive text is the stub, which reads no text at all. Regions start below the compositor-drawn title bar (y 140): its backdrop shifts by up to 2 levels over time on this machine (the stored ingame-xmb frame shows the same 62 dB drift over its top 75 rows), which is noise, not a drawing change.",
+      "reference": "out/native-reference/layers/ingame-enter-text-keyboard.png",
+      "dataSeed": "out/native-reference/v2/game",
+      "seedPaths": [
+        "preferences.json",
+        "profiles.json",
+        "settings.ini",
+        "apps.json"
+      ],
+      "env": {
+        "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
+        "XMB_NO_GAMEBOOT": "1",
+        "XMB_PS_LOG": "1",
+        "XMB_SINGLE_INSTANCE": "0"
+      },
+      "stubLog": "C:/dev/out/v2/stub.log",
+      "waits": 10,
+      "settleWaits": 1,
+      "path": [
+        {
+          "catalogueId": "custom:v2-stub"
+        }
+      ],
+      "preGrab": [
+        "pause=3000",
+        "ps",
+        "pause=3000",
+        "wait",
+        "wait",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "DOWN",
+        "wait",
+        "wait",
+        "ENTER",
+        "wait",
+        "wait",
+        "wait",
+        "type=Gate 42",
+        "wait",
+        "wait"
+      ],
+      "expect": {
+        "category": "game",
+        "depth": 0,
+        "entryId": "ingame:text",
+        "sidecar": {
+          "titleRunning": true,
+          "inGame": true,
+          "runningTitle": "Gate Stub",
+          "selection": 8
+        },
+        "log": [
+          {
+            "pattern": "ingame: row ingame:quit inserted in game",
+            "count": 1
+          },
+          {
+            "pattern": "mode=windowed capture=ok",
+            "count": 1
+          },
+          {
+            "pattern": "ingame: Enter Text opens the keyboard",
+            "count": 1
+          }
+        ]
+      },
+      "regions": [
+        {
+          "name": "below the title bar",
+          "crop": [
+            0,
+            140,
+            1920,
+            940
+          ]
+        },
+        {
+          "name": "keyboard",
+          "crop": [
+            490,
+            285,
+            940,
+            510
+          ]
+        },
+        {
+          "name": "text field",
+          "crop": [
+            490,
+            335,
+            940,
+            60
+          ]
+        }
+      ]
     }
   ]
 }

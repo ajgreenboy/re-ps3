@@ -112,6 +112,8 @@ type StateRecipe = {
   // "started pid=N" to this log (its third argument); the harness deletes the log before the run and ends exactly
   // those pids afterwards, so no stub outlives its capture. Absolute path; the stub is a fixture of work/v2-fixtures.ts.
   stubLog?: string;
+  // Extra command-line arguments for the app itself, e.g. ["--first-run"] for the first-run wizard. Plain tokens, no shell.
+  appArgs?: string[];
   // A surface with no window to script: the offscreen RAF still (--raf-render). A path under dev_flash; the capture is the
   // PNG the command writes, the log assertions read its stdout line, and dataSeed/seedPaths/waits are unused.
   rafRender?: string;
@@ -325,6 +327,8 @@ function parseThresholds(path: string): Thresholds {
             fail(`${path}: ${state.name}: env.${key} must be a string`);
         }
       }
+      if (state.appArgs !== undefined && (!Array.isArray(state.appArgs) || state.appArgs.some(a => typeof a !== 'string' || !a.startsWith('--'))))
+        fail(`${path}: ${state.name}: appArgs must be an array of --options`);
       if (state.stubLog !== undefined && (typeof state.stubLog !== 'string' || !isAbsolute(state.stubLog)))
         fail(`${path}: ${state.name}: stubLog must be an absolute path`);
       for (const listKey of ['preGrab', 'postGrab'] as const) {
@@ -683,6 +687,7 @@ async function runStateProcess(t: Thresholds, opts: ReturnType<typeof parseArgs>
   if (bgClock) args.push('--background-clock', bgClock);
   if (uiClock) args.push('--ui-clock', uiClock);
   args.push('--focus-time', focusTime, '--script', finalTokens.join(','));
+  if (recipe.appArgs) args.push(...recipe.appArgs);
   const env = {
     ...process.env,
     XMB_DUMP_ENTRIES: dumpPath,
