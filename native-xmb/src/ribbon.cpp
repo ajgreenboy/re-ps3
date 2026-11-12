@@ -213,13 +213,17 @@ bool Ribbon::init(QOpenGLFunctions_3_3_Core& gl,Assets& assets) {
     }
     // LinesController.fpo, reduced: the summed line intensity times the horizontal gradient of BACKGROUND.mnu colours
     // 3 and 4. The firmware also multiplies the background by colours 1 and 2 (both white) and pre-exposes for HDR.
+    // fit (2026-11-10, audit/RIBBON-A2.md): 0.7 scales only the ribbon's summed emissive energy, not the
+    // background, particles or HDR exposure. Day-root nine-pixel median peaks at x1520/1700/1900:
+    // 147/160/152 -> 117/125/120 luma (console 105/106/118); frame 19.34/.8480 -> 20.27/.8587.
+    // it does not claim the console still's cloth phase, which remains unresolved.
     static const char* composite=R"(#version 330 core
 in vec4 v_tc[10];
 layout(location=0) out vec4 colour;
 uniform sampler2D sum;uniform vec3 colour3,colour4;
 void main(){
     float l=texture(sum,v_tc[0].xy).r;
-    colour=vec4(l*mix(colour3,colour4,v_tc[0].x),1.0);
+    colour=vec4(l*0.7*mix(colour3,colour4,v_tc[0].x),1.0);
 })";
     if(!composite_.addShaderFromSourceCode(QOpenGLShader::Vertex,fullscreenVertex) || !composite_.addShaderFromSourceCode(QOpenGLShader::Fragment,composite) || !composite_.link()) {
         qWarning().noquote()<<"ribbon: composite failed:"<<composite_.log();return false;
