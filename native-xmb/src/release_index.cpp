@@ -51,6 +51,9 @@ ReleaseSize parseSize(const QJsonValue& label) {
     QString text=result.sizeLabel.trimmed();
     text.remove(QRegularExpression(QStringLiteral("\\(?selective\\s+download\\)?\\s*$"),QRegularExpression::CaseInsensitiveOption));
     text.replace(QLatin1Char(','),QLatin1Char('.'));
+    // Sources use non-breaking spaces (and &nbsp; entities) inside size strings: normalise both to a space.
+    text.replace(QStringLiteral("&nbsp;"),QStringLiteral(" "));
+    text.replace(QChar(0x00A0),QLatin1Char(' '));
     static const QRegularExpression token(QStringLiteral("(\\d+(?:\\.\\d+)?)\\s*(TB|GB|MB|KB|B)?"),QRegularExpression::CaseInsensitiveOption);
     QVector<QPair<double,QString>> values;
     QString fallback;

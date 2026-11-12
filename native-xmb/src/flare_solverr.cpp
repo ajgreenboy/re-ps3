@@ -33,8 +33,28 @@ bool FlareSolverr::request(const QUrl& url, QByteArray* response, QString* error
         if(error)*error=QStringLiteral("FlareSolverr: %1").arg(result.value(QStringLiteral("message")).toString());
         return false;
     }
-    const QByteArray solved=result.value(QStringLiteral("solution")).toObject().value(QStringLiteral("response")).toString().toUtf8();
+    QByteArray solved=result.value(QStringLiteral("solution")).toObject().value(QStringLiteral("response")).toString().toUtf8();
     if(solved.isEmpty()) { if(error)*error=QStringLiteral("FlareSolverr returned an empty response"); return false; }
+    // FlareSolverr returns driver.page_source: a raw JSON/text response is wrapped in an
+    // <html><body><pre>... page. Unwrap the <pre> and unescape the entities the source uses (&nbsp;
+    // in size strings).
+    if(solved.trimmed().startsWith('<')) {
+        QString text=QString::fromUtf8(solved);
+        const int pre=text.indexOf(QStringLiteral("<pre>"));
+        if(pre>=0) {
+            const int start=pre+5;
+            const int end=text.indexOf(QStringLiteral("</pre>"),start);
+            text=end>=0?text.mid(start,end-start):text.mid(start);
+        }
+        text.replace(QStringLiteral("&nbsp;"),QString(QChar(0x00A0)));
+        text.replace(QStringLiteral("&lt;"),QStringLiteral("<"));
+        text.replace(QStringLiteral("&gt;"),QStringLiteral(">"));
+        text.replace(QStringLiteral("&quot;"),QStringLiteral("\""));
+        text.replace(QStringLiteral("&#39;"),QStringLiteral("'"));
+        text.replace(QStringLiteral("&amp;"),QStringLiteral("&"));
+        solved=text.toUtf8();
+    }
+    if(solved.trimmed().isEmpty()) { if(error)*error=QStringLiteral("FlareSolverr returned an empty body"); return false; }
     if(response)*response=solved; return true;
 }
 } // namespace xmb
