@@ -529,8 +529,6 @@ private:
     QDateTime backgroundOverride_;                                    // fixed clock for measurement, invalid = now
     double secondsOverride_=-1;                                       // fixed animation time for A/B captures, -1 = now
     void drawScene(QPainter& painter);
-    void drawPsMenu(QPainter& painter);
-    void drawControllerHud(QPainter& painter);
     // ---- Message surfaces (dialogs.cpp) -------------------------------------------------------------
     // Shell decides which of the firmware's five surfaces a message is (MessageKind); these paths draw
     // the measured layouts. There is no dialog RCO - the box, its plate and its button row are built by

@@ -447,8 +447,7 @@ public:
     // build committed and popped in one frame. The chain below runs the same three stages on the surfaces
     // this app already draws - Ask is the two-answer box (D1), Proceed is the page_busy state, Finish is the
     // page message (D3/D4) - and every sentence is read from sysconf_plugin where that plugin has one.
-    // The stage is exposed so a scripted run (and the capture sidecar's reader) can name what is on screen.
-    QString settingsWriteStage() const;   // "ask"/"proceed"/"finish-ok"/"finish-failed"/"" 
+    // The key is exposed so a scripted run (and the capture sidecar's reader) can name what is on screen.
     QString settingsWriteKey() const { return settingsWrite_.key; }
     QString settingsWriteResult() const { return settingsWrite_.result; }
     // ---- Media: the Display key (audit/MEDIA-PANELS-FIRMWARE.md 3.4/3.6; FIDELITY-BEHAVIOUR I48) -------
