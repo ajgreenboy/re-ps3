@@ -1633,7 +1633,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     for(auto& category:categories_)if(category.id=="game") {
         category.entries.push_back(item("content:refresh","Refresh Game Library","item_tex_plain_folder",full,Action::RefreshContent));
         category.entries.push_back(item("content:import","Import Games and Apps","item_tex_plain_folder",full,Action::ImportApps));
-        category.entries.push_back(item("game:search","Search Games","item_tex_plain_folder",full,Action::SearchGames));
+        category.entries.push_back(item("game:search","Browse","item_tex_plain_folder",full,Action::BrowseGames));
         category.entries.push_back(item("release:import","Import Source","item_tex_plain_folder",full,Action::ImportSource));
     }
     refreshReleaseSources();
@@ -2263,6 +2263,7 @@ void Shell::activate() {
     case Action::DownloadManager:openDownloadManager();break;
     case Action::DebridToken:editDebridToken();break;
     case Action::FlareSolverrUrl:editFlareSolverrUrl();break;
+    case Action::BrowseGames:openBrowseGames();break;
     case Action::SearchGames:openGameSearch();break;
     case Action::GameSearchResult:pickGameResult(entry.value.toInt());break;
     case Action::GameSourcePick:pickGameSource(entry.value);break;

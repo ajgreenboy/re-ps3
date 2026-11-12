@@ -250,6 +250,42 @@ void Shell::saveFlareSolverrUrl(const QString& url) {
 void Shell::openGameSearch() {
     emit requestJellyfinFieldEdit(QStringLiteral("game:search"),tr("Search Games"),QString(),false);
 }
+void Shell::openBrowseGames() {
+    if(busy())return;
+    busy_=true;status_=tr("Loading popular games...");
+    busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();
+    auto* watcher=new QFutureWatcher<QPair<QVector<GameResult>,QString>>(this);
+    connect(watcher,&QFutureWatcher<QPair<QVector<GameResult>,QString>>::finished,this,[this,watcher]{
+        const auto result=watcher->result();watcher->deleteLater();
+        busy_=false;status_.clear();busyProgress_=-1.;busySpinnerPhase_=-1.;
+        gameSearch_=result.first;
+        if(pages_.size()<32) {
+            Page page;page.title=tr("Browse");
+            page.entries.append(releaseRow(QStringLiteral("game:search-row"),tr("Search"),Action::SearchGames));
+            if(!result.second.isEmpty()) {
+                Entry error=releaseRow(QStringLiteral("game:error"),tr("Could not load games"),Action::Unavailable);
+                error.detail=result.second;page.entries.append(error);
+            } else {
+                const int shown=qMin(100,gameSearch_.size());
+                for(int i=0;i<shown;++i) {
+                    const auto& game=gameSearch_[i];
+                    Entry entry=releaseRow(QStringLiteral("game:result:")+QString::number(i),game.name,Action::GameSearchResult,QString::number(i));
+                    entry.detail=game.options.size()>1?tr("%1 sources").arg(game.options.size()):game.options.first().source;
+                    entry.fieldValue=game.options.first().fileSize;
+                    page.entries.append(entry);
+                }
+            }
+            pages_.push_back(std::move(page));
+        }
+        emit changed();
+    });
+    watcher->setFuture(QtConcurrent::run([]{
+        QVector<GameResult> results;QString error;
+        HydraLibrary().searchGames(QString(),&results,&error);
+        return qMakePair(results,error);
+    }));
+    emit changed();
+}
 void Shell::runGameSearch(const QString& query) {
     const QString term=query.trimmed();
     if(term.isEmpty() || busy())return;

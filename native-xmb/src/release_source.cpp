@@ -18,6 +18,7 @@
 #include <QSaveFile>
 #include <QTimer>
 #include <limits>
+#include <atomic>
 
 namespace xmb {
 namespace {
@@ -44,7 +45,7 @@ QString slugFor(const QString& name,const QUrl& url) {
 // Same streaming QNAM + event-loop + timer pattern as firmware_fetcher::fetch.
 // file: is allowed only for importing a local index, never for resolved downloads.
 bool fetch(const QUrl& url,QIODevice* output,qint64 limit,int timeoutMs,QString* error,
-           const ReleaseProgress& progress={},bool localIndex=false) {
+           const ReleaseProgress& progress={},bool localIndex=false,const std::atomic_bool* cancel=nullptr) {
     if(localIndex && url.isLocalFile()) {
         QFile file(url.toLocalFile());
         if(!file.open(QIODevice::ReadOnly)){fail(error,QStringLiteral("Cannot read local source: ")+file.errorString());return false;}
@@ -65,6 +66,7 @@ bool fetch(const QUrl& url,QIODevice* output,qint64 limit,int timeoutMs,QString*
     QEventLoop loop; QTimer timer; timer.setSingleShot(true);
     bool timedOut=false,failedWrite=false; qint64 received=0;
     const auto consume=[&] {
+        if(cancel && cancel->load()) { reply->abort(); return; }
         const auto bytes=reply->readAll();
         if(bytes.size()>limit-received || output->write(bytes)!=bytes.size()){failedWrite=true;reply->abort();return;}
         received+=bytes.size();
@@ -75,7 +77,8 @@ bool fetch(const QUrl& url,QIODevice* output,qint64 limit,int timeoutMs,QString*
     QObject::connect(reply,&QNetworkReply::finished,&loop,&QEventLoop::quit);
     timer.start(timeoutMs);loop.exec();consume();
     const int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if(timedOut)fail(error,QStringLiteral("Download timed out"));
+    if(cancel && cancel->load())fail(error,QStringLiteral("Download cancelled"));
+    else if(timedOut)fail(error,QStringLiteral("Download timed out"));
     else if(failedWrite)fail(error,QStringLiteral("Response too large or cannot write download"));
     else if(reply->error()!=QNetworkReply::NoError)
         fail(error,QStringLiteral("Network error: %1").arg(reply->errorString()));

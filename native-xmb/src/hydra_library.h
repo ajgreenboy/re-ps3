@@ -9,6 +9,7 @@ namespace xmb {
 // JSON (e.g. https://hydralinks.cloud/sources/fitgirl.json) that importSource() can read.
 struct HydraSource {
     QString title; QUrl url; int gamesCount=0; QString description; QStringList status; QStringList topDownloadOption;
+    int installs=0;   // popularity proxy: times the source was installed via Hydra Launcher
 };
 // One download source a game is available from. A game may appear in several sources.
 struct GameSourceOption {

@@ -2,6 +2,7 @@
 #include "release_index.h"
 #include <QUrl>
 #include <functional>
+#include <atomic>
 
 namespace xmb {
 class Preferences;

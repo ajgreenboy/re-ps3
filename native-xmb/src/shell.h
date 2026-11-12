@@ -128,7 +128,7 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     Setup,
     // Game > Saved Data / Memory Card Utility: presentation only, no console save-data backend.
     SaveData, ImportSource, ReleaseFolder, ReleaseDownload, DownloadManager, DebridToken, FlareSolverrUrl,
-    SearchGames, GameSearchResult, GameSourcePick, GameDownloadDrive };
+    BrowseGames, SearchGames, GameSearchResult, GameSourcePick, GameDownloadDrive };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -691,6 +691,7 @@ private:
     void editFlareSolverrUrl();
     void saveFlareSolverrUrl(const QString& url);
     void openGameSearch();
+    void openBrowseGames();
     void runGameSearch(const QString& query);
     void pickGameResult(int index);
     void openGameSources(int index);

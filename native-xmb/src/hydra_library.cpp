@@ -9,6 +9,7 @@
 #include <QNetworkRequest>
 #include <QSet>
 #include <QTimer>
+#include <algorithm>
 
 namespace xmb {
 namespace {
@@ -30,6 +31,22 @@ bool fetchJson(const QUrl& url, QJsonObject* out, QString* error) {
     reply->deleteLater();
     if(out)*out=root; return true;
 }
+bool isPreinstalled(const HydraSource& source) {
+    const QString desc=source.description.toLower();
+    const QString title=source.title.toLower();
+    bool direct=false,torrent=false;
+    for(const auto& option:source.topDownloadOption) {
+        const QString name=option.toLower();
+        if(name==QStringLiteral("torrent"))torrent=true;
+        else if(!name.isEmpty())direct=true;
+    }
+    return desc.contains(QStringLiteral("pre-installed")) || desc.contains(QStringLiteral("preinstalled")) ||
+           title.contains(QStringLiteral("portable")) || (direct && !torrent);
+}
+bool isPreinstalledFor(const QString& sourceName,const QVector<HydraSource>& sources) {
+    for(const auto& source:sources)if(source.title==sourceName)return isPreinstalled(source);
+    return false;
+}
 }
 bool HydraLibrary::listSources(QVector<HydraSource>* out, QString* error) const {
     if(out)out->clear();
@@ -46,6 +63,7 @@ bool HydraLibrary::listSources(QVector<HydraSource>* out, QString* error) const 
             source.url=QUrl(object.value(QStringLiteral("url")).toString());
             source.gamesCount=object.value(QStringLiteral("gamesCount")).toInt();
             source.description=object.value(QStringLiteral("description")).toString();
+            source.installs=object.value(QStringLiteral("stats")).toObject().value(QStringLiteral("installs")).toInt();
             for(const auto& status:object.value(QStringLiteral("status")).toArray())source.status.append(status.toString());
             for(const auto& option:object.value(QStringLiteral("topDownloadOption")).toArray())
                 source.topDownloadOption.append(option.toObject().value(QStringLiteral("name")).toString());
@@ -63,28 +81,15 @@ bool HydraLibrary::preinstalledSources(QStringList* out, QString* error) const {
     QVector<HydraSource> sources;
     if(!listSources(&sources,error))return false;
     QStringList names;
-    for(const auto& source:sources) {
-        const QString desc=source.description.toLower();
-        const QString title=source.title.toLower();
-        bool direct=false,torrent=false;
-        for(const auto& option:source.topDownloadOption) {
-            const QString name=option.toLower();
-            if(name==QStringLiteral("torrent"))torrent=true;
-            else if(!name.isEmpty())direct=true;
-        }
-        if(desc.contains(QStringLiteral("pre-installed")) || desc.contains(QStringLiteral("preinstalled")) ||
-           title.contains(QStringLiteral("portable")) || (direct && !torrent))
-            names.append(source.title);
-    }
+    for(const auto& source:sources)if(isPreinstalled(source))names.append(source.title);
     if(out)*out=names; return true;
 }
 bool HydraLibrary::searchGames(const QString& query, QVector<GameResult>* out, QString* error) const {
     if(out)out->clear();
-    QStringList names;
-    if(!preinstalledSources(&names,error))return false;
-    const QSet<QString> whitelist(names.cbegin(),names.cend());
-    // Dedup by clean name (lowercased) so one game with several sources is a single result whose
-    // options are the per-source download choices.
+    QVector<HydraSource> sources;
+    if(!listSources(&sources,error))return false;
+    QHash<QString,int> installs;
+    for(const auto& source:sources)installs.insert(source.title,source.installs);
     QVector<GameResult> results;
     QHash<QString,int> byName;
     for(int page=1;page<=5;++page) {
@@ -96,12 +101,13 @@ bool HydraLibrary::searchGames(const QString& query, QVector<GameResult>* out, Q
         if(games.isEmpty())break;
         for(const auto& value:games) {
             const QJsonObject game=value.toObject();
-            if(!whitelist.contains(game.value(QStringLiteral("source")).toString()))continue;
+            const QString sourceName=game.value(QStringLiteral("source")).toString();
+            if(!isPreinstalledFor(sourceName,sources))continue;
             const QString name=game.value(QStringLiteral("name")).toString();
             const QString key=name.trimmed().toLower();
             if(key.isEmpty())continue;
             GameSourceOption option;
-            option.source=game.value(QStringLiteral("source")).toString();
+            option.source=sourceName;
             option.sourceUrl=game.value(QStringLiteral("sourceUrl")).toString();
             option.fileSize=game.value(QStringLiteral("fileSize")).toString();
             option.sourceStatus=game.value(QStringLiteral("sourceStatus")).toString();
@@ -121,6 +127,13 @@ bool HydraLibrary::searchGames(const QString& query, QVector<GameResult>* out, Q
         const int filtered=root.value(QStringLiteral("filteredCount")).toInt();
         if(results.size()>=filtered || results.size()>=500)break;
     }
+    // Popularity: sort by the most-installed source each game is available from, descending.
+    std::sort(results.begin(),results.end(),[&installs](const GameResult& a,const GameResult& b){
+        int pa=0,pb=0;
+        for(const auto& o:a.options)pa=std::max(pa,installs.value(o.source,0));
+        for(const auto& o:b.options)pb=std::max(pb,installs.value(o.source,0));
+        return pa>pb;
+    });
     if(out)*out=results; return true;
 }
 } // namespace xmb
