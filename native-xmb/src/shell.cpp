@@ -5950,8 +5950,11 @@ void Shell::setJellyfinSignInField(const QString& field,const QString& value) {
     if(field==QStringLiteral("release:url")) {
         QString raw=value.trimmed();
         if(!raw.isEmpty()) {
-            QUrl url(raw,QUrl::StrictMode);
-            if(url.scheme().isEmpty())url=QUrl(QStringLiteral("https://")+raw,QUrl::StrictMode);
+            // A pasted local path (C:\... or \\server\...) imports the file directly - how a
+            // Cloudflare-protected source gets in after the user downloads it in a browser.
+            const bool isLocal=(raw.size()>=3 && raw[1]==QLatin1Char(':') && (raw[2]==QLatin1Char('\\') || raw[2]==QLatin1Char('/'))) || raw.startsWith(QStringLiteral("\\\\"));
+            QUrl url=isLocal?QUrl::fromLocalFile(raw):QUrl(raw,QUrl::StrictMode);
+            if(!isLocal && url.scheme().isEmpty())url=QUrl(QStringLiteral("https://")+raw,QUrl::StrictMode);
             refreshReleaseSources(url);
         }
         return;
