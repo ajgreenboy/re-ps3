@@ -345,14 +345,17 @@ try {
 
     # --- 6. documentation links ----------------------------------------------
     $docs = @(
+        'README.md',
         'native-xmb/README.md',
         'native-xmb/audit/README.md',
-        'native-xmb/archive/HANDOFF-2026-10-28.md',
-        'native-xmb/archive/HANDOFF-2026-10-27.md',
+        'native-xmb/archive/README.md',
+        'native-xmb/HANDOFF-2026-11-09.md',
         'native-xmb/INSTALL.md',
-        'native-xmb/archive/PHASES-2026-10-28.md',
         'native-xmb/ISA.md',
-        'native-xmb/audit/DIAGNOSE.md'
+        'native-xmb/audit/PHASES-2026-11-07.md',
+        'native-xmb/audit/RELEASE-CHECKLIST.md',
+        'native-xmb/audit/DIAGNOSE.md',
+        'native-xmb/packaging/README.md'
     )
     $missingLinks = [System.Collections.Generic.List[string]]::new()
     $linkCount = 0

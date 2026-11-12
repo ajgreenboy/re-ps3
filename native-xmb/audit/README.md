@@ -1,106 +1,196 @@
-# XMB functional and presentation audit
+# XMB audit index
 
-Date: October 24, 2026. Target: the user's local PS3 firmware 4.93 and supplied
-RPCS3 VSH recording. Project goal: a complete native C++ recreation.
+This directory holds the audits, specifications, run records and plans for the native XMB. Every document is
+listed once below, grouped by type. Status is a property of the document, not of its position here: a **run
+record** is a dated snapshot, a **firmware specification** is evidence about the console, and only the first
+group says what is current. Superseded handoffs and phase plans live in [../archive/](../archive/README.md).
 
-## Read this set
+Provenance labels used throughout: **traced** (from a console frame, RCO object, MNU table or decoded program),
+**fit** (a native approximation with its removal criterion) and **unprovable** (with the artifact that would
+settle it). Local evidence the documents cite (`out/native-reference/`, `fw493/`, RPCS3 captures) is untracked.
 
-Current handoff (2026-11-09): [HANDOFF-2026-11-09.md](../HANDOFF-2026-11-09.md) - the tree at `00bfdd6`,
-what ships, the build/run/verify commands, the gates and the ranked open work. Plan of record (2026-11-07):
-[PHASES-2026-11-07.md](PHASES-2026-11-07.md) - done work, ranked backlog, parallel workstreams. Newer
-feature audits: [SPOTIFY.md](SPOTIFY.md), [DLNA.md](DLNA.md), [TAILSCALE.md](TAILSCALE.md) and the dated updates in
-[FEATURE-STATUS-2026-11-04.md](FEATURE-STATUS-2026-11-04.md).
+## Contents
 
-Historical handoff (2026-10-28): [HANDOFF-2026-10-28.md](../archive/HANDOFF-2026-10-28.md) - the tree at `49acac6`,
-what ships after the firmware-recovery week and the layout/text/Theme/composite waves, the four gate
-instruments with their last recorded numbers, the 2026-10-28 baselines correction and the canonical pin
-correction, and where the work goes next. The plan of record is
-[PHASES-2026-10-28.md](../archive/PHASES-2026-10-28.md) (phases 8-16, with the 88-item completion ledger:
-16 done / 49 partly / 22 not started / 1 obsolete); ownership and write fences are in
-[WORKSPACES.md](../WORKSPACES.md). The previous handoff,
-[HANDOFF-2026-10-27.md](../archive/HANDOFF-2026-10-27.md), is a dated snapshot of `0c8faee` and still carries the
-operational reference (build/run, config migration, crash reporting, release checklist, ground rules).
+1. [Start here: current state and plans](#1-start-here-current-state-and-plans)
+2. [Phase plans and handoffs](#2-phase-plans-and-handoffs)
+3. [Parity and fidelity audits](#3-parity-and-fidelity-audits)
+4. [Firmware specifications](#4-firmware-specifications-how-the-console-does-it)
+5. [Rendering and layout measurements](#5-rendering-and-layout-measurements)
+6. [Feature notes: services and integrations](#6-feature-notes-services-and-integrations)
+7. [Feature notes: shell, media and input](#7-feature-notes-shell-media-and-input)
+8. [Verification instruments and runbooks](#8-verification-instruments-and-runbooks)
+9. [Run records and investigations](#9-run-records-and-investigations)
+10. [Evidence base and sources](#10-what-the-evidence-establishes)
 
-Companion tool (2026-11-04): [MANAGER.md](../MANAGER.md) - the XMB Manager, the desktop tool that
-detects emulators and imports ROMs, ISOs and game folders as virtual packages (`xmb-virtual-pkg/1`)
-into the XMB's `apps.json`: the data layout, the emulator profile schema and placeholders, the CLI
-verbs and exit codes, the real-`.pkg` policy, how `refreshContent()` turns an import into a Game
-column tile, and the end-to-end verification (CLI transcript, `ContentRegistry::load` proof and a
-Game-column capture).
+## 1. Start here: current state and plans
 
-Fidelity instrument and register (2026-10-28): [PARITY-SCORECARD.md](PARITY-SCORECARD.md) - the
-three-tier method, the catalogue and its 720-cell matrix, and the consolidated text-bearing scorecard
-(`49acac6`, section 18: 0 of 35 capturable states at A+B+C; Tier A 35, Tier B 0 pass / 2 informative /
-23 gating, Tier C 9, 25 of 30 firmware states referenced, 40 of 720 cells) - and
-[FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md), re-scored in sections 1.1-1.4 with section 2.6
-listing every surface that moved from free-hand to firmware-derived. The capture plan for the five
-states that still owe a reference is [REFERENCE-GAPS.md](REFERENCE-GAPS.md) (`6a735e8`, corrected by
-`61d4e8c`: 3 attainable in one boot, 1 unattainable on this rig, 4 unreachable).
+| Document | What it is |
+|---|---|
+| [../HANDOFF-2026-11-09.md](../HANDOFF-2026-11-09.md) | The active handoff: state, build/run/verify, gates, what landed, work in flight, open work |
+| [PHASES-2026-11-07.md](PHASES-2026-11-07.md) | Plan of record: done work, ranked backlog, parallel workstreams |
+| [FEATURE-STATUS-2026-11-04.md](FEATURE-STATUS-2026-11-04.md) | Per-feature status with dated updates |
+| [FEATURE-CATALOG.md](FEATURE-CATALOG.md) | 307 indexed Sony guide topics/actions with native coverage status; machine-readable companion `feature-catalog.json` |
+| [FIRMWARE-PARITY-GAPS.md](FIRMWARE-PARITY-GAPS.md) | The scored gap register against the 4.93 firmware |
+| [../ISA.md](../ISA.md) | Completion criteria with dated verification |
 
-Firmware recoveries (2026-10-27, all with measured specs):
-[dialogs and message boxes](DIALOGS-FIRMWARE.md) (`e4e3c23`, implemented in `e171263`),
-[item menu and information panel](ITEM-MENU-INFO-FIRMWARE.md) (`969c9ac`),
-[media playback panels and the volume display](MEDIA-PANELS-FIRMWARE.md) (`79f377d`),
-[the on-screen keyboard](OSK-FIRMWARE.md) (`68134a6`),
-[the settings pages](SETTINGS-FIRMWARE.md) (`4bbff6e`),
-[root and page geometry](GEOMETRY-ROOT.md) (`4bbff6e`),
-[the runtime RCO object model and materials](RCO-OBJECT-MODEL.md) (`6096dbf`) and
-[session and power behaviour](SESSION-POWER.md) (`067d6f0`).
+## 2. Phase plans and handoffs
 
-Firmware capture batch (2026-10-27/28): [capture batch 2026-10-28](CAPTURE-BATCH-2026-10-28.md) - one
-RPCS3 session of the real 4.93 XMB at 1920x1080 (135 stills, 9 timestamped bursts), with the session and
-input-config hash record, the wish-item coverage table (frame paths per audit row), the headline
-measurements, what could not be captured and why, and the `xRegistry.sys` caveat. It is the evidence
-behind the dated correction sections added to [DIALOGS](DIALOGS-FIRMWARE.md),
-[SETTINGS](SETTINGS-FIRMWARE.md), [ITEM-MENU/INFO](ITEM-MENU-INFO-FIRMWARE.md), [OSK](OSK-FIRMWARE.md),
-[GEOMETRY-ROOT](GEOMETRY-ROOT.md) and [PAGE-MOVE](PAGE-MOVE.md).
+| Document | What it is |
+|---|---|
+| [PHASES-HTPC-2026-11-09.md](PHASES-HTPC-2026-11-09.md) | The HTPC product phase (D1-D12): behaving like an appliance |
+| [PHASES-ZERO-FRICTION-2026-11-11.md](PHASES-ZERO-FRICTION-2026-11-11.md) | Controller-only boot: automatic sign-in, text entry, administrator windows |
+| [PHASES-MANIFEST-DOWNLOAD-2026-11-11.md](PHASES-MANIFEST-DOWNLOAD-2026-11-11.md) | Manifest-driven game download and install (self-hosted source) |
+| [HANDOFF-PARITY-PHASES.md](HANDOFF-PARITY-PHASES.md) | 2026-11-10 handoff for the parity track and the product track |
+| [HTPC-IDEAS.md](HTPC-IDEAS.md) | The 2026-10-26 couch-system brainstorm and its task queue |
+| [HTPC-LEFTOVERS-TRIAGE.md](HTPC-LEFTOVERS-TRIAGE.md) | Triage of the P6 and D3 leftovers |
+| [../HANDOFF-PHASES.md](../HANDOFF-PHASES.md) | The 2026-10-25/27 phase record and the RPCS3 capture how-to |
+| [../WORKSPACES.md](../WORKSPACES.md) | Write fences for parallel agents |
 
-Firmware capture batch 2 (2026-10-28): [capture batch 2](CAPTURE-BATCH-2-2026-10-28.md) - a second targeted
-RPCS3 batch, one session in two boots (251 stills, 22,149 burst frames in 19 bursts; 1:1 crop bursts at
-130.2-234.9 fps; clock scale 100 %, so no timing rescale), aimed at what a settled frame cannot show. It
-carries the rig-restoration hashes (input config `e624da0d...ceee`, `config.yml` untouched, `xRegistry.sys`
-restored byte-for-byte), the coverage ledger (closed / partial / open with the frame for each), the depth-2
-page numbers, the options-menu and choice-band timings, the BG1-at-rest negative result (a focused settings
-row has no filled rectangle), the Theme/Color/Background/Font contents, the Video/System page tails, and the
-error-surface investigation - one real firmware error page, fully measured, and an explicit account of why a
-numeric error code could not be produced on this console. It is the evidence behind the dated correction
-sections added to [DIALOGS](DIALOGS-FIRMWARE.md) (section 9), [SETTINGS](SETTINGS-FIRMWARE.md) (section 12),
-[ITEM-MENU/INFO](ITEM-MENU-INFO-FIRMWARE.md) (part G), [GEOMETRY-ROOT](GEOMETRY-ROOT.md) (section 10) and
-[PAGE-MOVE](PAGE-MOVE.md) (dated note 2).
+## 3. Parity and fidelity audits
 
-Decoder and coverage documents (2026-10-28): [GIM-FORMATS.md](GIM-FORMATS.md) - the container's pixel
-formats, the palette-less format-0x5 mask case, the sibling palette block and the decode fixtures
-(`e90b196`) - and [TEXTURE-COVERAGE.md](TEXTURE-COVERAGE.md) - the 3,174-image sweep across 89
-containers, what the build actually consumes, the five draw-side substitutions and the decoder policy
-fixes (`4c4b25e`, `1781dd3`). The wave's other new documents - CAPTURE-BATCH-2-2026-10-28.md,
-RCO-OBJECT-MODEL.md and SESSION-POWER.md - are already indexed above.
+The comparison of the build against the console, surface by surface. [FIDELITY-VERDICT.md](FIDELITY-VERDICT.md)
+consolidates the others.
 
-Latest Friends continuation (2026-10-26): [signed-in Steam client connection](STEAM-CLIENT-FRIENDS.md), including the verified live list and external SDK build input.
+| Document | What it is |
+|---|---|
+| [FIDELITY-VERDICT.md](FIDELITY-VERDICT.md) | The exhaustive comparison, consolidated (2026-10-29) |
+| [FIDELITY-SURFACES-MAP.md](FIDELITY-SURFACES-MAP.md) | Map of every surface and where its audit lives |
+| [FIDELITY-ROOT-BAR.md](FIDELITY-ROOT-BAR.md) | The root frame and category bar, element by element |
+| [FIDELITY-SURFACES.md](FIDELITY-SURFACES.md) | Rows, open pages, options menus, dialogs and the info/indicator surfaces |
+| [FIDELITY-MEDIA.md](FIDELITY-MEDIA.md) | Media columns, players, volume HUD, on-screen keyboard, media dialogs |
+| [FIDELITY-BEHAVIOUR.md](FIDELITY-BEHAVIOUR.md) | Behaviour and state-machine fidelity |
+| [FIDELITY-MEASURED.md](FIDELITY-MEASURED.md) | The launcher build measured against every firmware reference |
+| [PARITY-SCORECARD.md](PARITY-SCORECARD.md) | The three-tier method, the catalogue and its matrix, the text-bearing scorecard |
+| [REFERENCE-GAPS.md](REFERENCE-GAPS.md) | Capture plan for the states that still owe a console reference |
+| [BEHAVIOUR-GAP-AUDIT.md](BEHAVIOUR-GAP-AUDIT.md) | System-behaviour gaps: what the 4.93 XMB does and what the build does |
+| [BEHAVIOUR-GAPS-SPEC.md](BEHAVIOUR-GAPS-SPEC.md) | Implementation-ready spec for the structure and behaviour gaps |
+| [UI-ELEMENT-GAP-AUDIT.md](UI-ELEMENT-GAP-AUDIT.md) | The composited visuals of a console frame and what the native build draws |
+| [ICON-GAP-AUDIT.md](ICON-GAP-AUDIT.md) | Every visible icon and graphic the firmware draws |
+| [ITEM-ICONS.md](ITEM-ICONS.md) | Open-column item-icon parity |
+| [FEATURE-COVERAGE.md](FEATURE-COVERAGE.md) | Feature coverage audit (ISC-13 to ISC-20) |
+| [SETTINGS-COVERAGE.md](SETTINGS-COVERAGE.md) | Acceptance matrix for the settings pages |
+| [TEXTURE-COVERAGE.md](TEXTURE-COVERAGE.md) | Every named image in the 4.93 UI art and what the build draws |
+| [GRAPHICS-INVENTORY.md](GRAPHICS-INVENTORY.md) | The visual inventory of the real XMB as a check-list |
+| [INGAME-FIDELITY-SWEEP.md](INGAME-FIDELITY-SWEEP.md) | In-game XMB fidelity sweep |
+| [FUNCTIONS.md](FUNCTIONS.md) | Functional analysis of every category (**historical**: its status column is a 2026-10-24 assessment) |
 
-Latest continuations (2026-10-25): [Steam and installed-PKG content](STEAM-INTEGRATION.md),
-[import registry](CONTENT-REGISTRY.md), [all-theme icon correction](CATEGORY-ICON-FIX.md),
-[info bar](INFO-BAR.md) and [animation smoothness](ANIMATION-SMOOTHNESS.md).
+## 4. Firmware specifications (how the console does it)
 
-Latest continuations (2026-10-26/27): [notifications](NOTIFICATIONS.md), [Triangle options
-menu](OPTIONS-MENU.md), [sidecar subtitles and the player panel](SUBTITLES.md), [Continue
-Watching](MEDIA-CONTROLS.md), [volume HUD and the couch volume path](HTPC-IDEAS.md), [Download
-Management](STEAM-DOWNLOADS.md), [the XMBML-driven Network column](XMBML-NETWORK.md), [Jellyfin
-sign-in inside the XMB](JELLYFIN-NATIVE.md) and [the PS button while a game runs](PS-INGAME-HOOK.md).
-This index itself is the October 24 set; per-feature status is in [FEATURE-CATALOG.md](FEATURE-CATALOG.md).
+Measured specifications recovered from the firmware's own resources and from console captures, each with the
+native diff.
 
-1. [Functional analysis](FUNCTIONS.md): behavior, data ownership, state variants
-   and implementation requirements across every category. **Historical** since 2026-10-28: its
-   "current native gap" column is a 2026-10-24 assessment, kept for the requirement families it
-   enumerates, not for status.
-2. [Feature catalog](FEATURE-CATALOG.md): 307 indexed guide topics/actions,
-   including 277 leaf entries, with links and native coverage status.
-3. [Visual and behavioral analysis](VISUAL-BEHAVIOR.md): shading, opacity, icon
-   orientation, motion, timings, input repeat, sound and measurement gaps.
-4. [Handoff](HANDOFF.md): build/run commands, current source state, evidence,
-   known problems and implementation order for the next session.
-5. `feature-catalog.json`: machine-readable companion to the catalog.
+| Document | What it is |
+|---|---|
+| [DIALOGS-FIRMWARE.md](DIALOGS-FIRMWARE.md) | System dialogs and message boxes |
+| [ITEM-MENU-INFO-FIRMWARE.md](ITEM-MENU-INFO-FIRMWARE.md) | Item menu and information panel |
+| [MEDIA-PANELS-FIRMWARE.md](MEDIA-PANELS-FIRMWARE.md) | Media playback panels and the volume display |
+| [OSK-FIRMWARE.md](OSK-FIRMWARE.md) | The on-screen keyboard |
+| [SETTINGS-FIRMWARE.md](SETTINGS-FIRMWARE.md) | Settings screens |
+| [GEOMETRY-ROOT.md](GEOMETRY-ROOT.md) | The root category column and an open page |
+| [RCO-OBJECT-MODEL.md](RCO-OBJECT-MODEL.md) | The runtime RCO object model and materials |
+| [SESSION-POWER.md](SESSION-POWER.md) | Session and power behaviour |
+| [PS-BUTTON.md](PS-BUTTON.md) | The PS button: console behaviour and the native equivalent |
+| [PAGE-MOVE.md](PAGE-MOVE.md) | Page-move timing and easing |
+| [INTERACTION-AUDIO.md](INTERACTION-AUDIO.md) | Interaction cues |
+| [MENUS-XMBML.md](MENUS-XMBML.md) | Firmware-driven menus, per-user profiles and list actions |
+| [XMBML-NETWORK.md](XMBML-NETWORK.md) | The XMBML-driven Network column |
+| [THEMES.md](THEMES.md) | What a `.p3t` contains and the RAF verdict |
+| [RAF-THEMES.md](RAF-THEMES.md) | Animated (RAF) theme support |
+| [GIM-FORMATS.md](GIM-FORMATS.md) | GIM pixel formats 4/5/6 and the OSK masks |
+| [VISUAL-BEHAVIOR.md](VISUAL-BEHAVIOR.md) | Shading, opacity, motion, timings, input repeat, sound |
+| [VIDEO-REFERENCES.md](VIDEO-REFERENCES.md) | Measured values from public video references |
+| [PLAYER-PANELS-SPEC.md](PLAYER-PANELS-SPEC.md) | Implementation-ready spec for the four player surfaces |
+| [SETTINGS-SUBFLOWS-SPEC.md](SETTINGS-SUBFLOWS-SPEC.md) | Settings sub-flows, save data and copy/move/progress |
+| [FIRMWARE-EXTRACT.md](FIRMWARE-EXTRACT.md) | Local PUP extraction |
+| [FIRMWARE-FETCH.md](FIRMWARE-FETCH.md) | Firmware fetch research |
 
-## What the evidence establishes
+## 5. Rendering and layout measurements
+
+| Document | What it is |
+|---|---|
+| [PIPELINE.md](PIPELINE.md) | The firmware source of each render layer and how far the port has got |
+| [LAYOUT-TRACE.md](LAYOUT-TRACE.md) | Category-column and item-row constants against firmware data |
+| [TEXT-RENDERER.md](TEXT-RENDERER.md) | The native text renderer and the firmware trace |
+| [TEXT-RASTER.md](TEXT-RASTER.md) | The firmware text rasteriser: hinting, gamma, overlap, glow, elision |
+| [FONT-MATCHING.md](FONT-MATCHING.md) | Firmware font matching |
+| [PARTICLES.md](PARTICLES.md) | Particle implementation and the port groundwork |
+| [RIBBON-A2.md](RIBBON-A2.md), [RIBBON-A2-PHASE.md](RIBBON-A2-PHASE.md), [RIBBON-A3-CREST.md](RIBBON-A3-CREST.md) | Ribbon remeasurement, phase recheck and crest amplitude |
+| [ICON-MATERIAL-CLOCK.md](ICON-MATERIAL-CLOCK.md) | Icon material clock inputs |
+| [CATEGORY-ICON-FIX.md](CATEGORY-ICON-FIX.md) | Category icons across all colours |
+| [RENDER-FILL-ALPHA.md](RENDER-FILL-ALPHA.md) | Full-window mapping and operation-guide alpha |
+| [ANIMATION-SMOOTHNESS.md](ANIMATION-SMOOTHNESS.md) | Animation diagnostics and measured high-refresh results |
+| [ICON-ARTWORK-SCROLL-2026-11-04.md](ICON-ARTWORK-SCROLL-2026-11-04.md) | Installed artwork and folder boundaries |
+| [INFO-BAR.md](INFO-BAR.md) | The info bar |
+
+## 6. Feature notes: services and integrations
+
+| Document | What it is |
+|---|---|
+| [STEAM-INTEGRATION.md](STEAM-INTEGRATION.md) | Steam and installed-PKG content |
+| [STEAM-ACCOUNTS.md](STEAM-ACCOUNTS.md) | The Steam account switcher |
+| [STEAM-CLIENT-FRIENDS.md](STEAM-CLIENT-FRIENDS.md) | Friends through the signed-in Steam client |
+| [STEAM-DOWNLOADS.md](STEAM-DOWNLOADS.md) | Steam download state for the XMB download page |
+| [STEAM-CLI.md](STEAM-CLI.md) | What the Steam client accepts headless |
+| [SERVICES-BREADTH.md](SERVICES-BREADTH.md) | Account switch, launch/quit, avatars, trophies and honest rows |
+| [JELLYFIN-NATIVE.md](JELLYFIN-NATIVE.md) | Native Jellyfin playback |
+| [SPOTIFY.md](SPOTIFY.md) | Spotify in the Music column |
+| [DLNA.md](DLNA.md) | Search for Media Servers (DLNA / UPnP AV) |
+| [TAILSCALE.md](TAILSCALE.md) | Network > Tailscale |
+| [HOME-SERVICES.md](HOME-SERVICES.md) | Wake on LAN and Home Assistant |
+| [WEATHER.md](WEATHER.md) | Network > Weather |
+| [CONTENT-REGISTRY.md](CONTENT-REGISTRY.md) | Content registry and import |
+| [XMB-TOOLING.md](XMB-TOOLING.md) | In-XMB tooling: owned library, collections, store, import, media apps |
+| [APP-EDITOR.md](APP-EDITOR.md) | The app registration editor |
+| [WEB-APPS.md](WEB-APPS.md) | Web apps in a tracked kiosk window |
+| [MAXMB-INTEGRATION.md](MAXMB-INTEGRATION.md) | MaXMB integration review |
+
+## 7. Feature notes: shell, media and input
+
+| Document | What it is |
+|---|---|
+| [OPTIONS-MENU.md](OPTIONS-MENU.md) | The Triangle options menu |
+| [NOTIFICATIONS.md](NOTIFICATIONS.md) | The top-right notification composite |
+| [SUBTITLES.md](SUBTITLES.md) | Sidecar subtitles and audio tracks |
+| [MEDIA-CONTROLS.md](MEDIA-CONTROLS.md) | Media controls and Continue Watching |
+| [VIDEO-CONTROL-PANEL.md](VIDEO-CONTROL-PANEL.md) | The video control matrix |
+| [MUSIC-PLAYER.md](MUSIC-PLAYER.md) | The full-screen music player |
+| [PLAYLIST-EDITOR.md](PLAYLIST-EDITOR.md) | The two-pane playlist editor |
+| [PHOTO-GALLERY-DESIGN.md](PHOTO-GALLERY-DESIGN.md), [PHOTO-GALLERY.md](PHOTO-GALLERY.md), [PHOTO-GALLERY-PLAYLIST.md](PHOTO-GALLERY-PLAYLIST.md) | The hakoniwa Photo Gallery: research, library area, Playlist area |
+| [INPUT.md](INPUT.md) | Keyboard, gamepads, remotes and media keys |
+| [TEXT-ENTRY.md](TEXT-ENTRY.md), [ZF-TEXT-ENTRY.md](ZF-TEXT-ENTRY.md) | Shell text entry; text entry into a running title |
+| [PS-INGAME-HOOK.md](PS-INGAME-HOOK.md), [INGAME-XMB-DESIGN.md](INGAME-XMB-DESIGN.md) | The PS button and the XMB over a running game |
+| [DESKTOP-MODE.md](DESKTOP-MODE.md) | Desktop Mode, single instance, controller-driven desktop |
+| [AUTOLOGON.md](AUTOLOGON.md) | Windows automatic sign-in status |
+| [BOOT-TIME.md](BOOT-TIME.md) | Boot time |
+| [SAFE-MODE.md](SAFE-MODE.md) | Safe start and diagnostics |
+
+## 8. Verification instruments and runbooks
+
+| Document | What it is |
+|---|---|
+| [VERIFICATION-HARNESS.md](VERIFICATION-HARNESS.md) | Repeatable native captures, layer comparison, named states and the gate |
+| [TRANSITION-HARNESS.md](TRANSITION-HARNESS.md) | The frame-by-frame transition instrument |
+| [RELEASE-CHECKLIST.md](RELEASE-CHECKLIST.md) | The HTPC evidence run (runbook) |
+| [DIAGNOSE.md](DIAGNOSE.md) | Design for the diagnostic bundle, including the **log redaction rules** |
+
+## 9. Run records and investigations
+
+Dated evidence. Each states the tree it was taken at; none is current state.
+
+| Document | What it is |
+|---|---|
+| [RELEASE-RUN-2026-11-12.md](RELEASE-RUN-2026-11-12.md) | The release evidence run on the development PC (the checklist's results) |
+| [BREADTH-GATE-2026-11-11.md](BREADTH-GATE-2026-11-11.md) | Breadth gate investigation |
+| [D8-HEAD.md](D8-HEAD.md) | Options-structure recheck at HEAD |
+| [CAPTURE-BATCH-2026-10-28.md](CAPTURE-BATCH-2026-10-28.md) | Console capture batch 1: 135 stills, 9 bursts |
+| [CAPTURE-BATCH-2-2026-10-28.md](CAPTURE-BATCH-2-2026-10-28.md) | Console capture batch 2: 251 stills, 19 bursts, the error-page investigation |
+| [INGAME-RENDER-FIX.md](INGAME-RENDER-FIX.md) | In-game rendering, silent quit and aspect-correct fill |
+| [INGAME-RUNTIME-FIX.md](INGAME-RUNTIME-FIX.md) | In-game XMB lifecycle verification |
+
+Superseded handoffs, pass records and phase plans (including the October 24 audit handoff and the 2026-10-25/26
+media and phase continuations) are in [../archive/](../archive/README.md).
+
+## 10. What the evidence establishes
 
 | Evidence | Coverage | Limits |
 |---|---|---|
@@ -118,7 +208,7 @@ The index is broad enough to prevent whole feature families being forgotten. It
 does **not** certify that every firmware state, service or timing is understood.
 The documents explicitly retain unmeasured and inaccessible reference details.
 
-## Sources and authority
+### Sources and authority
 
 - [Sony PS3 guide](https://manuals.playstation.net/document/en/ps3/current/)
   covers system software 4.80 and later and warns that service changes may be

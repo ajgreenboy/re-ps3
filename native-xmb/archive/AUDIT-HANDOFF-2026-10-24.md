@@ -2,7 +2,7 @@
 
 **Historical functional inventory.** Current visual/implementation status is in
 [HANDOFF-PHASES.md](../HANDOFF-PHASES.md); the October 25 repo review and MaXMB work is in
-[MAXMB-INTEGRATION.md](MAXMB-INTEGRATION.md). Preserve the dated evidence below without treating it as current.
+[MAXMB-INTEGRATION.md](../audit/MAXMB-INTEGRATION.md). Preserve the dated evidence below without treating it as current.
 
 ## Objective and latest user direction
 
@@ -11,8 +11,8 @@ assets. The firmware-execution experiment is preserved for reference. The user
 also requested an in-depth review of **every feature**, including shading,
 animation behavior and timing, and a handoff for future phases.
 
-Read [the audit overview](README.md), [functional analysis](FUNCTIONS.md),
-[catalog](FEATURE-CATALOG.md) and [visual/timing findings](VISUAL-BEHAVIOR.md).
+Read [the audit overview](../audit/README.md), [functional analysis](../audit/FUNCTIONS.md),
+[catalog](../audit/FEATURE-CATALOG.md) and [visual/timing findings](../audit/VISUAL-BEHAVIOR.md).
 Do not report this checkpoint as full XMB functionality or visual parity.
 
 ## Workspace and quick start

@@ -28,7 +28,7 @@ reimplemented, and its result is measured against the reference video (`nDL5YJt2
 
 ## Latest broader continuation (2026-10-26)
 
-[Phase continuation and resume map](audit/PHASE-CONTINUATION.md): integrated app-registration editor, video controls that fade during playback, bounded seeking/hour labels, and Display Settings → Screensaver with verified native dim/wake. Exact firmware player panels, dim brightness and timings remain open.
+[Phase continuation and resume map](archive/PHASE-CONTINUATION-2026-10-26.md): integrated app-registration editor, video controls that fade during playback, bounded seeking/hour labels, and Display Settings → Screensaver with verified native dim/wake. Exact firmware player panels, dim brightness and timings remain open.
 
 ## Where it stands
 
