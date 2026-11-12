@@ -139,9 +139,9 @@ AppEditor::AppEditor(QString registryPath, QWidget* parent)
     windowCombo_ = new QComboBox(this);
     windowCombo_->setObjectName(QStringLiteral("appWindowCombo"));
     windowCombo_->addItem(QStringLiteral("App window"), QStringLiteral("app"));
-    windowCombo_->addItem(QStringLiteral("Kiosk window"), QStringLiteral("kiosk"));
+    windowCombo_->addItem(QStringLiteral("Full screen"), QStringLiteral("kiosk"));
     windowCombo_->addItem(QStringLiteral("Default browser"), QStringLiteral("browser"));
-    form->addRow(QStringLiteral("Launch window"), windowCombo_);
+    form->addRow(QStringLiteral("Window style"), windowCombo_);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
 
     errorLabel_ = new QLabel(this);

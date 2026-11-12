@@ -88,7 +88,7 @@ scripts.
 | ZF3 | Scripted run of the first-run page on a scratch account; the real `netplwiz`/Autologon step stays manual and user-run (the package still never reads a password). |
 | ZF4 | `XMB_LOG=<file>` capture of `boot: first frame after N ms` before/after; assert the PowerShell toggle no longer blocks the GUI thread (no ~1 s freeze). |
 | ZF5 | Scripted run that simulates a reboot path; one real scheduled-update reboot on the HTPC to confirm it lands back in the XMB. |
-| ZF6 | Real device: launch a Steam title, an emulator, and a P6 web app; crash one, close one normally, Alt-F4 one; confirm XMB focus and selection each time. |
+| ZF6 | **Web apps proved 2026-11-12** (`work/zf6-web-test.ts`, audit/WEB-APPS.md: close, kill, Alt-F4, normal and stale-adopted; Edge relaunch hand-over fixed); emulators and Steam still need the device run. Real device: launch a Steam title, an emulator, and a P6 web app; crash one, close one normally, Alt-F4 one; confirm XMB focus and selection each time. |
 
 Gate for every item: build passes (`native-xmb/build.ps1`), scripted run exits 0, no new `qWarning`
 lines, and the affected audit file is updated with date, command and result.

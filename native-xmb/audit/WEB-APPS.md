@@ -1,6 +1,6 @@
 # Web apps: kiosk window and return to the XMB (P6)
 
-Status: implemented on branch wt/p6.
+Status: implemented on branch wt/p6; stale-profile adoption, the Window style editor field and the ZF6 return checks added on wt/p6b (2026-11-12).
 
 ## Behaviour
 
@@ -16,11 +16,10 @@ Both Chromium styles use a dedicated `--user-data-dir=<data>/browser-profile`, s
 
 The process is started through the existing `Shell::startTracked`, the same path as game launches, so everything built for titles applies unchanged: `TitleSession` (src/ps_watcher.*) pauses rendering while the XMB is not in front and restores the XMB foreground with the selection kept when the process ends; the in-game XMB opens on PS tap/hold over the browser window (captured frame as backdrop); Quit Game closes only the tracked pid tree (WM_CLOSE, then terminate, then kill), never any other browser process. Nothing new was added to those layers.
 
-Validation: `ContentRegistry` accepts `window` only as `""`, `app`, `kiosk` or `browser`, keeps it for web apps and drops it for other kinds. The in-XMB app editor has no field for it; an edit preserves the value already in apps.json.
+Validation: `ContentRegistry` accepts `window` only as `""`, `app`, `kiosk` or `browser`, keeps it for web apps and drops it for other kinds. The app editor dialog (src/app_editor.cpp) has a **Window style** combo for web apps (App window, Full screen = `kiosk`, Default browser); "App window" is stored as the absent key, and an app that is saved without touching the combo keeps its value because the combo is loaded from apps.json.
 
 ## Known limits
 
-- If a previous browser instance still holds `browser-profile` (XMB killed while the app ran), the new launch forwards to it and its process exits at once, so the XMB reports an immediate return while the old window stays open. Close that window once.
 - A web app that opens its own external window (OAuth pop-ups stay inside Chromium; links that hand off to another browser do not) is not tracked.
 - The fallback path to the default browser was verified by reading the code only; running it would open a tab in the user's real browser.
 

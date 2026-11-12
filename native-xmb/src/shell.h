@@ -933,6 +933,19 @@ private:
     QString resumePath_;             // file whose playback may resume
     qint64 resumePending_=0;         // milliseconds to seek once the media reports Loaded
     QPointer<QProcess> game_;        // the launched title, kept so a return is observable
+    // A web app adopted from a stale browser (P6/ZF6): the browser process an earlier run left on <data>/browser-profile.
+    // It is not our QProcess, so it is watched through a process handle; it counts as the running title everywhere game_ does.
+    quint32 adoptedPid_=0;
+    void* adoptedHandle_=nullptr;
+    QTimer adoptedWatch_;
+    QElapsedTimer adoptedAge_;
+    bool adoptedSeenWindow_=false;
+    int adoptedNoWindow_=0;
+    std::function<void(const QString&)> adoptedRestoreDisplay_;   // puts a title display mode back when the adopted browser ends
+    bool adoptWebApp(const Entry& entry,const ContentApp& app,const QString& exe,const QString& window,const QString& profile,quint32 holderPid);
+    bool trackAdopted(const QString& id,const QString& title,quint32 pid);
+    void pollAdopted();
+    void finishAdopted(const QString& why);
     QString gameTitle_;              // its title, for the return message
     QString gameCategory_;           // the column that launched the tracked content
     bool gameIsRpcs3_=false;         // the tracked process is RPCS3 (launched through the emulator path)
@@ -958,7 +971,8 @@ private:
     void refreshOwnedGames();
     bool stageOwnedForRefresh() const;
     QString collectionLabel(const QString& appId) const;
-    bool startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title,const DisplaySpec& display={});
+    bool startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title,const DisplaySpec& display={},
+        std::function<bool(const std::function<void(const QString&)>&)> successor={});
     bool gameRunning() const;
     bool launchWebApp(const Entry& entry);   // true when the entry was handled here (Chromium window or an error page)
     bool inGame_=false;              // the XMB was raised over the running title (setInGame)

@@ -25,6 +25,7 @@
 #include "steam_overrides.h"
 #include "steam_family.h"
 #include "steam_downloads.h"
+#include "web_adopt.h"
 #include "web_launch.h"
 #include <QDesktopServices>
 #include <QAudioOutput>
@@ -549,7 +550,8 @@ void Shell::resolveMediaColumns() {
 // Launches a child and keeps it parented so the XMB knows when it returns. While it runs the
 // idle auto-close is suppressed; on exit the library is rescanned and the column restored,
 // which is the return lifecycle a launched game needs (audit/FEATURE-COVERAGE.md, ISC-20).
-bool Shell::startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title,const DisplaySpec& displaySpec) {
+bool Shell::startTracked(const QString& program,const QStringList& arguments,const QString& workingDirectory,const QString& title,const DisplaySpec& displaySpec,
+        std::function<bool(const std::function<void(const QString&)>&)> successor) {
     if(!game_.isNull()){showMessage(QObject::tr("A title is already running."),MessageKind::Page);return false;}
     // D9: the title's own resolution / refresh / HDR, applied before it starts and put back exactly when it ends however it
     // ends (the restore state is on disk before the first change; audit/DISPLAY-MODES.md). An unsupported request is logged
@@ -576,7 +578,9 @@ bool Shell::startTracked(const QString& program,const QStringList& arguments,con
         emit changed();
     });
     connect(process,QOverload<int,QProcess::ExitStatus>::of(&QProcess::finished),this,
-            [this,process,title,restoreDisplay](int code,QProcess::ExitStatus status){
+            [this,process,title,restoreDisplay,successor](int code,QProcess::ExitStatus status){
+        // A launcher that hands over to a successor browser process and exits (P6/ZF6): keep the title running on the successor.
+        if(successor && status==QProcess::NormalExit && successor(restoreDisplay)){process->deleteLater();game_.clear();return;}
         process->deleteLater();game_.clear();gameTitle_.clear();gameIsRpcs3_=false;touch();
         restoreDisplay(status==QProcess::CrashExit?QStringLiteral("title crashed"):QStringLiteral("title ended"));
         qInfo().noquote()<<"returned from"<<title<<"exit"<<code<<(status==QProcess::NormalExit?"normal":"crashed");
@@ -628,17 +632,95 @@ bool Shell::launchWebApp(const Entry& entry) {
     const QString profile=QDir(dataDirectory_).filePath("browser-profile");
     QDir().mkpath(profile);
     if(gameRunning()){showMessage(QObject::tr("A title is already running."),MessageKind::Page);return true;}
+    // Stale profile (P6 leftover): an earlier XMB run that was killed may have left a browser on this profile. A second
+    // process would only forward to it and exit, so the old one is adopted instead.
+    int unreadable=0;
+    const auto holders=webAdopt::findHolders(profile,&unreadable);
+    if(unreadable>0)qInfo().noquote()<<"web: "+app->id<<unreadable<<"browser process(es) with an unreadable command line left alone";
+    if(!holders.isEmpty())return adoptWebApp(entry,*app,exe,window,profile,holders.first().pid);
     qInfo().noquote()<<"web: "+app->id<<"window="+window<<"browser="+exe<<"profile="+profile;
-    startTracked(exe,webLaunch::arguments(exe,app->url,window,profile),QString(),entry.title,app->display);
+    // Edge relaunches itself (--edge-skip-compat-layer-relaunch): the process started here can exit at once with code 0 while a
+    // successor carries on on the same profile. When that happens inside 10 s the successor is adopted instead of reporting a return.
+    const QString appId=app->id;
+    auto started=std::make_shared<QElapsedTimer>();started->start();
+    startTracked(exe,webLaunch::arguments(exe,app->url,window,profile),QString(),entry.title,app->display,
+        [this,appId,title=entry.title,profile,started](const std::function<void(const QString&)>& restoreDisplay){
+            if(started->elapsed()>10000)return false;
+            const auto successors=webAdopt::findHolders(profile);
+            if(successors.isEmpty())return false;
+            const quint32 pid=successors.first().pid;
+            if(!trackAdopted(appId,title,pid))return false;
+            adoptedRestoreDisplay_=restoreDisplay;
+            qInfo().noquote()<<"web: "+appId<<"the started process handed over after"<<started->elapsed()<<"ms; tracking its successor pid="+QString::number(pid);
+            emit changed();
+            return true;
+        });
     return true;
+}
+// Adopts the browser an earlier run left on <data>/browser-profile (it names our profile in its own command line; see
+// webAdopt::findHolders). No second browser is started for it: the chosen app's URL is handed to that browser by running the
+// same executable with the same --user-data-dir (Chromium forwards the command line to the process that owns the profile and
+// the forwarder exits), the old process is tracked as the running title, and its window is raised.
+bool Shell::trackAdopted(const QString& id,const QString& title,quint32 pid) {
+    adoptedHandle_=webAdopt::openWatch(pid);
+    if(!adoptedHandle_){qWarning().noquote()<<"web: "+id<<"browser pid"<<pid<<"cannot be watched; not adopting";return false;}
+    adoptedPid_=pid;adoptedSeenWindow_=false;adoptedNoWindow_=0;adoptedAge_.start();
+    gameTitle_=title;
+    gameCategory_=categories_.value(category_).id;
+    gameIsRpcs3_=false;
+    activity_.start();
+    adoptedWatch_.start();
+    return true;
+}
+bool Shell::adoptWebApp(const Entry& entry,const ContentApp& app,const QString& exe,const QString& window,const QString& profile,quint32 holderPid) {
+    if(!trackAdopted(app.id,entry.title,holderPid))return false;
+    adoptedRestoreDisplay_={};
+    qInfo().noquote()<<"web: "+app.id<<"adopting stale browser pid="+QString::number(holderPid)<<"which holds"<<profile;
+    webAdopt::allowForeground(holderPid);
+    const QStringList args=webLaunch::arguments(exe,app.url,window,profile);
+    const bool forwarded=QProcess::startDetached(exe,args);
+    qInfo().noquote()<<"launch:"<<exe<<args.join(' ')<<(forwarded?"(forwarded to the adopted browser)":"(forwarding FAILED; adopted without navigating)")
+        <<"(tracked pid="+QString::number(holderPid)+")";
+    for(const int delay:{500,1000,1500,2500,4000})QTimer::singleShot(delay,this,[this,holderPid]{
+        if(adoptedPid_!=holderPid || webAdopt::foregroundInTree(holderPid))return;
+        const bool front=webAdopt::bringTreeForward(holderPid);
+        qInfo().noquote()<<"web: adopted window raised="+QString::number(front?1:0)<<"pid="+QString::number(holderPid);
+    });
+    emit changed();
+    return true;
+}
+void Shell::pollAdopted() {
+    if(!adoptedPid_){adoptedWatch_.stop();return;}
+    if(webAdopt::watchExited(adoptedHandle_)){finishAdopted(QStringLiteral("process exited"));return;}
+    // The adopted browser may own other windows (the stale app window plus the one just forwarded), so the root can outlive the
+    // window the user closed. Once windows have been seen, an empty tree for ~1 s means the user is done with it.
+    if(webAdopt::treeHasVisibleWindow(adoptedPid_)){adoptedSeenWindow_=true;adoptedNoWindow_=0;return;}
+    if((adoptedSeenWindow_ || adoptedAge_.elapsed()>8000) && ++adoptedNoWindow_>=4)finishAdopted(QStringLiteral("no window left"));
+}
+void Shell::finishAdopted(const QString& why) {
+    const QString title=gameTitle_;
+    adoptedWatch_.stop();
+    webAdopt::closeWatch(adoptedHandle_);adoptedHandle_=nullptr;
+    const quint32 pid=adoptedPid_;adoptedPid_=0;
+    if(adoptedRestoreDisplay_){adoptedRestoreDisplay_(QStringLiteral("title ended"));adoptedRestoreDisplay_={};}
+    gameTitle_.clear();gameIsRpcs3_=false;touch();
+    qInfo().noquote()<<"returned from"<<title<<"(adopted browser pid="+QString::number(pid)+": "+why+")";
+    clearInGame();
+    if(quitStage_>0) {
+        static const char* const stages[]={"none","cooperative (WM_CLOSE)","terminate","kill"};
+        qInfo().noquote()<<"ingame: quit ended by stage"<<stages[std::clamp(quitStage_,0,3)]<<"title="+quitTitle_;
+        quitStage_=0;quitTitle_.clear();
+    }
+    emit changed();
+    refreshContent();
 }
 bool Shell::gameRunning() const {
     // Also true while a Steam handoff is being watched, so the idle auto-close cannot quit behind a game.
-    return (!game_.isNull() && game_->state()!=QProcess::NotRunning) || !steamGameId_.isEmpty();
+    return (!game_.isNull() && game_->state()!=QProcess::NotRunning) || adoptedPid_ || !steamGameId_.isEmpty();
 }
 bool Shell::titleRunning() const {
     // A pending Steam handoff still inhibits idle shutdown / another launch, but is not a game to overlay.
-    return (!game_.isNull() && game_->state()==QProcess::Running) ||
+    return (!game_.isNull() && game_->state()==QProcess::Running) || adoptedPid_ ||
         (!steamGameId_.isEmpty() && steamGameSeen_ && steamGameClear_==0);
 }
 // Steam launches itself, so the only honest lifecycle signal is Steam's own registry state. The
@@ -1651,6 +1733,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     });
     steamRefresh_.start(60000);
     steamWatch_.setInterval(1000);
+    adoptedWatch_.setInterval(250);
+    connect(&adoptedWatch_,&QTimer::timeout,this,&Shell::pollAdopted);
     connect(&steamWatch_,&QTimer::timeout,this,&Shell::pollSteamGame);
     discordFriendsError_=discordFriends_.configured()?QStringLiteral("Select Refresh Discord Friends to sign in."):discordFriends_.configurationError();
     rebuildFriends();
@@ -2611,6 +2695,7 @@ void Shell::psMenuBack() {
 // order (F8, TRACED); this build's columns are shorter than the console's, so each position is the nearest
 // native row after which the console's query falls (INFERRED).
 quint32 Shell::runningTitlePid() const {
+    if(adoptedPid_)return adoptedPid_;
     return (!game_.isNull() && game_->state()!=QProcess::NotRunning)?quint32(game_->processId()):0;
 }
 bool Shell::launcherOwnsPsTap() const {
@@ -2722,6 +2807,26 @@ void Shell::quitRunningTitle() {
         QString stopError;
         if(steamStopApp(steamGameId_,steamRoot_,&stopError))qInfo().noquote()<<"shell: asked Steam to stop"<<steamGameId_;
         else{qWarning().noquote()<<"shell: Steam stop failed:"<<stopError;quitStage_=0;showMessage(quitTitle_,stopError,MessageKind::Page);}
+        return;
+    }
+    if(adoptedPid_) {
+        // An adopted browser is not our QProcess: the same three stages, on its process tree only.
+        const quint32 pid=adoptedPid_;
+        const int posted=postCloseToProcessTree(pid);
+        bool ok=false;int grace=qEnvironmentVariableIntValue("XMB_QUIT_GRACE_MS",&ok);
+        if(!ok || grace<0)grace=10000;
+        qInfo().noquote()<<QStringLiteral("ingame: quit stage 1 WM_CLOSE posted to %1 window(s) of adopted pid %2, waiting up to %3 ms").arg(posted).arg(pid).arg(grace);
+        QTimer::singleShot(grace,this,[this,pid]{
+            if(adoptedPid_!=pid)return;
+            quitStage_=2;
+            qInfo().noquote()<<"ingame: quit stage 2 terminate (the title did not exit within the grace period)";
+            postCloseToProcessTree(pid);
+            QTimer::singleShot(3000,this,[this,pid]{
+                if(adoptedPid_!=pid)return;
+                quitStage_=3;
+                qInfo().noquote()<<"ingame: quit stage 3 kill, tree of pid"<<pid<<"terminated:"<<webAdopt::terminateTree(pid);
+            });
+        });
         return;
     }
     if(game_.isNull() || game_->state()==QProcess::NotRunning)return;
