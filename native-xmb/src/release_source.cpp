@@ -71,8 +71,10 @@ bool fetch(const QUrl& url,QIODevice* output,qint64 limit,int timeoutMs,QString*
     const int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if(timedOut)fail(error,QStringLiteral("Download timed out"));
     else if(failedWrite)fail(error,QStringLiteral("Response too large or cannot write download"));
-    else if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300)
-        fail(error,QStringLiteral("Download request failed (HTTP %1, network error %2)").arg(status).arg(int(reply->error())));
+    else if(reply->error()!=QNetworkReply::NoError)
+        fail(error,QStringLiteral("Network error: %1").arg(reply->errorString()));
+    else if(status<200 || status>=300)
+        fail(error,QStringLiteral("Server returned HTTP %1").arg(status));
     else return true;
     return false;
 }

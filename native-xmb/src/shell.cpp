@@ -5948,7 +5948,12 @@ void Shell::refreshJellyfinSignInPage() {
 void Shell::setJellyfinSignInField(const QString& field,const QString& value) {
     if(field==QStringLiteral("debrid:token")){saveDebridToken(value);return;}
     if(field==QStringLiteral("release:url")) {
-        if(!value.trimmed().isEmpty())refreshReleaseSources(QUrl(value.trimmed(),QUrl::StrictMode));
+        QString raw=value.trimmed();
+        if(!raw.isEmpty()) {
+            QUrl url(raw,QUrl::StrictMode);
+            if(url.scheme().isEmpty())url=QUrl(QStringLiteral("https://")+raw,QUrl::StrictMode);
+            refreshReleaseSources(url);
+        }
         return;
     }
     if(field.startsWith(QStringLiteral("setup:"))){setupText(field,value);return;}   // D8: the setup pages type a folder path on the same keyboard
