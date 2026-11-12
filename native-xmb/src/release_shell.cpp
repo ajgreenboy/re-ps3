@@ -109,26 +109,14 @@ void Shell::refreshReleaseSources(const QUrl& importUrl) {
     }
 }
 void Shell::rebuildReleaseSources() {
+    // The imported source folders no longer sit in the column: they are listed inside the Download Games
+    // hub (openDownloadHub). This just keeps the hub folder's detail line honest about how many sources
+    // are imported, so the column itself stays a fixed set of folders.
     for(auto& category:categories_)if(category.id==QLatin1String("game")) {
-        category.entries.erase(std::remove_if(category.entries.begin(),category.entries.end(),[](const Entry& entry){
-            return entry.action==Action::ReleaseFolder;
-        }),category.entries.end());
-        if(releaseSources_.isEmpty())return;
-        QVector<Entry> sources;
-        for(const auto& source:releaseSources_) {
-            Entry entry=releaseRow(QStringLiteral("release:source:")+source.slug,source.name,Action::ReleaseFolder,source.slug);
-            entry.detail=tr("%1 releases").arg(source.releases.size());sources.append(entry);
+        for(auto& entry:category.entries)if(entry.action==Action::DownloadHub) {
+            entry.detail=releaseSources_.isEmpty()?tr("Browse and import")
+                :tr("%1 source%2").arg(releaseSources_.size()).arg(releaseSources_.size()==1?QString():QStringLiteral("s"));
         }
-        // Insert the source folders at the end of the Download Games section, just before the Manage
-        // heading (id "game:section:manage"), or at the tail if that heading is somehow absent.
-        int at=category.entries.size();
-        for(int i=0;i<category.entries.size();++i)if(category.entries[i].id==QLatin1String("game:section:manage")){at=i;break;}
-        QVector<Entry> merged;
-        merged.reserve(category.entries.size()+sources.size());
-        for(int i=0;i<at;++i)merged.push_back(category.entries[i]);
-        for(const auto& source:sources)merged.push_back(source);
-        for(int i=at;i<category.entries.size();++i)merged.push_back(category.entries[i]);
-        category.entries=std::move(merged);
     }
 }
 void Shell::openReleaseSource(const QString& slug) {
@@ -263,6 +251,23 @@ void Shell::saveFlareSolverrUrl(const QString& url) {
 }
 void Shell::openGameSearch() {
     emit requestJellyfinFieldEdit(QStringLiteral("game:search"),tr("Search Games"),QString(),false);
+}
+void Shell::openDownloadHub() {
+    if(pages_.size()>=32)return;
+    Page page;page.title=tr("Download Games");
+    page.entries.push_back(releaseRow(QStringLiteral("game:search"),tr("Browse"),Action::BrowseGames));
+    page.entries.push_back(releaseRow(QStringLiteral("release:import"),tr("Import Source"),Action::ImportSource));
+    for(const auto& source:releaseSources_) {
+        Entry entry=releaseRow(QStringLiteral("release:source:")+source.slug,source.name,Action::ReleaseFolder,source.slug);
+        entry.detail=tr("%1 releases").arg(source.releases.size());
+        page.entries.push_back(entry);
+    }
+    if(releaseSources_.isEmpty()) {
+        Entry empty=releaseRow(QStringLiteral("release:none"),tr("No sources imported yet."),Action::Unavailable);
+        empty.detail=tr("Import Source adds a release index to download from.");page.entries.push_back(empty);
+    }
+    pages_.push_back(std::move(page));
+    emit changed();
 }
 void Shell::openBrowseGames() {
     if(busy())return;

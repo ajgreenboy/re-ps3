@@ -82,17 +82,10 @@ const QImage& spotify() {
 }
 
 const QImage& steam(const QString& steamRoot) {
-    static QString loadedFor;
-    static QImage icon;
-    if (loadedFor != steamRoot) {
-        loadedFor = steamRoot;icon = {};
-#ifdef Q_OS_WIN
-        const QString exe = QDir(steamRoot).filePath(QStringLiteral("steam.exe"));
-        if (!steamRoot.isEmpty() && QFileInfo::exists(exe)) icon = squared(jumboIcon(exe));
-        if (!icon.isNull()) qInfo().noquote() << "service icons: Steam's own icon from steam.exe" << icon.size();
-#endif
-    }
-    return icon.isNull() ? glyphs::steamLogo() : icon;
+    Q_UNUSED(steamRoot)
+    // The drawn circular mark is the official Steam logo. steam.exe's embedded icon varies by client build
+    // (and is often a square launcher tile rather than the mark), so the deterministic logo is used.
+    return glyphs::steamLogo();
 }
 
 const QImage& tailscale() {

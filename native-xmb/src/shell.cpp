@@ -61,12 +61,6 @@ namespace {
 Entry item(QString id,QString title,QString texture,QString container="explore_plugin_full",Action action=Action::Unavailable,QString value={}) {
     return {std::move(id),std::move(title),{},std::move(container),std::move(texture),action,std::move(value)};
 }
-// A non-selectable section label row (the Game column's "Download Games" / "Manage" headings).
-Entry sectionHeader(QString id,QString title) {
-    Entry e=item(std::move(id),std::move(title),QString());
-    e.sectionHeader=true;e.source=QStringLiteral("builtin");
-    return e;
-}
 // PARAM.SFO (PSF): "\0PSF", version, key table offset @8, data table offset @12, entry count @16, then 16-byte
 // entries {u16 key offset, u16 format, u32 length, u32 max length, u32 data offset}; all little-endian.
 QHash<QString,QString> readSfo(const QString& path) {
@@ -945,6 +939,21 @@ void Shell::openSteamFolder(const QString& mode) {
     pages_.push_back(std::move(page));
     emit changed();
 }
+void Shell::openManageHub() {
+    Page page;page.title=QObject::tr("Manage");
+    {
+        auto e=item("content:refresh",QObject::tr("Refresh Game Library"),"item_tex_plain_folder",
+            QStringLiteral("explore_plugin_full"),Action::RefreshContent);
+        page.entries.push_back(std::move(e));
+    }
+    {
+        auto e=item("content:import",QObject::tr("Import Games and Apps"),"item_tex_plain_folder",
+            QStringLiteral("explore_plugin_full"),Action::ImportApps);
+        page.entries.push_back(std::move(e));
+    }
+    pages_.push_back(std::move(page));
+    emit changed();
+}
 // --- Download Management --------------------------------------------------------------------------
 // The firmware's Network column carries seg_dlctrl, an ese://download_control query the console's
 // download plugin answers with its queue (audit/XMBML-NETWORK.md). This build has no console queue,
@@ -1421,18 +1430,12 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         {"tv","TV/Video Services","qgl/icontex","35n", /* normal-mapped like the others; tex_video is 46 px */{item("services","My Channels","tex_video")}},
         {"game","Game","qgl/icontex","6n",{
             // Row art is the firmware's own `icon_rsc` per segment view of category_game.xml, read this pass.
-            // Five of the seven rows bound a texture the definition does not name there (FIDELITY-SURFACES
-            // 3.1b, top gap 2): the Vita and Game Data rows are the folder-pixmap placeholder `tex_album_icon`
-            // (a plain folder - the same art the folder rows share, NOT item_tex_vitaformat's 110x28 wordmark and
-            // not a folder with a gamepad), and the three Saved Data rows take the two utility folders the
-            // definition names - `item_tex_ps3util` (folder + gamepad) on seg_sdps2 and seg_sdps3, and
-            // `item_tex_psputil` (folder + card slot) on seg_sdpsp. item_tex_psputil lives in
-            // explore_category_game.rco, so its row carries that container. The resolved table is logged and
-            // dumped (resolveGameColumnProof below is the same list the audit's table cites).
-            item("vita","PS Vita System Application Utility","tex_album_icon","explore_plugin_full"),item("data","Game Data Utility","tex_album_icon","explore_plugin_full"),
+            // The PS Vita and minis/PSP utility rows are dropped (this build runs no handheld content), so
+            // the column keeps Game Data, Memory Card and the PS2/PS3 Saved Data utilities plus the Store and
+            // Artwork Settings. The remaining folders keep the firmware's own textures (audit FIDELITY-SURFACES 3.1b).
+            item("data","Game Data Utility","tex_album_icon","explore_plugin_full"),
             item("memory",saveDataTitle(assets_,"memory"),"item_tex_ps12util","explore_plugin_full",Action::SaveData,"memory"),
             item("ps2",saveDataTitle(assets_,"ps2"),"item_tex_ps3util","explore_plugin_full",Action::SaveData,"ps2"),
-            item("psp",saveDataTitle(assets_,"psp"),"item_tex_psputil","explore_category_game",Action::SaveData,"psp"),
             item("ps3",saveDataTitle(assets_,"ps3"),"item_tex_ps3util","explore_plugin_full",Action::SaveData,"ps3"),
             item("store","PlayStation Store","item_tex_ps_store","explore_plugin_full"),
             item("artwork-settings",QObject::tr("Artwork Settings"),"item_tex_plain_folder","explore_plugin_full",Action::ArtworkSettings)}},
@@ -1636,12 +1639,8 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     discordFriendsError_=discordFriends_.configured()?QStringLiteral("Select Refresh Discord Friends to sign in."):discordFriends_.configurationError();
     rebuildFriends();
     for(auto& category:categories_)if(category.id=="game") {
-        category.entries.push_back(sectionHeader("game:section:download",QObject::tr("Download Games")));
-        category.entries.push_back(item("game:search","Browse","item_tex_plain_folder",full,Action::BrowseGames));
-        category.entries.push_back(item("release:import","Import Source","item_tex_plain_folder",full,Action::ImportSource));
-        category.entries.push_back(sectionHeader("game:section:manage",QObject::tr("Manage")));
-        category.entries.push_back(item("content:refresh","Refresh Game Library","item_tex_plain_folder",full,Action::RefreshContent));
-        category.entries.push_back(item("content:import","Import Games and Apps","item_tex_plain_folder",full,Action::ImportApps));
+        category.entries.push_back(item("game:download-hub",QObject::tr("Download Games"),"item_tex_plain_folder",full,Action::DownloadHub));
+        category.entries.push_back(item("game:manage-hub",QObject::tr("Manage"),"item_tex_plain_folder",full,Action::ManageHub));
     }
     refreshReleaseSources();
     QTimer::singleShot(0,this,&Shell::refreshContent);
@@ -2283,6 +2282,8 @@ void Shell::activate() {
     case Action::DebridToken:editDebridToken();break;
     case Action::FlareSolverrUrl:editFlareSolverrUrl();break;
     case Action::BrowseGames:openBrowseGames();break;
+    case Action::DownloadHub:openDownloadHub();break;
+    case Action::ManageHub:openManageHub();break;
     case Action::SearchGames:openGameSearch();break;
     case Action::GameSearchResult:pickGameResult(entry.value.toInt());break;
     case Action::GameSourcePick:pickGameSource(entry.value);break;

@@ -130,7 +130,11 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     SaveData, ImportSource, ReleaseFolder, ReleaseDownload, DownloadManager, DebridToken, FlareSolverrUrl,
     BrowseGames, SearchGames, GameSearchResult, GameSourcePick, GameDownloadDrive,
     // Game > Steam: the folded hub that lists Steam Store and All Games behind one column folder.
-    SteamHub };
+    SteamHub,
+    // Game > Download Games: the folded hub that lists Browse, Import Source and the imported source folders.
+    DownloadHub,
+    // Game > Manage: the folded hub that lists Refresh Game Library and Import Games and Apps.
+    ManageHub };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -697,6 +701,8 @@ private:
     void saveFlareSolverrUrl(const QString& url);
     void openGameSearch();
     void openBrowseGames();
+    void openDownloadHub();
+    void openManageHub();
     void runGameSearch(const QString& query);
     void pickGameResult(int index);
     void openGameSources(int index);

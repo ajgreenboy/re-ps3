@@ -66,10 +66,11 @@ const QImage& jellyfinLogo() {
 const QImage& steamLogo() {
     static const QImage logo=[]{
         QImage image=canvas();QPainter p(&image);p.setRenderHint(QPainter::Antialiasing);
-        // Steam's mark: a navy disc; on it a large ring (upper right) holding a dot, a small ring (lower left),
-        // and the rod joining them, all white.
-        QLinearGradient gradient(40,24,216,232);
-        gradient.setColorAt(0,QColor(0x11,0x1d,0x2e));gradient.setColorAt(1,QColor(0x1f,0x5f,0x8f));
+        // Steam's mark: a blue disc; on it a large ring (upper right) holding a dot, a small ring (lower left),
+        // and the rod joining them, all white. The disc is Steam's brand blue, darkening toward the lower right.
+        QLinearGradient gradient(24,24,232,232);
+        gradient.setColorAt(0,QColor(0x66,0x9d,0xc7));gradient.setColorAt(0.55,QColor(0x1b,0x28,0x38));
+        gradient.setColorAt(1,QColor(0x14,0x1a,0x22));
         p.setPen(Qt::NoPen);p.setBrush(gradient);p.drawEllipse(QRectF(20,20,216,216));
         const QColor white(250,250,250);
         QPen rod(white);rod.setWidthF(30);rod.setCapStyle(Qt::RoundCap);
