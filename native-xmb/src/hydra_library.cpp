@@ -21,6 +21,7 @@ bool fetchJson(const QUrl& url, QJsonObject* out, QString* error) {
     QEventLoop loop; QTimer timer; timer.setSingleShot(true);
     bool timedOut=false;
     QObject::connect(&timer,&QTimer::timeout,&loop,[&]{timedOut=true;reply->abort();});
+    QObject::connect(reply,&QNetworkReply::downloadProgress,&loop,[&](qint64 received,qint64){if(received>16*1024*1024){timedOut=true;reply->abort();}}); // a source cannot stream an unbounded body into memory
     QObject::connect(reply,&QNetworkReply::finished,&loop,&QEventLoop::quit);
     timer.start(30000); loop.exec();
     if(timedOut || reply->error()!=QNetworkReply::NoError) {
@@ -40,6 +41,7 @@ bool fetchJsonArray(const QUrl& url, QJsonArray* out, QString* error) {
     QEventLoop loop; QTimer timer; timer.setSingleShot(true);
     bool timedOut=false;
     QObject::connect(&timer,&QTimer::timeout,&loop,[&]{timedOut=true;reply->abort();});
+    QObject::connect(reply,&QNetworkReply::downloadProgress,&loop,[&](qint64 received,qint64){if(received>16*1024*1024){timedOut=true;reply->abort();}}); // a source cannot stream an unbounded body into memory
     QObject::connect(reply,&QNetworkReply::finished,&loop,&QEventLoop::quit);
     timer.start(30000); loop.exec();
     if(timedOut || reply->error()!=QNetworkReply::NoError) {
@@ -92,7 +94,7 @@ bool HydraLibrary::listSources(QVector<HydraSource>* out, QString* error) const 
         const int total=root.value(QStringLiteral("total")).toInt();
         const int limit=root.value(QStringLiteral("limit")).toInt();
         if(limit<=0 || all.size()>=total || sources.isEmpty())break;
-        ++page;
+        if(++page>100)break; // the server controls total; never page forever
     }
     if(all.isEmpty()) { if(error)*error=QStringLiteral("Hydra library returned no sources"); return false; }
     if(out)*out=all; return true;
