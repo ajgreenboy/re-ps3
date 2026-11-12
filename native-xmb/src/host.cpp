@@ -85,6 +85,22 @@ QByteArray regBinary(const QString& path,const QString& key) {
     return QSettings(path,QSettings::NativeFormat).value(key).toByteArray();
 }
 QString wide(const wchar_t* text) { return text?QString::fromWCharArray(text):QString{}; }
+// Windows 11 still ships the registry ProductName "Windows 10 ..." (the value was never renamed), so a Windows 11 PC
+// (build 22000+) reported "Windows 10 Pro 25H2". The real build number decides the major name.
+DWORD windowsBuildNumber() {
+    using RtlGetVersionFn=LONG (WINAPI*)(OSVERSIONINFOW*);
+    if(const HMODULE ntdll=GetModuleHandleW(L"ntdll.dll")) {
+        if(const auto fn=reinterpret_cast<RtlGetVersionFn>(reinterpret_cast<void*>(GetProcAddress(ntdll,"RtlGetVersion")))) {
+            OSVERSIONINFOW info{};info.dwOSVersionInfoSize=sizeof(info);
+            if(fn(&info)==0)return info.dwBuildNumber;
+        }
+    }
+    return 0;
+}
+QString windowsProductName(QString name,DWORD build) {
+    if(build>=22000 && name.startsWith(QStringLiteral("Windows 10")))name.replace(0,10,QStringLiteral("Windows 11"));
+    return name;
+}
 #endif
 QString bytesText(qint64 value) {
     if(value<0)return {};
@@ -806,7 +822,7 @@ Snapshot readSnapshot(bool gui=true) {
     const auto build=regString(versionKey,QStringLiteral("CurrentBuild"));
     const auto revision=regString(versionKey,QStringLiteral("UBR"));
     if(!productName.isEmpty())
-        state.osName=productName+(displayVersion.isEmpty()?QString{}:QStringLiteral(" ")+displayVersion);
+        state.osName=windowsProductName(productName,windowsBuildNumber()?windowsBuildNumber():build.toUInt())+(displayVersion.isEmpty()?QString{}:QStringLiteral(" ")+displayVersion);
     if(!build.isEmpty())state.osVersion=build+(revision.isEmpty()?QString{}:QLatin1Char('.')+revision);
     const QString cpuKey=QStringLiteral("HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0");
     state.cpuName=regString(cpuKey,QStringLiteral("ProcessorNameString"));
