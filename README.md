@@ -1,17 +1,21 @@
-# re-ps3 — a native PS3 XMB recreation for Windows
+# XMB-Rewritten — a native PS3 XMB recreation for Windows
+
+![The native XMB, Video column](native-xmb/screenshots/08-original-qgl-video-final-spacing.jpg)
 
 A native C++20 / OpenGL recreation of the PlayStation 3 **4.93 XMB**, built from the firmware's own
-assets and matched against console captures, intended as a living-room HTPC front end. It ships two
-programs from one CMake project:
+assets and matched against console captures, intended as a living-room HTPC front end. It is **not** a
+firmware replacement and **no Sony asset ships with this repository** — the app reads your local
+`dev_flash` read-only and reproduces the console's look, feel and navigation from scratch.
+
+One CMake project builds two programs:
 
 | Program | What it is | Docs |
 |---|---|---|
 | **`re-ps3-native.exe`** | the XMB itself — category bar, item columns, pages, options menus, dialogs, settings, media panels, the on-screen keyboard, the PS menu, themes, the cold-boot intro and transitions | [native-xmb/README.md](native-xmb/README.md), [INSTALL.md](native-xmb/INSTALL.md) |
 | **`xmb-manager.exe`** | a companion tool that detects emulators and imports ROMs/ISOs/game folders as virtual PS3-style packages into the XMB's library | [MANAGER.md](native-xmb/MANAGER.md) |
 
-The manager writes the same `apps.json` registry the XMB reads, so an imported game appears as a
-Game-column tile and launches through its mapped emulator. Nothing is a firmware replacement and no
-Sony asset ships with this repository — the app reads your local `dev_flash` read-only.
+The manager and the XMB share the same `apps.json` registry, so an imported game appears as a
+Game-column tile and launches through its mapped emulator.
 
 ## What it does
 
@@ -19,9 +23,9 @@ Sony asset ships with this repository — the app reads your local `dev_flash` r
   the item options menu, message boxes, settings pages, the PS system menu, themes (`.p3t`), the
   firmware's 4.93 cold-boot intro and health warning, and the traced interaction sounds.
 - **Local media:** video with sidecar subtitles (`.srt`/`.vtt` and PGS/VobSub image subtitles) and
-  resume/Continue Watching, a full-screen music player page, photo viewing/slideshow/zoom/rotate, and
-  playlists (create, add, add-all, reorder, delete).
-- **Real content backends** behind the console's presentation:
+  resume/Continue Watching, a full-screen music player with visualizer, photo viewing / slideshow /
+  zoom / rotate and the 3D Photo Gallery, and playlists (create, add, add-all, reorder, delete).
+- **Streaming & content backends** behind the console's presentation:
   - **Jellyfin** — library pages, direct play and HLS, streaming-quality ceiling, text and image
     subtitles, in-XMB sign-in with a remembered (DPAPI-sealed) session.
   - **Steam** — installed titles inline as ICON0 tiles (most recently played first), collections,
@@ -35,6 +39,38 @@ Sony asset ships with this repository — the app reads your local `dev_flash` r
 - **Input:** keyboard, XInput pads 0–3, DualShock 3/4 and DualSense over HID, and IR/HID remotes plus
   media keys (`WM_APPCOMMAND`). One press is one action; the PS/Guide button brings the XMB forward
   and a hold opens the system menu.
+- **Living-room operation:** kiosk mode, a crash watchdog with `--safe` recovery and minidumps, start
+  at sign-in, a controller-driven Desktop Mode, the in-game XMB (PS over a running title), and web
+  apps (Plex/YouTube/…) in a tracked app window that returns to the XMB on close.
+
+## Game library & downloads
+
+The Game column brings three kinds of titles together into one presentation:
+
+- **Steam** — your owned and installed titles inline, collections, the store, play activity,
+  downloads, accounts and friends.
+- **Your ROMs/ISOs** — the manager detects emulators, scans your libraries and imports each game as a
+  virtual PS3-style package (ICON0 + PARAM.SFO + an `apps.json` row), so a SNES cart or a PS2 ISO
+  appears and launches exactly like a PS3 title.
+- **Game sources** — the XMB can browse a community game index (the Hydra Launcher library), search
+  across extract-and-play sources, and show the *popular* catalogue, then download a title and drop
+  it into the same library.
+
+The download pipeline is opt-in and explicit end to end:
+
+1. **Add a source** — paste a URL to a release-index JSON, or choose from the community index.
+   Search is filtered to extract-and-play (pre-installed / portable) sources and deduplicated.
+2. **Browse or search** — the popular catalogue is ranked by real installs, with box art from Steam.
+3. **Pick a drive, then download** — the release link is handed to your own **Real-Debrid** account
+   (a token you enter; it is stored in preferences and never committed or logged), the archive
+   streams to disk, and 7-Zip extracts it.
+4. **It lands in the Game column** — the result is registered into `apps.json` through the same path
+   the manager uses, so it launches through its mapped emulator.
+
+Nothing ships as a built-in catalogue, and nothing downloads until you configure a source and a
+debrid token. There is no torrent client, DHT or DRM bypass in the app — the debrid performs the
+torrent resolution, and an encrypted retail `.pkg` is refused with an explanation rather than
+emulated. FlareSolverr (optional, self-hosted) is the only fallback for Cloudflare-gated source pages.
 
 ## Status
 
@@ -43,17 +79,17 @@ Buildable, gated, and measured — not "finished". The current snapshot:
 | Measure | Result | Detail |
 |---|---|---|
 | Build | clean, reproducible (MSVC 2022 + Qt 6 + Ninja) | [INSTALL.md](native-xmb/INSTALL.md) §2 |
-| Canonical render gate | **6/6 layers PASS** vs the matched console frame (frame ≈ 19.5 dB) | `work/ab-layers.ts --all` |
-| Regression states | **12/12 PASS** (deterministic self-baselines) | same |
+| Canonical render gate | **6/6 layers PASS** vs the matched console frame (frame ≈ 19.6 dB PSNR) | `work/ab-layers.ts --all` |
+| Regression states | **22/22 PASS** (deterministic self-baselines) | same |
 | Release hygiene | **PASS** (no secrets, no firmware data, links + cited commits resolve) | `work/release-check.ps1` |
 | Feature breadth | feature-complete for daily HTPC use | [HANDOFF-2026-11-09.md](native-xmb/HANDOFF-2026-11-09.md) |
 | Fidelity vs the console | partial and measured per surface | [FIDELITY-VERDICT.md](native-xmb/audit/FIDELITY-VERDICT.md), [FIDELITY-SURFACES-MAP.md](native-xmb/audit/FIDELITY-SURFACES-MAP.md) |
 
 What still needs work is release plumbing and the remaining fidelity surfaces, not core features: the
 on-device evidence run ([RELEASE-CHECKLIST.md](native-xmb/audit/RELEASE-CHECKLIST.md)), and fidelity
-items like the playlist two-pane editor, dynamic (RAF) themes, Photo Gallery, in-game XMB, OSK
-variants, the game boot splash, the music visualizer and layout-table tracing. The plan of record is
-[PHASES-2026-11-07.md](native-xmb/audit/PHASES-2026-11-07.md).
+items like the playlist two-pane editor, dynamic (RAF) theme playback, the in-game XMB over real
+fullscreen games, OSK variants, the game boot splash, the music visualizer and layout-table tracing.
+The plan of record is [PHASES-2026-11-07.md](native-xmb/audit/PHASES-2026-11-07.md).
 
 ## Build and run
 
@@ -97,6 +133,7 @@ Details and the auto-logon step: [packaging/README.md](native-xmb/packaging/READ
 |---|---|
 | `native-xmb/` | the application: `src/`, `manager/`, `packaging/`, `audit/` (fidelity + firmware audits), `CMakeLists.txt`, current documents |
 | `native-xmb/archive/` | superseded dated handoffs and phase plans |
+| `native-xmb/screenshots/` | approved UI captures referenced by the docs |
 | `work/` | verification tools (`ab-layers`, `parity`, transition harness, release check) and fidelity probes |
 | `out/`, `dist/` | local build, capture and package output (gitignored) |
 | `fw493/vsh_module/`, `rea/`, `ghidra_scripts/` | decrypted VSH modules and RE analysis assets the fidelity work reads (local only, gitignored) |
@@ -107,7 +144,7 @@ Details and the auto-logon step: [packaging/README.md](native-xmb/packaging/READ
 The project measures itself rather than trusting screenshots:
 
 - `bun work/ab-layers.ts --all --exe <exe>` — the canonical render gate (six content-neutral layers +
-  a text-presence guard) and the twelve named-state regression references.
+  a text-presence guard) and the twenty-two named-state regression references.
 - `bun work/parity.ts` — the matched-fidelity corpus (Tier A behavioural oracles, Tier B region
   budgets, Tier C traces).
 - `bun work/transition-compare.ts` — frame-by-frame console-vs-native transition verdicts.
@@ -119,6 +156,7 @@ The project measures itself rather than trusting screenshots:
 - [Active handoff](native-xmb/HANDOFF-2026-11-09.md) — current state, what landed, open work.
 - [Plan of record](native-xmb/audit/PHASES-2026-11-07.md) · [ISA](native-xmb/ISA.md) · [audit index](native-xmb/audit/README.md).
 - [Install, build and run](native-xmb/INSTALL.md) · [Manager](native-xmb/MANAGER.md) · [packaging](native-xmb/packaging/README.md).
+- [Screenshots](native-xmb/SCREENSHOTS.md) — captured states and their history.
 
 ## Provenance and honesty
 
