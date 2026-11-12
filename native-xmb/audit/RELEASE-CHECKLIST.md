@@ -25,7 +25,7 @@ The features documented in the README are Windows-only (XInput, DPAPI, Recycle B
 | 4. Data folder | Pass `--data-dir <data>`. The first launch creates it with default preferences. | INSTALL.md section 3 |
 | 5. Log | Before launching, run `$env:XMB_LOG = '<log>'` in the same PowerShell session. The launcher also writes session logs; its location: TODO, not read for this file. | INSTALL.md sections 3 and 7.2 |
 | 6. Kiosk launch | `& <exe> --dev-flash <firmware> --data-dir <data> --kiosk --display 1`. The documented example omits `--data-dir`; adding it pins the folder. `--display 1` is the second screen, so confirm the TV is display 1 in Windows Display settings. | INSTALL.md section 3 |
-| 7. Autostart at login | TODO: not documented. INSTALL.md has no autostart or startup-folder steps. Windows autologon for the HTPC account is also not documented. | none |
+| 7. Autostart at login | `packaging/install-autostart.ps1` registers the logon task that runs the watchdog; Windows automatic sign-in is a manual step (the package never stores a password). | packaging/README.md; AUTOLOGON.md |
 
 ## 2. Checklist
 
@@ -49,7 +49,7 @@ Keyboard and mouse disconnected for this section. Use an Xbox-layout (XInput) pa
 | N2 | Cross (A) on a row with a list. | The row's surface opens. | Photo of the TV. | |
 | N3 | Circle (B) to go back. | Goes back one level. | Photo of the TV. | |
 | N4 | Triangle (Y) on a title or item. | Options menu opens. | Photo of the TV. | |
-| N5 | L1 and R1 on a list with more than 10 rows. | Selection moves 10 rows per press. | Photo; log line `selection`. | |
+| N5 | L1 and R1 on a list with more than 10 rows. | Selection moves 10 rows per press. | Photo; log line `source=pad action=l1`/`r1` (a `selection` line is written only by the remote Channel keys). | |
 | N6 | Open a text field with the pad (Music or Photo > Playlists > Create New Playlist). | On-screen keyboard: D-pad picks keys, A types, X backspace, Y space, Start accepts, B cancels. | Photo of the keyboard in use. | |
 | N7 | Tap PS (DualSense) or Guide (Xbox pad) while another window has focus. | The XMB comes to the front. | Photo of the TV. | |
 | N8 | Hold PS 1 s (DualSense) or Guide 1 s (Xbox pad). | System menu opens; a second hold closes it. The Guide path is not verified (see G1). | Photo of the TV. | |
@@ -64,7 +64,7 @@ Use the owner's real remote (MCE/IR or Bluetooth HID). Start with `XMB_INPUT_TRA
 | R2 | Press Stop with media open. | Playback stops and the resume point is kept; log `stop; mediaOpen now 0`. | Log lines. | |
 | R3 | Press Next, then Previous, with an album playing. Hold Next briefly. | One track per press; a held key does not skip repeatedly. | Log lines. | |
 | R4 | Press Fast Forward and Rewind in a video. | About 10 s per press. | Log lines with positions. | |
-| R5 | Press Channel Up and Channel Down in a list. | Selection pages 10 rows. | Log line `selection`. | |
+| R5 | Press Channel Up and Channel Down in a list. | Selection pages 10 rows. | Log line `selection` (written for the remote Channel keys). | |
 | R6 | Press the remote's Back and Home keys. | Back acts as Circle. Home opens the system menu; a second Home closes it. | Photo of the TV. | |
 | R7 | Press Volume Up, Volume Down and Mute. | Windows volume changes; the player follows. | Screenshot of the Windows volume indicator. | |
 | R8 | Press one key once, then check the log. | One action per press. Any second copy within 100 ms is logged as swallowed. | Log lines. | |
@@ -176,7 +176,7 @@ Needs a long-lived access token in `<native-data>\homeassistant.json` as `{"url"
 |---|---|---|---|---|
 | PW1 | Launch once with `XMB_POWER_DRY_RUN=1`. Choose Users > Sleep, then Restart, then Turn Off, confirming each. | The log records the intended action each time; nothing happens. | Log lines. | |
 | PW2 | Real run: Users > Sleep, confirm. | The PC sleeps. The wake method is not documented (TODO). | Photo of the TV, time stamps. | |
-| PW3 | Real run: Users > Restart System, confirm. | Windows restarts. Whether the XMB returns is not documented (autostart TODO, see G13). Record what happens. | Photo of the TV after restart. | |
+| PW3 | Real run: Users > Restart System, confirm. | Windows restarts. Whether the XMB returns depends on the autostart task being registered (setup step 7, see G13). Record what happens. | Photo of the TV after restart. | |
 | PW4 | Real run in kiosk (last item of the run): Users > Turn Off the System, confirm. | Windows shuts down. | Photo of the screen going off; time stamp. | |
 | PW5 | Launch without `--kiosk`. Users > Turn Off the System, confirm. | The XMB quits; Windows stays up. | Screenshot of the desktop. | |
 
@@ -193,7 +193,7 @@ Needs a long-lived access token in `<native-data>\homeassistant.json` as `{"url"
 |---|---|---|---|---|
 | CD1 | Copy a test file into a library folder. Delete it from the XMB and confirm. | File is moved to the Recycle Bin and leaves the library. | Recycle Bin screenshot. | |
 | CD2 | Try to delete a file outside the library folders, if one exists. | The file is not moved. The refusal message is TODO, not documented. | Screenshot of the result. | |
-| CD3 | Copy on a local file. | Listed; the docs say it needs a destination picker. No pass criterion is documented (TODO). Record the result. | Photo of the TV. | |
+| CD3 | Copy on a local file. | The destination list (Video Library, Photo Library, This Folder) appears; choosing one writes a byte-identical copy (the 2026-11-12 run passed this). | Photo of the TV. | |
 
 ### 2.16 System Check
 
@@ -221,11 +221,11 @@ Pass criteria for memory and CPU are not documented. Record the numbers and let 
 
 ### 2.19 Recovery
 
-No watchdog exists yet. These rows record what happens today.
+The packaged `watchdog.ps1` (see packaging/README.md) restarts the XMB after a crash and drops to `--safe` after repeated crashes. Run RC1 through the watchdog; a bare `re-ps3-native.exe` has no supervisor.
 
 | ID | What to do | Correct looks like | Evidence | Pass/Fail |
 |---|---|---|---|---|
-| RC1 | With the XMB in front, End task on `re-ps3-native.exe` in Task Manager. | Expected: the process does not restart (no watchdog). Record what happens; a restart here is an unexpected result and is recorded as such. | Photo of the TV; Task Manager screenshot. | |
+| RC1 | With the XMB started by `watchdog.ps1` and in front, End task on `re-ps3-native.exe` in Task Manager. | The watchdog restarts the XMB; after repeated crashes inside its window it starts in safe mode. Started without the watchdog, nothing restarts it, which is expected. | Photo of the TV; Task Manager screenshot. | |
 | RC2 | Start again with the kiosk command from setup step 6. | Starts; preferences and playlists from `<data>` are present. | Photo of the TV; `<data>` listing. | |
 
 ## 3. Known gaps to expect
@@ -246,6 +246,6 @@ Each gap is a row above that the docs say was not verified. Expect these to fail
 | G10 | Jellyfin backdrop on a real server. Only the stub fixture was checked. | audit/JELLYFIN-NATIVE.md (line 550) | JF7 |
 | G11 | Weather has no "Not verified" line. Its only live check was Chicago, IL on 2026-11-07, so other places are untested. | audit/WEATHER.md (line 13) | WE1-WE3 |
 | G12 | Long-session stability is not established. OpenGL texture and context warnings appear on exit. | audit/VERIFICATION-HARNESS.md (lines 79-80) | LS1-LS3 |
-| G13 | No autostart, no watchdog, and no documented kiosk autostart. INSTALL.md section 3 documents launch flags only. | audit/BEHAVIOUR-GAP-AUDIT.md (E6); INSTALL.md section 3 (absence) | RC1, PW3 |
-| G14 | Copy needs a destination picker that is not built. | README.md, "Power, audio output, Delete and System Check" (lines 272-273) | CD3 |
+| G13 | Autostart registration and a kiosk autostart were not exercised. A watchdog exists (`packaging/watchdog.ps1`) and restarted the XMB after a kill (RC1 in RELEASE-RUN-2026-11-12.md). | packaging/README.md; audit/RELEASE-RUN-2026-11-12.md (G13) | RC1, PW3 |
+| G14 | Resolved: Copy offers a destination list and completed in the 2026-11-12 run. Kept for traceability. | audit/RELEASE-RUN-2026-11-12.md (G14) | CD3 |
 | G15 | The `<native-data>` folder is assumed to be `<data>`. | README.md, "Network services and media sources" (throughout) | Section 1 step 4; WE1, WOL1, SP1, DL3, HA1 |

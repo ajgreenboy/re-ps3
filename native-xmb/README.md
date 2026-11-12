@@ -270,7 +270,7 @@ Details: [audit/HOME-SERVICES.md](audit/HOME-SERVICES.md), [audit/WEATHER.md](au
 - **Settings > Sound Settings > Audio Output Settings** chooses the Windows default playback device; the player follows it.
   `XMB_AUDIO_DRY_RUN=1` logs instead of switching.
 - **Delete** on a local media file moves it to the Recycle Bin after the firmware's confirmation, only inside the chosen
-  library folders (`src/file_ops.*`). Copy is listed but needs a destination picker.
+  library folders (`src/file_ops.*`). Copy offers a destination list (Video Library, Photo Library or This Folder).
 - **Settings > System Settings > System Check** runs read-only checks (firmware files, fonts, data folder, free space,
   graphics, network, Jellyfin, Home Assistant, Spotify, Tailscale, Steam libraries) and lists problems first with their fix.
 - **Games** launched from the XMB: rendering pauses while the game is in front, and on exit (normal, crash, Alt-F4) the XMB
