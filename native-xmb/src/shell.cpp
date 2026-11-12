@@ -3746,6 +3746,7 @@ void Shell::optionsActivate() {
         const QString title=copyPlural_?QObject::tr("%1 files").arg(sources.size()):copyTitle_;
         multiSelect_=false;multiSelectKind_.clear();checkedIds_.clear();copyPlural_=false;
         resetOptions();
+        fileOps_.setAllowedRoots(libraryRoots());
         fileOpsRequest_=fileOps_.copy(sources,target);fileOpsKind_=QStringLiteral("copy");
         loading_=true;status_=assets_.text("explore_plugin_full","msg_copying","Copying...");
         busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();   // indeterminate until the backend totals the copy
@@ -5371,6 +5372,7 @@ void Shell::openCopyDestinations(const QString& here,const QStringList& sources)
         if(root.isEmpty() || QDir::cleanPath(root)==QDir::cleanPath(here))continue;
         MenuOption row{tr(kind[1]),OptionCommand::CopyTarget};
         row.index=int(copyTargets_.size());row.note=QDir::toNativeSeparators(root);
+        fileOps_.setAllowedRoots(libraryRoots());
         const QString refusal=fileOps_.checkCopy(sources,root);
         if(!refusal.isEmpty()){row.enabled=false;row.note=refusal;}
         copyTargets_<<root;options_.push_back(row);

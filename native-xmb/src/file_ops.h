@@ -26,7 +26,8 @@
 //
 // Copy refusals: same path syntax rules for sources and destination; sources must exist; the
 // destination must be an existing folder, not inside (or equal to) a source folder, and not a
-// protected system folder; free space on the destination volume (QStorageInfo) must cover the total
+// protected system folder; with library roots set, the sources and the destination must resolve (links and
+// junctions followed) inside a root; free space on the destination volume (QStorageInfo) must cover the total
 // size plus 1 MB; a file of 4 GiB or more cannot go to a FAT/FAT32 volume.
 //
 // Every request answers exactly once with finished(), always queued (also for refusals), never

@@ -86,11 +86,28 @@ bool isRootPath(const QString& p) {
     return QDir(p).isRoot();
 }
 
-// Symlink-resolved path with 8.3 short names expanded ("C:/PROGRA~1" -> "C:/Program Files").
+// Fully resolved path: symbolic links AND directory junctions followed (Qt's canonicalFilePath leaves
+// a junction in place), 8.3 short names expanded ("C:/PROGRA~1" -> "C:/Program Files").
 QString canonical(const QString& p) {
     QString c = QFileInfo(p).canonicalFilePath();
     if (c.isEmpty()) return {};
 #ifdef Q_OS_WIN
+    {
+        const std::wstring native = QDir::toNativeSeparators(c).toStdWString();
+        const HANDLE h = CreateFileW(native.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                     OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (h != INVALID_HANDLE_VALUE) {
+            std::wstring buf(32768, L'\0');
+            const DWORD got = GetFinalPathNameByHandleW(h, buf.data(), DWORD(buf.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+            CloseHandle(h);
+            if (got > 0 && got < buf.size()) {
+                QString r = QString::fromWCharArray(buf.c_str(), int(got));
+                if (r.startsWith(QLatin1String(R"(\\?\UNC\)"))) r = QStringLiteral(R"(\\)") + r.mid(8);
+                else if (r.startsWith(QLatin1String(R"(\\?\)"))) r = r.mid(4);
+                c = r;
+            }
+        }
+    }
     const std::wstring in = QDir::toNativeSeparators(c).toStdWString();
     const DWORD need = GetLongPathNameW(in.c_str(), nullptr, 0);
     if (need > 0) {
@@ -249,6 +266,13 @@ QString FileOperations::checkCopy(const QStringList& paths, const QString& desti
     const QFileInfo di(dest);
     if (!di.exists() || !di.isDir()) return refused(dest, QStringLiteral("destination is not an existing folder"));
     const QString destK = canonical(dest);
+    // With library roots configured, both ends must resolve (junctions and symlinks followed) inside them.
+    auto inLibrary = [&](const QString& form) {
+        if (roots_.isEmpty()) return true;
+        for (const QString& r : roots_) if (sameOrInside(form, r)) return true;
+        return false;
+    };
+    if (!destK.isEmpty() && !inLibrary(destK)) return refused(dest, QStringLiteral("destination resolves outside the library folders"));
     for (const QString& form : {dest, destK})
         if (!form.isEmpty())
             if (const QString s = protectedProblem(form, false); !s.isEmpty()) return refused(dest, QStringLiteral("destination is a ") + s);
@@ -259,6 +283,7 @@ QString FileOperations::checkCopy(const QStringList& paths, const QString& desti
         if (!fi.exists()) return refused(p, QStringLiteral("does not exist"));
         if (isRootPath(p)) return refused(p, QStringLiteral("drive or share root"));
         if (isLink(fi)) return refused(p, QStringLiteral("symbolic link or junction"));
+        if (const QString k = canonical(p); !k.isEmpty() && !inLibrary(k)) return refused(p, QStringLiteral("resolves outside the library folders"));
         if (fi.isDir()) {
             const QString k = canonical(p);
             for (const QString& d : {dest, destK})
