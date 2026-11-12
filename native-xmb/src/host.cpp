@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -870,9 +871,21 @@ bool onGuiThread() {
     const auto* app=QCoreApplication::instance();
     return app && QThread::currentThread()==app->thread();
 }
+// ZF4: the reading started by startEarlySnapshot(), consumed by the first snapshot() on the GUI thread.
+std::future<std::shared_ptr<Snapshot>> gEarlySnapshot;
+int gEarlyGeneration=0;
 const Snapshot& snapshot() {
     const qint64 now=QDateTime::currentMSecsSinceEpoch();
     const qint64 taken=gSnapshotAt.load();
+    if(taken==0 && gEarlySnapshot.valid() && onGuiThread()) {
+        const auto fresh=gEarlySnapshot.get();   // blocks only for what the worker has left to do
+        if(gEarlyGeneration==gGeneration.load()) {
+            readGuiParts(*fresh);
+            gCached=std::move(*fresh);
+            gSnapshotAt.store(QDateTime::currentMSecsSinceEpoch());
+            return gCached;
+        }   // invalidated since it started: fall through to a fresh synchronous read
+    }
     if(taken==0 || (now-taken>2000 && !onGuiThread())) {
         gCached=readSnapshot();
         gSnapshotAt.store(now);
@@ -895,6 +908,11 @@ const Snapshot& snapshot() {
     return gCached;
 }
 void invalidateSnapshot() { ++gGeneration;gSnapshotAt.store(0); }
+void startEarlySnapshot() {
+    if(gEarlySnapshot.valid() || gSnapshotAt.load()!=0)return;
+    gEarlyGeneration=gGeneration.load();
+    gEarlySnapshot=std::async(std::launch::async,[]{return std::make_shared<Snapshot>(readSnapshot(false));});
+}
 void prefetchSnapshot() {
     autostart::prefetch();   // the Start at Sign-in row reads the scheduler on a worker, off the paint path
     if(gSnapshotAt.load()!=0 || gRefreshing.exchange(true))return;

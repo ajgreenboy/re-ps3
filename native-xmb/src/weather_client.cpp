@@ -5,6 +5,9 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -75,9 +78,15 @@ QPainterPath moon(QPointF c, qreal r) {
 }
 
 // `front` filled plus the clearance gap a shape behind it keeps from its outline.
+// ZF4: the path clipper behind keepOut() and drawBehind() costs ~140 ms per call here, and one icon asks for the same `front` four times
+// (the shadow and the main pass, each in sun() and drawBehind()). The last answer is remembered per thread; the result is the same path.
+struct LastPath { QPainterPath in, out; bool valid = false; };
 QPainterPath keepOut(const QPainterPath& front) {
+    thread_local LastPath last;
+    if (last.valid && last.in == front) return last.out;
     QPainterPathStroker gap; gap.setWidth(44); gap.setCapStyle(Qt::RoundCap); gap.setJoinStyle(Qt::RoundJoin);
-    return front.united(gap.createStroke(front));
+    last.in = front; last.out = front.united(gap.createStroke(front)); last.valid = true;
+    return last.out;
 }
 
 // A sun; with `behind`, rays that would touch it are left out rather than cut into stubs.
@@ -97,9 +106,13 @@ QPainterPath sun(QPointF c, qreal r, qreal rayFrom, qreal rayTo, const QPainterP
 
 // Draws `path` except where it would cross `front` (plus a gap), so `front` reads as in front of it.
 void drawBehind(QPainter& p, const QPainterPath& path, const QPainterPath& front) {
-    QPainterPath everything; everything.addRect(QRectF(-64, -64, 384, 384));
+    thread_local LastPath lastClip;
+    if (!lastClip.valid || !(lastClip.in == front)) {
+        QPainterPath everything; everything.addRect(QRectF(-64, -64, 384, 384));
+        lastClip.in = front; lastClip.out = everything.subtracted(keepOut(front)); lastClip.valid = true;
+    }
     p.save();
-    p.setClipPath(everything.subtracted(keepOut(front)), Qt::IntersectClip);
+    p.setClipPath(lastClip.out, Qt::IntersectClip);
     p.drawPath(path);
     p.restore();
 }
@@ -557,7 +570,7 @@ QString WeatherClient::iconName(WeatherIcon kind) {
     return QStringLiteral("cloudy");
 }
 
-QImage WeatherClient::icon(WeatherIcon kind, bool night, int size) {
+static QImage drawIcon(WeatherIcon kind, bool night, int size) {
     size = qBound(8, size, 2048);
     // Clouds with weather under them sit higher so the precipitation fits below.
     const QPainterPath high = cloud(QTransform::fromTranslate(0, -34));
@@ -615,6 +628,22 @@ QImage WeatherClient::icon(WeatherIcon kind, bool night, int size) {
         });
     }
     return {};
+}
+
+// ZF4: the same drawing, remembered. The start-up path asks for the same icons the shell builds its rows from, and a worker
+// thread starts drawing them before the shell exists (Shell::initWeather then finds them done). One lock covers the drawing,
+// so a request that meets a drawing in progress waits for it instead of repeating it.
+QImage WeatherClient::icon(WeatherIcon kind, bool night, int size) {
+    static QMutex lock;
+    static QHash<quint64, QImage> memo;
+    size = qBound(8, size, 2048);
+    const quint64 key = (quint64(kind) << 40) | (quint64(night ? 1 : 0) << 32) | quint64(size);
+    const QMutexLocker guard(&lock);
+    const auto found = memo.constFind(key);
+    if (found != memo.cend()) return *found;
+    const QImage image = drawIcon(kind, night, size);
+    memo.insert(key, image);
+    return image;
 }
 
 } // namespace xmb

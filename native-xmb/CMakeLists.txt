@@ -36,6 +36,7 @@ qt_add_executable(re-ps3-native
     src/service_installer.cpp src/service_installer.h
     src/tailscale_client.cpp src/tailscale_client.h src/tailscale_shell.cpp
     src/system_power.cpp src/system_power.h
+    src/boot_prefetch.cpp src/boot_prefetch.h
     src/file_ops.cpp src/file_ops.h
     src/weather_client.cpp src/weather_client.h src/weather_shell.cpp
     src/self_check.cpp src/self_check.h src/system_check_shell.cpp

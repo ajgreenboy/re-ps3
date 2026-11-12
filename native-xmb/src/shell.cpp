@@ -55,6 +55,7 @@
 #include "musicvis.h"
 #include <algorithm>
 #include <functional>
+#include "boot_profile.h"
 #include <limits>
 
 namespace xmb {
@@ -1356,6 +1357,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     steamArtwork_(std::make_unique<SteamArtwork>(QDir(dataDirectory).filePath("cache/steam"))),
     rawgArtwork_(std::make_unique<RawgArtwork>(QDir(dataDirectory).filePath("cache"))),
     player_(std::make_unique<QMediaPlayer>()),audio_(std::make_unique<QAudioOutput>()),video_(std::make_unique<QVideoSink>()) {
+    xmb::bootprof::mark("Shell members");
     QDir().mkpath(dataDirectory);
     // The resume-point format change (audit/MEDIA-CONTROLS.md): a data directory written by the earlier
     // build holds {id: milliseconds} with no path, so those entries are resolved or dropped here, once,
@@ -1377,7 +1379,9 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         category_=0;
         qInfo().noquote()<<"profiles: start logged out (no automatic login user); last user"<<profiles_.activeId();
     }
+    xmb::bootprof::mark("Shell migrate+profiles");
     playlists_.open(dataDirectory_,profiles_.activeId());
+    xmb::bootprof::mark("Shell playlists");
     const QString sys="explore_category_sysconf",full="explore_plugin_full";
     const auto friendText=[&assets](const QString& id,const QString& fallback){return assets.text("explore_category_friend",id,fallback);};
     categories_={
@@ -1462,10 +1466,13 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     };
     // The Network column's rows come from the firmware's own category_network.xml (the proof of the
     // XMBML-driven column mechanism); it keeps the list above when the definition cannot be read.
+    xmb::bootprof::mark("Shell categories literal");
     resolveNetworkColumn();
+    xmb::bootprof::mark("Shell resolveNetworkColumn");
     // The three media columns are the same mechanism (category_video|music|photo.xml): the console's own rows
     // in its own order, then this build's native rows marked as such. See resolveMediaColumns().
     resolveMediaColumns();
+    xmb::bootprof::mark("Shell resolveMediaColumns");
     // The Game column's row art, as one line per row: the texture each row binds and the container it is read
     // from. Five of the seven rows changed binding this pass (category_game.xml's icon_rsc), so the log is the
     // record a scripted run greps instead of reading pixels (FIDELITY-SURFACES 3.1b).
@@ -1516,6 +1523,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         category.themeIcon=themeCategoryIcons.value(category.id);
         for(auto& entry:category.entries)entry.themeIcon=themeEntryIcons.value(category.id+"/"+entry.id);
     }
+    xmb::bootprof::mark("Shell settings column");
     selections_.fill(0,categories_.size());
     // The tenth column (FIDELITY-ROOT-BAR C1/#5): built like every other category above, then dropped here when
     // `appearance/tvColumn` is off, so the bar, the navigation clamps and the entry dump all follow categories_.
@@ -1523,10 +1531,14 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     connect(this,&Shell::changed,this,[this]{if(inGame_)syncInGameRows();});
     syncTvColumn();
     rebuildUsers();
+    xmb::bootprof::mark("Shell rebuildUsers");
     addInstalledApps();
+    xmb::bootprof::mark("Shell addInstalledApps");
     for(const auto& category:categories_)if(category.id=="friends")staticFriendEntries_=category.entries;
     discordFriends_.configure(dataDirectory_);
+    xmb::bootprof::mark("Shell discord configure");
     if(!diagnostics::safeMode())discordFriends_.restoreSession();
+    xmb::bootprof::mark("Shell discord restoreSession");
     connect(&discordFriends_,&DiscordClient::loaded,this,[this](const QVector<DiscordFriend>& friends,const QString& error){
         if(error.isEmpty())discordFriendList_=friends;discordFriendsError_=error;friendsRefreshing_=false;rebuildFriends();emit changed();
         if(error.isEmpty())friendsAge_.restart();
@@ -1646,12 +1658,17 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         category.entries.push_back(item("game:download-hub",QObject::tr("Download Games"),"item_tex_plain_folder",full,Action::DownloadHub));
         category.entries.push_back(item("game:manage-hub",QObject::tr("Manage"),"item_tex_plain_folder",full,Action::ManageHub));
     }
+    xmb::bootprof::mark("Shell friends+connects");
     refreshReleaseSources();
+    xmb::bootprof::mark("Shell refreshReleaseSources");
     QTimer::singleShot(0,this,&Shell::refreshContent);
     connect(&profiles_,&Profiles::changed,this,[this]{rebuildUsers();emit changed();});
     connect(&profiles_,&Profiles::failed,this,[this](const QString& error){showMessage(error,MessageKind::Page);emit changed();});
+    xmb::bootprof::mark("Shell profiles connects");
     player_->setAudioOutput(audio_.get());host::followDefaultAudioOutput(audio_.get());player_->setVideoSink(video_.get());
+    xmb::bootprof::mark("Shell player wiring");
     musicTap_=std::make_unique<MusicTap>(player_.get());
+    xmb::bootprof::mark("Shell MusicTap");
     connect(&preferences_,&Preferences::failed,this,[this](const QString& error){
         // The store reports its reason on this signal and only keeps it in error() for the read/format cases,
         // so the chain records the latest one: a refused value ("The setting value is invalid.") arrives here.
@@ -1751,7 +1768,9 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         // Never close the XMB while a title it launched is still running.
         if(minutes && !desktopMode_ && !mediaOpen_ && !gameRunning() && !QApplication::activeModalWidget() && activity_.elapsed()>=qint64(minutes)*60000)emit requestQuit();
     });
+    xmb::bootprof::mark("Shell player+connects");
     activity_.start();idle_.start(1000);applyPreferences();
+    xmb::bootprof::mark("Shell applyPreferences");
     if(!preferences_.error().isEmpty())showMessage(preferences_.error(),MessageKind::Page);
     if(!profiles_.error().isEmpty())showMessage(profiles_.error(),MessageKind::Page);
     connect(video_.get(),&QVideoSink::videoFrameChanged,this,[this](const QVideoFrame& frame){emit mediaFrame(frame.toImage());});
@@ -1783,14 +1802,23 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     // The box's answer row is quiet by default; XMB_DIALOG_LOG=1 names each event (raised, moved, answered,
     // cancelled) so a scripted run can prove which choice it made without reading pixels (audit section 11).
     dialogLog_=qEnvironmentVariableIsSet("XMB_DIALOG_LOG");
+    xmb::bootprof::mark("Shell misc connects");
     initJellyfin();
+    xmb::bootprof::mark("Shell initJellyfin");
     initSpotify();
+    xmb::bootprof::mark("Shell initSpotify");
     initDlna();
+    xmb::bootprof::mark("Shell initDlna");
     initTailscale();
+    xmb::bootprof::mark("Shell initTailscale");
     initHome();
+    xmb::bootprof::mark("Shell initHome");
     initWeather();
+    xmb::bootprof::mark("Shell initWeather");
     initPhoneRemote();
+    xmb::bootprof::mark("Shell initPhoneRemote");
     initWifi();
+    xmb::bootprof::mark("Shell initWifi");
     // The copy/delete busy page's determinate form (SETTINGS-SUBFLOWS 4.3/4.6, DIALOGS-FIRMWARE 15.7):
     // the backend streams done/total and the current file while it runs. A known total flips the page from
     // the indeterminate ring to the progress bar; total <= 0 keeps the ring (the firmware's indeterminate

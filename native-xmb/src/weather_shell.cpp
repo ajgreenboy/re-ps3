@@ -5,6 +5,7 @@
 // The place comes from <data>/weather.json ({"place": "Chicago, IL"}): Open-Meteo, no key, never IP geolocation.
 #include "shell.h"
 #include "diagnostics.h"
+#include "boot_profile.h"
 #include "glyphs.h"
 #include <QLocale>
 #include <QTimer>
@@ -86,7 +87,9 @@ void Shell::refreshWeatherRows() {
 }
 
 void Shell::initWeather() {
+    xmb::bootprof::mark("weather start");
     weather_.configure(dataDirectory_);
+    xmb::bootprof::mark("weather configure");
     for(auto& column:categories_) {
         if(column.id!=QLatin1String("network"))continue;
         auto row=iconed(weatherRow(QStringLiteral("weather"),tr("Weather"),Action::WeatherApp,QString(),weatherSummary()),
@@ -94,6 +97,7 @@ void Shell::initWeather() {
         row.container=QStringLiteral("explore_category_network");
         column.entries.push_back(std::move(row));
     }
+    xmb::bootprof::mark("weather row+icon");
     connect(&weather_,&WeatherClient::weatherReady,this,[this](const WeatherReport& report){
         weatherReport_=report;weatherError_.clear();refreshWeatherRows();emit changed();
     });

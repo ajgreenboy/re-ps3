@@ -215,6 +215,9 @@ struct Snapshot {
 const Snapshot& snapshot();
 void invalidateSnapshot();           // after a write this layer or the shell performed
 void prefetchSnapshot();             // take the first reading on a worker (GUI thread, after QApplication exists)
+// ZF4: start the first reading on a worker at process start. The first snapshot() on the GUI thread then waits for that
+// reading (instead of repeating it, ~145 ms cold) and installs it exactly as a synchronous read would. Call once, early.
+void startEarlySnapshot();
 // The running app's data directory, so the backup row and the report can name (and size) the one piece of
 // state this build really keeps. Never written; the caller passes its own.
 void setDataDirectory(const QString& path);

@@ -46,6 +46,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <Xinput.h>
+#include "boot_profile.h"
 #endif
 
 namespace xmb {
@@ -133,6 +134,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         auto surface=format();surface.setAlphaBufferSize(8);setFormat(surface);
     }
     idleprofile::startSampler();
+    xmb::bootprof::mark("View start");
     setFocusPolicy(Qt::StrongFocus);setMinimumSize(800,450);
     setMouseTracking(true);qApp->installEventFilter(this);
     // Decode and cache frequently used original assets before animation starts.
@@ -140,17 +142,21 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         assets_.image(category.container,category.texture);
         for(const auto& entry:category.entries)assets_.image(entry.container,entry.texture);
     }
+    xmb::bootprof::mark("View predecode category images");
     artworkCredit_ = new QLabel("<a style='color:white' href='https://rawg.io/'>Artwork from RAWG</a>", this);
     artworkCredit_->setOpenExternalLinks(true);
     artworkCredit_->setFocusPolicy(Qt::NoFocus);
     artworkCredit_->setStyleSheet("background-color:rgba(0,0,0,110); padding:3px 6px;");
     artworkCredit_->adjustSize();
+    xmb::bootprof::mark("View QLabel");
     syncColumns();
     // The keyboard layout is resolved once, from the firmware, where the assets are already open: one RCO
     // through the P1.1 reader and one decrypted module (audit/OSK-FIRMWARE.md 12). A failed or absent firmware
     // read falls back to the committed table and logs which source it used, so the keyboard always has a
     // layout and the provenance is never guessed.
+    xmb::bootprof::mark("View label+syncColumns");
     oskLayout_=loadOskLayout(assets_,oskObjects_);
+    xmb::bootprof::mark("View loadOskLayout");
     monthImage_=assets_.image("qgl/lines",QString("textures/month_bg/rgb/%1.dds").arg(QDateTime::currentDateTime().date().month(),2,10,QChar('0')));
     connect(&shell_,&Shell::changed,this,[this]{syncInGameWindow();++uiRevision_;syncColumns();loadWallpaper();setColumnSink(shell_.columnSink());update();});
     connect(&shell_,&Shell::mediaFrame,this,[this](const QImage& frame){
@@ -212,7 +218,9 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         osk_.preserveWhitespace=true;osk_.allowEmpty=true;
         osk_.maxLength=field=="server"?2048:field=="username"?256:4096;
     });
+    xmb::bootprof::mark("View month image+connects");
     loadWallpaper();
+    xmb::bootprof::mark("View loadWallpaper");
     clock_.start();timer_.setTimerType(Qt::PreciseTimer);timer_.setInterval(16);
     // The PC's master volume at start-up: logged once (an isolated data directory does not isolate the
     // Windows audio endpoint, so a scripted run has to put this back) and kept for VOLRESTORE.
@@ -238,7 +246,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
         // An opacity-zero Qt owner may stop producing frameSwapped callbacks. The live
         // surface needs its own bounded cadence for animations/input even then.
         if(liveOverlay_ && !renderPaused())update();
-    });timer_.start();pad::start();
+    });timer_.start();xmb::bootprof::mark("View volume+keys");pad::start();xmb::bootprof::mark("View pad::start");
     // The PS button is watched globally: its own 20 ms HID poll keeps working while a game owns the
     // foreground, unlike pollController which is limited to the active XMB window.
     connect(&psWatcher_,&PsWatcher::pressed,this,&View::psPressed);
@@ -247,6 +255,7 @@ View::View(Shell& shell,Assets& assets,QWidget* parent):QOpenGLWidget(parent),sh
     connect(&psWatcher_,&PsWatcher::released,this,&View::psReleasedEvent);
     connect(&psWatcher_,&PsWatcher::cancelled,this,[this]{psPressActionable_=false;});
     psWatcher_.start();
+    xmb::bootprof::mark("View psWatcher");
     // Phone Remote (D11): the paired LAN remote drives the same key path a scripted or keyboard press takes, so
     // its input behaves identically. The PS button goes through the tap handler.
     connect(&shell_.phoneRemote(),&PhoneRemote::keyRequested,this,&View::replayKeyTap);
@@ -471,9 +480,12 @@ View::~View(){
 #endif
     saveFrameTrace();if(context()){makeCurrent();liveOverlayResolved_.reset();gallery_.reset();textRenderer_.release(*this);monthTexture_.reset();inGameTexture_.reset();inGameProgram_.removeAllShaders();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
+    xmb::bootprof::mark("before initializeGL");
     uniformcache::invalidate();
     if(!initializeOpenGLFunctions()){qCritical()<<"Native renderer requires OpenGL 3.3";return;}
+    xmb::bootprof::mark("GL context");
     textRenderer_.init(*this,QDir(assets_.root()).filePath("data/font"));
+    xmb::bootprof::mark("GL textRenderer init");
     static const char* vertex=R"(#version 330 core
 out vec2 uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);}
@@ -524,11 +536,16 @@ void main(){
 })";
     glReady_=background_.addShaderFromSourceCode(QOpenGLShader::Vertex,vertex)&&background_.addShaderFromSourceCode(QOpenGLShader::Fragment,fragment)&&background_.link();
     if(!glReady_)qCritical().noquote()<<background_.log();
+    xmb::bootprof::mark("GL background shader");
     glGenVertexArrays(1,&vao_);
     initOriginalBackground();
+    xmb::bootprof::mark("GL initOriginalBackground");
     ribbon_.init(*this,assets_);
+    xmb::bootprof::mark("GL ribbon init");
     hdr_.init(*this,assets_);
+    xmb::bootprof::mark("GL hdr init");
     icons_.init(*this,assets_);
+    xmb::bootprof::mark("GL icons init");
     static const char* compositeVertex=R"(#version 330 core
 out vec2 uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0.0,1.0);})";
@@ -544,7 +561,9 @@ void main(){colour=vec4(texture(frame,(uv-.5)*uvScale+.5).rgb*brightness,1.);})"
     if(!inGameProgram_.addShaderFromSourceCode(QOpenGLShader::Vertex,compositeVertex) ||
        !inGameProgram_.addShaderFromSourceCode(QOpenGLShader::Fragment,inGameFragment) || !inGameProgram_.link())
         qCritical().noquote()<<"In-game backdrop shader failed:"<<inGameProgram_.log();
+    xmb::bootprof::mark("GL composite shaders");
     particles_.init(*this,assets_);
+    xmb::bootprof::mark("GL particles init");
     if(introEnabled_)coldboot_.init(*this,assets_);
     if(!monthImage_.isNull()) {
 #if QT_VERSION >= QT_VERSION_CHECK(6,9,0)
@@ -557,6 +576,7 @@ void main(){colour=vec4(texture(frame,(uv-.5)*uvScale+.5).rgb*brightness,1.);})"
     }
     const QString renderer=QString::fromLatin1(reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
     qInfo()<<"native renderer:"<<renderer;shell_.setRenderer(renderer);
+    xmb::bootprof::mark("GL month texture+end");
 }
 // Background brightness by clock time, 0 = night, 1 = day. Keyframes are the top-band brightness of
 // the reference day-cycle video relative to 10:30-16:30 (audit/VIDEO-REFERENCES.md); linear between them.
@@ -919,6 +939,7 @@ bool View::measureReference(const QString& path) {
 }
 void View::paintGL() {
     ProfScope profPaint("paintGL total");
+    {static bool firstPaint=true;if(firstPaint){firstPaint=false;xmb::bootprof::mark("first paintGL entry");}}
     if(g_profOn) {
         static QElapsedTimer window;
         if(!window.isValid())window.start();
@@ -1054,6 +1075,7 @@ void View::paintGL() {
         if(columns_.size()>shell_.depth()+1)columns_.resize(shell_.depth()+1);
     }
     if(std::abs(barDepthPosition_-shell_.depth())<.001)barDepthPosition_=shell_.depth();
+    xmb::bootprof::markEarly("paint: state update");
     glClearColor(.04f,.04f,.05f,1.f);glClear(GL_COLOR_BUFFER_BIT);
     // Photo Gallery (audit/PHOTO-GALLERY.md): while its area is up it replaces the XMB scene; the photo viewer over it uses
     // the normal path below.
@@ -1193,8 +1215,10 @@ void View::paintGL() {
         glBindTexture(GL_TEXTURE_2D,0);
         rebuild=true;
     }
+    xmb::bootprof::markEarly("paint: ui FBOs");
     if(rebuild) {
         ProfScope profUi("ui rebuild");
+        xmb::bootprof::markEarly("paint: background+ribbon (before ui rebuild)");
         uiSignature_=signature;
         uiMsaa_->bind();glViewport(0,0,pixels.width(),pixels.height());glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
         // Glyphs are rasterised for the layer's own scale (twice the window): at the window's scale they were
@@ -1205,7 +1229,9 @@ void View::paintGL() {
             QPainter ui(&paintDevice);
             ui.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing|QPainter::SmoothPixmapTransform);
             ui.setTransform(DesignSpace(pixels).transform());
+            xmb::bootprof::markEarly("paint: ui painter setup");
             const qint64 sceneStart=clock_.nsecsElapsed();drawScene(ui);sceneNs_=clock_.nsecsElapsed()-sceneStart;
+            xmb::bootprof::markEarly("paint: drawScene");
             particles_.trackWidgets(windSites_,renderSeconds);
         }
         QOpenGLFramebufferObject::blitFramebuffer(uiResolved_.get(),uiMsaa_.get());
@@ -1216,9 +1242,11 @@ void View::paintGL() {
     // BRIGHTNESS colour as the widgets (FUN_0038fcb4 -> FUN_00396328/00396528), so the icon pass is scaled too.
     const bool screensaver=shell_.screensaverMinutes()>0 && shell_.idleDisplayAllowed()
         && shell_.idleMilliseconds()>qint64(shell_.screensaverMinutes())*60000;
+    xmb::bootprof::markEarly("paint: ui rebuild+upload");
     icons_.setColourScale(screensaver?.2f:1.f);
     {ProfScope prof("icons");if(glReady_ && icons_.ready())icons_.render(*this,iconQueue_,renderSeconds,presetBlend_,device.width(),device.height(),defaultFramebufferObject(),bool(liveOverlay_));}
     iconNs_=clock_.nsecsElapsed()-iconStart;
+    xmb::bootprof::markEarly("paint: icons");
     // Composite (premultiplied alpha) over the background in the widget's framebuffer.
     glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());glViewport(0,0,device.width(),device.height());
     glDisable(GL_DEPTH_TEST);glDisable(GL_STENCIL_TEST);glDisable(GL_SCISSOR_TEST);
@@ -1237,6 +1265,7 @@ void View::paintGL() {
     uiComposite_.setUniformValue("rgbScale",1.f);
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D,0);uiComposite_.release();glDisable(GL_BLEND);
+    xmb::bootprof::markEarly("paint: composite");
     double overlayBridgeMs=0.;
     if(liveOverlay_) {
         const qint64 bridgeStart=clock_.nsecsElapsed();

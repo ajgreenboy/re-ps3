@@ -6,6 +6,7 @@
 #include <future>
 #include <memory>
 #include <vector>
+#include <QString>
 #include <QVector3D>
 #include <QVector4D>
 #include <QOpenGLFunctions_3_3_Core>
@@ -30,6 +31,10 @@ public:
     // no GL context, so it runs while the first native window is created instead of inside initializeGL. init()
     // uses the result only when LINE1.mnu's day preset is bit-identical to the compiled fallback.
     Ribbon();
+    // ZF4: start that warm-up at process start (before any View exists) so it finishes while the shell is built. cacheDir is
+    // <data>/cache: the settled state is a pure function of the compiled day preset, so it is stored there and read back on later
+    // starts (keyed on the preset, the step count and this executable). Ribbon() adopts it; call at most once, before View.
+    static void startEarlySettle(const QString& cacheDir);
     // Requires a current GL context. Returns false (and logs why) when the firmware programs are unavailable.
     bool init(QOpenGLFunctions_3_3_Core& gl,Assets& assets);
     bool ready() const { return ready_; }
@@ -75,11 +80,13 @@ private:
         void spring(int i,int j,float rest,float k);
     };
     // One flat-grid warm-up: the settled cloth and the wall time the steps took.
-    struct Settle { Cloth cloth; qint64 micros=0; };
+    struct Settle { Cloth cloth; qint64 micros=0; bool fromCache=false; };
     // Fitted fallback start: columns LENGTH apart, rows round the tables' y/z loop (not FUN_0004ec90).
     static QVector4D flatPoint(int i,float length);
     // Fitted day-preset warm-up from the fallback start; bound documented in ribbon.cpp.
     static Settle settledFlat(const Preset& p);
+    static Settle settledFlatCached(const Preset& p,const QString& cacheDir);
+    static std::future<Settle>& earlySettle();
     // True when two presets give the cloth identical inputs (the fields step() and flatPoint() read). Exact float
     // comparison is deliberate: a prefetched state is reused only when it is bit-identical to the synchronous one.
     static bool sameClothPreset(const Preset& a,const Preset& b);

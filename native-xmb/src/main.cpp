@@ -19,6 +19,8 @@
 #include "firmware_fetcher.h"
 #include "firmware_extract.h"
 #include <QApplication>
+#include "boot_profile.h"
+#include "boot_prefetch.h"
 #include <QCommandLineParser>
 #include <QDir>
 #include <QMainWindow>
@@ -393,6 +395,7 @@ int main(int argc,char** argv) {
     QSurfaceFormat format;format.setVersion(3,3);format.setProfile(QSurfaceFormat::CoreProfile);format.setSwapInterval(1);format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);app.setApplicationName("re-ps3-native");app.setApplicationVersion("0.2.0");QImageReader::setAllocationLimit(128);
     qInfo().noquote()<<QString("boot: QApplication ready after %1 ms").arg(processAgeMs(),0,'f',0);
+    xmb::bootprof::mark("start");
     // D9: --display-mode-test <w>x<h>@<hz> <seconds> [--data-dir <dir>]. Applies one mode the monitor lists, holds it for a few
     // seconds and restores it, even when something fails (display_mode.h). Handled before the option parser: it takes the
     // seconds as a second value and must never reach a window.
@@ -488,7 +491,7 @@ int main(int argc,char** argv) {
     parser.addOption({"first-run","Run the first-run setup sequence now, even when setup.json says it was completed"});
     parser.addOption({"after-pid","Wait for this process id to exit before starting (used by the XMB's own restart after setup)","pid"});
     parser.addOption({"quit","Ask the running XMB to exit with code 0 (the kiosk watchdog then stops) and exit; does nothing when none runs"});
-    parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);
+    parser.addOption({"raf-render","Render a RAF scene still to PNG (file@image.png) and exit","spec"});parser.process(app);xmb::bootprof::mark("parse-args");
     if(parser.isSet("firmware-check")) {
         QString error; const auto release=xmb::latestFirmware(QStringLiteral("us"),&error);
         if(!error.isEmpty()){std::fprintf(stderr,"Firmware check: %s\n",error.toUtf8().constData());return 2;}
@@ -1005,7 +1008,11 @@ int main(int argc,char** argv) {
         qInfo()<<"catalog inventory:"<<inventory.value("documentCount").toInt()<<"documents,"<<inventory.value("viewCount").toInt()<<"views,"<<inventory.value("itemCount").toInt()<<"items,"<<inventory.value("errorCount").toInt()<<"errors";
         return inventory.value("errorCount").toInt()?1:0;
     }
+    xmb::bootprof::mark("prelude-to-assets");
+    // ZF4: a real window follows (interactive start or a script): start the independent work on workers now (boot_prefetch.h).
+    if(interactiveLaunch || parser.isSet("script"))xmb::boot::startPrefetch(data);
     xmb::Assets assets(devFlashPath);
+    xmb::bootprof::mark("Assets ctor");
     if(parser.isSet("motion-report")) {
         QJsonArray cases;
         for(const auto& spec:{std::pair{5,200},std::pair{4,300}}) {
@@ -1336,12 +1343,15 @@ int main(int argc,char** argv) {
             .arg(scriptedRun?1:0)
             .arg(parser.isSet("script")?QStringLiteral("--script")
                 :scriptOnlyEnv?QStringLiteral("XMB_INPUT_SCRIPT_ONLY"):QStringLiteral("none"));
+    xmb::bootprof::mark("options-to-shell");
     xmb::Shell shell(data,assets);
+    xmb::bootprof::mark("Shell ctor");
     shell.setSetupContext(devFlashPath,parser.isSet("display")?parser.value("display").toInt():-1);
     // Game boot and the Auto-Off guide (coldboot.h GameBoot): the sequence reads its textures from the assets, and the
     // guide is fed the shell's idle time and the Auto-Off setting four times a second. The setting is read from the
     // preferences file (a shared key, so a bare "power/idleMinutes"); Shell has no accessor for it.
     xmb::GameBoot::attach(assets);
+    xmb::bootprof::mark("GameBoot attach");
     auto* guideFeed=new QTimer(&app);
     QObject::connect(guideFeed,&QTimer::timeout,&app,[&shell,data]{
         if(shell.desktopMode())return;   // hidden for Desktop Mode: the Auto-Off guide has nothing to draw or count
@@ -1382,7 +1392,9 @@ int main(int argc,char** argv) {
     if(kiosk && !kioskScreen)kioskScreen=QGuiApplication::primaryScreen();
     if(kiosk && !kioskScreen){qCritical()<<"kiosk: no screen is available";return 2;}
     QSettings windowSettings(QDir(data).filePath("settings.ini"),QSettings::IniFormat);
+    xmb::boot::joinOpenGlWarmup();   // never two WGL contexts being created at once (boot_prefetch.h)
     QMainWindow window;window.setWindowTitle("re-ps3 — Native XMB");auto* view=new xmb::View(shell,assets,&window);view->setGalleryRoots(parser.values("gallery-root"));window.setCentralWidget(view);window.resize(960,540);
+    xmb::bootprof::mark("View ctor");
     auto* phoneRemote=new xmb::PhoneRemote(&app);
     QObject::connect(phoneRemote,&xmb::PhoneRemote::keyRequested,view,[view](int key){view->replayKeyTap(key);},Qt::QueuedConnection);
     QObject::connect(phoneRemote,&xmb::PhoneRemote::psRequested,view,[view]{view->replayPsTap();},Qt::QueuedConnection);
@@ -1459,6 +1471,7 @@ int main(int argc,char** argv) {
     xmb::host::observeDisplayState();
     if(!startWindowed && !kiosk)
         QObject::connect(&shell,&xmb::Shell::changed,&window,[&]{if(shell.fullscreen()!=window.isFullScreen()){if(shell.fullscreen())window.showFullScreen();else window.showNormal();}});
+    xmb::bootprof::mark("main pre-show");
     if(kiosk) {
         // Frameless fullscreen on the chosen screen: showFullScreen() uses the screen the window is on, so the
         // screen is set first, and the frame flag removes the title bar even if a window manager would add one.
@@ -1474,8 +1487,11 @@ int main(int argc,char** argv) {
     else if(shell.fullscreen())window.showFullScreen();else window.show();
     if(window.screen())qInfo()<<"native display refresh:"<<window.screen()->refreshRate()<<"Hz";
     // D4: process start to the first presented frame (frameSwapped = the first buffer swap after the window is up).
+    xmb::bootprof::mark("window show");
+    QTimer::singleShot(5000,&app,[]{xmb::boot::runDeferred();});   // no buffer swap by then (hidden window, paused render): run the deferred jobs anyway
     qInfo().noquote()<<QString("boot: window shown after %1 ms").arg(processAgeMs(),0,'f',0);
     QObject::connect(view,&QOpenGLWidget::frameSwapped,&app,[]{
+        xmb::bootprof::mark("show-to-first-frame");xmb::bootprof::firstFrameDone()=true;QTimer::singleShot(0,[]{xmb::boot::runDeferred();});
         qInfo().noquote()<<QString("boot: first frame after %1 ms").arg(processAgeMs(),0,'f',0);
     },Qt::SingleShotConnection);
     // ---- Display modes (PHASES-HTPC D9, audit/DISPLAY-MODES.md) ----

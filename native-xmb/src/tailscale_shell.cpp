@@ -9,6 +9,9 @@
 // exit node changes this PC's network, so those happen only on the user's explicit choice on these pages.
 #include "shell.h"
 #include "diagnostics.h"
+#include "boot_profile.h"
+#include "boot_prefetch.h"
+#include <QPointer>
 #include "assets.h"
 #include "glyphs.h"
 #include "service_icons.h"
@@ -113,6 +116,7 @@ void Shell::refreshTailscalePages() {
 }
 
 void Shell::initTailscale() {
+    xmb::bootprof::mark("tailscale start");
     // The Network column's row, after Download Management.
     for(auto& column:categories_) {
         if(column.id!=QLatin1String("network"))continue;
@@ -121,6 +125,7 @@ void Shell::initTailscale() {
         row.container=QStringLiteral("explore_category_network");
         column.entries.push_back(std::move(row));
     }
+    xmb::bootprof::mark("tailscale row+icon");
     tailscaleTimer_=new QTimer(this);tailscaleTimer_->setInterval(10000);
     connect(tailscaleTimer_,&QTimer::timeout,this,[this]{
         const bool open=std::any_of(pages_.begin(),pages_.end(),[](const Page& p){return !p.tailscale.isEmpty();});
@@ -157,7 +162,12 @@ void Shell::initTailscale() {
         tailscale_.refresh();
         emit changed();
     });
-    if(tailscale_.installed() && !diagnostics::safeMode())tailscale_.refresh();   // D6: no network in safe mode
+    xmb::bootprof::mark("tailscale connects");
+    // D6: no network in safe mode. ZF4: the status read starts a tailscale process (~40 ms of the GUI thread); nothing of it is drawn
+    // by the first frame, so it starts right after it (the answer was always asynchronous).
+    if(!diagnostics::safeMode())
+        xmb::boot::afterFirstFrame([self=QPointer<Shell>(this)]{if(self && self->tailscale_.installed())self->tailscale_.refresh();});
+    xmb::bootprof::mark("tailscale installed+refresh");
 }
 
 bool Shell::activateTailscale(const Entry& entry) {

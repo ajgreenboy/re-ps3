@@ -145,6 +145,10 @@ The app logs `boot: first frame after N ms` (process creation to the first buffe
 `XMB_LOG=<file>` to capture it. In `--kiosk` the mouse cursor hides after 3 s without movement and returns on
 the next movement.
 
+`XMB_BOOT_PROFILE=1` adds `boot-profile: <span> N ms` lines for each start-up stage, and `XMB_BOOT_PREFETCH=0` turns the worker
+prefetch off for an A/B; the ribbon's settled state is cached in `<data>/cache/ribbon-settle.bin`
+(see [audit/BOOT-TIME.md](../audit/BOOT-TIME.md)).
+
 ## Dry-run and safety
 
 - The app's own dry-run switch `XMB_POWER_DRY_RUN=1` logs power actions instead of acting; the watchdog

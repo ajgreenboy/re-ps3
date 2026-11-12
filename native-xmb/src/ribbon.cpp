@@ -8,7 +8,13 @@
 #include <cmath>
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <type_traits>
 #include <QImage>
 #include <QMatrix4x4>
 #include <QtEndian>
@@ -182,8 +188,62 @@ bool Ribbon::sameClothPreset(const Preset& a,const Preset& b) {
 // Start the warm-up with the view, overlapping the first native window's creation. The thread touches only
 // its own copy; the preset-1 table path (a --vsh-modules run) never consumes it, and the future's destructor joins
 // the thread at shutdown. XMB_RIBBON_SETTLE_SYNC=1 keeps the pre-change synchronous path for the A/B.
+std::future<Ribbon::Settle>& Ribbon::earlySettle() { static std::future<Settle> future;return future; }
+
+// ZF4: the settled cloth of the compiled day preset, read back from <data>/cache when an earlier start stored it. The file holds
+// the Cloth bytes exactly as settledFlat produced them, so a hit is bit-identical to computing. The key covers every input of the
+// computation (the preset fields step() and flatPoint() read, the step count, the grid) and this executable's size and time, so
+// any rebuild recomputes once; a short, foreign or damaged file (checked by size and a checksum) is ignored and rewritten.
+Ribbon::Settle Ribbon::settledFlatCached(const Preset& p,const QString& cacheDir) {
+    static_assert(std::is_trivially_copyable_v<Cloth>,"the cache stores the cloth as raw bytes");
+    struct Header { char magic[8];quint32 version;quint32 pad;quint64 key;quint64 size;quint64 checksum; };
+    const auto fnv=[](const void* data,size_t size,quint64 hash=1469598103934665603ull){
+        const auto* bytes=static_cast<const unsigned char*>(data);
+        for(size_t i=0;i<size;++i){hash^=bytes[i];hash*=1099511628211ull;}
+        return hash;
+    };
+    const QFileInfo exe(QCoreApplication::applicationFilePath());
+    const float fields[]={p.damping,p.length,p.tension,p.timestep,p.perturbation,p.endY,p.endZ};
+    quint64 key=fnv(fields,sizeof(fields));
+    const qint64 identity[]={qint64(fallbackWarmupSteps),qint64(points_),exe.size(),exe.lastModified().toMSecsSinceEpoch()};
+    key=fnv(identity,sizeof(identity),key);
+    const QString path=cacheDir.isEmpty()?QString{}:QDir(cacheDir).filePath(QStringLiteral("ribbon-settle.bin"));
+    QElapsedTimer timer;timer.start();
+    if(!path.isEmpty()) {
+        QFile file(path);
+        Header header{};
+        Settle out;
+        if(file.open(QIODevice::ReadOnly) && file.read(reinterpret_cast<char*>(&header),sizeof(header))==qint64(sizeof(header))
+           && std::memcmp(header.magic,"XMBRSET1",8)==0 && header.version==1 && header.key==key && header.size==sizeof(Cloth)
+           && file.read(reinterpret_cast<char*>(&out.cloth),sizeof(Cloth))==qint64(sizeof(Cloth)) && file.atEnd()
+           && fnv(&out.cloth,sizeof(Cloth))==header.checksum) {
+            out.micros=timer.nsecsElapsed()/1000;out.fromCache=true;
+            return out;
+        }
+    }
+    Settle out=settledFlat(p);
+    if(!path.isEmpty() && QDir().mkpath(cacheDir)) {
+        Header header{};
+        std::memcpy(header.magic,"XMBRSET1",8);header.version=1;header.key=key;header.size=sizeof(Cloth);header.checksum=fnv(&out.cloth,sizeof(Cloth));
+        QSaveFile file(path);
+        if(file.open(QIODevice::WriteOnly)) {
+            file.write(reinterpret_cast<const char*>(&header),sizeof(header));
+            file.write(reinterpret_cast<const char*>(&out.cloth),sizeof(Cloth));
+            file.commit();
+        }
+    }
+    return out;
+}
+
+void Ribbon::startEarlySettle(const QString& cacheDir) {
+    if(qEnvironmentVariableIsSet("XMB_RIBBON_SETTLE_SYNC") || earlySettle().valid())return;
+    try { earlySettle()=std::async(std::launch::async,[cacheDir]{return settledFlatCached(Preset{},cacheDir);}); }
+    catch(const std::exception& e) { qWarning().noquote()<<"ribbon: early cloth warm-up thread unavailable:"<<e.what(); }
+}
+
 Ribbon::Ribbon() {
     if(qEnvironmentVariableIsSet("XMB_RIBBON_SETTLE_SYNC"))return;
+    if(earlySettle().valid()){settleFuture_=std::move(earlySettle());return;}   // started at process start by startEarlySettle
     try { settleFuture_=std::async(std::launch::async,[]{return settledFlat(Preset{});}); }
     catch(const std::exception& e) { qWarning().noquote()<<"ribbon: cloth warm-up thread unavailable:"<<e.what(); }
 }
@@ -313,7 +373,8 @@ void main(){
             const double joinMs=join.nsecsElapsed()/1e6;
             cloth_=prefetched.cloth;
             qInfo().noquote()<<"ribbon: cloth warm-up"<<QString::number(prefetched.micros/1000.,'f',1)
-                <<"ms on a prefetch thread started by the constructor (joined in initializeGL after"<<QString::number(joinMs,'f',1)
+                <<(prefetched.fromCache?"ms read from the settle cache on a prefetch thread":"ms on a prefetch thread started by the constructor")
+                <<"(joined in initializeGL after"<<QString::number(joinMs,'f',1)
                 <<"ms); LINE1 day preset matches the compiled fallback, state reused";
         } else {
             if(settleFuture_.valid())settleFuture_.wait();
