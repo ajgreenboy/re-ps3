@@ -1,6 +1,6 @@
 # XMB-Rewritten — a native PS3 XMB recreation for Windows
 
-![The native XMB, Video column](native-xmb/screenshots/08-original-qgl-video-final-spacing.jpg)
+![The native XMB, Game column](native-xmb/screenshots/10-game-column.png)
 
 A native C++20 / OpenGL recreation of the PlayStation 3 **4.93 XMB**, built from the firmware's own
 assets and matched against console captures, intended as a living-room HTPC front end. It is **not** a
