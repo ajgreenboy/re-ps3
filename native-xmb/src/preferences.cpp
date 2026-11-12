@@ -134,6 +134,7 @@ bool Preferences::validBare(const QString& key,const QVariant& value) {
     const auto text=value.toString();
     if(text.contains(QChar(0)))return false;
     if(key==QStringLiteral("debrid/realDebridToken"))return text.size()<=4096 && !text.contains(QLatin1Char('\n')) && !text.contains(QLatin1Char('\r'));
+    if(key==QStringLiteral("debrid/flareSolverrUrl"))return text.size()<=256 && !text.contains(QLatin1Char('\n')) && !text.contains(QLatin1Char('\r')) && !text.contains(QLatin1Char(' '));
     // A global hotkey: one or more of Ctrl/Alt/Shift/Win, then Home/End/Insert/Delete/PageUp/PageDown, F1-F24, a letter or a
     // digit (the same grammar desktop_mode.cpp parses). At least one modifier, so a bare key can never be taken.
     if(key=="desktop/hotkey")return QRegularExpression(QStringLiteral("^((Ctrl|Alt|Shift|Win)\\+)+(Home|End|Insert|Delete|PageUp|PageDown|F([1-9]|1[0-9]|2[0-4])|[A-Z0-9])$")).match(text).hasMatch();

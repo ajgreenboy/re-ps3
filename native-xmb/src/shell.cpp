@@ -2261,6 +2261,7 @@ void Shell::activate() {
     case Action::ReleaseDownload:activateRelease(entry);break;
     case Action::DownloadManager:openDownloadManager();break;
     case Action::DebridToken:editDebridToken();break;
+    case Action::FlareSolverrUrl:editFlareSolverrUrl();break;
     case Action::PlaylistFolder:openPlaylists(categories_[category_].id);break;
     case Action::CreatePlaylist:
         if(playlists_.list(entry.value).size()>=PlaylistStore::MaximumPlaylists)showPlaylistResult(PlaylistStore::Result::TooManyPlaylists);
@@ -5947,6 +5948,7 @@ void Shell::refreshJellyfinSignInPage() {
 }
 void Shell::setJellyfinSignInField(const QString& field,const QString& value) {
     if(field==QStringLiteral("debrid:token")){saveDebridToken(value);return;}
+    if(field==QStringLiteral("flaresolverr:url")){saveFlareSolverrUrl(value);return;}
     if(field==QStringLiteral("release:url")) {
         QString raw=value.trimmed();
         if(!raw.isEmpty()) {

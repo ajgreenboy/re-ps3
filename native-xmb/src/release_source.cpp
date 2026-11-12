@@ -1,5 +1,7 @@
 #include "release_source.h"
 #include "real_debrid.h"
+#include "flare_solverr.h"
+#include "preferences.h"
 #include <QBuffer>
 #include <QCryptographicHash>
 #include <QDir>
@@ -20,6 +22,10 @@
 namespace xmb {
 namespace {
 void fail(QString* error,const QString& message) { if(error)*error=message; }
+bool looksLikeHtml(const QByteArray& bytes) {
+    const QString head=QString::fromLatin1(bytes.left(512)).trimmed().toLower();
+    return head.startsWith(QStringLiteral("<!doctype html")) || head.startsWith(QStringLiteral("<html"));
+}
 QString safeName(QString text) {
     text.replace(QRegularExpression(QStringLiteral("[<>:\"/\\\\|?*\\x00-\\x1f]")),QStringLiteral("_"));
     text=text.trimmed().left(100);
@@ -87,7 +93,23 @@ ReleaseSources::ReleaseSources(const QString& dataDirectory,const Preferences& p
 bool ReleaseSources::importSource(const QUrl& jsonUrl,QString* error) {
     if(error)error->clear();
     QByteArray bytes; QBuffer buffer(&bytes);buffer.open(QIODevice::WriteOnly);
-    if(!fetch(jsonUrl,&buffer,64LL*1024*1024,30000,error,{},true))return false;
+    QString directError;
+    const bool fetched=fetch(jsonUrl,&buffer,64LL*1024*1024,30000,&directError,{},true);
+    // Cloudflare/bot protection shows as either a failed fetch (403) or an HTML challenge body.
+    // When a FlareSolverr endpoint is configured, retry through it.
+    const QString solver=preferences_.value(QStringLiteral("debrid/flareSolverrUrl")).toString().trimmed();
+    if(!solver.isEmpty() && (!fetched || looksLikeHtml(bytes))) {
+        QString solverError;
+        if(FlareSolverr(solver).request(jsonUrl,&bytes,&solverError)) {
+            // challenge solved; fall through to the JSON parse
+        } else {
+            fail(error,fetched?QStringLiteral("Source returned an HTML challenge (FlareSolverr: %1)").arg(solverError)
+                               :QStringLiteral("%1 (FlareSolverr: %2)").arg(directError,solverError));
+            return false;
+        }
+    } else if(!fetched) {
+        fail(error,directError);return false;
+    }
     // Match Bun's replacement decoding of malformed UTF-8 before JSON parsing.
     QJsonParseError parse;
     const auto document=QJsonDocument::fromJson(QString::fromUtf8(bytes).toUtf8(),&parse);

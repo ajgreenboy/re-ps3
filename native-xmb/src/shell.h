@@ -126,7 +126,7 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // Entry::value is the command ("next", "fw:use|<path>", ...); the page it sits on is told apart by its first row id "setup:<step>...".
     Setup,
     // Game > Saved Data / Memory Card Utility: presentation only, no console save-data backend.
-    SaveData, ImportSource, ReleaseFolder, ReleaseDownload, DownloadManager, DebridToken };
+    SaveData, ImportSource, ReleaseFolder, ReleaseDownload, DownloadManager, DebridToken, FlareSolverrUrl };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -682,6 +682,8 @@ private:
     void openDownloadManager();
     void editDebridToken();
     void saveDebridToken(const QString& token);
+    void editFlareSolverrUrl();
+    void saveFlareSolverrUrl(const QString& url);
     Assets& assets_;
     std::unique_ptr<class NotifyOverlay> notifyOverlay_;
     Preferences preferences_;

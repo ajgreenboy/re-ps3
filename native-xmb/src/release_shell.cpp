@@ -217,7 +217,13 @@ void Shell::openDownloadManager() {
     Entry entry=releaseRow(QStringLiteral("debrid:token"),tr("Real-Debrid API Key"),Action::DebridToken);
     entry.fieldValue=preferences_.value(QStringLiteral("debrid/realDebridToken")).toString().isEmpty()?tr("Not set"):QStringLiteral("********");
     entry.detail=tr("Enter a replacement API key, or clear the field to remove it. Stored for this profile; never shown in plain text.");
-    page.entries.append(entry);pages_.push_back(std::move(page));emit changed();
+    page.entries.append(entry);
+    Entry solver=releaseRow(QStringLiteral("flaresolverr:url"),tr("FlareSolverr Address"),Action::FlareSolverrUrl);
+    solver.fieldValue=preferences_.value(QStringLiteral("debrid/flareSolverrUrl")).toString();
+    if(solver.fieldValue.isEmpty())solver.fieldValue=tr("Not set");
+    solver.detail=tr("Base URL of a local FlareSolverr instance, e.g. http://localhost:8191. Used to fetch sources behind Cloudflare bot protection.");
+    page.entries.append(solver);
+    pages_.push_back(std::move(page));emit changed();
 }
 void Shell::editDebridToken() {
     // An empty, masked editor never exposes the existing token to the view or its capture diagnostics.
@@ -227,6 +233,16 @@ void Shell::saveDebridToken(const QString& token) {
     if(!preferences_.setValue(QStringLiteral("debrid/realDebridToken"),token.trimmed()))return;
     for(auto& page:pages_)for(auto& row:page.entries)if(row.id==QStringLiteral("debrid:token"))
         row.fieldValue=token.trimmed().isEmpty()?tr("Not set"):QStringLiteral("********");
+    setupRefresh();emit changed();
+}
+void Shell::editFlareSolverrUrl() {
+    emit requestJellyfinFieldEdit(QStringLiteral("flaresolverr:url"),tr("FlareSolverr Address"),
+                                  preferences_.value(QStringLiteral("debrid/flareSolverrUrl")).toString(),false);
+}
+void Shell::saveFlareSolverrUrl(const QString& url) {
+    if(!preferences_.setValue(QStringLiteral("debrid/flareSolverrUrl"),url.trimmed()))return;
+    const QString shown=url.trimmed().isEmpty()?tr("Not set"):url.trimmed();
+    for(auto& page:pages_)for(auto& row:page.entries)if(row.id==QStringLiteral("flaresolverr:url"))row.fieldValue=shown;
     setupRefresh();emit changed();
 }
 } // namespace xmb
