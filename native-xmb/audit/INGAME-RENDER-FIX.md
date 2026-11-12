@@ -93,3 +93,11 @@ Gallery and coldboot non-16:9 behavior was aligned by code inspection, not exhau
 
 Build command: the requested `native-xmb/build.ps1 -OutputDirectory C:/dev/xmb/out/native-xmb`.
 Result: `Built C:\dev\xmb\out\native-xmb\re-ps3-native.exe`.
+
+## Update, 2026-11-12 (render-parity sweep 2): contain-fit instead of crop-fill
+
+`DesignSpace` now takes the minimum of `width/1920` and `height/1080`. The crop-fill above cut the clock, the lower
+item rows, the music player's bar and hints and the video control panel off a 2560x1080 window, and both sides off a
+900x1000 window (grabs under `out/par2` of that sweep). With contain-fit the whole 1920x1080 design area is always on
+screen and undistorted; a window that is not 16:9 shows black bars. At 16:9 the transform is unchanged, so every
+pinned state is unaffected. The captured game image is letterboxed the same way.
