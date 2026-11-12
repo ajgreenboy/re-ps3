@@ -1154,6 +1154,7 @@ private:
     void removeContinueEntry(const QString& id,const QString& title);
     int rememberedResumeCount() const;
     void advanceMedia(bool failed,const QString& error={});
+    void abandonFailedMedia();
     int category_=6;
     std::unique_ptr<QMediaPlayer> player_;
     std::unique_ptr<QAudioOutput> audio_;

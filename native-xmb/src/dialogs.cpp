@@ -248,14 +248,35 @@ void View::drawPageClock(QPainter& p) {
 }
 
 // ---- Text and body --------------------------------------------------------------------------------
-void View::drawMessageText(QPainter& p,const QRectF& r,const QString& value,int size,const QColor& colour,int flags) {
-    if(value.isEmpty())return;
+void View::drawMessageText(QPainter& p,const QRectF& r,const QString& text,int size,const QColor& colour,int flags) {
+    if(text.isEmpty())return;
+    QFont font(shell_.fontFamily());font.setPixelSize(size);
+    // A single line wider than its box (a long file path in an information row, an unbroken URL, a long
+    // heading) used to run off the screen edge. It is shortened with an ellipsis instead: in the middle for a
+    // path, where the start (drive, folder) and the end (file name) both matter, otherwise at the end.
+    QString value=text;
+    if(!(flags&Qt::TextWordWrap) && !value.contains(QLatin1Char('\n'))) {
+        const QFontMetrics metrics(font);
+        const auto advance=[&](const QString& s){return textRenderer_.ready()?textRenderer_.measure(font,s):double(metrics.horizontalAdvance(s));};
+        if(advance(value)>r.width()) {
+            const bool path=value.contains(QLatin1Char('\\')) || value.contains(QLatin1Char('/'));
+            // Shrink from the end until it fits: elidedText with the real renderer's advance, not the metrics'.
+            int keep=int(value.size());
+            while(keep>2) {
+                --keep;
+                const QString candidate=path
+                    ?value.left((keep+1)/2)+QChar(0x2026)+value.right(keep/2)
+                    :value.left(keep)+QChar(0x2026);
+                if(advance(candidate)<=r.width()){value=candidate;break;}
+                if(keep==3)value=candidate;
+            }
+        }
+    }
     if(textRenderer_.ready()) {
-        QFont font(shell_.fontFamily());font.setPixelSize(size);
         textRenderer_.draw(*this,p,r,value,font,colour,flags);
         return;
     }
-    QFont font(shell_.fontFamily());font.setPixelSize(size);font.setStyleStrategy(QFont::PreferAntialias);
+    font.setStyleStrategy(QFont::PreferAntialias);
     font.setHintingPreference(QFont::PreferNoHinting);p.setFont(font);
     p.setPen(QColor(0,0,0,38));p.drawText(r.translated(1,1),flags,value);
     p.setPen(colour);p.drawText(r,flags,value);

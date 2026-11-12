@@ -5003,6 +5003,15 @@ void Shell::startQueuedMedia() {
     if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: play"<<mediaQueue_.currentIndex()+1<<"of"<<mediaQueue_.items().size()<<item.title;
     emit changed();
 }
+// A queue that ran out of playable files closes the player surface before its error page goes up: the page used to be
+// drawn over a half-open player (a music page for a video, track counts, the play-state hint line). The photo path
+// (a picture that cannot be opened) already works this way.
+void Shell::abandonFailedMedia() {
+    mediaOpen_=false;mediaQueue_.clear();mediaFailures_=0;mediaDisplayPinned_=false;resumePath_.clear();resumePending_=0;
+    status_.clear();player_->setSource({});emit mediaFrame({});
+    subtitleTracks_.clear();subtitleTrackIndex_=-1;subtitleCueNumber_=0;subtitleMediaPath_.clear();++subtitleGeneration_;
+    audioTracks_.clear();audioRejected_.clear();activeAudioTrack_=-1;
+}
 void Shell::advanceMedia(bool failed,const QString& error) {
     if(jellyfinQueue_) {
         finishJellyfinPlayback(!failed);
@@ -5013,14 +5022,15 @@ void Shell::advanceMedia(bool failed,const QString& error) {
         if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: rejected"<<mediaTitle_<<error;
         if(++mediaFailures_>=mediaQueue_.items().size()) {
             ++mediaRequest_;loading_=false;player_->stop();
-            showMessage("No playable files remain in this queue.",error,MessageKind::Page);status_="Playback stopped";emit changed();return;
+            abandonFailedMedia();
+            showMessage("No playable files remain in this queue.",error,MessageKind::Page);emit changed();return;
         }
     } else mediaFailures_=0;
     // Errors skip Repeat One; otherwise a broken file could retry forever.
     const int next=mediaQueue_.next(!failed);
     if(next<0) {
         ++mediaRequest_;loading_=false;player_->stop();status_="End of queue";
-        if(failed)showMessage("This file could not be played.",error,MessageKind::Page);
+        if(failed){abandonFailedMedia();showMessage("This file could not be played.",error,MessageKind::Page);}
         if(qEnvironmentVariableIsSet("XMB_MEDIA_TRACE"))qInfo()<<"media queue: stopped at end";
         emit changed();return;
     }
