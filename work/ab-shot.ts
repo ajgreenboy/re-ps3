@@ -17,7 +17,7 @@ const args = process.argv.slice(2);
 const repo = resolve(import.meta.dir, '..');
 const pos: string[] = [];
 let flash = join(dirname(repo), 'rpcs3', 'bin', 'dev_flash');
-let exe = join(repo, 'out', 'native-xmb', 're-ps3-native.exe');
+let exe = join(repo, 'out', 'integration', 're-ps3-native.exe');
 let bgClock = '', renderClock = '30', uiClock = '', focusTime = '', timeoutMs = 30000, crop: string | undefined;
 const seen = new Set<string>();
 const usage = 'bun work/ab-shot.ts <ref.png> <tokens> [x,y,w,h] [--crop x,y,w,h] [--flash dir] [--exe path] [--bg-clock ISO] [--render-clock seconds] [--ui-clock ISO] [--focus-time milliseconds] [--timeout-ms milliseconds]';

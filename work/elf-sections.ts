@@ -1,4 +1,7 @@
-﻿import { readFileSync } from "node:fs";
+﻿// elf-sections.ts - print the section table and the symbol tables (SYMTAB/DYNSYM) of a 32-bit big-endian ELF.
+//   bun work/elf-sections.ts <elf>
+// Read-only; cited by native-xmb/audit/PARTICLES.md.
+import { readFileSync } from "node:fs";
 const b = readFileSync(process.argv[2]);
 const shoff = b.readUInt32BE(32), shnum = b.readUInt16BE(48), shstr = b.readUInt16BE(50);
 const sh = (i) => ({ name: b.readUInt32BE(shoff+i*40), type: b.readUInt32BE(shoff+i*40+4), flags: b.readUInt32BE(shoff+i*40+8), addr: b.readUInt32BE(shoff+i*40+12), off: b.readUInt32BE(shoff+i*40+16), size: b.readUInt32BE(shoff+i*40+20), link: b.readUInt32BE(shoff+i*40+24), info: b.readUInt32BE(shoff+i*40+28), align: b.readUInt32BE(shoff+i*40+32), entsize: b.readUInt32BE(shoff+i*40+36) });

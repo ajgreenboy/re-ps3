@@ -1,3 +1,7 @@
+// ribbon-crest.ts - frame-space proxy for the ribbon crest height and brightness: for six column windows, the row of
+// the brightest horizontal-median pixel between y=330 and y=860 of a 1920x1080 capture.
+//   bun work/ribbon-crest.ts <native.png> [more.png ...]
+// Not isolated ribbon energy; see native-xmb/audit/RIBBON-A3-CREST.md for what it can and cannot show.
 import { decodePng } from './ab-compare';
 
 // Frame-space proxy, not isolated ribbon energy: horizontal median rejects tiny

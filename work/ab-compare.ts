@@ -1,3 +1,7 @@
+// ab-compare.ts - PNG decoding and PSNR/SSIM scoring, shared by the harness (ab-layers, ab-scenarios, ab-shot,
+// parity, transition-compare). Run directly it scores one native frame against one reference:
+//   bun work/ab-compare.ts <ref.png> <native.png> [crop x,y,w,h]
+// Handles 8-bit non-interlaced grey, grey-alpha, RGB and RGBA PNGs. No dependencies.
 import { inflateSync } from 'node:zlib';
 import { readFileSync } from 'node:fs';
 

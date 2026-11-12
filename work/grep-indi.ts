@@ -1,3 +1,7 @@
+// grep-indi.ts - list the indicator, busy, clock and trophy-indicator objects (name, schema, parent, position, size)
+// of every RCO in the pre-digested inventory out/native-reference/rco-behavior/resources.json. Read-only.
+//   bun work/grep-indi.ts
+// Cited by native-xmb/audit/ITEM-MENU-INFO-FIRMWARE.md. Reads the maintainer's checkout path (C:/dev/xmb).
 import {readFileSync} from "node:fs";
 const db=JSON.parse(readFileSync("C:/dev/xmb/out/native-reference/rco-behavior/resources.json","utf8"));
 const re=/^indi|indicator|_ws$|^tex_go|trophy_ind|download_ind|^busy|^clock/i;

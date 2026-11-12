@@ -1,3 +1,7 @@
+// prx-va.ts - print the program headers of a decrypted PS3 PRX/ELF (32- or 64-bit, big-endian) and translate
+// Ghidra virtual addresses to file offsets.
+//   bun work/prx-va.ts <file.prx>      (the probed addresses 0x2709c0..0x2709f0 are fixed in the script)
+// Read-only; cited by native-xmb/audit/ITEM-MENU-INFO-FIRMWARE.md.
 import {readFileSync} from "node:fs";
 const p=process.argv[2];
 const f=readFileSync(p);

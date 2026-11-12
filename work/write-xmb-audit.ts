@@ -1,3 +1,7 @@
+// write-xmb-audit.ts - turn the Sony guide catalogue (out/native-reference/guide-audit/catalog.json, written by
+// xmb-guide-audit.ts) into native-xmb/audit/FEATURE-CATALOG.md and feature-catalog.json.
+//   bun work/write-xmb-audit.ts
+// Regenerates tracked files; run it only when the catalogue is deliberately refreshed.
 import {mkdir} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 const source=await Bun.file('out/native-reference/guide-audit/catalog.json').json();

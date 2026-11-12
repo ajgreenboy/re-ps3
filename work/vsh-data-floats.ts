@@ -1,3 +1,7 @@
+// vsh-data-floats.ts - list the round-valued float32 constants in the 0x310-byte vsh.elf data block at 0x68eec0.
+//   bun work/vsh-data-floats.ts
+// Read-only; reads fw493/vsh_module/vsh.elf from the maintainer's checkout (C:/dev/xmb). Cited by
+// native-xmb/audit/ITEM-MENU-INFO-FIRMWARE.md.
 import {readFileSync} from "node:fs";
 const f=readFileSync("C:/dev/xmb/fw493/vsh_module/vsh.elf");
 const base=0x68eec0-0x10000;

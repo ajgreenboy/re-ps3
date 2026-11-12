@@ -59,7 +59,7 @@ switch ($Mode) {
         Get-Content $outFile
     }
     'scan' {
-        & 'C:\Users\Albert\.local\bin\bun.exe' (Join-Path $repo 'work\page-move-scan.ts') `
+        & bun (Join-Path $repo 'work\page-move-scan.ts') `
             (Join-Path $repo 'fw493\vsh_module\vsh.elf') @Rest
     }
 }

@@ -1,3 +1,8 @@
+// ab-scenarios.ts - run named-state scenarios from a manifest and score each capture against a stored reference.
+//   bun work/ab-scenarios.ts <manifest.json> --exe <exe> --flash <dev_flash> --references <dir> --output <dir> [--timeout-ms N]
+// See work/ab-scenarios.example.json for the manifest shape and native-xmb/audit/VERIFICATION-HARNESS.md ("Running
+// named states"). A region with no thresholds is unscored. Exit 0 = captures and declared gates passed, 1 = a
+// declared threshold failed, 2 = input/runtime/reference error. The product gate is ab-layers.ts, not this script.
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';

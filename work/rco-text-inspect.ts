@@ -1,3 +1,6 @@
+// rco-text-inspect.ts - print the English text keys of a PS3 RCO whose names match a pattern.
+//   bun work/rco-text-inspect.ts <file.rco> [name-regex]     (default: the msg_* system-message keys)
+// Read-only; cited by native-xmb/audit/D8-HEAD.md.
 import {inflateSync} from 'node:zlib';
 const file=Buffer.from(await Bun.file(process.argv[2]).arrayBuffer());
 const filter=new RegExp(process.argv[3]||'msg_(thema|console|update|game_setting|video_setting|music_setting)');

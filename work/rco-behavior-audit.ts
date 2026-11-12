@@ -1,3 +1,8 @@
+// rco-behavior-audit.ts - build the pre-digested RCO inventory (out/native-reference/rco-behavior/resources.json)
+// that the rco-*/page-/group-/settings-/grep- probes read: every RCO under a dev_flash, with its object tree and
+// animation types, parsed with the attribute definitions in out/native-reference.
+//   bun work/rco-behavior-audit.ts <dev_flash> [output-directory]
+// Reads firmware read-only; the output is local, untracked evidence.
 import {inflateSync} from 'node:zlib';
 import {readdir,mkdir} from 'node:fs/promises';
 import {join,resolve,relative} from 'node:path';

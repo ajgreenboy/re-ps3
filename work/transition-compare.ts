@@ -23,8 +23,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync,
 import { basename, dirname, join, resolve } from 'node:path';
 import { decodePng, type PngImage } from './ab-compare.ts';
 
-const BUN = 'C:\\Users\\Albert\\.bun\\bin\\bun.exe';
-const PYTHON = 'C:\\Users\\Albert\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\python\\python.exe';
+const PYTHON = process.env.XMB_PYTHON ?? 'python';     // transition-render.py needs Python with Pillow
 const ROOT = 'C:\\dev';
 const DEFAULT_EXE = 'C:\\dev\\out\\native-iconwave1\\re-ps3-native.exe';
 const DEFAULT_PROBES = join(ROOT, 'xmb', 'work', 'transition-probes.json');

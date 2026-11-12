@@ -1,3 +1,7 @@
+// frame-report.ts - summarise an XMB_FRAME_TRACE log: paint intervals (count, mean/median/p95/p99/max, fps),
+// split into moving and settled frames, over a chosen window.
+//   bun work/frame-report.ts <native.log> [--warmup-ms N] [--until-ms N] [--output file.json]
+// The trace is written by the app on orderly shutdown (see native-xmb/audit/ANIMATION-SMOOTHNESS.md).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 

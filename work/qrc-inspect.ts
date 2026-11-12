@@ -1,3 +1,6 @@
+// qrc-inspect.ts - dump the table of contents of a Sony QGL/QRC archive (QRCF, or zlib QRCC) with its attributes.
+//   bun work/qrc-inspect.ts <file.qrc> [name-filter]
+// Read-only; nothing is written.
 import {inflateSync} from 'node:zlib';
 const path=process.argv[2];
 if(!path)throw new Error('Usage: bun work/qrc-inspect.ts file.qrc [name-filter]');
