@@ -784,6 +784,7 @@ function expectedDetailFormula(recipe: StateRecipe, formula: string, dump: any) 
   const installed = Number(dump.installedSteam);
   const family = familySharedCount(recipe);
   if (formula === 'ownedGames') return Number.isFinite(owned) ? String(owned) : undefined;
+  if (formula === 'ownedGamesLabel') return Number.isFinite(owned) ? `${owned} owned` : undefined;   // the Steam hub row's detail
   if (formula === 'notInstalled')
     return Number.isFinite(owned) && Number.isFinite(installed) ? String(owned - installed + family) : undefined;
   if (formula === 'familyShared') return String(family);

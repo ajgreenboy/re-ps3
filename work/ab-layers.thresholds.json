@@ -107,8 +107,8 @@
       "expect": {
         "category": "game",
         "depth": 0,
-        "catalogueRowIds": ["steam:*", "steam-store", "steam-folder-all-games", "vita", "data", "memory", "ps2", "psp", "ps3", "store", "artwork-settings", "content:refresh", "content:import", "game:search", "release:import"],
-        "catalogueDetails": [{ "id": "steam-folder-all-games", "formula": "ownedGames" }],
+        "catalogueRowIds": ["steam:*", "steam-hub", "data", "memory", "ps2", "ps3", "store", "artwork-settings", "game:download-hub", "game:manage-hub"],
+        "catalogueDetails": [{ "id": "steam-hub", "formula": "ownedGamesLabel" }],
         "noStoreDump": true
       },
       "regions": [
@@ -124,10 +124,10 @@
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
       "waits": 8,
       "settleWaits": 3,
-      "path": [{ "catalogueId": "steam-folder-all-games" }],
+      "path": [{ "catalogueId": "steam-hub" }, { "rowIndex": 1 }],
       "expect": {
         "category": "game",
-        "depth": 1,
+        "depth": 2,
         "entryId": "steam-folder-all-titles",
         "entryTitle": "All Titles",
         "entryCount": 14,
@@ -164,10 +164,10 @@
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
       "waits": 8,
       "settleWaits": 3,
-      "path": [{ "catalogueId": "steam-store" }],
+      "path": [{ "catalogueId": "steam-hub" }, { "rowIndex": 0 }],
       "expect": {
         "category": "game",
-        "depth": 1,
+        "depth": 2,
         "entryId": "store-section:top_sellers",
         "entryTitle": "Top Sellers",
         "entryCount": 3,
@@ -186,10 +186,10 @@
       "seedPaths": ["preferences.json", "profiles.json", "settings.ini", "family-shared.json", "artwork", "cache/steam"],
       "waits": 8,
       "settleWaits": 3,
-      "path": [{ "catalogueId": "steam-folder-all-games" }, { "rowIndex": 12 }],
+      "path": [{ "catalogueId": "steam-hub" }, { "rowIndex": 1 }, { "rowIndex": 12 }],
       "expect": {
         "category": "game",
-        "depth": 2,
+        "depth": 3,
         "folderMode": "library",
         "folderTitle": "Not Installed",
         "folderCountFormula": "owned-installed+familyShared",
