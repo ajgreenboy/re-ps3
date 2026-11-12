@@ -1348,7 +1348,7 @@ OskLayout loadOskLayout(Assets& assets, RcoObjects& objects) {
     return layout;
 }
 
-OskLayout loadOskPanelLayout(Assets& assets, RcoObjects& objects) {
+OskLayout loadOskPanelLayout(Assets& assets, [[maybe_unused]] RcoObjects& objects) {
     QElapsedTimer total;
     total.start();
     const bool trace = qEnvironmentVariableIntValue("XMB_OSK_LAYOUT_LOG") == 1;

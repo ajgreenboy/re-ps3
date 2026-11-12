@@ -273,13 +273,13 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         // parent column behind a page at 0.247/0.698 - keep the opaque material: with the frame behind them
         // still brighter than the reference (audit/ICON-MATERIAL-CLOCK.md) their refracted result inherits that
         // error, and the measured cost there is 1.0-1.4 dB (audit/ITEM-ICONS.md).
-        const bool glass=forcedGlass || !opaqueMaterial || icon.brightness>=.999f;
+        const bool useGlass=forcedGlass || !opaqueMaterial || icon.brightness>=.999f;
         const double ndcX=icon.centre.x()/960.-1,ndcY=1-icon.centre.y()/540.;
         const double distance=icon.distance,worldX=ndcX*distance/kScaleX,worldY=ndcY*distance/kScaleY;
         // 1. CookieCutter: the frame behind the icon, 128x128 reference px, into the background map.
         const double cx=design.left+icon.centre.x()*design.x,cy=pixelHeight-design.top-icon.centre.y()*design.y;
         const double halfX=64*design.x,halfY=64*design.y;
-        if(glass) {
+        if(useGlass) {
             gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
             gl.glBlitFramebuffer(GLint(cx-halfX),GLint(cy-halfY),GLint(cx+halfX),GLint(cy+halfY),0,0,128,128,GL_COLOR_BUFFER_BIT,GL_LINEAR);
         }
@@ -291,7 +291,7 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         vc[258]=QVector4D(0,0,-1,float(distance-19.95)); // captured: the icon quad's z offset in the firmware matrix
         vc[259]=QVector4D(0,0,-1,float(distance));
         vc[467]=QVector4D(float(ndcX),float(ndcY),0,0);
-        if(!glass) {
+        if(!useGlass) {
             opaque_.bind();uniformcache::setVec4Array(opaque_,"vc",vc);
             const float peak=std::max({fixedTint_.x(),fixedTint_.y(),fixedTint_.z()});
             uniformcache::set(opaque_,"tint",fixedTint_/peak);uniformcache::set(opaque_,"brightness",float(icon.brightness));

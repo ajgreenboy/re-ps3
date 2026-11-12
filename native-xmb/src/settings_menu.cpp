@@ -1875,8 +1875,8 @@ QString settingsRowBody(const Entry& row,Assets& assets,const QString& renderer,
         QStringList labels;
         if(page.container && !page.items.isEmpty()) {
             for(const auto* item:page.items) {
-                const auto label=choiceItemLabel(*page.container,*item);
-                if(!label.isEmpty())labels<<label;
+                const auto choiceLabel=choiceItemLabel(*page.container,*item);
+                if(!choiceLabel.isEmpty())labels<<choiceLabel;
             }
         }
         if(!labels.isEmpty())
