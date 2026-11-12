@@ -75,6 +75,8 @@ QImage fetchCover(const QUrl& url,const QString& path) {
     }
     return image;
 }
+// Browse worker result: the popular games plus their fetched box art (indexed by list position).
+struct BrowseOutcome { QVector<GameResult> games; QHash<int,QImage> covers; QString error; };
 }
 
 void Shell::refreshReleaseSources(const QUrl& importUrl) {
@@ -254,17 +256,19 @@ void Shell::openBrowseGames() {
     if(busy())return;
     busy_=true;status_=tr("Loading popular games...");
     busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();
-    auto* watcher=new QFutureWatcher<QPair<QVector<GameResult>,QString>>(this);
-    connect(watcher,&QFutureWatcher<QPair<QVector<GameResult>,QString>>::finished,this,[this,watcher]{
+    auto* watcher=new QFutureWatcher<BrowseOutcome>(this);
+    connect(watcher,&QFutureWatcher<BrowseOutcome>::finished,this,[this,watcher]{
         const auto result=watcher->result();watcher->deleteLater();
         busy_=false;status_.clear();busyProgress_=-1.;busySpinnerPhase_=-1.;
-        gameSearch_=result.first;
+        gameSearch_=result.games;
         if(pages_.size()<32) {
             Page page;page.title=tr("Browse");
             page.entries.append(releaseRow(QStringLiteral("game:search-row"),tr("Search"),Action::SearchGames));
-            if(!result.second.isEmpty()) {
+            if(!result.error.isEmpty()) {
                 Entry error=releaseRow(QStringLiteral("game:error"),tr("Could not load games"),Action::Unavailable);
-                error.detail=result.second;page.entries.append(error);
+                error.detail=result.error;page.entries.append(error);
+            } else if(gameSearch_.isEmpty()) {
+                page.entries.append(releaseRow(QStringLiteral("game:empty"),tr("No popular games are downloadable right now."),Action::Unavailable));
             } else {
                 const int shown=qMin(100,gameSearch_.size());
                 for(int i=0;i<shown;++i) {
@@ -272,6 +276,9 @@ void Shell::openBrowseGames() {
                     Entry entry=releaseRow(QStringLiteral("game:result:")+QString::number(i),game.name,Action::GameSearchResult,QString::number(i));
                     entry.detail=game.options.size()>1?tr("%1 sources").arg(game.options.size()):game.options.first().source;
                     entry.fieldValue=game.options.first().fileSize;
+                    entry.gameTile=true;
+                    entry.artwork=result.covers.value(i);
+                    entry.artworkUrl=game.coverUrl;
                     page.entries.append(entry);
                 }
             }
@@ -279,10 +286,19 @@ void Shell::openBrowseGames() {
         }
         emit changed();
     });
-    watcher->setFuture(QtConcurrent::run([]{
-        QVector<GameResult> results;QString error;
-        HydraLibrary().searchGames(QString(),&results,&error);
-        return qMakePair(results,error);
+    const QString cache=QDir(dataDirectory_).filePath(QStringLiteral("cache/release-art"));
+    watcher->setFuture(QtConcurrent::run([cache]{
+        BrowseOutcome result;
+        HydraLibrary().popularGames(&result.games,&result.error);
+        for(int i=0;i<result.games.size();++i) {
+            const QString url=result.games[i].coverUrl;
+            if(url.isEmpty())continue;
+            const QString path=cache+QLatin1Char('/')+QStringLiteral("hot-")+
+                QString::fromLatin1(QCryptographicHash::hash(url.toUtf8(),QCryptographicHash::Sha256).toHex().left(16))+QStringLiteral(".png");
+            const QImage image=fetchCover(QUrl(url),path);
+            if(!image.isNull())result.covers.insert(i,image);
+        }
+        return result;
     }));
     emit changed();
 }

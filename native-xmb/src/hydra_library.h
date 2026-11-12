@@ -23,6 +23,7 @@ struct GameResult {
     QString name;           // clean name (the dedup key)
     QString title;
     QString originalTitle;  // the full release line from the first option
+    QString coverUrl;       // landscape box art (Steam header), when known
     QVector<GameSourceOption> options;
 };
 // Blocking client, like the other network clients; call from a worker.
@@ -34,5 +35,10 @@ public:
     bool preinstalledSources(QStringList* out, QString* error=nullptr) const;
     // Full-text search across /games, filtered to the preinstalled sources.
     bool searchGames(const QString& query, QVector<GameResult>* out, QString* error=nullptr) const;
+    // Genuinely-popular games, in popularity order: the Hydra Cloud "hot" catalogue
+    // (api.hydralauncher.gg/catalogue/hot) matched against the download library, so each entry
+    // carries its preinstalled download sources and Steam box art. Titles with no downloadable
+    // source are dropped. The order is the catalogue's own ranking, not newest-first.
+    bool popularGames(QVector<GameResult>* out, QString* error=nullptr) const;
 };
 } // namespace xmb
