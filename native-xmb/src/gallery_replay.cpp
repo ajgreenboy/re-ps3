@@ -16,7 +16,8 @@ bool tokenKey(const QString& token, GalleryController::Key* key) {
     static const QHash<QString, GalleryController::Key> keys{{"LEFT", GalleryController::Key::Left}, {"RIGHT", GalleryController::Key::Right},
         {"UP", GalleryController::Key::Up}, {"DOWN", GalleryController::Key::Down}, {"ENTER", GalleryController::Key::Cross},
         {"ESC", GalleryController::Key::Circle}, {"TRIANGLE", GalleryController::Key::Triangle}, {"START", GalleryController::Key::Start},
-        {"ZOOMIN", GalleryController::Key::ZoomIn}, {"ZOOMOUT", GalleryController::Key::ZoomOut}};
+        {"ZOOMIN", GalleryController::Key::ZoomIn}, {"ZOOMOUT", GalleryController::Key::ZoomOut},
+        {"L1", GalleryController::Key::L1}, {"R1", GalleryController::Key::R1}};
     const auto found = keys.constFind(token);
     if (found == keys.constEnd()) return false;
     *key = *found;
@@ -72,6 +73,14 @@ int runGalleryReplay(const GalleryReplayRequest& request) {
     const GalleryScan scan = scanGalleryPhotos(options);
     GalleryController c;
     if (!c.setup(params, scan.photos, sort, 16.0 / 9.0, &error)) { qCritical().noquote() << "gallery-replay:" << error; return 2; }
+    // The Playlist area's jackets: the photo playlists of the first profile file in <data>/playlists (by name).
+    const QStringList playlistFiles = QDir(QDir(request.dataDir).filePath(QStringLiteral("playlists")))
+        .entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+    if (!playlistFiles.isEmpty()) {
+        PlaylistStore store;
+        store.open(request.dataDir, QFileInfo(playlistFiles.first()).completeBaseName());
+        c.setPlaylists(store.list(QStringLiteral("photo")));
+    }
     const double hz = request.hz > 0 ? request.hz : 60.0;
     const double dt = 1.0 / hz;
     QJsonArray steps;

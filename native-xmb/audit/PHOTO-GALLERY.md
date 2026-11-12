@@ -33,7 +33,9 @@ Scope (b) drew a line; these are absent by design and are named in the UI honest
 
 - **The floor** is one lit quad. The firmware's 15 package floors (the NPIA00006 download) and their seals/age/face
   groupings are absent.
-- **Playlist and Network/PSN areas**, jackets, comments, copy/import, print, upload, 2D/3D stereo, BGM and key tones.
+- **Network/PSN area**, comments, copy/import, print, upload, 2D/3D stereo, BGM and key tones. The **Playlist area**
+  was added on 2026-11-12 (jackets from the Photo column's playlists, the module's traced placement spiral, R1 / L1);
+  see `PHOTO-GALLERY-PLAYLIST.md` for what is traced, inferred and still absent (jacket frames, angles, editing).
 - **Physics boot**: the module drops photos with a rigid-body simulation and a ~20 s camera sweep; the port shows a
   short fall of the shown photos plus the title logo (`tex_logo_boot`), a port choice, not a firmware value.
 - **The four photoviewer slideshow styles** (`ggfz` models) are a separate item.

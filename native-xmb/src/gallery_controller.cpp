@@ -36,7 +36,162 @@ QStringList GalleryController::paramNames() {
             "CAMERA_NEAR_LIMIT_GRID", "CAMERA_FAR_LIMIT_GRID", "CAMERA_SPEED_ZOOM", "QUICK_ZOOM_TIME", "QUICK_ZOOM_OUT_TIME",
             "FOCUS_MOVE_SPEED", "FOCUS_MOVE_BRAKE", "FOCUS_GRAVITY", "GROUP_FOCUS_RECT_SPACE", "GROUP_FOCUS_FLOAT_SPEED_UP",
             "GROUP_FOCUS_FLOAT_SPEED_DOWN", "BOOT_CAMERA_INIT_DIST", "BOOT_CAMERA_INIT_ANGLE", "BOOT_HELP_DISP_TIME",
-            "BOOT_PHYSICS_INIT_YPOS_PARAM_1", "PARAM_MIN_DX", "PARAM_MIN_DZ"};
+            "BOOT_PHYSICS_INIT_YPOS_PARAM_1", "PARAM_MIN_DX", "PARAM_MIN_DZ",
+            // Playlist area (audit/PHOTO-GALLERY-PLAYLIST.md)
+            "CAMERA_NEAR_LIMIT_PLAYLIST", "CAMERA_NEAR_LIMIT_GRID_PLAYLIST", "CAMERA_FAR_LIMIT_PLAYLIST", "PLAYLIST_SPACE_CENTER_X",
+            "PLAYLIST_SPACE_CENTER_Z", "PLAYLIST_SPACE_WIDTH", "PLAYLIST_SPACE_HEIGHT", "NEW_PLAYLIST_DIST_X", "NEW_PLAYLIST_DIST_Z",
+            "PLAYLIST_VIEW_SPACE_FADE_IN", "PLAYLIST_VIEW_SPACE_FADE_OUT"};
+}
+
+namespace {
+// Port choice, not a firmware value: the jacket's size. The module reads it from the jacket model (the frame
+// .cxml/.gim files of the absent NPIA00006 package, set through FUN_0013b4cc); here a jacket covers 70 % of one
+// placement step (NEW_PLAYLIST_DIST_X) so the spiral's cells never overlap, as they do not in tex_help_pic_playlist.
+constexpr double JacketStepFill = 0.7;
+// Port choice: how far a focused jacket lifts, in library-photo float heights.
+constexpr double JacketLift = 4.0;
+}
+
+QVector<QPointF> GalleryController::placeJackets(int count, const JacketSpace& s, double startX, double startZ) {
+    QVector<QPointF> placed;
+    const double left = s.centerX - s.width / 2, right = s.centerX + s.width / 2;
+    const double top = s.centerZ - s.height / 2, bottom = s.centerZ + s.height / 2;
+    const auto inside = [&](double x, double z) { return x >= left && x <= right && z >= top && z <= bottom; };
+    // FUN_000ef688: two axis-aligned rects of the jackets' width/height overlap (strictly).
+    const auto overlaps = [&](double x, double z) {
+        for (const QPointF& p : std::as_const(placed))
+            if (std::abs(x - p.x()) < s.jacketW && std::abs(z - p.y()) < s.jacketH) return true;
+        return false;
+    };
+    for (int i = 0; i < count; ++i) {
+        // The module returns without placing when the requested point is outside the space; the port's start is the
+        // space centre, so this only guards bad parameters.
+        if (!inside(startX, startZ)) { placed.push_back(QPointF(startX, startZ)); continue; }
+        double x = startX, z = startZ;
+        int run = 1, dir = 0;
+        bool done = false;
+        while (!done) {
+            for (int leg = 0; leg < 2 && !done; ++leg) {
+                for (int step = 0; step < run; ++step) {
+                    if (!overlaps(x, z)) { done = true; break; }
+                    // dir 0: z -= DZ, 1: x -= DX, 2: z += DZ, 3: x += DX (vsubfp / vaddfp helpers FUN_000a6cb4 / FUN_000af82c)
+                    const double nx = x + (dir == 1 ? -s.stepX : dir == 3 ? s.stepX : 0.0);
+                    const double nz = z + (dir == 0 ? -s.stepZ : dir == 2 ? s.stepZ : 0.0);
+                    if (!inside(nx, nz)) { done = true; break; }   // the module saves the last in-space point
+                    x = nx; z = nz;
+                }
+                dir = (dir + 1) % 4;
+            }
+            ++run;
+        }
+        placed.push_back(QPointF(x, z));
+    }
+    return placed;
+}
+
+void GalleryController::buildJacketLayout(GalleryLayout* out) {
+    GalleryLayout layout;
+    layout.ok = true;
+    layout.sort = layout_.sort;
+    const QVector<QPointF> spots = placeJackets(int(playlists_.size()), space_, space_.centerX, space_.centerZ);
+    QHash<QString, int> index;
+    for (int i = 0; i < libraryCount_; ++i) index.insert(photos_[i].path, i);
+    for (int i = libraryCount_; i < photos_.size(); ++i) index.insert(photos_[i].path, i);
+    for (int i = 0; i < playlists_.size(); ++i) {
+        const Playlist& list = playlists_[i];
+        GalleryPile jacket;
+        jacket.id = i;
+        jacket.label = list.name;
+        jacket.colorIndex = i % 6;   // INFERRED: tex_help_pic_playlist shows labels in several of the group colours
+        jacket.row = 0;
+        jacket.x = spots[i].x();
+        jacket.z = spots[i].y();
+        jacket.halfWidth = space_.jacketW / 2;
+        jacket.halfDepth = space_.jacketH / 2;
+        for (const QString& path : list.items) {
+            int at = index.value(path, -1);
+            if (at < 0) {
+                GalleryPhoto photo;
+                photo.path = path;
+                at = int(photos_.size());
+                photos_.push_back(photo);
+                index.insert(path, at);
+            }
+            jacket.photos.push_back(at);
+        }
+        jacket.visible = jacket.photos.isEmpty() ? 0 : 1;
+        // INFERRED: the jacket shows the playlist's first photo (image-thumbnail-auto layer of frame_01.cxml); the angle
+        // the module keeps in PhotoList.jacketAngle is not stored by this port, so every jacket lies straight.
+        if (!jacket.photos.isEmpty()) jacket.shown.push_back({jacket.photos.first(), jacket.x, jacket.z, 0.0});
+        layout.piles.push_back(jacket);
+    }
+    layout.rows = layout.piles.isEmpty() ? 0 : 1;
+    *out = layout;
+}
+
+void GalleryController::setPlaylists(const QVector<Playlist>& playlists) {
+    playlists_ = playlists;
+    photos_.resize(libraryCount_);
+    GalleryLayout jackets;
+    buildJacketLayout(&jackets);
+    const auto firstFocus = [&](AreaView* view) {
+        view->focusPile = jackets.piles.isEmpty() ? -1 : 0;
+        view->focusX = jackets.piles.isEmpty() ? space_.centerX : jackets.piles[0].x;
+        view->focusZ = jackets.piles.isEmpty() ? space_.centerZ : jackets.piles[0].z;
+    };
+    if (area_ == Area::Playlist) {
+        // Rebuilt while shown: drop any entered jacket and refocus.
+        layout_ = jackets;
+        gridPile_ = -1;
+        grid_.clear();
+        if (mode_ == Mode::Grid) mode_ = Mode::Piles;
+        AreaView here;
+        firstFocus(&here);
+        focusPile_ = here.focusPile;
+        focusX_ = here.focusX;
+        focusZ_ = here.focusZ;
+        floatPileId_ = focusPile_;
+        sinkPileId_ = -1;
+    } else {
+        other_.layout = jackets;
+        firstFocus(&other_);
+        // INFERRED: the area opens at its far limit so the most jackets are in view.
+        other_.distance = c_.farPlaylist;
+        other_.nearLimit = c_.nearPlaylist;
+        other_.farLimit = c_.farPlaylist;
+        other_.nearGrid = c_.nearGridPlaylist;
+    }
+}
+
+void GalleryController::swapArea() {
+    AreaView here;
+    here.layout = layout_;
+    here.focusPile = focusPile_;
+    here.focusX = focusX_;
+    here.focusZ = focusZ_;
+    here.distance = distanceGoal_;
+    here.nearLimit = c_.nearLimit;
+    here.farLimit = c_.farLimit;
+    here.nearGrid = c_.nearGrid;
+    layout_ = other_.layout;
+    focusPile_ = other_.focusPile;
+    focusX_ = other_.focusX;
+    focusZ_ = other_.focusZ;
+    distance_ = distanceGoal_ = other_.distance;
+    c_.nearLimit = other_.nearLimit;
+    c_.farLimit = other_.farLimit;
+    c_.nearGrid = other_.nearGrid;
+    other_ = here;
+    area_ = area_ == Area::Library ? Area::Playlist : Area::Library;
+    gridPile_ = -1;
+    grid_.clear();
+    blend_ = 0;
+    blendDirection_ = 0;
+    velX_ = velZ_ = 0;
+    floatPileId_ = focusPile_;
+    float_ = 1;
+    sinkPileId_ = -1;
+    sinking_ = 0;
 }
 
 bool GalleryController::setup(const GalleryParams& params, QVector<GalleryPhoto> photos, GallerySort sort, double aspect, QString* error) {
@@ -65,24 +220,47 @@ bool GalleryController::setup(const GalleryParams& params, QVector<GalleryPhoto>
     c_.bootFallHeight = params_.number("BOOT_PHYSICS_INIT_YPOS_PARAM_1");
     c_.minDx = params_.number("PARAM_MIN_DX");
     c_.minDz = params_.number("PARAM_MIN_DZ");
+    // Playlist area. TRACED values (compiled into hknw_plugin.prx as the file's value x 0.01, COORD_UNIT): the space
+    // rect +-3.575 / +-2.6 and the steps 0.55 / 0.4 in FUN_001a12e0; CAMERA_*_PLAYLIST read by name only (INFERRED use).
+    c_.nearPlaylist = params_.number("CAMERA_NEAR_LIMIT_PLAYLIST");
+    c_.farPlaylist = params_.number("CAMERA_FAR_LIMIT_PLAYLIST");
+    c_.nearGridPlaylist = params_.number("CAMERA_NEAR_LIMIT_GRID_PLAYLIST");
+    // INFERRED: the "playlist space" fade in/out times are the area change's veil.
+    c_.fadeIn = std::max(0.05, params_.number("PLAYLIST_VIEW_SPACE_FADE_IN"));
+    c_.fadeOut = std::max(0.05, params_.number("PLAYLIST_VIEW_SPACE_FADE_OUT"));
+    space_.centerX = params_.number("PLAYLIST_SPACE_CENTER_X");
+    space_.centerZ = params_.number("PLAYLIST_SPACE_CENTER_Z");
+    space_.width = params_.number("PLAYLIST_SPACE_WIDTH");
+    space_.height = params_.number("PLAYLIST_SPACE_HEIGHT");
+    space_.stepX = params_.number("NEW_PLAYLIST_DIST_X");
+    space_.stepZ = params_.number("NEW_PLAYLIST_DIST_Z");
+    jacketScale_ = c_.minDx > 0 ? JacketStepFill * space_.stepX / c_.minDx : 1.0;
+    space_.jacketW = c_.minDx * jacketScale_;
+    space_.jacketH = c_.minDz * jacketScale_;
     aspect_ = aspect > 0.5 ? aspect : 16.0 / 9.0;
     photos_ = std::move(photos);
+    libraryCount_ = int(photos_.size());
     mode_ = Mode::Boot;
+    area_ = Area::Library;
+    areaPhase_ = 0;
+    areaFade_ = 0;
     overlay_ = Overlay::None;
     bootTime_ = 0;
     helpCard_ = 0;
     distance_ = distanceGoal_ = std::clamp(c_.bootDist, c_.nearLimit, c_.farLimit);  // TRACED name: BOOT_CAMERA_INIT_DIST
     relayout(sort);
     if (!layout_.ok) { if (error) *error = layout_.error; return false; }
+    setPlaylists({});
     return true;
 }
 
 void GalleryController::relayout(GallerySort sort) {
+    if (area_ != Area::Library) return;
     GalleryLayoutOptions options;
     options.sort = sort;
     options.aspect = aspect_;
     options.fovYDegrees = FovYDegrees;
-    layout_ = layoutGallery(photos_, params_, options);
+    layout_ = layoutGallery(photos_.mid(0, libraryCount_), params_, options);
     gridPile_ = -1;
     grid_.clear();
     blend_ = 0;
@@ -150,6 +328,22 @@ int GalleryController::nearestPile(double x, double z, double within) const {
 int GalleryController::neighbour(int from, int dx, int dz) const {
     const int count = int(layout_.piles.size());
     if (from < 0 || from >= count) return count ? 0 : -1;
+    if (area_ == Area::Playlist) {
+        // INFERRED: the jacket state's input is not traced. A key moves to the nearest jacket on that side, the off-axis
+        // distance weighing double, so the spiral's cells are walked like a grid.
+        const GalleryPile& here = layout_.piles[from];
+        int best = -1;
+        double bestScore = 1e300;
+        for (int i = 0; i < count; ++i) {
+            if (i == from) continue;
+            const double ax = layout_.piles[i].x - here.x, az = layout_.piles[i].z - here.z;
+            const double along = dx ? ax * dx : az * dz, across = dx ? std::abs(az) : std::abs(ax);
+            if (along <= 1e-6) continue;
+            const double score = along + 2.0 * across;
+            if (score < bestScore) { bestScore = score; best = i; }
+        }
+        return best < 0 ? from : best;
+    }
     if (dx) return std::clamp(from + dx, 0, count - 1);
     const GalleryPile& here = layout_.piles[from];
     const int row = here.row + dz;
@@ -181,7 +375,7 @@ void GalleryController::gridTargetFor(double* x, double* z) const {
 }
 
 void GalleryController::enterPile(int pile) {
-    if (pile < 0 || pile >= layout_.piles.size()) return;
+    if (pile < 0 || pile >= layout_.piles.size() || layout_.piles[pile].photos.isEmpty()) return;   // an empty playlist's jacket
     gridPile_ = pile;
     grid_ = layoutGalleryGrid(layout_.piles[pile], params_, aspect_);
     gridColumns_ = 1;
@@ -228,16 +422,20 @@ GalleryController::Result GalleryController::openResult(int index) const {
 }
 
 QVector<GalleryController::MenuItem> GalleryController::menu() const {
-    // Names are tex_menuItems' own icons; only what maps to a working feature of this port is enabled.
+    // Names are tex_menuItems' own icons; only what maps to a working feature of this port is enabled. The module has
+    // its own PlaylistMenu state for the Playlist area whose entries are not traced; there the port keeps this strip
+    // with the library-only Sort switched off (INFERRED).
+    const bool library = area_ == Area::Library;
     return {{"quit", 0, true}, {"tools", 1, false}, {"help", 2, true}, {"info", 3, false}, {"delete", 4, false},
-            {"rotate", 5, false}, {"move", 6, false}, {"edit", 7, false}, {"group", 8, false}, {"sort", 9, true},
-            {"slideshow", 10, true}, {"playlists", 11, mode_ == Mode::Piles}, {"undo", 12, false}, {"redo", 13, false}};
+            {"rotate", 5, false}, {"move", 6, false}, {"edit", 7, false}, {"group", 8, false}, {"sort", 9, library},
+            {"slideshow", 10, true}, {"add_to_playlist", 11, false}, {"undo", 12, false}, {"redo", 13, false}};
 }
 
 // ------------------------------------------------------------------ input
 
 GalleryController::Result GalleryController::press(Key key) {
     Result none;
+    if (areaPhase_ != 0) return none;   // the area change runs to its end
     if (mode_ == Mode::Boot) {
         // Any press ends the drop; the key itself still acts.
         mode_ = Mode::Piles;
@@ -276,7 +474,6 @@ GalleryController::Result GalleryController::press(Key key) {
             const QString id = menuItems[menuFocus_].id;
             if (id == "quit") { overlay_ = Overlay::QuitAsk; quitChoice_ = 0; }
             else if (id == "help") overlay_ = Overlay::Help;
-            else if (id == "playlists") { overlay_ = Overlay::None; mode_ = Mode::Playlists; }
             else if (id == "sort") {
                 const GallerySort next = layout_.sort == GallerySort::Newest ? GallerySort::Oldest
                     : layout_.sort == GallerySort::Oldest ? GallerySort::Random : GallerySort::Newest;
@@ -292,19 +489,15 @@ GalleryController::Result GalleryController::press(Key key) {
         }
         return none;
     }
-    if (mode_ == Mode::Playlists) {
-        if (key == Key::Circle) mode_ = Mode::Piles;
-        else if (key == Key::Up && playlistFocus_ > 0) --playlistFocus_;
-        else if (key == Key::Down && playlistFocus_ + 1 < playlists_.size()) ++playlistFocus_;
-        else if (key == Key::Cross && !playlists_.isEmpty()) {
-            Result result;
-            result.act = Act::OpenPhoto;
-            result.paths = playlists_[playlistFocus_].items;
-            return result;
-        }
-        return none;
-    }
     switch (key) {
+    case Key::L1: case Key::R1:
+        // TRACED strings (hknw_plugin.rco): msg_help_go_to_playlist_area_r1 / _l1, msg_help_go_to_library_area_l1 and
+        // msg_help_go_to_psn_area_r1 only, so the areas run Library | Playlist | PSN and L1 / R1 step between them.
+        // INFERRED: only from the floor view (not inside a grid). R1 from the Playlist area would be the PSN area,
+        // which this port does not build, so it does nothing.
+        if (mode_ != Mode::Piles || gridPile_ >= 0) break;
+        if ((key == Key::R1 && area_ == Area::Library) || (key == Key::L1 && area_ == Area::Playlist)) { areaPhase_ = 1; areaFade_ = 0; }
+        break;
     case Key::Triangle:
         overlay_ = Overlay::Menu;
         if (!menuItems[menuFocus_].enabled) stepMenu(1);
@@ -341,8 +534,8 @@ GalleryController::Result GalleryController::press(Key key) {
     case Key::Start: {
         Result result;
         int pile = mode_ == Mode::Grid ? gridPile_ : focusPile_;
-        if (pile < 0 || pile >= layout_.piles.size()) return none;
-        if (mode_ != Mode::Grid) {   // slideshow from the focused pile without entering it
+        if (pile < 0 || pile >= layout_.piles.size() || layout_.piles[pile].photos.isEmpty()) return none;
+        if (mode_ != Mode::Grid) {   // slideshow from the focused pile (or jacket) without entering it
             result.act = Act::Slideshow;
             for (const int photo : layout_.piles[pile].photos) result.paths << photos_[photo].path;
             return result;
@@ -364,6 +557,13 @@ void GalleryController::setSticks(double leftX, double leftY, double rightY) {
 
 void GalleryController::tick(double dt) {
     dt = std::clamp(dt, 0.0, 0.1);
+    if (areaPhase_ == 1) {
+        areaFade_ = std::min(1.0, areaFade_ + dt / c_.fadeOut);
+        if (areaFade_ >= 1) { swapArea(); areaPhase_ = 2; }
+    } else if (areaPhase_ == 2) {
+        areaFade_ = std::max(0.0, areaFade_ - dt / c_.fadeIn);
+        if (areaFade_ <= 0) areaPhase_ = 0;
+    }
     if (mode_ == Mode::Boot) {
         bootTime_ += dt;
         if (bootTime_ >= BootSeconds) { mode_ = Mode::Piles; helpCard_ = c_.helpTime; }
@@ -378,7 +578,7 @@ void GalleryController::tick(double dt) {
     }
     const bool inGrid = mode_ == Mode::Grid;
     // Zoom: right stick (analog) on top of the key steps.
-    if (stickZoom_ != 0 && mode_ != Mode::Playlists) {
+    if (stickZoom_ != 0) {
         const double factor = std::exp(stickZoom_ * c_.zoomSpeed * 0.2 * dt);
         if (inGrid) gridDistanceGoal_ = std::clamp(gridDistanceGoal_ * factor, c_.nearGrid, c_.farGrid);
         else distanceGoal_ = std::clamp(distanceGoal_ * factor, c_.nearLimit, c_.farLimit);
@@ -396,7 +596,8 @@ void GalleryController::tick(double dt) {
     // Focus in the pile view.
     if (!layout_.piles.isEmpty() && gridPile_ < 0) {
         const double frames = dt * 60.0;   // the firmware's constants are per 60 Hz frame (FOCUS_MOVE_BRAKE, FOCUS_GRAVITY)
-        if (mode_ != Mode::Playlists && (stickX_ != 0 || stickZ_ != 0)) {
+        // INFERRED for the Playlist area as well: the library's free focus with snap to the nearest jacket.
+        if (stickX_ != 0 || stickZ_ != 0) {
             // INFERRED: FOCUS_MOVE_SPEED scales the stick into a speed in world units per second that grows with the
             // camera distance; FOCUS_MOVE_BRAKE is the per-frame retention of the velocity.
             const double speed = c_.focusSpeed * distance_ * 0.5;
@@ -451,9 +652,11 @@ void GalleryController::collectDraws(QVector<GalleryDraw>* out, const std::funct
         const double alpha = gridPile_ >= 0 ? 1.0 - s : 1.0;
         if (alpha < 0.01) continue;
         if (!cull(pile.x, pile.z, std::max(pile.halfWidth, pile.halfDepth) + 2.0)) continue;
+        const bool jacket = area_ == Area::Playlist;
+        const double floatHeight = jacket ? floatHeight_ * JacketLift : floatHeight_;
         double lift = 0;
-        if (p == floatPileId_) lift = smooth(float_) * floatHeight_;
-        else if (p == sinkPileId_) lift = smooth(sinking_) * floatHeight_;
+        if (p == floatPileId_) lift = smooth(float_) * floatHeight;
+        else if (p == sinkPileId_) lift = smooth(sinking_) * floatHeight;
         int k = 0;
         for (const GalleryPlacedPhoto& placed : pile.shown) {
             GalleryDraw d;
@@ -464,6 +667,8 @@ void GalleryController::collectDraws(QVector<GalleryDraw>* out, const std::funct
             d.y = float(baseY + k * stack + lift);
             d.rotationY = float(placed.rotationY);
             d.alpha = float(alpha);
+            d.jacket = jacket;
+            d.scale = float(jacket ? jacketScale_ : 1.0);
             if (mode_ == Mode::Boot) {
                 // The short fall that stands in for the physics boot: each photo drops from BOOT_PHYSICS_INIT_YPOS_PARAM_1
                 // after its own delay, accelerating.
@@ -491,6 +696,7 @@ void GalleryController::collectDraws(QVector<GalleryDraw>* out, const std::funct
             d.focused = i == gridFocus_;
             const auto found = shownAt.constFind(cell.photo);
             double fromX = pile.x, fromZ = pile.z, fromRot = 0, fromAlpha = 0;
+            const double fromScale = area_ == Area::Playlist ? jacketScale_ : 1.0;
             if (found != shownAt.constEnd()) {
                 const GalleryPlacedPhoto& placed = pile.shown[*found];
                 fromX = placed.x; fromZ = placed.z; fromRot = placed.rotationY; fromAlpha = 1;
@@ -500,6 +706,7 @@ void GalleryController::collectDraws(QVector<GalleryDraw>* out, const std::funct
             d.y = float(baseY + (i % 50) * stack + (1.0 - s) * smooth(float_) * floatHeight_);
             d.rotationY = float(lerp(fromRot, 0, s));
             d.alpha = float(lerp(fromAlpha, 1, s));
+            d.scale = float(lerp(found != shownAt.constEnd() ? fromScale : 1.0, 1.0, s));
             out->push_back(d);
         }
     }
@@ -507,11 +714,12 @@ void GalleryController::collectDraws(QVector<GalleryDraw>* out, const std::funct
 
 QJsonObject GalleryController::stateJson() const {
     const GalleryCamera cam = camera();
-    const char* modeName = mode_ == Mode::Boot ? "boot" : mode_ == Mode::Piles ? "piles" : mode_ == Mode::Grid ? "grid" : "playlists";
+    const char* modeName = mode_ == Mode::Boot ? "boot" : mode_ == Mode::Piles ? "piles" : "grid";
     const char* overlayName = overlay_ == Overlay::None ? "none" : overlay_ == Overlay::Menu ? "menu" : overlay_ == Overlay::Help ? "help" : "quit-ask";
     QJsonObject out{{"mode", modeName}, {"overlay", overlayName}, {"sort", gallerySortName(layout_.sort)},
+        {"area", area_ == Area::Library ? "library" : "playlist"}, {"areaChanging", areaPhase_ != 0},
         {"piles", layout_.piles.size()}, {"focusPile", focusPile_}, {"gridPile", gridPile_}, {"gridFocus", gridFocus_},
-        {"playlists", playlists_.size()}, {"playlistFocus", playlistFocus_},
+        {"playlists", playlists_.size()},
         {"gridCells", grid_.size()}, {"gridColumns", gridColumns_}, {"gridAmount", std::round(gridAmount() * 1000) / 1000},
         {"camera", QJsonObject{{"x", std::round(cam.targetX * 100) / 100}, {"z", std::round(cam.targetZ * 100) / 100},
             {"distance", std::round(cam.distance * 100) / 100}, {"angle", std::round(cam.angleDeg * 100) / 100}}},
@@ -520,6 +728,11 @@ QJsonObject GalleryController::stateJson() const {
         out.insert("focusLabel", layout_.piles[focusPile_].label);
         out.insert("focusPhotos", layout_.piles[focusPile_].photos.size());
     }
+    QJsonArray jackets;
+    for (const GalleryPile& jacket : (area_ == Area::Playlist ? layout_ : other_.layout).piles)
+        jackets.push_back(QJsonObject{{"name", jacket.label}, {"x", std::round(jacket.x * 100) / 100}, {"z", std::round(jacket.z * 100) / 100},
+            {"photos", jacket.photos.size()}});
+    out.insert("jackets", jackets);
     return out;
 }
 }

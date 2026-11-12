@@ -473,7 +473,7 @@ int main(int argc,char** argv) {
     parser.addOption({"gallery-layout","Index the Photo library recursively, write the gallery's piles and floor layout as JSON, then exit (uses --data-dir)","json-file"});
     parser.addOption({"gallery-root","Photo folder for --gallery-layout (repeatable; default: the Photo library folder preference)","directory"});
     parser.addOption({"gallery-sort","Pile order for --gallery-layout: newest (default), oldest or random","order"});
-    parser.addOption({"gallery-replay","Replay controller tokens (LEFT,RIGHT,UP,DOWN,ENTER,ESC,TRIANGLE,START,ZOOMIN,ZOOMOUT,wait=ms) over the Photo Gallery headlessly and write the state after each as JSON, then exit (uses --data-dir, --gallery-root)","tokens"});
+    parser.addOption({"gallery-replay","Replay controller tokens (LEFT,RIGHT,UP,DOWN,ENTER,ESC,TRIANGLE,START,ZOOMIN,ZOOMOUT,L1,R1,wait=ms) over the Photo Gallery headlessly and write the state after each as JSON, then exit (uses --data-dir, --gallery-root; the Playlist area's jackets come from the first <data-dir>/playlists file)","tokens"});
     parser.addOption({"gallery-replay-out","Output file for --gallery-replay","json-file"});
     parser.addOption({"gallery-thumbs","With --gallery-layout: also warm the thumbnail LOD cache under <data>/cache/gallery/thumbs and report it"});
     parser.addOption({"decode-fp","Decode RSX fragment-program captures (archive:lib/x.fpo@dir) into named parameter values and exit","spec"});

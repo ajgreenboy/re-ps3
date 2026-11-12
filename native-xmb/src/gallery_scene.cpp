@@ -124,7 +124,10 @@ QStringList GalleryScene::paramNames() {
         "SHADOW_PHOTO_SCALE_X", "SHADOW_PHOTO_SCALE_Z", "FOCUS_CLUSER_RADIUS_RATE", "FOCUS_CLUSER_COLOR_R", "FOCUS_CLUSER_COLOR_G",
         "FOCUS_CLUSER_COLOR_B", "FOCUS_CLUSER_COLOR_A", "CONTOUR_COLOR_R", "CONTOUR_COLOR_G", "CONTOUR_COLOR_B", "CONTOUR_COLOR_A",
         "CONTOUR_RADIUS_RATE", "GROUP_TEXT_LOD_DIST_2", "GROUP_TEXT_YEAR_LOD_DIST_2", "BORDER_LABEL_FONT_SIZE", "BORDER_YEAR_FONT_SIZE",
-        "GROUP_TEXT_LOD_SIZE_0", "GROUP_TEXT_YEAR_LOD_SIZE_0", "ARROW_OPACITY", "PARAM_MIN_DX", "PARAM_MIN_DZ", "LOD_PHOTO_DIST_3"};
+        "GROUP_TEXT_LOD_SIZE_0", "GROUP_TEXT_YEAR_LOD_SIZE_0", "ARROW_OPACITY", "PARAM_MIN_DX", "PARAM_MIN_DZ", "LOD_PHOTO_DIST_3",
+        // Playlist area (audit/PHOTO-GALLERY-PLAYLIST.md)
+        "FLOOR_PLAYLIST_COLOR_R", "FLOOR_PLAYLIST_COLOR_G", "FLOOR_PLAYLIST_COLOR_B", "FLOOR_WRAP_COUNT_PLAYLIST", "PLAYLIST_TEXT_SIZE",
+        "PLAYLIST_TEXT_POS_Z", "SHADOW_JACKET_DENSITY"};
     for (int i = 0; i < 6; ++i)
         for (const char* channel : {"R", "G", "B", "A"}) names << QStringLiteral("GROUP_TEXT_COLOR_%1_%2").arg(i).arg(QLatin1String(channel));
     return names;
@@ -367,12 +370,18 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
     program_.setUniformValue(u_.camPos, QVector3D(float(ex), float(ey), float(ez)));
 
     // ---- floor ----
-    program_.setUniformValue(u_.floorColor, QVector3D(float(n("FLOOR_COLOR_R")), float(n("FLOOR_COLOR_G")), float(n("FLOOR_COLOR_B"))));
+    // The Playlist area's floor uses FLOOR_PLAYLIST_COLOR_* and FLOOR_WRAP_COUNT_PLAYLIST (TRACED names; the package's
+    // wood floor of tex_help_pic_playlist is absent, so it is the same lit quad as the library's).
+    const bool playlistArea = controller.area() == GalleryController::Area::Playlist;
+    if (playlistArea)
+        program_.setUniformValue(u_.floorColor, QVector3D(float(n("FLOOR_PLAYLIST_COLOR_R")), float(n("FLOOR_PLAYLIST_COLOR_G")), float(n("FLOOR_PLAYLIST_COLOR_B"))));
+    else
+        program_.setUniformValue(u_.floorColor, QVector3D(float(n("FLOOR_COLOR_R")), float(n("FLOOR_COLOR_G")), float(n("FLOOR_COLOR_B"))));
     program_.setUniformValue(u_.floorOut, QVector3D(float(n("FLOOR_LIGHT_OUT_COLOR_R")), float(n("FLOOR_LIGHT_OUT_COLOR_G")), float(n("FLOOR_LIGHT_OUT_COLOR_B"))));
     // The grain tile repeats FLOOR_WRAP_COUNT_LIBRARY times across a 2000-unit floor (INFERRED reading of the name).
     const double floorSize = 2000.0;
     program_.setUniformValue(u_.floorParams, QVector4D(float(n("FLOOR_BRIGHTNESS_TYPE0")), float(camera.distance * 3.0),
-        float(n("FLOOR_WRAP_COUNT_LIBRARY") / floorSize), 0.10f));
+        float(n(playlistArea ? "FLOOR_WRAP_COUNT_PLAYLIST" : "FLOOR_WRAP_COUNT_LIBRARY") / floorSize), 0.10f));
     program_.setUniformValue(u_.lightCentre, QVector3D(float(camera.targetX), 0.f, float(camera.targetZ)));
     drawQuad(placeMatrix(camera.targetX, 0, camera.targetZ, 0, floorSize, floorSize), Floor, QVector4D(1, 1, 1, 1), grain_->textureId());
     checkGl("floor");
@@ -384,8 +393,37 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
     const bool inGrid = controller.enteredPile() >= 0;
     const bool bootDrop = controller.bootActive();
 
+    const auto groupColor = [&](int index, double alphaScale) {
+        const auto channel = [&](const char* c) { return n(qPrintable(QStringLiteral("GROUP_TEXT_COLOR_%1_%2").arg(index).arg(QLatin1String(c)))); };
+        return QVector4D(float(std::clamp(channel("R"), 0.0, 1.0)), float(std::clamp(channel("G"), 0.0, 1.0)), float(std::clamp(channel("B"), 0.0, 1.0)),
+                         float(channel("A") * alphaScale));
+    };
+    // ---- Playlist area: each jacket's name under it, and the card of an empty playlist ----
+    // PLAYLIST_TEXT_SIZE (2.5, "relative to the library space") and PLAYLIST_TEXT_POS_Z (1.9) are loaded by FUN_001a0488
+    // (TRACED: the 2.5f and 1.9 constants it reads); how it applies them is INFERRED: the label is the library label
+    // height times PLAYLIST_TEXT_SIZE, its centre PLAYLIST_TEXT_POS_Z half label heights below the jacket's lower edge.
+    if (playlistArea && pileAlpha > 0.01) {
+        const double labelHeight = n("BORDER_LABEL_FONT_SIZE") * 0.45 * n("PLAYLIST_TEXT_SIZE");
+        const int labelPixels = int(n("GROUP_TEXT_LOD_SIZE_0"));
+        const QVector3D placeholder(float(n("DEFAULT_PHOTO_COLOR_BASE_R")), float(n("DEFAULT_PHOTO_COLOR_BASE_G")), float(n("DEFAULT_PHOTO_COLOR_BASE_B")));
+        for (int i = 0; i < layout.piles.size(); ++i) {
+            const GalleryPile& jacket = layout.piles[i];
+            if (i == controller.enteredPile()) continue;
+            if (!onScreen(jacket.x, jacket.z, std::max(jacket.halfWidth, jacket.halfDepth) + labelHeight * 3)) continue;
+            if (jacket.shown.isEmpty()) {
+                // An empty playlist: the module's default photo colour card where the cover would be (INFERRED).
+                drawQuad(placeMatrix(jacket.x, 0.05, jacket.z, 0, jacket.halfWidth * 2, jacket.halfDepth * 2), Solid,
+                    QVector4D(placeholder.x() * 0.9f, placeholder.y() * 0.9f, placeholder.z() * 0.92f, float(0.8 * pileAlpha)));
+            }
+            if (const Label* label = labelFor(-1 - qint64(i), jacket.label, labelPixels); label && label->texture) {
+                const double lz = jacket.z + jacket.halfDepth + labelHeight * n("PLAYLIST_TEXT_POS_Z") * 0.5;
+                drawQuad(placeMatrix(jacket.x, 0.012, lz, 0, labelHeight * label->aspect, labelHeight), Plain,
+                    groupColor(jacket.colorIndex, pileAlpha), label->texture->textureId());
+            }
+        }
+    }
     // ---- contour (soft ellipse under each pile), labels, arrows ----
-    if (pileAlpha > 0.01 && !bootDrop) {
+    if (!playlistArea && pileAlpha > 0.01 && !bootDrop) {
         const QVector4D contour(float(n("CONTOUR_COLOR_R")), float(n("CONTOUR_COLOR_G")), float(n("CONTOUR_COLOR_B")), float(n("CONTOUR_COLOR_A") * pileAlpha));
         const double radiusRate = n("CONTOUR_RADIUS_RATE");
         const double labelDistance = n("GROUP_TEXT_LOD_DIST_2"), yearDistance = n("GROUP_TEXT_YEAR_LOD_DIST_2");
@@ -439,7 +477,7 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
     int floating = -1;
     double lift = 0;
     floating = controller.floatPile(&lift);
-    if (floating >= 0 && floating < layout.piles.size() && pileAlpha > 0.01 && !bootDrop) {
+    if (!playlistArea && floating >= 0 && floating < layout.piles.size() && pileAlpha > 0.01 && !bootDrop) {
         const GalleryPile& pile = layout.piles[floating];
         const double radius = (std::max(pile.halfWidth, pile.halfDepth) + 1.6) * n("FOCUS_CLUSER_RADIUS_RATE");
         const float k = float(GalleryController::smooth(lift) * pileAlpha);
@@ -463,11 +501,15 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
         photoTexture(photos[d.photo].path, &ratio);
         double w, h;
         photoSize(ratio, &w, &h);
+        w *= d.scale;
+        h *= d.scale;
+        // A jacket's shadow density is SHADOW_JACKET_DENSITY (TRACED name; INFERRED use, as for the photos).
         const double height = d.y;
         const int which = height <= d1 ? 0 : height <= d2 ? 1 : 2;
         const double spread = 1.0 + std::min(1.5, height * 0.15);
+        const double shade = d.jacket ? n("SHADOW_JACKET_DENSITY") : density;
         drawQuad(placeMatrix(d.x + height * 0.12, 0.015, d.z + height * 0.06, d.rotationY, w * sx * spread, h * sz * spread), Plain,
-            QVector4D(0, 0, 0, float(density * 0.22 * d.alpha)), shadow_[which]->textureId());
+            QVector4D(0, 0, 0, float(shade * 0.22 * d.alpha)), shadow_[which]->textureId());
     }
     checkGl("shadows");
 
@@ -481,7 +523,9 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
         const GLuint texture = photoTexture(photos[d.photo].path, &ratio);
         double w, h;
         photoSize(ratio, &w, &h);
-        const double border = 0.07;
+        w *= d.scale;
+        h *= d.scale;
+        const double border = 0.07 * d.scale;
         drawQuad(placeMatrix(d.x, d.y, d.z, d.rotationY, w + border * 2, h + border * 2), Solid,
             QVector4D(frameColor.x(), frameColor.y(), frameColor.z(), frameColor.w() * (texture ? d.alpha : d.alpha * 0.5f)));
         if (texture) {
@@ -503,6 +547,16 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
             if (!d.focused) continue;
             const float pulse = 0.85f + 0.15f * float(std::sin(seconds * 5.0));
             drawQuad(placeMatrix(d.x, d.y + 0.05, d.z, 0, minDx * 1.18, minDz * 1.3), Plain, QVector4D(1.f, 1.f, 1.f, float(gridAmount) * pulse), focusGrid_->textureId());
+        }
+    }
+    // The focused jacket: INFERRED. The module's jacket focus is not traced (focus_cluster's ring reads as a grey slab at a
+    // jacket's size), so the jacket lifts (controller) and carries the gallery's own focus_grid frame, scaled to it.
+    if (playlistArea && !inGrid && floating >= 0 && pileAlpha > 0.01) {
+        for (const GalleryDraw& d : draws) {
+            if (!d.jacket || d.pile != floating) continue;
+            const float pulse = 0.85f + 0.15f * float(std::sin(seconds * 5.0));
+            drawQuad(placeMatrix(d.x, d.y + 0.05, d.z, d.rotationY, minDx * 1.18 * d.scale, minDz * 1.3 * d.scale), Plain,
+                QVector4D(1.f, 1.f, 1.f, float(GalleryController::smooth(lift) * pileAlpha) * pulse), focusGrid_->textureId());
         }
     }
     checkGl("cursor");

@@ -3,6 +3,7 @@
 #include "gallery_params.h"
 #include "playlists.h"
 #include <QJsonObject>
+#include <QPointF>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -39,15 +40,21 @@ struct GalleryDraw {
     float x = 0, y = 0, z = 0;
     float rotationY = 0;  // degrees
     float alpha = 1;
+    float scale = 1;      // size against a library photo (a playlist jacket's cover is larger)
     bool grid = false;    // belongs to the pile that has been entered (grid cell positions)
     bool focused = false; // the grid's focused cell
+    bool jacket = false;  // a playlist jacket's cover in the Playlist area
 };
 
 class GalleryController {
 public:
-    enum class Mode { Boot, Piles, Grid, Playlists };
+    // Piles = the area's floor view (date piles in the Library area, playlist jackets in the Playlist area);
+    // Grid = one pile or one jacket entered.
+    enum class Mode { Boot, Piles, Grid };
+    // The firmware's areas, left to right: Library | Playlist | PSN (audit/PHOTO-GALLERY-PLAYLIST.md). PSN is not built.
+    enum class Area { Library, Playlist };
     enum class Overlay { None, Menu, Help, QuitAsk };
-    enum class Key { Left, Right, Up, Down, Cross, Circle, Triangle, Start, ZoomIn, ZoomOut };
+    enum class Key { Left, Right, Up, Down, Cross, Circle, Triangle, Start, ZoomIn, ZoomOut, L1, R1 };
     enum class Act { None, OpenPhoto, Slideshow, Quit };
     struct Result {
         Act act = Act::None;
@@ -69,10 +76,22 @@ public:
     void tick(double dt);
     // Back from the photo viewer: put the grid cursor on that file of the entered pile.
     void setGridFocus(int indexInPile);
-    void setPlaylists(QVector<Playlist> playlists) { playlists_ = std::move(playlists); playlistFocus_ = 0; }
+    // The user's photo playlists become the Playlist area's jackets (one per playlist, in store order), placed by the
+    // module's own collision spiral (placeJackets). Paths not in the library index are added as extra photos.
+    void setPlaylists(const QVector<Playlist>& playlists);
+    // The jacket placement of FUN_001a12e0 (TRACED; audit/PHOTO-GALLERY-PLAYLIST.md section 3): each jacket starts at
+    // `start` and, while its rect overlaps an already placed one, walks a square spiral (z-, x-, z+, z+, x+, x+, ...)
+    // in NEW_PLAYLIST_DIST_X / _Z steps; a step that would leave the PLAYLIST_SPACE rect ends the walk where it is.
+    struct JacketSpace { double centerX = 0, centerZ = 0, width = 0, height = 0, stepX = 0, stepZ = 0, jacketW = 0, jacketH = 0; };
+    static QVector<QPointF> placeJackets(int count, const JacketSpace& space, double startX, double startZ);
 
     // ---- read-only state ----
     Mode mode() const { return mode_; }
+    Area area() const { return area_; }
+    // 0..1 veil over the area change (fading out, the area swaps at 1, fading back in), and the area being entered.
+    double areaFade() const { return areaFade_; }
+    Area areaTarget() const { return areaPhase_ == 1 ? (area_ == Area::Library ? Area::Playlist : Area::Library) : area_; }
+    bool areaChanging() const { return areaPhase_ != 0; }
     Overlay overlay() const { return overlay_; }
     const QVector<GalleryPhoto>& photos() const { return photos_; }
     const GalleryLayout& layout() const { return layout_; }
@@ -100,7 +119,8 @@ public:
     QVector<MenuItem> menu() const;
     int menuFocus() const { return menuFocus_; }
     const QVector<Playlist>& playlists() const { return playlists_; }
-    int playlistFocus() const { return playlistFocus_; }
+    // A jacket's size against a library photo (draw scale) and its lift on focus.
+    double jacketScale() const { return jacketScale_; }
     int quitChoice() const { return quitChoice_; }  // 0 = Yes, 1 = No
     double nearLimit() const { return c_.nearLimit; }
     double farLimit() const { return c_.farLimit; }
@@ -117,7 +137,17 @@ private:
         double zoomSpeed = 0, quickIn = 0, quickOut = 0, focusSpeed = 0, brake = 0, gravity = 0, rectSpace = 0;
         double floatUp = 0, floatDown = 0, bootDist = 0, bootAngle = 0, helpTime = 0, bootFallHeight = 0;
         double minDx = 0, minDz = 0;
+        // Playlist area
+        double nearPlaylist = 0, farPlaylist = 0, nearGridPlaylist = 0, fadeIn = 0, fadeOut = 0;
     };
+    // What one area keeps while the other is shown.
+    struct AreaView {
+        GalleryLayout layout;
+        int focusPile = -1;
+        double focusX = 0, focusZ = 0, distance = 40, nearLimit = 0, farLimit = 0, nearGrid = 0;
+    };
+    void swapArea();
+    void buildJacketLayout(GalleryLayout* out);
     void enterPile(int pile);
     void leavePile();
     int nearestPile(double x, double z, double within) const;
@@ -151,8 +181,15 @@ private:
     int blendDirection_ = 0; // +1 entering, -1 leaving
     // menu / quit
     int menuFocus_ = 0, quitChoice_ = 0;
+    // areas
+    Area area_ = Area::Library;
+    AreaView other_;          // the area not shown
+    int areaPhase_ = 0;       // 0 idle, 1 fading out, 2 fading in
+    double areaFade_ = 0;
+    int libraryCount_ = 0;    // photos_[0, libraryCount_) are the library; the rest are playlist-only files
     QVector<Playlist> playlists_;
-    int playlistFocus_ = 0;
+    JacketSpace space_;
+    double jacketScale_ = 1;
     // sticks
     double stickX_ = 0, stickZ_ = 0, stickZoom_ = 0;
 };

@@ -4834,7 +4834,8 @@ void View::keyPressEvent(QKeyEvent* e) {
         const bool arrow=e->key()==Qt::Key_Left || e->key()==Qt::Key_Right || e->key()==Qt::Key_Up || e->key()==Qt::Key_Down;
         const bool mapped=arrow || e->key()==Qt::Key_Return || e->key()==Qt::Key_Enter || e->key()==Qt::Key_Escape || e->key()==Qt::Key_Backspace ||
             e->key()==Qt::Key_T || e->key()==Qt::Key_S || e->key()==Qt::Key_Space || e->key()==Qt::Key_Plus || e->key()==Qt::Key_Equal ||
-            e->key()==Qt::Key_Minus || e->key()==Qt::Key_PageUp || e->key()==Qt::Key_PageDown;
+            e->key()==Qt::Key_Minus || e->key()==Qt::Key_PageUp || e->key()==Qt::Key_PageDown ||
+            e->key()==Qt::Key_BracketLeft || e->key()==Qt::Key_BracketRight;
 #ifdef Q_OS_WIN
         const bool viaPoll=arrow && !replayingInput_;
 #else
@@ -5022,7 +5023,7 @@ void View::pollController() {
         return;
     }
     // The Photo Gallery owns the pad while its area is up: d-pad and keyboard arrows hop between piles or cells with the
-    // XMB's repeat, the left stick moves the free focus, the right stick (a DualShock/HID pad) and L1/R1 zoom.
+    // XMB's repeat, the left stick moves the free focus, the right stick zooms and L1/R1 change the area.
     if(galleryOwnsInput()) {
         const auto edgeG=quint16((buttons&~buttons_)|keyPressed_);keyPressed_=0;const auto nowG=clock_.elapsed();
         if(buttons || edgeG){shell_.noteActivity();mediaControls_.activity(nowG);}
@@ -5030,7 +5031,7 @@ void View::pollController() {
         const qint64 nextG=std::max(repeatAt_,nowG-67)+67;
         const auto moveG=quint16(edgeG|(repeatG?buttons:0));
         const float stickX=xinput?xstate.lx:(playstation?hid.lx:0.f),stickY=xinput?xstate.ly:(playstation?hid.ly:0.f);
-        const float zoomY=playstation?hid.ry:0.f;
+        const float zoomY=xinput?xstate.ry:(playstation?hid.ry:0.f);
         if(moveG&XINPUT_GAMEPAD_DPAD_LEFT)galleryPress(Qt::Key_Left);
         if(gallery_ && (moveG&XINPUT_GAMEPAD_DPAD_RIGHT))galleryPress(Qt::Key_Right);
         if(gallery_ && (moveG&XINPUT_GAMEPAD_DPAD_UP))galleryPress(Qt::Key_Up);
@@ -5039,8 +5040,9 @@ void View::pollController() {
         if(gallery_ && (edgeG&XINPUT_GAMEPAD_B))galleryPress(Qt::Key_Escape);
         if(gallery_ && (edgeG&XINPUT_GAMEPAD_Y))galleryPress(Qt::Key_T);
         if(gallery_ && (edgeG&XINPUT_GAMEPAD_START))galleryPress(Qt::Key_S);
-        if(gallery_ && (edgeG&XINPUT_GAMEPAD_RIGHT_SHOULDER))galleryPress(Qt::Key_Plus);
-        if(gallery_ && (edgeG&XINPUT_GAMEPAD_LEFT_SHOULDER))galleryPress(Qt::Key_Minus);
+        // L1 / R1 change the area (hknw_plugin's msg_help_go_to_*_area_l1/_r1; audit/PHOTO-GALLERY-PLAYLIST.md).
+        if(gallery_ && (edgeG&XINPUT_GAMEPAD_RIGHT_SHOULDER))galleryPress(Qt::Key_BracketRight);
+        if(gallery_ && (edgeG&XINPUT_GAMEPAD_LEFT_SHOULDER))galleryPress(Qt::Key_BracketLeft);
         if(gallery_ && gallery_->controller)gallery_->controller->setSticks(stickX,stickY,zoomY);
         if(edgeG&0x000f)repeatAt_=nowG+300;else if(moveG&0x000f)repeatAt_=nextG;
         buttons_=buttons;return;
