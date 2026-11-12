@@ -662,7 +662,8 @@ QStringList realLines() {
 QStringList readLines(const QString& path) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) return {};
-    return QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    // Tolerate a CRLF checkout of the golden file.
+    return QString::fromUtf8(file.readAll()).remove(QLatin1Char('\r')).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
 }
 
 bool writeLines(const QString& path, const QStringList& lines) {
