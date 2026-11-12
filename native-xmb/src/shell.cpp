@@ -4853,10 +4853,9 @@ void Shell::readMediaTags() {
     if(mediaArtist_.isEmpty())mediaArtist_=tags.value(QMediaMetaData::AlbumArtist).toString().trimmed();
     mediaAlbum_=tags.value(QMediaMetaData::AlbumTitle).toString().trimmed();
     QImage cover;
-    for(const auto key:{QMediaMetaData::CoverArtImage,QMediaMetaData::ThumbnailImage}) {
-        const auto value=tags.value(key);
+    {
+        const auto value=tags.value(QMediaMetaData::CoverArtImage);
         if(value.canConvert<QImage>())cover=value.value<QImage>();
-        if(!cover.isNull())break;
     }
     if(cover.isNull()) {
         const QFileInfo file(player_->source().toLocalFile());

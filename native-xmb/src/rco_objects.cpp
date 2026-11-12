@@ -727,16 +727,16 @@ QString RcoObjects::Container::resolve(const Value& value) const {
     switch (value.refKind()) {
     case RefKind::Null: return QStringLiteral("null");
     case RefKind::Text: {
-        const QString name = textLabel(value.target);
-        return name.isEmpty() ? QStringLiteral("text#%1").arg(value.target) : QStringLiteral("text#%1:%2").arg(value.target).arg(name);
+        const QString label = textLabel(value.target);
+        return label.isEmpty() ? QStringLiteral("text#%1").arg(value.target) : QStringLiteral("text#%1:%2").arg(value.target).arg(label);
     }
     case RefKind::Image: {
-        const QString name = imageName(value.target);
-        return name.isEmpty() ? QStringLiteral("image@0x%1").arg(value.target, 0, 16) : name;
+        const QString image = imageName(value.target);
+        return image.isEmpty() ? QStringLiteral("image@0x%1").arg(value.target, 0, 16) : image;
     }
     case RefKind::Font: {
-        const QString name = fontName(value.target);
-        return name.isEmpty() ? QStringLiteral("font@0x%1").arg(value.target, 0, 16) : name;
+        const QString font = fontName(value.target);
+        return font.isEmpty() ? QStringLiteral("font@0x%1").arg(value.target, 0, 16) : font;
     }
     case RefKind::Object: {
         const auto* entry = objectAt(value.target);

@@ -112,6 +112,8 @@ if(WIN32)
 endif()
 if(MSVC)
     target_compile_options(re-ps3-native PRIVATE /W4 /permissive- /utf-8 /Zi)
+    # The env-driven debug logs and the crash handler use fopen/_wfopen deliberately; fopen_s adds nothing there.
+    target_compile_definitions(re-ps3-native PRIVATE _CRT_SECURE_NO_WARNINGS)
     # Program database for the crash handler's stack traces (main.cpp); optimisation is unchanged.
     target_link_options(re-ps3-native PRIVATE /DEBUG /OPT:REF /OPT:ICF)
     target_link_libraries(re-ps3-native PRIVATE dbghelp windowsapp d3d11 dxgi dcomp dwmapi shell32 wlanapi)

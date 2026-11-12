@@ -340,7 +340,7 @@ public:
         setAttribute(Qt::WA_AlwaysShowToolTips,false);
         resize(640,400);
         clock_.start();
-        log_.open(QIODevice::WriteOnly|QIODevice::Truncate);
+        if(!log_.open(QIODevice::WriteOnly|QIODevice::Truncate))qWarning()<<"desktop pad sink: cannot open the log:"<<log_.errorString();
     }
     void write(QJsonObject o) {
         o.insert("ms",double(clock_.elapsed()));

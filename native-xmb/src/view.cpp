@@ -537,7 +537,11 @@ void main(){colour=vec4(texture(frame,(uv-.5)*uvScale+.5).rgb*brightness,1.);})"
     particles_.init(*this,assets_);
     if(introEnabled_)coldboot_.init(*this,assets_);
     if(!monthImage_.isNull()) {
+#if QT_VERSION >= QT_VERSION_CHECK(6,9,0)
+        monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.flipped(Qt::Vertical));
+#else
         monthTexture_=std::make_unique<QOpenGLTexture>(monthImage_.mirrored(false,true));
+#endif
         monthTexture_->setMinificationFilter(QOpenGLTexture::Linear);monthTexture_->setMagnificationFilter(QOpenGLTexture::Linear);
         monthTexture_->setWrapMode(QOpenGLTexture::ClampToEdge);
     }
@@ -846,8 +850,8 @@ bool View::measureReference(const QString& path) {
             backgroundOverride_=QDateTime(QDate(measureDate.year(),8,1),QTime(12,0));
             renderBackground(float(300+k*.5),1.f,W,H);
             const QImage crop=fbo.toImage().copy((W-cropW)/2,int(H*.12),cropW,cropH).scaled(tileW,tileH,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
-            const QPoint at((k%columns)*tileW,(k/columns)*tileH);
-            painter.drawImage(at,crop);painter.drawText(at+QPoint(6,16),QString("t+%1 s").arg(k*.5,0,'f',1));
+            const QPoint cell((k%columns)*tileW,(k/columns)*tileH);
+            painter.drawImage(cell,crop);painter.drawText(cell+QPoint(6,16),QString("t+%1 s").arg(k*.5,0,'f',1));
         }
         painter.end();
         sheet.save(QFileInfo(path).dir().filePath("video-reference-motion.png"));
@@ -2840,9 +2844,9 @@ void View::drawScene(QPainter& p) {
                    && i!=column.selection) {
                     const int d=std::abs(i-column.selection);
                     if(d<=13) {
-                        PafEase dim;dim.retarget(1.);
-                        dim.retarget(settingsIdleDim,(i>column.selection?800.-10*d:800.-20*d),5,settingsIdleMs+(14-d)*30.);
-                        dim.advance(resting*.001);settingsIdle=dim.value;
+                        PafEase idleDim;idleDim.retarget(1.);
+                        idleDim.retarget(settingsIdleDim,(i>column.selection?800.-10*d:800.-20*d),5,settingsIdleMs+(14-d)*30.);
+                        idleDim.advance(resting*.001);settingsIdle=idleDim.value;
                     }
                 }
                 p.save();p.setOpacity(columnAlpha*(1.-behind)*(1.-panelAmount*(1.-focus))*(1.-idleFade)*settingsIdle);

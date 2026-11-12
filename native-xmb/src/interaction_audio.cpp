@@ -503,7 +503,7 @@ InteractionAudio::Decision InteractionAudio::playAt(Cue cue, qint64 atMs) {
         state.device = device.description();
         auto* sink = state.sink.get();
         connect(sink, &QAudioSink::stateChanged, sink, [sink](QtAudio::State) {
-            if (sink->error() != QtAudio::NoError && sink->error() != QtAudio::UnderrunError)
+            if (sink->error() != QtAudio::NoError)
                 qWarning() << "interaction audio: output failure" << sink->error();
         });
     }
