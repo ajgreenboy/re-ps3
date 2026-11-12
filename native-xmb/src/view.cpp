@@ -2743,6 +2743,16 @@ void View::drawScene(QPainter& p) {
                 const double sink=(active && level==int(columns.size())-1)?overscrollStep*columnSink_:0.;
                 const double y=540+(505+row-540-15*depth*std::clamp(distance,0.,1.))*(1.-.055*depth)+sink;
                 if(y<-100 || y>1050)continue;
+                // A section heading row: a dim caption with no icon and no focus, so the groups below read
+                // as sections instead of more items. It never takes the cursor (Shell::vertical skips it).
+                if(entry.sectionHeader) {
+                    const double labelX=kColumnX+(level==0?113:60)+ahead*210+offset;
+                    p.save();
+                    p.setOpacity(columnAlpha*(1.-behind)*.62);
+                    text({labelX,y-14,600,28},entry.title,20,QColor(212,212,212,150),Qt::AlignLeft|Qt::AlignVCenter);
+                    p.restore();
+                    continue;
+                }
                 // The icon wind's widget: this row's icon centre, keyed by its column set, level and row.
                 windSites_.push_back({(quint64(active?shell_.category():outgoingCategory_)<<40)|(quint64(level)<<20)|quint64(i),
                     QPointF(kColumnX-behind*(109.46+152*focus)+ahead*210+offset,y)});

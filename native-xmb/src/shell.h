@@ -128,7 +128,9 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     Setup,
     // Game > Saved Data / Memory Card Utility: presentation only, no console save-data backend.
     SaveData, ImportSource, ReleaseFolder, ReleaseDownload, DownloadManager, DebridToken, FlareSolverrUrl,
-    BrowseGames, SearchGames, GameSearchResult, GameSourcePick, GameDownloadDrive };
+    BrowseGames, SearchGames, GameSearchResult, GameSourcePick, GameDownloadDrive,
+    // Game > Steam: the folded hub that lists Steam Store and All Games behind one column folder.
+    SteamHub };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -160,6 +162,9 @@ struct Entry {
     // page's three fields use it (server URL, user name, and the password as dots); every other row leaves it
     // empty, so the view falls through to Shell::valueText() exactly as before and no existing frame changes.
     QString fieldValue;
+    // True on a non-selectable section label row in a column (the Game column's "Download Games" /
+    // "Manage" headings). The view draws it as a dim caption and navigation skips over it.
+    bool sectionHeader=false;
     // The Settings page a row belongs to ("system", "network", "device", ...), empty on every other row. It is
     // what lets the shell resolve a row's live value and its information page through host::rowValue /
     // host::rowDetail - the machine half of the settings source layer - without every call site naming the

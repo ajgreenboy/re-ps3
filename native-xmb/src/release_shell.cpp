@@ -113,10 +113,22 @@ void Shell::rebuildReleaseSources() {
         category.entries.erase(std::remove_if(category.entries.begin(),category.entries.end(),[](const Entry& entry){
             return entry.action==Action::ReleaseFolder;
         }),category.entries.end());
+        if(releaseSources_.isEmpty())return;
+        QVector<Entry> sources;
         for(const auto& source:releaseSources_) {
             Entry entry=releaseRow(QStringLiteral("release:source:")+source.slug,source.name,Action::ReleaseFolder,source.slug);
-            entry.detail=tr("%1 releases").arg(source.releases.size());category.entries.append(entry);
+            entry.detail=tr("%1 releases").arg(source.releases.size());sources.append(entry);
         }
+        // Insert the source folders at the end of the Download Games section, just before the Manage
+        // heading (id "game:section:manage"), or at the tail if that heading is somehow absent.
+        int at=category.entries.size();
+        for(int i=0;i<category.entries.size();++i)if(category.entries[i].id==QLatin1String("game:section:manage")){at=i;break;}
+        QVector<Entry> merged;
+        merged.reserve(category.entries.size()+sources.size());
+        for(int i=0;i<at;++i)merged.push_back(category.entries[i]);
+        for(const auto& source:sources)merged.push_back(source);
+        for(int i=at;i<category.entries.size();++i)merged.push_back(category.entries[i]);
+        category.entries=std::move(merged);
     }
 }
 void Shell::openReleaseSource(const QString& slug) {

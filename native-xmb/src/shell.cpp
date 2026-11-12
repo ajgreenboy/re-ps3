@@ -61,6 +61,12 @@ namespace {
 Entry item(QString id,QString title,QString texture,QString container="explore_plugin_full",Action action=Action::Unavailable,QString value={}) {
     return {std::move(id),std::move(title),{},std::move(container),std::move(texture),action,std::move(value)};
 }
+// A non-selectable section label row (the Game column's "Download Games" / "Manage" headings).
+Entry sectionHeader(QString id,QString title) {
+    Entry e=item(std::move(id),std::move(title),QString());
+    e.sectionHeader=true;e.source=QStringLiteral("builtin");
+    return e;
+}
 // PARAM.SFO (PSF): "\0PSF", version, key table offset @8, data table offset @12, entry count @16, then 16-byte
 // entries {u16 key offset, u16 format, u32 length, u32 max length, u32 data offset}; all little-endian.
 QHash<QString,QString> readSfo(const QString& path) {
@@ -1131,9 +1137,9 @@ void Shell::refreshContent() {
             auto& category=categories_[c];
             const auto selected=category.entries.isEmpty()?QString{}:category.entries[selections_[c]].id;
             category.entries.erase(std::remove_if(category.entries.begin(),category.entries.end(),[](const Entry& e){
-                return e.id.startsWith("steam:") || e.id.startsWith("steam-folder-") || e.id.startsWith("steam-store") || e.id.startsWith("custom:");
+                return e.id.startsWith("steam:") || e.id.startsWith("steam-folder-") || e.id.startsWith("steam-store") || e.id.startsWith("steam-hub") || e.id.startsWith("custom:");
             }),category.entries.end());
-            QVector<Entry> providers,installed;
+            QVector<Entry> providers,installed,steam;
             if(category.id=="game") {
                 // Installed titles lead the column as ICON0 tiles that launch directly, the way a real PS3
                 // lists its installed games at the top of Game (user direction 2026-11-02; the RPCS3 corpus has
@@ -1156,16 +1162,12 @@ void Shell::refreshContent() {
                     return steamActivity_.value(a.value).lastPlayed>steamActivity_.value(b.value).lastPlayed;
                 });
                 {
-                    // Browsing the public storefront: the only place to find something not owned yet.
-                    auto e=item("steam-store",QObject::tr("Steam Store"),"item_tex_ps_store","explore_plugin_full",
-                        Action::SteamStoreBrowse,QString());
-                    e.detail=QObject::tr("Browse and install");e.artwork=serviceIcons::steam(steamRoot_);e.iconSized=true;providers.push_back(std::move(e));
-                }
-                const int steamTitles=steamTitleCount();
-                if(steamTitles>0) {
-                    auto e=item("steam-folder-all-games",QObject::tr("All Games"),"item_tex_plain_folder",
-                        "explore_plugin_full",Action::SteamFolder,"all");
-                    e.detail=QString::number(steamTitles);e.artwork=serviceIcons::steam(steamRoot_);e.iconSized=true;providers.push_back(std::move(e));
+                    // One folded Steam hub instead of two separate rows: Store and All Games live inside it.
+                    auto e=item("steam-hub",QObject::tr("Steam"),"item_tex_plain_folder","explore_plugin_full",
+                        Action::SteamHub,QString());
+                    const int steamTitles=steamTitleCount();
+                    e.detail=steamTitles>0?QObject::tr("%1 owned").arg(steamTitles):QObject::tr("Store and library");
+                    e.artwork=serviceIcons::steam(steamRoot_);e.iconSized=true;steam.push_back(std::move(e));
                 }
             }
             for(const auto& app:contentApps_)if(app.category==category.id) {
@@ -1202,10 +1204,13 @@ void Shell::refreshContent() {
                 providers.push_back(std::move(e));
                 providers.last().rawgArtworkVisible=result.rawgPaths.contains(QStringLiteral("custom:")+app.id);
             }
-            category.entries=installed+providers+category.entries;
+            category.entries=installed+providers+steam+category.entries;
             selections_[c]=0;
             for(int i=0;i<category.entries.size();++i)if(category.entries[i].id==selected){selections_[c]=i;break;}
             if(!contentLoaded_ && category.id=="game" && !providers.isEmpty())selections_[c]=0;
+            // Never rest the selection on a section heading: skip forward to the first real row.
+            while(selections_[c]<category.entries.size() && category.entries[selections_[c]].sectionHeader)++selections_[c];
+            selections_[c]=std::min(selections_[c],int(category.entries.size())-1);
         }
         contentLoaded_=true;
         QVector<QPair<QString,QString>> rawgTargets;
@@ -1631,10 +1636,12 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     discordFriendsError_=discordFriends_.configured()?QStringLiteral("Select Refresh Discord Friends to sign in."):discordFriends_.configurationError();
     rebuildFriends();
     for(auto& category:categories_)if(category.id=="game") {
-        category.entries.push_back(item("content:refresh","Refresh Game Library","item_tex_plain_folder",full,Action::RefreshContent));
-        category.entries.push_back(item("content:import","Import Games and Apps","item_tex_plain_folder",full,Action::ImportApps));
+        category.entries.push_back(sectionHeader("game:section:download",QObject::tr("Download Games")));
         category.entries.push_back(item("game:search","Browse","item_tex_plain_folder",full,Action::BrowseGames));
         category.entries.push_back(item("release:import","Import Source","item_tex_plain_folder",full,Action::ImportSource));
+        category.entries.push_back(sectionHeader("game:section:manage",QObject::tr("Manage")));
+        category.entries.push_back(item("content:refresh","Refresh Game Library","item_tex_plain_folder",full,Action::RefreshContent));
+        category.entries.push_back(item("content:import","Import Games and Apps","item_tex_plain_folder",full,Action::ImportApps));
     }
     refreshReleaseSources();
     QTimer::singleShot(0,this,&Shell::refreshContent);
@@ -2018,7 +2025,19 @@ void Shell::vertical(int delta) {
         if(busy() && message_.isEmpty())qInfo().noquote()<<"busy: navigation refused (Up/Down) while a list loads";
         return;
     }
-    const int previous=selection();currentSelection()=int(std::clamp(qint64(selection())+qint64(delta),qint64(0),qint64(std::max(0,int(entries().size())-1))));
+    const int previous=selection();
+    const int n=int(entries().size());
+    if(n>0) {
+        int target=int(std::clamp(qint64(previous)+qint64(delta),qint64(0),qint64(n-1)));
+        // Section headings are not selectable: step over them in the same direction.
+        int guard=0;
+        while(target!=previous && entries()[target].sectionHeader && guard<n) {
+            target=int(std::clamp(qint64(target)+qint64(delta),qint64(0),qint64(n-1)));
+            ++guard;
+        }
+        if(entries()[target].sectionHeader)target=previous;   // no real row that way: stay put
+        currentSelection()=target;
+    }
     if(previous!=selection()){columnSink_=0;interactionAudio_.play(InteractionAudio::Cue::Move);emit changed();}
     else emit changed();
 }
@@ -2285,6 +2304,26 @@ void Shell::activate() {
         break;
     case Action::SteamFolder:openSteamFolder(entry.value);break;
     case Action::SteamDownloads:openSteamDownloads();break;
+    case Action::SteamHub: {
+        // The folded Steam hub: Store plus All Games, one level under the Game column's Steam folder.
+        Page page;page.title=QObject::tr("Steam");
+        {
+            auto e=item("steam-store",QObject::tr("Steam Store"),"item_tex_ps_store","explore_plugin_full",
+                Action::SteamStoreBrowse,QString());
+            e.detail=QObject::tr("Browse and install");e.artwork=serviceIcons::steam(steamRoot_);e.iconSized=true;
+            page.entries.push_back(std::move(e));
+        }
+        const int steamTitles=steamTitleCount();
+        if(steamTitles>0) {
+            auto e=item("steam-folder-all-games",QObject::tr("All Games"),"item_tex_plain_folder",
+                "explore_plugin_full",Action::SteamFolder,"all");
+            e.detail=QString::number(steamTitles);e.artwork=serviceIcons::steam(steamRoot_);e.iconSized=true;
+            page.entries.push_back(std::move(e));
+        }
+        pages_.push_back(std::move(page));
+        emit changed();
+        break;
+    }
     case Action::SteamStoreBrowse: {
         // Sections first: no request until a section is chosen, so opening the store is instant.
         Page page;page.title=QObject::tr("Steam Store");
