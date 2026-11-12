@@ -2672,7 +2672,7 @@ void Shell::requestQuitGame() {
     showConfirm(ask,QString(),[this]{quitRunningTitle();});
     emit changed();
 }
-// ZF2 (audit/TEXT-ENTRY.md): only while the in-game XMB is up over a tracked title. The view opens the OSK; nothing is sent until it
+// ZF2 (audit/ZF-TEXT-ENTRY.md): only while the in-game XMB is up over a tracked title. The view opens the OSK; nothing is sent until it
 // confirms, and Circle sends nothing.
 void Shell::requestEnterText() {
     if(!titleRunning() || !inGame_){qInfo().noquote()<<"ingame: Enter Text ignored (no in-game XMB over a running title)";return;}

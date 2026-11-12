@@ -6,7 +6,7 @@
 #include <functional>
 #include <vector>
 
-// ZF2 (audit/TEXT-ENTRY.md): type into a running title or web app through the XMB's own on-screen keyboard.
+// ZF2 (audit/ZF-TEXT-ENTRY.md): type into a running title or web app through the XMB's own on-screen keyboard.
 //
 // The in-game XMB's "Enter Text" row opens the XMB's OSK in plain text-field mode. On confirm the foreground goes back to the
 // window the XMB recorded when the in-game XMB opened, and TextDelivery sends the text with SendInput and KEYEVENTF_UNICODE (one

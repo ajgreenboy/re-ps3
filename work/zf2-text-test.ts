@@ -1,4 +1,4 @@
-// ZF2/ZF1 verification (audit/TEXT-ENTRY.md). Everything runs against a sink window of our own; nothing is sent to any other
+// ZF2/ZF1 verification (audit/ZF-TEXT-ENTRY.md). Everything runs against a sink window of our own; nothing is sent to any other
 // application, and only the PIDs this script starts are ever stopped.
 //   bun work/zf2-text-test.ts [--exe C:/dev/out/zf2-build/re-ps3-native.exe]
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';

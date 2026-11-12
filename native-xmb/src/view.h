@@ -203,7 +203,7 @@ private:
     // foreground back to the recorded window. inGameBack(): Circle at the column root is "Back to Game Screen".
     void enterInGame(const QString& reason);
     void returnToGame(const QString& reason);
-    // ZF2 (audit/TEXT-ENTRY.md): the in-game "Enter Text" row opens the OSK; the confirmed text goes to the recorded window.
+    // ZF2 (audit/ZF-TEXT-ENTRY.md): the in-game "Enter Text" row opens the OSK; the confirmed text goes to the recorded window.
     void beginTitleText();
     void deliverTitleText(const QString& text);
     textentry::TextDelivery titleText_{this};

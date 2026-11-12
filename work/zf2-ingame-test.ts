@@ -1,4 +1,4 @@
-// ZF2 end to end (audit/TEXT-ENTRY.md): the XMB launches a sink window of our own as its tracked title (the XMB's own exe in
+// ZF2 end to end (audit/ZF-TEXT-ENTRY.md): the XMB launches a sink window of our own as its tracked title (the XMB's own exe in
 // --zf-text-sink mode, imported as an app), a scripted PS tap opens the in-game XMB, Cross on "Enter Text" opens the OSK, keys are
 // pressed on it, and Enter confirms (case A) or Circle cancels (case B). Nothing touches any other application.
 //   bun work/zf2-ingame-test.ts [--exe C:/dev/out/zf2-build/re-ps3-native.exe]

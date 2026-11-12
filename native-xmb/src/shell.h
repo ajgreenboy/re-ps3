@@ -109,7 +109,7 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // F5 in-game XMB (audit/INGAME-XMB-DESIGN.md): the firmware's seg_gameexit row (class xmlgameexit, key gameexit) and the
     // Game column's seg_manual row. Both exist only while a title runs and the XMB was raised over it (inGame()).
     QuitGame, GameManual,
-    // ZF2 (audit/TEXT-ENTRY.md, INFERRED: the firmware has no such row): type into the running title through the XMB's own keyboard.
+    // ZF2 (audit/ZF-TEXT-ENTRY.md, INFERRED: the firmware has no such row): type into the running title through the XMB's own keyboard.
     EnterText,
     // Photo > Photo Gallery (category_photo.xml #seg_hakoniwa): the recreated hakoniwa library area (gallery_*.cpp, audit/PHOTO-GALLERY.md).
     PhotoGallery,
