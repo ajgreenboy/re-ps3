@@ -555,7 +555,6 @@ public:
     // pages, so the pad reaches it through the same horizontal/vertical/activate/back path as every other page.
     void setSetupContext(const QString& devFlashRoot,int kioskDisplay);
     void beginSetup(bool forced);
-    bool setupActive() const;
     QString desktopHotkey() const { return preferences_.value("desktop/hotkey").toString(); }
     bool keepMusicInDesktop() const { return preferences_.value("desktop/keepMusic").toBool(); }
     // D9 part 2: the two HDMI-CEC preferences (both default off; the rows are unavailable without cec-client).

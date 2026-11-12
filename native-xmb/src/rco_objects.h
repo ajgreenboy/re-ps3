@@ -155,7 +155,6 @@ public:
     // The parsed container, read on first request and cached. A missing/corrupt container comes back
     // with ok == false and error set; it is not retried.
     const Container& container(const QString& name);
-    bool isLoaded(const QString& name) const;
     // Every vsh/resource/*.rco the firmware tree carries, base names sorted (no I/O into the files).
     QStringList containers() const;
     Assets& assets() const { return *assets_; }

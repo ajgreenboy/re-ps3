@@ -780,8 +780,6 @@ const RcoObjects::Container& RcoObjects::container(const QString& name) {
     return *container;
 }
 
-bool RcoObjects::isLoaded(const QString& name) const { return containers_.contains(name); }
-
 QStringList RcoObjects::containers() const {
     QStringList names;
     const QDir dir(QDir(assets_->root()).filePath(QStringLiteral("vsh/resource")));

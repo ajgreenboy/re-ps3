@@ -152,12 +152,6 @@ Profiles::Profiles(const QString& dataDirectory, QObject* parent)
     autoLogin_ = autoLogin;
 }
 
-QString Profiles::activeName() const {
-    for (const auto& profile : profiles_)
-        if (profile.id == activeId_) return profile.name;
-    return {};
-}
-
 bool Profiles::fail(QString message) {
     error_ = std::move(message);
     qWarning().noquote() << "profiles:" << error_;

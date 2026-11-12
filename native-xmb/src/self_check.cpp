@@ -626,15 +626,6 @@ CheckResult checkRawg(const SelfCheckInputs& in) {
 
 } // namespace
 
-QString checkLevelName(CheckResult::Level level) {
-    switch (level) {
-    case CheckResult::Ok: return QStringLiteral("OK");
-    case CheckResult::Warn: return QStringLiteral("WARN");
-    case CheckResult::Fail: return QStringLiteral("FAIL");
-    }
-    return {};
-}
-
 QVector<CheckResult> runSelfCheck(const SelfCheckInputs& in) {
     QVector<CheckResult> out;
     out.push_back(checkVersion(in));

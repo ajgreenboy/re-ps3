@@ -32,8 +32,6 @@ struct SelfCheckInputs {
     int timeoutMs = 1500;        // per network/process probe; kept under the 2 s budget
 };
 
-QString checkLevelName(CheckResult::Level level);
-
 // Synchronous; call on a worker thread (it blocks on DNS, HTTP and process probes).
 QVector<CheckResult> runSelfCheck(const SelfCheckInputs& inputs);
 

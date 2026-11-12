@@ -45,7 +45,6 @@ void Shell::setSetupContext(const QString& devFlashRoot,int kioskDisplay) {
     setup_.devFlash=devFlashRoot;setup_.kioskDisplay=kioskDisplay;
     setup_.firmwareOk=setup::checkFirmware(devFlashRoot).ok;
 }
-bool Shell::setupActive() const { return setup_.active; }
 QStringList Shell::setupOrder() const {
     QStringList order{QStringLiteral("welcome"),QStringLiteral("firmware"),QStringLiteral("library")};
     if(QGuiApplication::screens().size()>1)order<<QStringLiteral("display");

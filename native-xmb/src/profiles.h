@@ -28,7 +28,6 @@ public:
 
     QVector<Profile> profiles() const { return profiles_; }
     QString activeId() const { return activeId_; }
-    QString activeName() const;
     bool create(QString name);
     bool select(QString id);
     // Renames a user; the name rules and the case-folded duplicate check are create()'s (the firmware's
