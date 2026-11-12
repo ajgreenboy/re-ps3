@@ -18,6 +18,7 @@ constexpr double kDistance=2700,kScaleX=2.8125,kScaleY=5; // captured: steady-st
 // GLASS and the 1/GLASS weights are ICONS.mnu keys, the control points themselves are captures.
 constexpr float kLuminanceX0=.20443f,kLuminanceX1=.544441f,kLuminanceX2=1.f;
 constexpr float kLuminanceY0=-.736614f,kLuminanceY1=-.259981f;
+constexpr GLint kMaxWindow=512; // the 128 px window at up to 4x design scale (7680x4320 is 4x)
 constexpr double kEnvTurnPerSecond=30.; // captured: _EnvRot turns ~30 deg/s, starting at -147 deg
 constexpr double kEnvStartDegrees=-147.;
 }
@@ -45,6 +46,15 @@ GLuint IconRenderer::normalMap(QOpenGLFunctions_3_3_Core& gl,const QString& name
     const GLuint id=image.isNull()?0:texture(gl,image.flipped(Qt::Vertical),true);
     normalMaps_.insert(name,id);
     return id;
+}
+
+void IconRenderer::ensureWindow(QOpenGLFunctions_3_3_Core& gl) {
+    gl.glGenTextures(1,&window_);gl.glBindTexture(GL_TEXTURE_2D,window_);
+    gl.glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,kMaxWindow,kMaxWindow,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
+    gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);gl.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    gl.glGenFramebuffers(1,&windowFbo_);gl.glBindFramebuffer(GL_FRAMEBUFFER,windowFbo_);
+    gl.glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,window_,0);
+    gl.glBindFramebuffer(GL_FRAMEBUFFER,0);gl.glBindTexture(GL_TEXTURE_2D,0);
 }
 
 float IconRenderer::value(const QString& key,float light) const {
@@ -280,8 +290,22 @@ void IconRenderer::render(QOpenGLFunctions_3_3_Core& gl,const QVector<Icon>& ico
         const double cx=design.left+icon.centre.x()*design.x,cy=pixelHeight-design.top-icon.centre.y()*design.y;
         const double halfX=64*design.x,halfY=64*design.y;
         if(useGlass) {
-            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
-            gl.glBlitFramebuffer(GLint(cx-halfX),GLint(cy-halfY),GLint(cx+halfX),GLint(cy+halfY),0,0,128,128,GL_COLOR_BUFFER_BIT,GL_LINEAR);
+            // The target is the widget's multisampled framebuffer, and a blit out of a multisampled read buffer cannot
+            // scale (GL_INVALID_OPERATION): only at exactly 1920 px wide is the 128 px window 128 px in the frame. Any
+            // other size (1280x720, 4K, a wider window) left the cut empty and the glass icon dark. So the window is
+            // first resolved 1:1 into a plain texture, then scaled into the 128x128 cut from there.
+            const GLint sx0=GLint(cx-halfX),sy0=GLint(cy-halfY),sx1=GLint(cx+halfX),sy1=GLint(cy+halfY);
+            if(sx1-sx0==128 && sy1-sy0==128) {
+                gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
+                gl.glBlitFramebuffer(sx0,sy0,sx1,sy1,0,0,128,128,GL_COLOR_BUFFER_BIT,GL_LINEAR);
+            } else {
+                const GLint w=std::clamp(sx1-sx0,1,kMaxWindow),h=std::clamp(sy1-sy0,1,kMaxWindow);
+                if(!windowFbo_)ensureWindow(gl);
+                gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,targetFbo);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,windowFbo_);
+                gl.glBlitFramebuffer(sx0,sy0,sx0+w,sy0+h,0,0,w,h,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+                gl.glBindFramebuffer(GL_READ_FRAMEBUFFER,windowFbo_);gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER,cutFbo_);
+                gl.glBlitFramebuffer(0,0,w,h,0,0,128,128,GL_COLOR_BUFFER_BIT,GL_LINEAR);
+            }
         }
         // 2. The icon quad.
         gl.glBindFramebuffer(GL_FRAMEBUFFER,targetFbo);

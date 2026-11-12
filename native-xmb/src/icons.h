@@ -57,7 +57,8 @@ private:
     QVector3D fixedTint_;
     float tintStrength_=.12f;
     float colourScale_=1.f;
-    GLuint vao_=0,vbo_=0,diffuse_=0,environment_=0,cut_=0,cutFbo_=0;
+    GLuint vao_=0,vbo_=0,diffuse_=0,environment_=0,cut_=0,cutFbo_=0,window_=0,windowFbo_=0;
+    void ensureWindow(QOpenGLFunctions_3_3_Core& gl);
     QHash<QString,GLuint> normalMaps_;
     // ICONS.mnu, read at run time through the shared Materials reader (one parser for the whole app).
     // nullptr until init(); the MNU objects stay owned by that reader.
