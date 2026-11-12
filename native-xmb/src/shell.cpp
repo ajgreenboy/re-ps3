@@ -3991,6 +3991,10 @@ int Shell::subtitleCueNumber() {
     return subtitleCueNumber_;
 }
 void Shell::chooseSubtitleTrack(int index) {
+    if(subtitleLog_)qInfo().noquote()<<"subtitle: choose index"<<index<<"current"<<subtitleTrackIndex_
+        <<"tracks"<<subtitleTracks_.size()<<"mediaOpen"<<mediaOpen_<<"photo"<<photoOpen()
+        <<(jellyfinQueue_?QStringLiteral(" jellyfin"):QStringLiteral(" local"))
+        <<(jellyfinPlayback_.burnSubtitleIndex>=0?QStringLiteral(" burn=%1").arg(jellyfinPlayback_.burnSubtitleIndex):QString{});
     if(!mediaOpen_ || photoOpen())return;
     if(index<-1 || index>=subtitleTracks_.size())return;
     // Leaving a server burn-in (Off, or a track the client draws) means re-opening the original stream;

@@ -195,6 +195,8 @@ void Shell::initJellyfin() {
             <<"cues"<<bytes.size()<<"bytes; skipped"<<subtitleTracks_[track].skipped;
         bool isDefault=false;
         for(const auto& stream:jellyfinPlayback_.streams)if(stream.index==streamIndex)isDefault=stream.isDefault;
+        if(subtitleLog_)qInfo().noquote()<<"subtitle: stream"<<streamIndex<<"default"<<isDefault
+            <<"choice" <<(subtitleChoice_.contains(subtitleMediaPath_)?subtitleChoice_.value(subtitleMediaPath_):QStringLiteral("<none>"));
         if(subtitleChoice_.contains(subtitleMediaPath_)) {
             if(subtitleChoice_.value(subtitleMediaPath_)==key)applySubtitleTrack(track);
         } else if(isDefault && subtitleTrackIndex_<0) {
