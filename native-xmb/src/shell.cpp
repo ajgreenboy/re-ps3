@@ -1216,7 +1216,10 @@ void Shell::refreshContent() {
             category.entries=installed+providers+steam+category.entries;
             selections_[c]=0;
             for(int i=0;i<category.entries.size();++i)if(category.entries[i].id==selected){selections_[c]=i;break;}
-            if(!contentLoaded_ && category.id=="game" && !providers.isEmpty())selections_[c]=0;
+            // The first time the Game column is built it opens on its first row, whatever the placeholder list's first row
+            // was (restoring that id put the focus on "Game Data Utility" once the Vita row went away, which also broke the
+            // gate's "DOWN x index from row 0" navigation). Later rebuilds keep the focused row by id, above.
+            if(!contentLoaded_ && category.id=="game")selections_[c]=0;
             // Never rest the selection on a section heading: skip forward to the first real row.
             while(selections_[c]<category.entries.size() && category.entries[selections_[c]].sectionHeader)++selections_[c];
             selections_[c]=std::min(selections_[c],int(category.entries.size())-1);
