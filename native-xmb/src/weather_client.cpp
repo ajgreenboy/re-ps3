@@ -163,7 +163,7 @@ bool WeatherClient::configure(const QString& dataDirectory) {
 }
 
 bool WeatherClient::readConfig() {
-    place_.clear(); region_.clear(); country_.clear(); imperial_ = false; latitude_ = longitude_ = 0;
+    place_.clear(); region_.clear(); country_.clear(); imperial_ = true; latitude_ = longitude_ = 0;   // Fahrenheit unless the file says metric
     QFile f(configPath());
     if (!f.open(QIODevice::ReadOnly)) return false;
     if (f.size() > MaxResponseBytes) { qInfo().noquote() << "weather: weather.json too large, ignored"; return false; }
@@ -173,7 +173,7 @@ bool WeatherClient::readConfig() {
     place_ = o.value("place").toString().trimmed().left(100);
     region_ = o.value("region").toString().trimmed().left(100);
     country_ = o.value("country").toString().trimmed().left(100);
-    imperial_ = o.value("units").toString().compare(QLatin1String("imperial"), Qt::CaseInsensitive) == 0;
+    imperial_ = o.value("units").toString().compare(QLatin1String("metric"), Qt::CaseInsensitive) != 0;   // missing or unknown = imperial, the documented default
     const double lat = number(o.value("latitude")), lon = number(o.value("longitude"));
     if (!validCoordinates(lat, lon)) {
         if (o.contains("latitude") || o.contains("longitude")) qInfo().noquote() << "weather: weather.json coordinates out of range, ignored";

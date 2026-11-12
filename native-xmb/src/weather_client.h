@@ -7,7 +7,7 @@
 //
 // Configuration: <data>/weather.json
 //   {"place": "Chicago", "region": "Illinois", "country": "US", "latitude": 41.85, "longitude": -87.65,
-//    "units": "metric" | "imperial"}
+//    "units": "metric" | "imperial"}   (no units key = imperial, Fahrenheit)
 // setPlace() geocodes a name and rewrites the file (keeping the units). With no file, or no valid coordinates,
 // the client is "not configured": refresh() reports that and never guesses a location (no IP geolocation).
 //
@@ -122,7 +122,7 @@ signals:
 private:
     QNetworkAccessManager* network_ = nullptr;
     QString dataDir_;
-    bool configured_ = false, imperial_ = false;
+    bool configured_ = false, imperial_ = true;
     QString place_, region_, country_;
     double latitude_ = 0, longitude_ = 0;
     QUrl forecastUrl_, geocodeUrl_;
