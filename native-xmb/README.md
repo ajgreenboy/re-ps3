@@ -1,26 +1,31 @@
 # Native C++ XMB recreation
 
-This is the active application track following the user's October 23 direction
-change. It rebuilds XMB behavior as a native application. The older firmware
-runtime under `xmbrt/` remains a reference.
+This is the application: a native C++20 / Qt 6 rebuild of the PS3 4.93 XMB. It reads your own local
+`dev_flash` read-only and ships no Sony asset. The repository-level overview is [../README.md](../README.md).
 
-The target is complete behavior and presentation coverage. Version 0.2 is the
-first application foundation, **not a completed XMB recreation**.
+The target is complete behavior and presentation coverage. The build is feature-complete for daily HTPC use,
+but fidelity to the console is partial and measured per surface
+([audit/FIDELITY-VERDICT.md](audit/FIDELITY-VERDICT.md)), so this is **not a completed XMB recreation**.
 
 ## Build and run
 
-From the repository root, using the installed Visual Studio C++ tools and a Qt
-6.8+ MSVC kit with Widgets, OpenGLWidgets and Multimedia:
+You need Windows 10/11 x64, Visual Studio 2022 with the C++ workload and a Qt 6.8+ MSVC kit with Widgets,
+OpenGLWidgets, Multimedia, Concurrent and Network ([INSTALL.md](INSTALL.md) section 1 has the full list). To
+*run* it you also need a local PS3 4.93 `dev_flash`; a clone without one still builds.
+
+From the repository root:
 
 ```powershell
-& .\native-xmb\build.ps1
-& .\run-native-xmb.ps1
+& .\native-xmb\build.ps1                                   # -> out\integration\re-ps3-native.exe, xmb-manager.exe, deployed Qt
+& .\run-native-xmb.ps1 -FlashRoot C:\path\to\dev_flash
 ```
 
-Pass `-QtRoot` to the build script for another installed Qt kit. Pass `-FlashRoot`
-to the launcher for another local `dev_flash`. The default launcher uses the
-existing sibling RPCS3 firmware directory. Build products and native settings are
-under `out/native-xmb/`. No firmware assets are copied into source control.
+- `build.ps1` finds Qt under `C:\Qt\<version>\msvc2022_64` (newest first) or takes `-QtRoot`; `-OutputDirectory`
+  builds somewhere else. Stop a running `re-ps3-native.exe` first (the linker fails with LNK1104 otherwise).
+- `run-native-xmb.ps1` rebuilds when the sources changed, then starts the app. `-FlashRoot` defaults to a sibling
+  `..\rpcs3\bin\dev_flash`; `-VshModules` (or `fw493\vsh_module`) supplies the optional decrypted modules for the
+  ribbon. Its data folder is `out\native-xmb\data` and its per-run logs are under `out\integration\sessions\`.
+- `out/` is git-ignored. No firmware asset is copied into source control.
 
 Font coverage also requires FreeType: CMake uses an installed FreeType package or the Qt SDK's bundled
 library/header targets. The recovered glyph-load settings and remaining parity work are in
@@ -30,9 +35,41 @@ Keyboard: arrows navigate, Enter activates, Escape or Backspace returns, T opens
 (Triangle), F11 toggles full screen, Space pauses/resumes media; the volume media keys drive the volume HUD.
 XInput D-pad and A/B share the same actions.
 
+### Tests and the verification gate
+
+The test runners are off by default; each has a CMake option (`XMB_STEAM_VDF_BUILD_TESTS`,
+`XMB_SETUP_BUILD_TESTS`, `XMB_AUTOLOGON_BUILD_TESTS`, `XMB_UPDATER_BUILD_TESTS`, `XMB_FIRMWARE_BUILD_TESTS`,
+`XMB_RELEASE_BUILD_TESTS`, `XMB_MANAGER_BUILD_TESTS`). From a Visual Studio developer prompt, configure with the option on (`cmake -S native-xmb -B out/tests -G Ninja -DCMAKE_PREFIX_PATH=<Qt kit> -DXMB_STEAM_VDF_BUILD_TESTS=ON`), build the matching
+`xmb-*-tests` target and run the executable.
+
+The render gate is a Bun script (Bun 1.x; the project uses `bun`, never Node/npm):
+
+```powershell
+bun work/ab-layers.ts --list                  # layers and crops; needs nothing local
+bun work/ab-layers.ts --state <name>          # capture one named state and gate it
+bun work/ab-layers.ts --all                   # the full gate: stored pair + canonical capture + every state
+.\work\release-check.ps1 -SkipBuild           # secret, firmware-data, link and stale-commit scans only
+```
+
+The gate compares against stored frames and state references under **`out/native-reference/`, which is untracked
+and absent on a fresh clone**. It holds RPCS3 captures of the console and baselines derived from firmware data,
+neither of which can be redistributed. Without it `--state`/`--all` stop with "reference missing" or "data seed
+missing" (exit 2); building, running, the unit tests, `--list` and `release-check.ps1 -SkipBuild` all still work.
+To use the gate you either get a copy of `out/native-reference/` from the maintainer (a junction to one shared
+copy is fine for extra worktrees), or create your own baselines deliberately with `--states --save-reference`
+after an intended render, which gives a self-regression gate rather than a console comparison. The thresholds file
+`work/ab-layers.thresholds.json` names the maintainer's default `exe`, `flash` and `vshModules` paths; pass
+`--exe`, `--flash` and `--vsh-modules` for your own.
+
 Local named-state captures and layer scoring: [verification harness](audit/VERIFICATION-HARNESS.md).
 The harness keeps user preferences separate, checks category/page state and reports failures; repeatable native
 captures are distinct from firmware-fidelity evidence.
+
+### Sharing logs
+
+`XMB_LOG=<file>` and the launcher's session logs name the Windows account, the Tailscale host and audio devices.
+Scrub a log before it leaves the machine. The redaction rules are in [audit/DIAGNOSE.md](audit/DIAGNOSE.md) section 3
+(drop credential lines, replace user paths and account, host and Steam identities with placeholders); the bundle collector described there is a design, not yet a built option, so scrub by hand until it is.
 
 ## Application boundaries
 
@@ -99,7 +136,7 @@ files. DDS support covers 32-bit masked RGB(A) and DXT1/3/5 first mip levels. So
 normal maps can be inspected locally without writing them into the repository:
 
 ```powershell
-& .\out\native-xmb\re-ps3-native.exe --dev-flash <local-dev_flash> --icon-sheet .\out\native-xmb\icon-sheet.png
+& .\out\integration\re-ps3-native.exe --dev-flash <local-dev_flash> --icon-sheet .\out\icon-sheet.png
 ```
 
 ## Controllers and installed titles
@@ -115,25 +152,18 @@ from its `USRDIR/EBOOT.BIN`. Both pieces follow MaXMB (MIT); see `THIRD-PARTY.md
 
 ## Steam games, friends and service apps
 
-The Game column lists the games your Steam account **owns**. Installed titles sit inline in the column and launch
-straight away; each row's detail carries its Steam collection labels (Multiplayer, Singleplayer, Favorites, ...).
-Titles that are owned but not installed go into one **Not Installed** folder row, whose detail shows the combined
-count. Row artwork, title position and spacing are the installed-PKG layout, so Steam rows and original PS3 titles
-share one presentation. F5 or **Refresh Game Library** rescans.
+The Game column lists the games your Steam account **owns**. Installed titles sit inline, most recently played
+first, and launch straight away; each row's detail carries its Steam collection labels (Multiplayer, Singleplayer,
+Favorites, ...). Row artwork, title position and spacing are the installed-PKG layout, so Steam rows and original
+PS3 titles share one presentation. F5 or **Refresh Game Library** rescans.
 
-Steam uses one folder rather than a folder per subset: **Not Installed** holds every owned title that is not on
-disk plus any family-shared titles from `<native-data>/family-shared.json` (275 rows here: 272 owned titles that are not installed, plus 3
-family-shared, alongside the 10 installed titles inline). The earlier **Installed Games** and **Family Shared**
-folder rows are gone. Opening **Not Installed** pushes an ordinary XMB page of rows; OK hands `steam://install/<id>`
-to Steam, which performs the download.
+Below the installed titles sit a **Steam Store** row and one **All Games** folder. The All Games page lists an
+**All Titles** folder, one folder per Steam collection (icon: a 2x2 mosaic of its first titles' headers), then
+**Not Installed** (every owned title that is not on disk; its detail shows the combined count) and **Family Shared**
+(only when `<native-data>/family-shared.json` has titles). Opening a title in **Not Installed** hands
+`steam://install/<id>` to Steam, which performs the download. See "Steam play activity and actions" below.
 
-Updated 2026-11-07 (`src/shell.cpp`, `src/steam_activity.*`; commit 4e64c31): the Game column is now the installed titles inline (most
-recently played first), a **Steam Store** row and one **All Games** folder. The All Games page lists an **All Titles** folder,
-one folder per Steam collection (icon: a 2x2 mosaic of its first titles' headers), then **Not Installed** and **Family Shared**
-(the latter only when `family-shared.json` has titles). The paragraph above is still right about what Not Installed holds, but
-the separate Family Shared folder is back and the folders sit inside All Games. See "Steam play activity and actions" below.
-
-A **Steam Store** row sits above the folder and opens a browse page of live top sellers with prices (public,
+The **Steam Store** row opens a browse page of live top sellers with prices (public,
 keyless endpoint); its rows hand the same `steam://install/<id>` to Steam. Nothing is bought or downloaded inside
 the XMB - the store page only lists, and Steam owns purchase, download and launch.
 
@@ -157,7 +187,7 @@ library. The key is never written to preferences, reports, manifests or logs.
 licensed to another member, and the family endpoint (`IFamilyGroupsService`) needs an OAuth access token - a Web
 API key is rejected with 401 (verified). Family *membership* is read locally from Steam (`FamilyGroup` in
 `userdata/<accountid>/config/localconfig.vdf`, e.g. group and 6 members here). To include shared titles now, write
-`<native-data>/family-shared.json` (its titles join the **Not Installed** folder):
+`<native-data>/family-shared.json` (they appear in the **Family Shared** folder):
 
 ```json
 { "apps": [ { "id": 620, "title": "Portal 2" } ] }
@@ -168,7 +198,7 @@ API key is rejected with 401 (verified). Family *membership* is read locally fro
 The Friends column prefers the signed-in Steam client through an optional native helper; this works without a Web API key or a profile-privacy change. Build it with `-SteamworksHeaders <sdk/public/steam>`; see [client connection](audit/STEAM-CLIENT-FRIENDS.md). The key is an optional friends fallback and still serves the owned-games provider. **Open Steam Friends** also opens Steam's own friends
 window.
 
- `<native-data>/artwork/`: `<appid>.png` for the wide row,
+Artwork overrides go in `<native-data>/artwork/`: `<appid>.png` for the wide row,
 `<appid>_icon.png` for the square icon and `<appid>_bg.png` for the background (`.jpg/.jpeg/.webp` also work). An
 override wins over the cached Steam header and the manifest icon; `XMB_STEAM_ARTWORK_LOG=1` logs which files are used.
 
@@ -177,18 +207,18 @@ Open **Game → Artwork Settings**, enter a [RAWG API key](https://rawg.io/apido
 **Import Games and Apps** reads a versioned JSON manifest. The same tool is available without opening XMB:
 
 ```powershell
-& .\out\native-xmb\re-ps3-native.exe --data-dir <native-data> --import-apps <manifest.json>
-& .\out\native-xmb\re-ps3-native.exe --steam-report .\out\steam-installed.json
-& .\out\native-xmb\re-ps3-native.exe --steam-collections-report .\out\steam-collections.json
-& .\out\native-xmb\re-ps3-native.exe --owned-games-report .\out\steam-owned.json      # needs STEAM_WEB_API_KEY
-& .\out\native-xmb\re-ps3-native.exe --steam-library-report .\out\steam-library.json  # owned + collections
-& .\out\native-xmb\re-ps3-native.exe --steam-store-report .\out\steam-store.json [--steam-store-query portal]
+& .\out\integration\re-ps3-native.exe --data-dir <native-data> --import-apps <manifest.json>
+& .\out\integration\re-ps3-native.exe --steam-report .\out\steam-installed.json
+& .\out\integration\re-ps3-native.exe --steam-collections-report .\out\steam-collections.json
+& .\out\integration\re-ps3-native.exe --owned-games-report .\out\steam-owned.json      # needs STEAM_WEB_API_KEY
+& .\out\integration\re-ps3-native.exe --steam-library-report .\out\steam-library.json  # owned + collections
+& .\out\integration\re-ps3-native.exe --steam-store-report .\out\steam-store.json [--steam-store-query portal]
 ```
 
 Edit `examples/jellyfin.json` (or `examples/media-apps.json` for Jellyfin, Plex, YouTube and Spotify) for your
 setup before importing it. This adds a TV/Video Services app: Jellyfin is a native service with library/folder
 pages, direct play and server-negotiated HLS, and it signs in on an XMB page with a masked keyboard
-(audit/JELLYFIN-NATIVE.md); the Plex, YouTube and Spotify entries are URL apps that still open in your browser. Updated 2026-11-07: Spotify also has a native page in the Music column (see "Spotify" below); the example's Spotify entry is only a browser shortcut.
+(audit/JELLYFIN-NATIVE.md); the Plex, YouTube and Spotify entries are URL apps that still open in your browser. Spotify also has a native page in the Music column (see "Spotify" below); the example's Spotify entry is only a browser shortcut.
 See [content schema](audit/CONTENT-REGISTRY.md) and
 [Steam handoff, verification and limits](audit/STEAM-INTEGRATION.md). No firmware or installed game files are changed.
 
@@ -301,7 +331,7 @@ is one. The firmware's own theme (`dev_flash/vsh/resource/theme/01.p3t`, "Air Pa
 what a theme holds, write its element tree and decoded pictures and sounds to a local folder:
 
 ```powershell
-& .\out\native-xmb\re-ps3-native.exe --p3t-dump <theme.p3t>@<local-folder>
+& .\out\integration\re-ps3-native.exe --p3t-dump <theme.p3t>@<local-folder>
 ```
 
 ## Cold-boot intro
@@ -324,7 +354,7 @@ dev_flash holds the VSH modules encrypted (`*.sprx`). The ribbon cloth starts fr
 custom_render_plugin. To use them, pass a local directory of decrypted modules (`*.prx`):
 
 ```powershell
-& .\out\native-xmb\re-ps3-native.exe --dev-flash <local-dev_flash> --vsh-modules <local-decrypted-vsh_module>
+& .\out\integration\re-ps3-native.exe --dev-flash <local-dev_flash> --vsh-modules <local-decrypted-vsh_module>
 ```
 
 Without that directory, the cloth starts flat and settles. The modules stay local and are never committed.
@@ -332,11 +362,11 @@ Without that directory, the cloth starts flat and settles. The modules stay loca
 ## Inventory original menu definitions
 
 ```powershell
-& .\out\native-xmb\re-ps3-native.exe --dev-flash <local-dev_flash> --inventory .\out\native-xmb\xmbml-inventory.json
+& .\out\integration\re-ps3-native.exe --dev-flash <local-dev_flash> --inventory .\out\xmbml-inventory.json
 ```
 
-The current local firmware yields 28 documents,206 views,788 item/query
-definitions and445 attribute tables with zero parse errors. Literal query `&`
+The current local firmware yields 28 documents, 206 views, 788 item/query
+definitions and 445 attribute tables with zero parse errors. Literal query `&`
 characters are adapted in memory for Qt's strict XML parser. Original file hashes
 are recorded before adaptation; firmware files are never rewritten. The inventory
 retains unmapped status and selector/plugin references. Definitions are not proof
@@ -353,20 +383,15 @@ The main category/menu catalog is currently curated from the reference. A comple
 XMBML/resource-driven catalog and localization are required before fidelity can
 be claimed.
 
-See the [forward phase plan](archive/PHASES-2026-10-28.md), the [full feature/presentation audit and handoff](audit/README.md),
-[handoff](HANDOFF.md) and [completion criteria](ISA.md).
+## Where to read next
 
-**Plan of record (2026-11-07):** [audit/PHASES-2026-11-07.md](audit/PHASES-2026-11-07.md) - what is done, the ranked backlog and the
-parallel workstreams; it supersedes the "Next steps" list in [HANDOFF-PHASES.md](HANDOFF-PHASES.md) and the open-gap list in
-[audit/FEATURE-STATUS-2026-11-04.md](audit/FEATURE-STATUS-2026-11-04.md) where they disagree.
-
-**Current handoff (2026-11-09):** [HANDOFF-2026-11-09.md](HANDOFF-2026-11-09.md) - state, build/run/verify, what landed 2026-11-08/09, work in flight, config files, open work and conventions.
-
-**Previous handoff (2026-10-28):** [HANDOFF-2026-10-28.md](archive/HANDOFF-2026-10-28.md) - supersedes [HANDOFF-2026-10-27.md](archive/HANDOFF-2026-10-27.md) (the tree at `0c8faee`),
-with build/run/verify, today's gate result, the known gaps by surface, the config migration policy, the
-diagnostics design and the release checklist. Read it first; the install guide is [INSTALL.md](INSTALL.md).
-
-**Previous handoff snapshot (2026-10-26, historical):** [HANDOFF-2026-10-26.md](archive/HANDOFF-2026-10-26.md) - the tree at
-`937227d`, with what was verified then, the drift it found and its open work. It is no longer the current state; for
-current state read the current handoff, [ISA.md](ISA.md), [the feature catalogue](audit/FEATURE-CATALOG.md),
-[the verification harness](audit/VERIFICATION-HARNESS.md) and [the parity register](audit/FIRMWARE-PARITY-GAPS.md).
+- **Current state:** [HANDOFF-2026-11-09.md](HANDOFF-2026-11-09.md) - what ships, build/run/verify, what landed, work in flight,
+  config files, open work and conventions. The install guide is [INSTALL.md](INSTALL.md).
+- **Plan of record:** [audit/PHASES-2026-11-07.md](audit/PHASES-2026-11-07.md) - what is done, the ranked backlog and the
+  parallel workstreams. It supersedes the "Next steps" list in [HANDOFF-PHASES.md](HANDOFF-PHASES.md) and the open-gap
+  list in [audit/FEATURE-STATUS-2026-11-04.md](audit/FEATURE-STATUS-2026-11-04.md) where they disagree.
+- **Completion criteria:** [ISA.md](ISA.md); per-feature status: [audit/FEATURE-CATALOG.md](audit/FEATURE-CATALOG.md);
+  gate and baselines: [audit/VERIFICATION-HARNESS.md](audit/VERIFICATION-HARNESS.md); scored gap register:
+  [audit/FIRMWARE-PARITY-GAPS.md](audit/FIRMWARE-PARITY-GAPS.md).
+- **Everything else:** the [audit index](audit/README.md) groups the audits by type; dated handoffs and superseded
+  plans are in [archive/](archive/README.md).

@@ -140,15 +140,15 @@ prints its usage and exits with code 2. The options that do not need it (the Ste
 & .\run-native-xmb.ps1 -FlashRoot C:\path\to\dev_flash
 
 # Same thing directly
-& .\out\native-xmb\re-ps3-native.exe `
+& .\out\integration\re-ps3-native.exe `
     --dev-flash C:\path\to\dev_flash `
     --data-dir  C:\path\to\xmb-data
 
 # Skip the cold-boot intro (useful when debugging)
-& .\out\native-xmb\re-ps3-native.exe --dev-flash C:\path\to\dev_flash --data-dir C:\path\to\xmb-data --no-intro
+& .\out\integration\re-ps3-native.exe --dev-flash C:\path\to\dev_flash --data-dir C:\path\to\xmb-data --no-intro
 
 # Appliance mode: frameless fullscreen on the second screen, straight to the XMB
-& .\out\native-xmb\re-ps3-native.exe --dev-flash C:\path\to\dev_flash --kiosk --display 1
+& .\out\integration\re-ps3-native.exe --dev-flash C:\path\to\dev_flash --kiosk --display 1
 ```
 
 - `--dev-flash` - the local firmware directory (read-only).
@@ -267,10 +267,10 @@ the shell sees.
 
 ```powershell
 # A pinned capture of the PS system menu, then the volume HUD and a notification
-& .\out\native-xmb\re-ps3-native.exe --dev-flash C:\path\to\dev_flash `
+& .\out\integration\re-ps3-native.exe --dev-flash C:\path\to\dev_flash `
     --render-clock 30 --background-clock 2026-10-25T10:00:00 --ui-clock 2026-10-25T12:32:00 `
     --focus-time 2000 --script "pshold,pause=1200,grab=C:/tmp/psmenu.png,quit"
-& .\out\native-xmb\re-ps3-native.exe --dev-flash C:\path\to\dev_flash `
+& .\out\integration\re-ps3-native.exe --dev-flash C:\path\to\dev_flash `
     --render-clock 30 --script "NOTIFY=Hello|Detail,VOLSET=35,pause=1000,grab=C:/tmp/hud.png,quit"
 ```
 
@@ -326,7 +326,7 @@ the shell sees.
 | `%APPDATA%\re-ps3-native\steam_api_key` | Optional one-line Steam Web API key. Outside the repository and outside the data directory. |
 | `<exe folder>\crash.log` | Crash stack (exception code plus symbolized frames) when `XMB_LOG` is not set. The `.pdb` next to the executable gives the symbols. |
 | `<data>\diagnostics\` | Reserved for a diagnostic bundle. **No flag writes it today**: the bundle is a design in [audit/DIAGNOSE.md](audit/DIAGNOSE.md), not an implemented option. |
-| `out\native-xmb\sessions\<timestamp>\native.stdout.txt` and `native.stderr.txt` | Per-run output from the launcher. |
+| `out\integration\sessions\<timestamp>\native.stdout.txt` and `native.stderr.txt` | Per-run output from the launcher. |
 
 Preferences keys an uninstall or a backup should keep: `media/resume` holds one record per title
 (`path`, `ms`, `dur`, `title`, `at`), so deleting `preferences.json` loses resume points. Deleting
@@ -452,7 +452,7 @@ a browser shortcut.
 2. Import it. Reimporting the same `id` updates the entry instead of duplicating it:
 
    ```powershell
-   & .\out\native-xmb\re-ps3-native.exe --data-dir <data> --import-apps .\examples\jellyfin.json
+   & .\out\integration\re-ps3-native.exe --data-dir <data> --import-apps .\examples\jellyfin.json
    ```
 
 3. Start the app, open the TV/Video Services area and select the Jellyfin row. Sign-in is an ordinary

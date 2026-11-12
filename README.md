@@ -150,6 +150,12 @@ The project measures itself rather than trusting screenshots:
 - `bun work/transition-compare.ts` — frame-by-frame console-vs-native transition verdicts.
 - `.\work\release-check.ps1` — the credential, firmware-data, dump, broken-link and dead-commit gate.
 
+The render gate and `parity.ts` compare against `out/native-reference/` (RPCS3 captures and firmware-derived
+baselines), which is **untracked and absent on a fresh clone**. Without it you can still build, run, run the unit
+tests and `.\work\release-check.ps1 -SkipBuild`; `ab-layers.ts --state/--all` stop with "reference missing". Get a
+copy from the maintainer or create your own self-baselines with `--save-reference`; details in
+[native-xmb/README.md](native-xmb/README.md) "Tests and the verification gate".
+
 ## Documentation
 
 - [Application README](native-xmb/README.md) — architecture, build, controls, service setup.
