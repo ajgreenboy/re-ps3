@@ -67,7 +67,7 @@ struct ThemeItemSpec {
 };
 // The Theme list's `Install` item and the Background list's wallpaper item carry these sentinels
 // (kThemePickerValue / kWallpaperPickerValue, settings_menu.h): activate() opens the file dialog for them.
-const char* kMonthNote="this build has no theme tint for this month's palette; its six tints are Original, "
+const char* kMonthNote="This build has no theme tint for this month's palette; its six tints are Original, "
     "Blue=August, Purple=June, Red=December, Green=May, Silver=January";
 const QVector<ThemeItemSpec>& themeColourSpec() {
     // Chip colours sampled at x 1355, chip top + 14 on out/rpcs3-ref2-2026-10-28/lists/color-list-rest.png

@@ -355,9 +355,18 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
     gl.glDisable(GL_STENCIL_TEST);
     gl.glDisable(GL_CULL_FACE);
     gl.glDepthMask(GL_TRUE);
-    gl.glClearColor(0.5f, 0.5f, 0.52f, 1.f);
-    gl.glClearDepth(1.0);
-    gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // The bars of a window that is not 16:9 stay black like every other page; only the 16:9 area takes the scene's grey.
+    {
+        const DesignSpace area(pixelWidth, pixelHeight);
+        gl.glClearColor(0.f, 0.f, 0.f, 1.f);
+        gl.glClearDepth(1.0);
+        gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        gl.glEnable(GL_SCISSOR_TEST);
+        gl.glScissor(qRound(area.left), qRound(area.top), qRound(1920. * area.x), qRound(1080. * area.y));
+        gl.glClearColor(0.5f, 0.5f, 0.52f, 1.f);
+        gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        gl.glDisable(GL_SCISSOR_TEST);
+    }
     gl.glEnable(GL_DEPTH_TEST);
     gl.glDepthFunc(GL_LEQUAL);
     gl.glEnable(GL_BLEND);
