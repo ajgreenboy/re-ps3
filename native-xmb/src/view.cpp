@@ -2394,10 +2394,11 @@ void View::drawScene(QPainter& p) {
         previousMediaOpen_=true;previousMediaTitle_=shell_.mediaTitle();
         mediaControls_.setPaused(shell_.mediaPaused() || shell_.busy(),now);
         // Where the video picture sits on the 1920x1080 frame (letterboxed or pillarboxed); an image
-        // subtitle is placed against this rectangle, not the screen.
+        // subtitle is placed against this rectangle, not the screen. The picture area is always painted
+        // black first, so a 4:3 (pillarboxed) or letterboxed stream never shows the XMB wave through its bars.
         QRectF videoRect(0,0,1920,1080);
+        if(shell_.videoOpen() || shell_.photoOpen())p.fillRect(QRectF(0,0,1920,1080),Qt::black);
         if(!mediaFrame_.isNull()) {
-            p.fillRect(QRectF(0,0,1920,1080),Qt::black);
             const auto size=QSizeF(mediaFrame_.size()).scaled(QSizeF(1920,1080),shell_.photoOpen() && shell_.photoFill()?Qt::KeepAspectRatioByExpanding:Qt::KeepAspectRatio);
             videoRect=QRectF(QPointF((1920-size.width())/2,(1080-size.height())/2),size);
             p.save();p.setClipRect(QRectF(0,0,1920,1080));
