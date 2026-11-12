@@ -414,6 +414,7 @@ void Shell::requestJellyfinSubtitles() {
     bool textDefault=false;
     for(const auto& stream:jellyfinPlayback_.streams) {
         if(stream.type!=QLatin1String("Subtitle") || stream.index<0)continue;
+        if(!isEnglishSubtitle(stream))continue;   // only English subtitles, text and PGS alike
         if(subtitleTracks_.size()>=8)break;
         subtitles::Track track;
         track.path=jellyfinSubtitleKey(stream.index);track.name=stream.title;track.language=stream.language;

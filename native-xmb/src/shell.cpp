@@ -3707,6 +3707,7 @@ void Shell::buildPlayerOptions() {
         int seen=0;
         for(const auto& stream:jellyfinPlayback_.streams) {
             if(stream.type!="Subtitle")continue;
+            if(!isEnglishSubtitle(stream))continue;   // only English subtitles, text and PGS alike
             ++seen;
             MenuOption row{QObject::tr("Subtitles %1: %2").arg(seen).arg(stream.title),OptionCommand::SubtitleTrack};
             row.index=-1;row.enabled=false;

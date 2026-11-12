@@ -43,6 +43,16 @@ struct JellyfinPlayback {
     int burnSubtitleIndex = -1;   // the subtitle stream the server burns into this transcode, -1 = none
     QVector<JellyfinTrack> streams;
 };
+// Whether a subtitle stream is English. The language field is Jellyfin's ISO 639-2 code (usually
+// "eng"); the title is DisplayTitle (e.g. "English (Forced)"), so both are consulted. Covers text
+// and image (PGS) subtitle streams alike.
+inline bool isEnglishSubtitle(const JellyfinTrack& track) {
+    const QString lang=track.language.trimmed().toLower();
+    const QString title=track.title.trimmed().toLower();
+    if(lang==QLatin1String("eng") || lang==QLatin1String("en"))return true;
+    if(lang.startsWith(QLatin1String("en-")))return true;
+    return title.contains(QLatin1String("english"));
+}
 
 class JellyfinClient final : public QObject {
     Q_OBJECT
