@@ -679,6 +679,7 @@ private:
     QVector<GameResult> gameSearch_;
     QString pendingGameTitle_;
     QUrl pendingGameUrl_;
+    bool gameArtHooked_=false;
     void refreshReleaseSources(const QUrl& importUrl={});
     void rebuildReleaseSources();
     void openReleaseSource(const QString& slug);
@@ -696,6 +697,7 @@ private:
     void pickGameSource(const QString& value);
     void beginGameDownload(const QString& title,const QUrl& sourceUrl);
     void completeGameDownload(const QString& drive);
+    void fetchGameArtwork(const QString& id,const QString& title);
     Assets& assets_;
     std::unique_ptr<class NotifyOverlay> notifyOverlay_;
     Preferences preferences_;

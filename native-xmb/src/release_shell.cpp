@@ -346,6 +346,7 @@ void Shell::completeGameDownload(const QString& drive) {
         busy_=false;status_.clear();busyProgress_=-1.;busySpinnerPhase_=-1.;
         if(!result.second.isEmpty()){showMessage(tr("Download"),result.second,MessageKind::Page);emit changed();return;}
         refreshContent();
+        fetchGameArtwork(result.first,title);
         showMessage(tr("Download Complete"),tr("%1 is installed and ready in Games.").arg(title),MessageKind::Page);
         emit changed();
     });
@@ -377,5 +378,29 @@ void Shell::completeGameDownload(const QString& drive) {
         promise.addResult(qMakePair(app.id,QString()));
     }));
     emit changed();
+}
+void Shell::fetchGameArtwork(const QString& id,const QString& title) {
+    if(!releaseArtwork_) {
+        releaseArtwork_=std::make_unique<RawgArtwork>(QDir(dataDirectory_).filePath(QStringLiteral("cache/release-art")),this);
+        connect(releaseArtwork_.get(),&RawgArtwork::ready,this,[this](const QString& rid,const QString&,const QString&,const QImage& image){
+            releaseArt_.insert(rid,image);
+            for(auto& page:pages_)for(auto& row:page.entries)if(row.id==rid){row.artwork=image;row.rawgArtworkVisible=true;}
+            emit changed();
+        });
+    }
+    if(!gameArtHooked_) {
+        gameArtHooked_=true;
+        connect(releaseArtwork_.get(),&RawgArtwork::ready,this,[this](const QString& rid,const QString&,const QString& path,const QImage&){
+            const QString registryPath=QDir(dataDirectory_).filePath(QStringLiteral("apps.json"));
+            QVector<ContentApp> apps; QString error;
+            if(!ContentRegistry::load(registryPath,apps,error))return;
+            for(const auto& app:apps)if(app.id==rid && app.artwork!=path) {
+                ContentApp updated=app; updated.artwork=path;
+                if(ContentRegistry::upsert(registryPath,updated,error))refreshContent();
+                break;
+            }
+        });
+    }
+    releaseArtwork_->refresh(QVector<QPair<QString,QString>>{{id,title}});
 }
 } // namespace xmb

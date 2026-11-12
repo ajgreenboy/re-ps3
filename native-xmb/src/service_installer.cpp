@@ -31,10 +31,13 @@ QVector<ServiceAvailability> serviceAvailability() {
     const QString steam=registryValue(QStringLiteral("HKEY_CURRENT_USER\\Software\\Valve\\Steam"),QStringLiteral("SteamPath"));
     const QString discord=registryValue(QStringLiteral("HKEY_CURRENT_USER\\Software\\Discord"),QStringLiteral("AppPath"));
     const QString spotify=registryValue(QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Spotify"),QStringLiteral("InstallLocation"));
+    const QString sevenZip=registryValue(QStringLiteral("HKEY_LOCAL_MACHINE\\Software\\7-Zip"),QStringLiteral("Path"));
+    const bool has7z=!QStandardPaths::findExecutable(QStringLiteral("7z.exe")).isEmpty() || executableAt(sevenZip,QStringLiteral("7z.exe"));
     return {
         {executableAt(steam,QStringLiteral("steam.exe")),QStringLiteral("Steam"),QStringLiteral("https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe")},
         {!QStandardPaths::findExecutable(QStringLiteral("discord.exe")).isEmpty() || executableAt(discord,QStringLiteral("discord.exe")),QStringLiteral("Discord"),QStringLiteral("https://discord.com/api/download/stable?platform=win")},
-        {!QStandardPaths::findExecutable(QStringLiteral("Spotify.exe")).isEmpty() || executableAt(spotify,QStringLiteral("Spotify.exe")),QStringLiteral("Spotify"),QStringLiteral("https://download.scdn.co/SpotifyFullSetup.exe")}
+        {!QStandardPaths::findExecutable(QStringLiteral("Spotify.exe")).isEmpty() || executableAt(spotify,QStringLiteral("Spotify.exe")),QStringLiteral("Spotify"),QStringLiteral("https://download.scdn.co/SpotifyFullSetup.exe")},
+        {has7z,QStringLiteral("7-Zip"),QStringLiteral("https://www.7-zip.org/a/7z2409-x64.exe")}
     };
 }
 bool downloadInstaller(const QString& url, const QString& name, QString* path, QString* error,
