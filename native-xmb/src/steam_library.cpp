@@ -1,4 +1,5 @@
 #include "steam_library.h"
+#include "steam_vdf.h"
 
 #include <QDir>
 #include <QFile>
@@ -22,179 +23,34 @@ constexpr int MaximumLibraries = 64;
 constexpr qsizetype MaximumGames = 4096;
 constexpr int MaximumManifestsPerLibrary = 4096;
 
-struct KvEntry {
-    QString key;
-    QString value;
-    QVector<KvEntry> children;
-    bool block = false;
-};
+using KvEntry = steamvdf::Entry;
+using KvDocument = steamvdf::Document;
 
-struct KvDocument {
-    QVector<KvEntry> entries;
-    QString error;
-};
-
-bool readBounded(const QString& path, qsizetype maximum, QByteArray* bytes) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly) || file.size() < 0 || file.size() > maximum)
-        return false;
-    *bytes = file.read(maximum + 1);
-    return bytes->size() <= maximum && !file.error();
+// The KeyValues dialect of the library scanner, read by the shared parser (steam_vdf.h): a leading
+// BOM is not skipped, a quoted "{" or "}" acts as a brace, and keys are looked up case-insensitively.
+// Every input is at most MaximumConfigBytes (readBounded), so the token-size limit cannot be hit by a
+// bare word.
+KvDocument parseKeyValues(const QByteArray& bytes) {
+    steamvdf::Options options;
+    options.skipBom = false;
+    options.quotedBracesAreStructural = true;
+    options.maxTokenBytes = MaximumConfigBytes;
+    options.maxTokens = MaximumTokens;
+    options.maxEntries = MaximumEntries;
+    options.maxDepth = MaximumDepth;
+    return steamvdf::parse(bytes, options);
 }
 
-class KeyValuesParser final {
-public:
-    explicit KeyValuesParser(const QByteArray& input) : input_(input) {}
-
-    KvDocument parse() {
-        KvDocument document;
-        if (!tokenize()) {
-            document.error = error_;
-            return document;
-        }
-        qsizetype totalEntries = 0;
-        if (!parseEntries(document.entries, 0, false, totalEntries) || position_ != tokens_.size()) {
-            document.entries.clear();
-            document.error = error_.isEmpty() ? QStringLiteral("Unexpected trailing KeyValues data") : error_;
-        }
-        return document;
-    }
-
-private:
-    bool tokenize() {
-        qsizetype i = 0;
-        while (i < input_.size()) {
-            const auto c = static_cast<unsigned char>(input_.at(i));
-            if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f') {
-                ++i;
-                continue;
-            }
-            if (c == '/' && i + 1 < input_.size() && input_.at(i + 1) == '/') {
-                i += 2;
-                while (i < input_.size() && input_.at(i) != '\n') ++i;
-                continue;
-            }
-            if (c == '{' || c == '}') {
-                tokens_.append(QString(QChar(c)));
-                ++i;
-            } else if (c == '"') {
-                ++i;
-                QByteArray token;
-                bool closed = false;
-                while (i < input_.size()) {
-                    const char current = input_.at(i++);
-                    if (current == '"') {
-                        closed = true;
-                        break;
-                    }
-                    if (current == '\\' && i < input_.size()) {
-                        const char next = input_.at(i);
-                        if (next == '"' || next == '\\') {
-                            token.append(next);
-                            ++i;
-                        } else {
-                            token.append(current);
-                        }
-                    } else {
-                        token.append(current);
-                    }
-                    if (token.size() > MaximumConfigBytes) {
-                        error_ = QStringLiteral("KeyValues token exceeds limit");
-                        return false;
-                    }
-                }
-                if (!closed) {
-                    error_ = QStringLiteral("Unterminated KeyValues string");
-                    return false;
-                }
-                tokens_.append(QString::fromUtf8(token));
-            } else {
-                const qsizetype start = i;
-                while (i < input_.size()) {
-                    const char current = input_.at(i);
-                    if (current == ' ' || current == '\t' || current == '\r' || current == '\n' ||
-                        current == '\v' || current == '\f' || current == '{' || current == '}')
-                        break;
-                    if (current == '/' && i + 1 < input_.size() && input_.at(i + 1) == '/') break;
-                    ++i;
-                }
-                if (start == i) {
-                    error_ = QStringLiteral("Invalid KeyValues token");
-                    return false;
-                }
-                tokens_.append(QString::fromUtf8(input_.constData() + start, i - start));
-            }
-            if (tokens_.size() > MaximumTokens) {
-                error_ = QStringLiteral("KeyValues token count exceeds limit");
-                return false;
-            }
-        }
-        return true;
-    }
-
-    bool parseEntries(QVector<KvEntry>& entries, int depth, bool nested, qsizetype& total) {
-        if (depth > MaximumDepth) {
-            error_ = QStringLiteral("KeyValues nesting exceeds limit");
-            return false;
-        }
-        while (position_ < tokens_.size()) {
-            if (tokens_.at(position_) == QStringLiteral("}")) {
-                if (!nested) {
-                    error_ = QStringLiteral("Unexpected KeyValues closing brace");
-                    return false;
-                }
-                ++position_;
-                return true;
-            }
-            if (tokens_.at(position_) == QStringLiteral("{")) {
-                error_ = QStringLiteral("Unexpected KeyValues opening brace");
-                return false;
-            }
-            if (position_ + 1 >= tokens_.size()) {
-                error_ = QStringLiteral("KeyValues key has no value");
-                return false;
-            }
-            KvEntry entry;
-            entry.key = tokens_.at(position_++);
-            const QString value = tokens_.at(position_++);
-            if (value == QStringLiteral("{")) {
-                entry.block = true;
-                if (!parseEntries(entry.children, depth + 1, true, total)) return false;
-            } else if (value == QStringLiteral("}")) {
-                error_ = QStringLiteral("KeyValues key has no value");
-                return false;
-            } else {
-                entry.value = value;
-            }
-            if (++total > MaximumEntries) {
-                error_ = QStringLiteral("KeyValues entry count exceeds limit");
-                return false;
-            }
-            entries.append(std::move(entry));
-        }
-        if (nested) {
-            error_ = QStringLiteral("Unclosed KeyValues block");
-            return false;
-        }
-        return true;
-    }
-
-    const QByteArray& input_;
-    QVector<QString> tokens_;
-    qsizetype position_ = 0;
-    QString error_;
-};
+bool readBounded(const QString& path, qsizetype maximum, QByteArray* bytes) {
+    return steamvdf::readBounded(path, maximum, bytes, nullptr, false);
+}
 
 const KvEntry* findEntry(const QVector<KvEntry>& entries, const QString& key) {
-    for (const auto& entry : entries) {
-        if (entry.key.compare(key, Qt::CaseInsensitive) == 0) return &entry;
-    }
-    return nullptr;
+    return steamvdf::findEntry(entries, key, Qt::CaseInsensitive);
 }
 
 QString stringValue(const QVector<KvEntry>& entries, const QString& key) {
-    const auto* entry = findEntry(entries, key);
-    return entry && !entry->block ? entry->value : QString{};
+    return steamvdf::stringValue(entries, key, Qt::CaseInsensitive);
 }
 
 QString canonicalDirectory(const QString& path) {
@@ -404,7 +260,7 @@ QString selectedSteamId(const QString& steamRoot, bool allowActiveRegistry) {
     const QString path = QDir(steamRoot).filePath(QStringLiteral("config/loginusers.vdf"));
     QByteArray bytes;
     if (!readBounded(path, MaximumConfigBytes, &bytes)) return {};
-    const auto document = KeyValuesParser(bytes).parse();
+    const auto document = parseKeyValues(bytes);
     if (!document.error.isEmpty()) return {};
     const auto* users = findEntry(document.entries, QStringLiteral("users"));
     if (!users || !users->block) return {};
@@ -512,7 +368,7 @@ void addLibraries(const RootInfo& root, QVector<LibraryInfo>& libraries, QString
     const QString config = QDir(root.path).filePath(QStringLiteral("steamapps/libraryfolders.vdf"));
     QByteArray bytes;
     if (!readBounded(config, MaximumConfigBytes, &bytes)) return;
-    const auto document = KeyValuesParser(bytes).parse();
+    const auto document = parseKeyValues(bytes);
     if (!document.error.isEmpty()) {
         warnings.append(QStringLiteral("A Steam library configuration could not be parsed."));
         return;
@@ -545,7 +401,7 @@ void scanLibrary(const QString& steamRoot, const QString& steamId, const QString
         if (!isSafeAppId(expectedId)) continue;
         QByteArray bytes;
         if (!readBounded(manifest.absoluteFilePath(), MaximumManifestBytes, &bytes)) continue;
-        const auto document = KeyValuesParser(bytes).parse();
+        const auto document = parseKeyValues(bytes);
         if (!document.error.isEmpty()) continue;
         const auto* state = findEntry(document.entries, QStringLiteral("AppState"));
         if (!state || !state->block) continue;

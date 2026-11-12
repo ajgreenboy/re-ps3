@@ -55,7 +55,7 @@ qt_add_executable(re-ps3-native
     src/text_renderer.cpp src/text_renderer.h
     src/font_raster.cpp src/font_raster.h
     src/profiles.cpp src/profiles.h
-    src/steam_library.cpp src/steam_library.h
+    src/steam_library.cpp src/steam_library.h src/steam_vdf.cpp src/steam_vdf.h
     src/steam_downloads.cpp src/steam_downloads.h src/steam_accounts.cpp src/steam_accounts.h src/steam_friends.cpp src/steam_friends.h
     src/steam_artwork.cpp src/steam_artwork.h src/steam_store.cpp src/steam_store.h src/steam_owned.cpp src/steam_owned.h src/steam_collections.cpp src/steam_collections.h src/steam_overrides.cpp src/steam_overrides.h src/steam_family.cpp src/steam_family.h
     src/content_registry.cpp src/content_registry.h src/web_launch.cpp src/web_launch.h src/app_editor.cpp src/app_editor.h
@@ -110,7 +110,8 @@ endif()
 option(XMB_STEAM_VDF_BUILD_TESTS "Build the Steam KeyValues (VDF) golden tests" OFF)
 if(XMB_STEAM_VDF_BUILD_TESTS)
     qt_add_executable(xmb-steam-vdf-tests tests/steam_vdf_tests.cpp
-        src/steam_library.cpp src/steam_library.h src/steam_accounts.cpp src/steam_accounts.h)
+        src/steam_library.cpp src/steam_library.h src/steam_accounts.cpp src/steam_accounts.h
+        src/steam_vdf.cpp src/steam_vdf.h)
     target_include_directories(xmb-steam-vdf-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(xmb-steam-vdf-tests PRIVATE XMB_VDF_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/tests/steam_vdf_golden.txt")
     target_link_libraries(xmb-steam-vdf-tests PRIVATE Qt6::Core)
@@ -185,7 +186,7 @@ if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND XMB_STEAMWORKS_HEADERS)
     if(NOT EXISTS "${XMB_STEAMWORKS_HEADERS}/isteamclient.h")
         message(FATAL_ERROR "XMB_STEAMWORKS_HEADERS must contain the Steamworks public headers")
     endif()
-    add_executable(xmb-steam-client src/steam_client_helper.cpp src/steam_library.cpp src/steam_library.h
+    add_executable(xmb-steam-client src/steam_client_helper.cpp src/steam_library.cpp src/steam_library.h src/steam_vdf.cpp src/steam_vdf.h
     src/steam_downloads.cpp src/steam_downloads.h src/steam_accounts.cpp src/steam_accounts.h)
     target_include_directories(xmb-steam-client PRIVATE "${XMB_STEAMWORKS_HEADERS}")
     target_compile_definitions(xmb-steam-client PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
