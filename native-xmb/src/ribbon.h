@@ -38,6 +38,9 @@ public:
     // Requires a current GL context. Returns false (and logs why) when the firmware programs are unavailable.
     bool init(QOpenGLFunctions_3_3_Core& gl,Assets& assets);
     bool ready() const { return ready_; }
+    // Frees the textures and render targets while the GL context is still current (View::~View); members destroyed after the
+    // context was released would otherwise log "QOpenGLTexturePrivate::destroy() called without a current context".
+    void releaseTextures() { uvw_.reset();stripes_.reset();fresLut_.reset();encode_.reset();field_.reset();sum_.reset(); }
     // Adds the ribbon to targetFbo (additive). seconds: wall time; dayFraction: local time of day, 0..1 from midnight.
     void render(QOpenGLFunctions_3_3_Core& gl,double seconds,double dayFraction,int pixelWidth,int pixelHeight,GLuint targetFbo);
     // Crest of the ribbon centre line as a fraction of screen height from the top, sampled left to right across

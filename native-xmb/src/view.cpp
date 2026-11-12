@@ -478,7 +478,7 @@ View::~View(){
 #ifdef Q_OS_WIN
     if(volumeKeys_ && qApp)qApp->removeNativeEventFilter(volumeKeys_.get());
 #endif
-    saveFrameTrace();if(context()){makeCurrent();liveOverlayResolved_.reset();gallery_.reset();textRenderer_.release(*this);monthTexture_.reset();inGameTexture_.reset();inGameProgram_.removeAllShaders();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
+    saveFrameTrace();if(context()){makeCurrent();liveOverlayResolved_.reset();gallery_.reset();textRenderer_.release(*this);monthTexture_.reset();for(auto& texture:monthTextures_)texture.reset();ribbon_.releaseTextures();particles_.releaseTextures();uiMsaa_.reset();uiResolved_.reset();inGameTexture_.reset();inGameProgram_.removeAllShaders();if(vao_)glDeleteVertexArrays(1,&vao_);background_.removeAllShaders();doneCurrent();}}
 void View::initializeGL() {
     xmb::bootprof::mark("before initializeGL");
     uniformcache::invalidate();

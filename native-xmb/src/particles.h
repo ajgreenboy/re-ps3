@@ -85,6 +85,8 @@ public:
     bool init(QOpenGLFunctions_3_3_Core& gl);
     bool init(QOpenGLFunctions_3_3_Core& gl,Assets& assets);
     bool ready() const { return ready_; }
+    // See Ribbon::releaseTextures: call with the GL context current before it is released.
+    void releaseTextures() { iridescent_.reset(); }
     // True when the firmware particles/proc_iridescent.tga is bound as the LUT (false = a neutral
     // 1x1 fallback, so the dust loses its colour hint but keeps its photometry).
     bool iridescentLoaded() const { return iridescentFromFirmware_; }
