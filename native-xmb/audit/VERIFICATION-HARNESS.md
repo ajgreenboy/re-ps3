@@ -791,8 +791,21 @@ Ten more named states in `work/ab-layers.thresholds.json`, same self-baseline ru
 gate with the Steam states above. Fixtures are scratch, never committed: `bun work/v2-fixtures.ts` writes a silent
 tagged WAV and cover under `C:/dev/out/v2/music`, builds the stand-in game (`work/v2-stubgame.cpp`, a plain GDI window)
 to `C:/dev/out/v2/stubgame.exe`, and writes the data seeds under `out/native-reference/v2/`. The Photo Gallery uses the
-read-only library `C:/dev/out/gal/photos` in place. Each state was run twice in a row on one build with identical
-results (see the V2 row in `PHASES-2026-11-07.md`).
+library `C:/dev/out/gal/photos`, which `work/gallery-fixture.ts` writes (and `v2-fixtures.ts` calls) when it is absent;
+afterwards it is read-only. Each state was run twice in a row on one build with identical results (see the V2 row in
+`PHASES-2026-11-07.md`).
+
+The gallery library (regenerated 2026-11-11, replacing the original 2026-11-08 library, which was lost with its
+generator): 374 pictures in 17 folders (the root plus 16, two levels deep), one pile per calendar day = 49 piles on 2 rows,
+the newest pile holding 2 photos, 365 dated by EXIF (little- and big-endian, DateTimeOriginal / digitized-only /
+IFD0-only, orientation 6, and a later decoy date that must lose) and 9 by file time (5 plain JPEGs, 4 PNGs), dates
+spanning 2021-2023 with a New Year's Eve split (2021-12-31 and 2022-01-01 are separate piles). The pictures are
+generated colour fields, not photographs; every byte is derived from fixed tables with +, -, *, / and sqrt only, so
+the manifest's sha256 (`C:/dev/out/gal/library.json`) is the same on every machine. `bun work/gallery-fixture.ts --check`
+verifies the folder against it, and the app's own `--gallery-layout` report agrees (374 photos, 17 folders, 365 EXIF, 9
+file times, 49 piles, 2 rows, 0 thumbnail failures at all three levels). The two gallery references were re-saved over
+this library (backups: `out/native-reference/layers-backup-2026-11-11-gallery/`), each state checked twice with
+identical results. The generator refuses to touch a folder it did not write.
 
 | State | What pins it |
 |---|---|
