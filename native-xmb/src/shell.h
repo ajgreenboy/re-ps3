@@ -28,6 +28,7 @@
 #include "steam_library.h"
 #include "subtitles.h"
 #include "release_source.h"
+#include "hydra_library.h"
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QDateTime>
@@ -126,7 +127,8 @@ enum class Action { Unavailable, SettingsPage, SettingChoices, SetSetting, EditN
     // Entry::value is the command ("next", "fw:use|<path>", ...); the page it sits on is told apart by its first row id "setup:<step>...".
     Setup,
     // Game > Saved Data / Memory Card Utility: presentation only, no console save-data backend.
-    SaveData, ImportSource, ReleaseFolder, ReleaseDownload, DownloadManager, DebridToken, FlareSolverrUrl };
+    SaveData, ImportSource, ReleaseFolder, ReleaseDownload, DownloadManager, DebridToken, FlareSolverrUrl,
+    SearchGames, GameSearchResult, GameSourcePick };
 struct Entry {
     QString id,title,detail,container,texture;
     Action action=Action::Unavailable;
@@ -674,6 +676,7 @@ private:
     QSet<QString> releaseRawgArt_;
     QSet<QString> releaseArtRequested_;
     std::unique_ptr<RawgArtwork> releaseArtwork_;
+    QVector<GameResult> gameSearch_;
     void refreshReleaseSources(const QUrl& importUrl={});
     void rebuildReleaseSources();
     void openReleaseSource(const QString& slug);
@@ -684,6 +687,11 @@ private:
     void saveDebridToken(const QString& token);
     void editFlareSolverrUrl();
     void saveFlareSolverrUrl(const QString& url);
+    void openGameSearch();
+    void runGameSearch(const QString& query);
+    void pickGameResult(int index);
+    void openGameSources(int index);
+    void pickGameSource(const QString& value);
     Assets& assets_;
     std::unique_ptr<class NotifyOverlay> notifyOverlay_;
     Preferences preferences_;

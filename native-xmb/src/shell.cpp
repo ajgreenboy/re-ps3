@@ -1633,6 +1633,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     for(auto& category:categories_)if(category.id=="game") {
         category.entries.push_back(item("content:refresh","Refresh Game Library","item_tex_plain_folder",full,Action::RefreshContent));
         category.entries.push_back(item("content:import","Import Games and Apps","item_tex_plain_folder",full,Action::ImportApps));
+        category.entries.push_back(item("game:search","Search Games","item_tex_plain_folder",full,Action::SearchGames));
         category.entries.push_back(item("release:import","Import Source","item_tex_plain_folder",full,Action::ImportSource));
     }
     refreshReleaseSources();
@@ -2262,6 +2263,9 @@ void Shell::activate() {
     case Action::DownloadManager:openDownloadManager();break;
     case Action::DebridToken:editDebridToken();break;
     case Action::FlareSolverrUrl:editFlareSolverrUrl();break;
+    case Action::SearchGames:openGameSearch();break;
+    case Action::GameSearchResult:pickGameResult(entry.value.toInt());break;
+    case Action::GameSourcePick:pickGameSource(entry.value);break;
     case Action::PlaylistFolder:openPlaylists(categories_[category_].id);break;
     case Action::CreatePlaylist:
         if(playlists_.list(entry.value).size()>=PlaylistStore::MaximumPlaylists)showPlaylistResult(PlaylistStore::Result::TooManyPlaylists);
@@ -5949,6 +5953,7 @@ void Shell::refreshJellyfinSignInPage() {
 void Shell::setJellyfinSignInField(const QString& field,const QString& value) {
     if(field==QStringLiteral("debrid:token")){saveDebridToken(value);return;}
     if(field==QStringLiteral("flaresolverr:url")){saveFlareSolverrUrl(value);return;}
+    if(field==QStringLiteral("game:search")){runGameSearch(value);return;}
     if(field==QStringLiteral("release:url")) {
         QString raw=value.trimmed();
         if(!raw.isEmpty()) {

@@ -245,4 +245,75 @@ void Shell::saveFlareSolverrUrl(const QString& url) {
     for(auto& page:pages_)for(auto& row:page.entries)if(row.id==QStringLiteral("flaresolverr:url"))row.fieldValue=shown;
     setupRefresh();emit changed();
 }
+void Shell::openGameSearch() {
+    emit requestJellyfinFieldEdit(QStringLiteral("game:search"),tr("Search Games"),QString(),false);
+}
+void Shell::runGameSearch(const QString& query) {
+    const QString term=query.trimmed();
+    if(term.isEmpty() || busy())return;
+    busy_=true;status_=tr("Searching games...");
+    busyProgress_=-1.;busySpinnerPhase_=0.;busyClock_.start();
+    auto* watcher=new QFutureWatcher<QPair<QVector<GameResult>,QString>>(this);
+    connect(watcher,&QFutureWatcher<QPair<QVector<GameResult>,QString>>::finished,this,[this,watcher,term]{
+        const auto result=watcher->result();watcher->deleteLater();
+        busy_=false;status_.clear();busyProgress_=-1.;busySpinnerPhase_=-1.;
+        gameSearch_=result.first;
+        if(pages_.size()<32) {
+            Page page;page.title=tr("Search: %1").arg(term);
+            if(!result.second.isEmpty()) {
+                Entry error=releaseRow(QStringLiteral("game:error"),tr("Search failed"),Action::Unavailable);
+                error.detail=result.second;page.entries.append(error);
+            } else if(gameSearch_.isEmpty()) {
+                page.entries.append(releaseRow(QStringLiteral("game:empty"),tr("No portable results for \"%1\"").arg(term),Action::Unavailable));
+            } else {
+                for(int i=0;i<gameSearch_.size();++i) {
+                    const auto& game=gameSearch_[i];
+                    Entry entry=releaseRow(QStringLiteral("game:result:")+QString::number(i),game.name,Action::GameSearchResult,QString::number(i));
+                    entry.detail=game.options.size()>1?tr("%1 sources").arg(game.options.size()):game.options.first().source;
+                    entry.fieldValue=game.options.first().fileSize;
+                    page.entries.append(entry);
+                }
+            }
+            pages_.push_back(std::move(page));
+        }
+        emit changed();
+    });
+    watcher->setFuture(QtConcurrent::run([term]{
+        QVector<GameResult> results;QString error;
+        HydraLibrary().searchGames(term,&results,&error);
+        return qMakePair(results,error);
+    }));
+    emit changed();
+}
+void Shell::pickGameResult(int index) {
+    if(index<0 || index>=gameSearch_.size())return;
+    const auto& game=gameSearch_[index];
+    if(game.options.size()>1){openGameSources(index);return;}
+    showMessage(tr("Download"),tr("Downloading \"%1\" is the next step.").arg(game.name),MessageKind::Page);
+    emit changed();
+}
+void Shell::openGameSources(int index) {
+    if(index<0 || index>=gameSearch_.size() || pages_.size()>=32)return;
+    const auto& game=gameSearch_[index];
+    Page page;page.title=game.name;
+    for(int i=0;i<game.options.size();++i) {
+        const auto& option=game.options[i];
+        Entry entry=releaseRow(QStringLiteral("game:source:")+QString::number(i),option.source,Action::GameSourcePick,QString::number(index)+QLatin1Char(':')+QString::number(i));
+        entry.detail=option.sourceStatus;
+        entry.fieldValue=option.fileSize;
+        page.entries.append(entry);
+    }
+    pages_.push_back(std::move(page));
+    emit changed();
+}
+void Shell::pickGameSource(const QString& value) {
+    const int colon=value.indexOf(QLatin1Char(':'));
+    const int game=value.left(colon).toInt();
+    const int option=value.mid(colon+1).toInt();
+    if(game<0 || game>=gameSearch_.size())return;
+    const auto& g=gameSearch_[game];
+    if(option<0 || option>=g.options.size())return;
+    showMessage(tr("Download"),tr("Downloading \"%1\" from %2 is the next step.").arg(g.name,g.options[option].source),MessageKind::Page);
+    emit changed();
+}
 } // namespace xmb
