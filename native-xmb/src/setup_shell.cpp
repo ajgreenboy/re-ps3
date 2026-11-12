@@ -10,6 +10,7 @@
 // Initial Setup (sysconf_plugin.rco: msg_initsetup "Initial Setup", msg_initsetup_set2 "Press the %e button to finish initial setup.").
 #include "shell.h"
 #include "assets.h"
+#include "autologon.h"
 #include "autostart.h"
 #include "pad.h"
 #include "setup.h"
@@ -48,7 +49,7 @@ bool Shell::setupActive() const { return setup_.active; }
 QStringList Shell::setupOrder() const {
     QStringList order{QStringLiteral("welcome"),QStringLiteral("firmware"),QStringLiteral("library")};
     if(QGuiApplication::screens().size()>1)order<<QStringLiteral("display");
-    order<<QStringLiteral("pad")<<QStringLiteral("autostart")<<QStringLiteral("services")<<QStringLiteral("debrid")<<QStringLiteral("finish");
+    order<<QStringLiteral("pad")<<QStringLiteral("autostart")<<QStringLiteral("autologon")<<QStringLiteral("services")<<QStringLiteral("debrid")<<QStringLiteral("finish");
     return order;
 }
 QString Shell::setupStepOfTopPage() const {
@@ -77,7 +78,7 @@ void Shell::setupPush(const QString& step) {
     page.title=step==QLatin1String("welcome")?assets_.text("sysconf_plugin","msg_initsetup",tr("Initial Setup"))   // TRACED: sysconf_plugin msg_initsetup
         :step==QLatin1String("firmware")?tr("Firmware Folder"):step==QLatin1String("library")?tr("Library Folders")
         :step==QLatin1String("display")?tr("Display"):step==QLatin1String("pad")?tr("Controller")
-        :step==QLatin1String("autostart")?tr("Start at Sign-in"):step==QLatin1String("services")?tr("Services")
+        :step==QLatin1String("autostart")?tr("Start at Sign-in"):step==QLatin1String("autologon")?tr("Windows Automatic Sign-in"):step==QLatin1String("services")?tr("Services")
         :step==QLatin1String("debrid")?tr("Download Manager"):tr("Setup Complete");
     page.entries=setupRows(step);
     // Focus the row the step is about: "Continue" when the step has nothing to choose, else its first choice.
@@ -225,6 +226,12 @@ QVector<Entry> Shell::setupRows(const QString& step) {
             available?(autostart::enabled()?tr("On"):tr("Off")):tr("Unavailable"),available);
         if(!available)entry.detail=reason;
         rows<<entry<<cont()<<skip();
+    } else if(step==QLatin1String("autologon")) {
+        // ZF3: status and guidance only. The XMB reads two Winlogon values (autologon.h), never a password, and changes nothing;
+        // the first row opens the same page as Settings > System Settings > Windows automatic sign-in.
+        const autologon::Status status=autologon::read();
+        rows<<row(prefix,tr("Windows automatic sign-in"),QStringLiteral("auto:logonpage"),autologon::stepGuidance(status),status.value);
+        rows<<cont()<<skip();
     } else if(step==QLatin1String("services")) {
         for(auto service:serviceAvailability()) {
             if(service.name==QLatin1String("Steam") && QFileInfo(QDir(steamRoot_).filePath(QStringLiteral("steam.exe"))).isFile())service.installed=true;
@@ -333,6 +340,10 @@ void Shell::activateSetup(const Entry& entry) {
         setup_.capturing=true;setup_.idle.restart();setup_.lastInput.clear();
         qInfo()<<"setup: pad test started (navigation is swallowed until 3 s without input)";
         setupRefresh();emit changed();return;
+    }
+    if(command==QLatin1String("auto:logonpage")) {
+        showMessage(tr("Windows automatic sign-in"),autologon::shortPageText(autologon::read()),MessageKind::Page);
+        emit changed();return;
     }
     if(command==QLatin1String("auto:toggle")) {
         // The write runs PowerShell + the scheduler read-back, so it goes off the GUI thread (D3); the row

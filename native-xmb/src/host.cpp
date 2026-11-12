@@ -1,5 +1,6 @@
 #include "host.h"
 #include "pad.h"
+#include "autologon.h"
 #include "autostart.h"
 #include "display_mode.h"
 #include <QCoreApplication>
@@ -1717,6 +1718,8 @@ Reading rowValue(const QString& pageId,const QString& rowId) {
         if(rowId==QLatin1String("backup_utility"))
             return value(state.dataDirectorySize.isEmpty()?QStringLiteral("no data directory"):state.dataDirectorySize,
                          "qt","read-only");
+        if(rowId==QLatin1String("windows_autologon"))              // ZF3: AutoAdminLogon + DefaultUserName, read-only
+            return value(autologon::current().value,"registry","read-only");
         if(rowId==QLatin1String("init_setting"))return {};         // a real action, no value
         if(rowId==QLatin1String("init_console"))
             return noValue(QStringLiteral("the console row wipes the system storage and every user's data; on a "
@@ -2075,6 +2078,7 @@ QString rowDetail(const QString& pageId,const QString& rowId) {
     const auto lines=[&](const QStringList& body) {return body.join(QLatin1Char('\n'));};
     // ---- system -----------------------------------------------------------------------------------
     if(pageId==QLatin1String("system")) {
+        if(rowId==QLatin1String("windows_autologon"))return autologon::pageText(autologon::current());   // ZF3
         if(rowId==QLatin1String("console_lang"))
             return lines({QStringLiteral("System Language"),
                 QStringLiteral("Language: ")+state.clock.language,

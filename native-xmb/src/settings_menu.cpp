@@ -491,6 +491,10 @@ const QVector<RowSpec>* nativeOnlyRows(const QString& id) {
         // Off removes it. Unavailable, with the reason, when no watchdog.ps1 sits beside the exe (a dev build).
         {"start_at_signin",nullptr,nullptr,Action::SettingChoices,"host/startAtSignIn",nullptr,"Start at Sign-in",
             "Starts the XMB full-screen with its crash watchdog when this Windows account signs in. Turns the scheduled task on or off for this account only; Windows automatic sign-in is a separate step you set yourself."},
+        // INFERRED (ZF3, audit/AUTOLOGON.md): the firmware has no such row. Read-only: whether Windows signs this PC in by itself
+        // (HKLM Winlogon AutoAdminLogon + DefaultUserName only), with the manual steps. It never reads a password or changes the setting.
+        {"windows_autologon",nullptr,nullptr,Action::Information,nullptr,nullptr,"Windows automatic sign-in",
+            "Shows whether Windows signs this account in by itself at start-up, which a TV that boots straight into the XMB needs. Read-only: the XMB never asks for, reads or stores the password and never changes this setting."},
         // INFERRED (PHASES-HTPC D6): the firmware has no such row. Read-only page: the last crash, safe or normal run, the log folder.
         {"diagnostics",nullptr,nullptr,Action::Information,nullptr,nullptr,"Diagnostics",
             "Shows the last crash (time and code), whether this run is safe mode, and where the logs and crash files are kept."},

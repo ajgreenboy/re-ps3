@@ -106,6 +106,10 @@ reads or stores a password.
 
 Both store a credential on this PC, so only the owner should do it, and only on a machine in a trusted room.
 
+The XMB only shows the result: Settings > System Settings > Windows automatic sign-in (and a first-run step) reads
+`AutoAdminLogon` and `DefaultUserName` from the Winlogon registry key, read-only. It never reads `DefaultPassword` and
+never changes the setting; see [audit/AUTOLOGON.md](../audit/AUTOLOGON.md).
+
 ## Elevated windows and the controller
 
 Windows does not let a program send keyboard or mouse input to a window that runs at a higher privilege level (UIPI). While a

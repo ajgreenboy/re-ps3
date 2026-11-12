@@ -7,6 +7,7 @@
 #include "updater.h"
 #include "render_gate.h"
 #include "desktop_mode.h"
+#include "autologon.h"
 #include "diagnostics.h"
 #include "setup.h"
 #include "display_mode.h"
@@ -1529,6 +1530,7 @@ int main(int argc,char** argv) {
     // The Settings rows read the host snapshot from the paint path; take the first reading on a worker now so the
     // first Settings page does not pay for it (host::snapshot, ~145 ms cold).
     xmb::host::prefetchSnapshot();
+    xmb::autologon::logOnce();   // ZF3: one boot line, e.g. "autologon: on for <user>"; reads two Winlogon values, never a password
     xmb::diagnostics::armTestCrash();
     // Safe mode says so on screen, through the ordinary notification pop-up, once the first frames are up.
     if(xmb::diagnostics::safeMode())
