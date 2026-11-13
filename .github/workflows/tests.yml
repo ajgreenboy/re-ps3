@@ -54,7 +54,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
             -DXMB_STEAM_VDF_BUILD_TESTS=ON -DXMB_SETUP_BUILD_TESTS=ON -DXMB_AUTOLOGON_BUILD_TESTS=ON `
             -DXMB_UPDATER_BUILD_TESTS=ON -DXMB_FIRMWARE_BUILD_TESTS=ON -DXMB_RELEASE_BUILD_TESTS=ON `
-            -DXMB_MANAGER_BUILD_TESTS=ON -DXMB_FILE_OPS_BUILD_TESTS=ON
+            -DXMB_MANAGER_BUILD_TESTS=ON -DXMB_FILE_OPS_BUILD_TESTS=ON -DXMB_DISCORD_BUILD_TESTS=ON
           if ($LASTEXITCODE) { throw 'CMake configuration failed.' }
 
       - name: Build the test runners (and xmb-manager, which the manager tests drive)
@@ -62,7 +62,7 @@ jobs:
         run: |
           cmake --build "$env:BUILD_DIR" --parallel --target `
             xmb-steam-vdf-tests xmb-setup-tests xmb-autologon-tests xmb-updater-tests `
-            xmb-firmware-tests xmb-release-tests xmb-file-ops-tests xmb-manager-tests xmb-manager
+            xmb-firmware-tests xmb-release-tests xmb-file-ops-tests xmb-discord-tests xmb-manager-tests xmb-manager
           if ($LASTEXITCODE) { throw 'Test build failed.' }
 
       - name: Run the test runners
@@ -81,6 +81,7 @@ jobs:
             @{ Name = 'updater';   Exe = 'xmb-updater-tests.exe';   Args = @() },
             @{ Name = 'firmware';  Exe = 'xmb-firmware-tests.exe';  Args = @() },
             @{ Name = 'release';   Exe = 'xmb-release-tests.exe';   Args = @("$env:GITHUB_WORKSPACE\work\release-reader\fixtures\fitgirl-sample.json") },
+            @{ Name = 'discord';   Exe = 'xmb-discord-tests.exe';   Args = @() },
             @{ Name = 'file-ops';  Exe = 'xmb-file-ops-tests.exe';  Args = @((Join-Path $scratch 'file-ops')) },
             # The manager runner only deletes a scratch root whose name ends in manager-dev.
             @{ Name = 'manager';   Exe = 'xmb-manager-tests.exe';   Args = @((Join-Path $scratch 'manager-dev'), (Join-Path $b 'xmb-manager.exe')) }
