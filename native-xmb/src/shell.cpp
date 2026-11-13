@@ -4329,6 +4329,18 @@ void Shell::showEntryInformation(const Entry& entry) {
         qInfo().noquote()<<"shell: options information title="<<entry.title<<"rows="<<rows.size()<<"(continue watching)";
         return;
     }
+    // A Steam Store row is neither a file nor a folder: Size, Created and Format would all read Unknown or Item. Its
+    // facts are the price (the row's description) and where the purchase happens.
+    if(entry.id.startsWith(QLatin1String("store:"))) {
+        QStringList rows;
+        if(!entry.detail.isEmpty() && entry.detail!=QObject::tr("Open in Steam"))rows<<QObject::tr("Price: %1").arg(entry.detail);
+        rows<<QObject::tr("Store: Steam");
+        rows<<QString();
+        rows<<QObject::tr("Selecting this title hands it to Steam, which handles any purchase and the install.");
+        showMessage(entry.title,rows.join(QLatin1Char('\n')),MessageKind::Info);
+        qInfo().noquote()<<"shell: options information title="<<entry.title<<"(steam store)";
+        return;
+    }
     QStringList rows;
     rows<<row("msg_format","Format",entryKind(entry));
     // A file's own facts come from the filesystem, which is the same source the console reads a Size and
