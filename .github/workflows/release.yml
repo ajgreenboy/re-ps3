@@ -69,10 +69,28 @@ jobs:
           & (Join-Path "$env:QT_ROOT_DIR" 'bin\windeployqt.exe') --release --no-translations --no-compiler-runtime C:\release\dist\xmb-updater\xmb-updater.exe
           Compress-Archive -Path C:\release\dist\xmb-updater\* -DestinationPath C:\release\dist\xmb-updater.zip
 
+      # The in-app updater (src/updater.cpp) refuses a release unless it can verify re-ps3.zip against a
+      # SHA-256, taken from a `SHA256: <hex>` line in the notes or a `re-ps3.zip.sha256` asset. Attach the
+      # sidecar in the usual `<hex>  <file>` form. It also refuses a tag that is not newer than the running
+      # app's version, which comes from project(VERSION ...) in CMakeLists.txt, so the two must agree.
+      - name: Write the SHA-256 sidecar and check the version
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 C:\release\dist\re-ps3.zip).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText('C:\release\dist\re-ps3.zip.sha256', "$hash  re-ps3.zip`n")
+          Write-Host "re-ps3.zip SHA-256: $hash"
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $cmake = Get-Content native-xmb\CMakeLists.txt -Raw
+            if ($cmake -notmatch 'project\(\s*\S+\s+VERSION\s+([0-9.]+)') { throw 'No project(VERSION) in native-xmb/CMakeLists.txt' }
+            $tag = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($tag -ne $Matches[1]) { throw "Tag $env:GITHUB_REF_NAME does not match CMake project version $($Matches[1]); bump project(VERSION) first." }
+          }
+
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             C:\release\dist\re-ps3.zip
+            C:\release\dist\re-ps3.zip.sha256
             C:\release\dist\xmb-updater.zip
           generate_release_notes: true

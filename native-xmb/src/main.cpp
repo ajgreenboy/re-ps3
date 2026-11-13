@@ -1,4 +1,7 @@
 #include "view.h"
+#ifndef XMB_APP_VERSION
+#error "XMB_APP_VERSION must come from project(VERSION ...) in CMakeLists.txt"
+#endif
 #include "steam_friends.h"
 #include "phone_remote.h"
 #include <QNetworkAccessManager>
@@ -393,7 +396,7 @@ int main(int argc,char** argv) {
     // by size (5 MB, 3 old files kept); a qFatal also writes a crash capture (diagnostics.h).
     xmb::diagnostics::installLogHandler();
     QSurfaceFormat format;format.setVersion(3,3);format.setProfile(QSurfaceFormat::CoreProfile);format.setSwapInterval(1);format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);
-    QApplication app(argc,argv);app.setApplicationName("re-ps3-native");app.setApplicationVersion("0.2.0");QImageReader::setAllocationLimit(128);
+    QApplication app(argc,argv);app.setApplicationName("re-ps3-native");app.setApplicationVersion(QStringLiteral(XMB_APP_VERSION));QImageReader::setAllocationLimit(128);
     qInfo().noquote()<<QString("boot: QApplication ready after %1 ms").arg(processAgeMs(),0,'f',0);
     xmb::bootprof::mark("start");
     // D9: --display-mode-test <w>x<h>@<hz> <seconds> [--data-dir <dir>]. Applies one mode the monitor lists, holds it for a few
