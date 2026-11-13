@@ -31,6 +31,8 @@
 namespace xmb {
 namespace {
 constexpr qint64 MaxResponseBytes = 4 * 1024 * 1024;
+constexpr qint64 TokenResponseBytes = 64 * 1024;   // a token reply is a few hundred bytes
+constexpr int MaxCachedCovers = 400;
 constexpr int RequestTimeoutMs = 15000;
 constexpr int SignInTimeoutMs = 5 * 60 * 1000;
 constexpr int MaxPages = 20;          // 20 x 50 playlists, 20 x 100 playlist tracks, 20 x 50 liked tracks
@@ -233,8 +235,17 @@ void SpotifyClient::onCallback() {
         const QString error = query.queryItemValue(QStringLiteral("error"));
         const QByteArray code = query.queryItemValue(QStringLiteral("code")).toLatin1();
         const bool stateOk = !state_.isEmpty() && query.queryItemValue(QStringLiteral("state")).toLatin1() == state_;
+        if (!stateOk) {
+            // A stray or forged request must not cancel the sign-in the user is completing in the browser.
+            const QByteArray stray = "<!doctype html><meta charset=utf-8><title>XMB</title><p>" +
+                tr("This sign-in response did not match the request.").toUtf8() + "</p>";
+            socket->write("HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: " +
+                          QByteArray::number(stray.size()) + "\r\nConnection: close\r\n\r\n" + stray);
+            socket->disconnectFromHost();
+            return;
+        }
         if (!error.isEmpty()) page = tr("Spotify sign-in was not completed (%1). You can close this tab.").arg(error.left(64).toHtmlEscaped());
-        else if (!stateOk || code.isEmpty() || code.size() > 2048) page = tr("This sign-in response did not match the request. You can close this tab.");
+        else if (code.isEmpty() || code.size() > 2048) page = tr("This sign-in response did not match the request. You can close this tab.");
         else page = tr("Signed in to Spotify. You can close this tab and return to the XMB.");
         const QByteArray body = "<!doctype html><meta charset=utf-8><title>XMB</title><p>" + page.toUtf8() + "</p>";
         socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: " +
@@ -261,6 +272,7 @@ void SpotifyClient::exchangeCode(const QByteArray& code) {
     form.addQueryItem(QStringLiteral("client_id"), clientId_);
     form.addQueryItem(QStringLiteral("code_verifier"), QString::fromLatin1(verifier_));
     QNetworkReply* reply = network_->post(request, form.toString(QUrl::FullyEncoded).toLatin1());
+    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64) { if (received > TokenResponseBytes) reply->abort(); });
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         reply->deleteLater();
         verifier_.fill('\0');verifier_.clear();
@@ -302,6 +314,7 @@ void SpotifyClient::refreshAccess(std::function<void(bool)> done) {
     form.addQueryItem(QStringLiteral("client_id"), clientId_);
     QNetworkReply* reply = network_->post(request, form.toString(QUrl::FullyEncoded).toLatin1());
     const quint64 generation = generation_;
+    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64) { if (received > TokenResponseBytes) reply->abort(); });
     connect(reply, &QNetworkReply::finished, this, [this, reply, done, generation] {
         reply->deleteLater();
         if (generation != generation_) { done(false);return; }
@@ -323,11 +336,14 @@ void SpotifyClient::fetchMe() {
 }
 
 void SpotifyClient::signOut() {
-    ++generation_;cancelSignIn();waiting_.clear();refreshing_ = false;
+    ++generation_;cancelSignIn();refreshing_ = false;
+    // Requests parked behind a token refresh must hear back, or the UI's loading state never resets.
+    const auto parked = std::move(waiting_);waiting_.clear();
     accessToken_.fill('\0');accessToken_.clear();refreshToken_.fill('\0');refreshToken_.clear();
     displayName_.clear();product_.clear();
     forgetSession();
     emit signedInChanged();
+    for (const auto& item : parked) fail(item.request, tr("The Spotify sign-in has expired or was revoked. Sign in again."));
 }
 
 bool SpotifyClient::saveSession() {
@@ -396,6 +412,10 @@ void SpotifyClient::fetchImage(const QString& url) {
         QImage image;
         if (!bytes.isEmpty() && bytes.size() <= 2 * 1024 * 1024) image.loadFromData(bytes);
         if (!image.isNull() && !file.isEmpty() && QDir().mkpath(QFileInfo(file).absolutePath())) {
+            // Bound the cover cache: drop the oldest files once it holds more than MaxCachedCovers.
+            QDir dir(QFileInfo(file).absolutePath());
+            auto entries = dir.entryInfoList({QStringLiteral("*.img")}, QDir::Files, QDir::Time | QDir::Reversed);
+            for (int i = 0; i + MaxCachedCovers <= entries.size(); ++i) QFile::remove(entries.at(i).absoluteFilePath());
             QSaveFile out(file);
             if (out.open(QIODevice::WriteOnly) && out.write(bytes) == bytes.size()) out.commit();
         }
