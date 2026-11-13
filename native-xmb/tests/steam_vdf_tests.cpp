@@ -543,10 +543,21 @@ struct World {
     QTemporaryDir dir;
     Paths paths;
     QString canonicalRoot;
+    QString paddedBase;    // canonical form of the padded tree root, scrubbed to <T> like the temp dir
+    QString rawPaddedBase; // the same root as built from the temp dir path
 
     bool init() {
         if (!dir.isValid()) return false;
-        const QString base = dir.path();
+        // The folders fixtures embed these paths, so their length decides every truncation and
+        // mutation offset. Pad the tree root to a fixed length so the results (and the golden file)
+        // do not depend on how long the machine's temp path is.
+        constexpr qsizetype BaseLength = 120;
+        QString base = dir.path();
+        if (base.size() + 2 > BaseLength) {
+            std::fprintf(stderr, "temp path longer than %lld characters\n", static_cast<long long>(BaseLength - 2));
+            return false;
+        }
+        base += QLatin1Char('/') + QString(BaseLength - base.size() - 1, QLatin1Char('p'));
         paths.root = QDir(base).filePath(QStringLiteral("steam"));
         paths.lib1 = QDir(base).filePath(QStringLiteral("lib one"));
         paths.lib2 = QDir(base).filePath(QStringLiteral("lib2"));
@@ -558,6 +569,8 @@ struct World {
         QDir().mkpath(paths.root + QStringLiteral("/userdata/39734273/config"));
         writeFile(paths.root + QStringLiteral("/userdata/39734273/config/localconfig.vdf"), "\"UserLocalConfigStore\" { }");
         canonicalRoot = QDir(paths.root).canonicalPath();
+        paddedBase = QDir(base).canonicalPath();
+        rawPaddedBase = QDir::cleanPath(base);
         return true;
     }
 
@@ -592,6 +605,11 @@ QString scrub(QString text, const World& w) {
     const QStringList forms = {w.canonicalRoot, QDir::toNativeSeparators(w.canonicalRoot), w.paths.root,
                                QDir::toNativeSeparators(w.paths.root)};
     for (const QString& form : forms) text.replace(form, QStringLiteral("<R>"), Qt::CaseInsensitive);
+    // The padded root first, so its paths scrub to <T> exactly as before the padding existed.
+    text.replace(w.paddedBase, QStringLiteral("<T>"), Qt::CaseInsensitive);
+    text.replace(QDir::toNativeSeparators(w.paddedBase), QStringLiteral("<T>"), Qt::CaseInsensitive);
+    text.replace(w.rawPaddedBase, QStringLiteral("<T>"), Qt::CaseInsensitive);
+    text.replace(QDir::toNativeSeparators(w.rawPaddedBase), QStringLiteral("<T>"), Qt::CaseInsensitive);
     QString base = QDir(w.dir.path()).canonicalPath();
     text.replace(base, QStringLiteral("<T>"), Qt::CaseInsensitive);
     text.replace(QDir::toNativeSeparators(base), QStringLiteral("<T>"), Qt::CaseInsensitive);

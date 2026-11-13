@@ -40,7 +40,7 @@ jobs:
           extra: '--base https://download.qt.io/'
           # aqtinstall 3.3.0 fails with "Failed to locate XML data" on Qt 6.11+, whose repository
           # moved to per-arch folders (qt6_6120/qt6_6120_msvc2022_64/); the current source reads them.
-          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git'
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@5a49f2b391ae8ee1d3c0dd87f8b33c1d49a4deb7'
 
       - name: Set up the MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -64,6 +64,19 @@ jobs:
             xmb-steam-vdf-tests xmb-setup-tests xmb-autologon-tests xmb-updater-tests `
             xmb-firmware-tests xmb-release-tests xmb-file-ops-tests xmb-manager-tests xmb-manager
           if ($LASTEXITCODE) { throw 'Test build failed.' }
+
+      - name: Re-record the steam-vdf golden file (temporary, for review)
+        shell: pwsh
+        run: |
+          & (Join-Path $env:BUILD_DIR 'xmb-steam-vdf-tests.exe') --record
+          git diff --stat -- native-xmb/tests/steam_vdf_golden.txt
+          git diff -U0 -- native-xmb/tests/steam_vdf_golden.txt | Select-String '^[-+][a-z]' | ForEach-Object { ($_ -split "`t")[0] -replace '-\d+$','' } | Group-Object | Sort-Object Count -Descending | Format-Table Count, Name -AutoSize
+
+      - name: Upload the re-recorded golden file
+        uses: actions/upload-artifact@v4
+        with:
+          name: steam-vdf-golden
+          path: native-xmb/tests/steam_vdf_golden.txt
 
       - name: Run the test runners
         shell: pwsh
