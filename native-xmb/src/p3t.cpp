@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QSet>
 #include <QtEndian>
+#include <QtZlib/zlib.h>
 #include <bit>
 #include <algorithm>
 #include <cmath>
@@ -15,6 +16,9 @@
 namespace xmb {
 namespace {
 constexpr quint32 kNone=0xFFFFFFFFu;
+// Element offsets may overlap in a hostile file, so the attribute scan has hard budgets.
+constexpr quint32 kMaxAttributesPerElement=4096;
+constexpr qsizetype kMaxTotalAttributes=4*1024*1024;
 quint32 be32(const QByteArray& d,qsizetype at){return at>=0 && at+4<=d.size()?qFromBigEndian<quint32>(d.constData()+at):kNone;}
 quint16 be16(const QByteArray& d,qsizetype at){return at>=0 && at+2<=d.size()?qFromBigEndian<quint16>(d.constData()+at):0;}
 quint32 le32(const QByteArray& d,qsizetype at){return at>=0 && at+4<=d.size()?qFromLittleEndian<quint32>(d.constData()+at):0;}
@@ -78,15 +82,36 @@ QString cstr(const QByteArray& d,qsizetype at) {
     const qsizetype end=d.indexOf('\0',at);
     return QString::fromUtf8(d.constData()+at,(end<0?d.size():end)-at);
 }
-// zlib stream without the size header qUncompress expects; the expanded size is not stored, so grow the hint.
+// Inflates a zlib stream, giving up (empty result) once the output would pass `cap` bytes, so a small stream cannot
+// expand into memory the process does not have. The expanded size is not trusted: only the running total is.
+QByteArray inflateBounded(const char* data,qsizetype size,qsizetype cap) {
+    if(size<=0)return {};
+    z_stream stream{};
+    if(inflateInit(&stream)!=Z_OK)return {};
+    QByteArray out;
+    stream.next_in=reinterpret_cast<Bytef*>(const_cast<char*>(data));
+    stream.avail_in=uInt(std::min<qsizetype>(size,qsizetype(0x7FFFFFFF)));
+    int status=Z_OK;
+    while(status==Z_OK) {
+        if(out.size()>=cap){inflateEnd(&stream);return {};}
+        const qsizetype grow=std::min<qsizetype>(std::max<qsizetype>(out.size(),1<<16),cap-out.size()+1);
+        const qsizetype used=out.size();
+        out.resize(used+grow);
+        stream.next_out=reinterpret_cast<Bytef*>(out.data()+used);
+        stream.avail_out=uInt(grow);
+        status=inflate(&stream,Z_NO_FLUSH);
+        out.resize(qsizetype(stream.total_out));
+        if(out.size()>cap){inflateEnd(&stream);return {};}
+    }
+    inflateEnd(&stream);
+    return status==Z_STREAM_END?out:QByteArray{};
+}
+constexpr qsizetype kMaxInflated=256ll*1024*1024;
+// zlib stream without the size header qUncompress expects; stored as-is when it is not a zlib stream.
 QByteArray inflate(const QByteArray& packed) {
     if(packed.size()<2 || (quint8(packed[0])&0x0F)!=8 || ((quint8(packed[0])<<8)|quint8(packed[1]))%31)return packed;
-    for(quint64 hint=std::max<quint64>(quint64(packed.size())*4,1<<16);hint<=(256u<<20);hint*=4) {
-        QByteArray framed(4,'\0');qToBigEndian<quint32>(quint32(hint),framed.data());framed+=packed;
-        auto out=qUncompress(framed);
-        if(!out.isEmpty())return out;
-    }
-    return packed;
+    auto out=inflateBounded(packed.constData(),packed.size(),kMaxInflated);
+    return out.isEmpty()?packed:out;
 }
 }
 
@@ -107,7 +132,7 @@ P3t P3t::readContainer(QByteArray data,QString* error,int nesting) {
     else if(data.startsWith("_RAF")) {
         const quint32 declared=be32(data,4);
         if(declared==kNone || declared>256u*1024*1024)return fail("The RAF scene is too large to read.");
-        raw=qUncompress(data.mid(4));
+        raw=data.size()>8?inflateBounded(data.constData()+8,data.size()-8,kMaxInflated):QByteArray{};
         if(!raw.startsWith("RAFO"))return fail("The RAF scene could not be decompressed.");
         container=QStringLiteral("_RAF");compressedScene=true;
     } else {
@@ -126,14 +151,15 @@ P3t P3t::readContainer(QByteArray data,QString* error,int nesting) {
     for(qsizetype i=0;i+4<=floatBytes.size();i+=4)floats.push_back(std::bit_cast<float>(be32(floatBytes,i)));
     // Element: name, attribute count, parent, previous, next sibling, first child, last child (28 bytes), then
     // 16-byte attributes {name, kind, value, value}. Walked depth-first; a node seen twice ends that branch.
-    QVector<QPair<quint32,int>> stack{{0,0}};QSet<quint32> seen;
+    QVector<QPair<quint32,int>> stack{{0,0}};QSet<quint32> seen;qsizetype totalAttributes=0;
     while(!stack.isEmpty()) {
         const auto [off,depth]=stack.takeLast();
-        if(qsizetype(off)+28>tree.size() || seen.contains(off) || seen.size()>200000)continue;
+        if(qsizetype(off)+28>tree.size() || seen.contains(off) || seen.size()>200000 || totalAttributes>kMaxTotalAttributes)continue;
         seen.insert(off);
         const auto w=[&](int i){return be32(tree,qsizetype(off)+4*i);};
         Element element{depth,cstr(strings,w(0)),{}};
-        for(quint32 i=0;i<w(1);++i) {
+        for(quint32 i=0;i<std::min<quint32>(w(1),kMaxAttributesPerElement);++i) {
+            if(++totalAttributes>kMaxTotalAttributes)break;
             const qsizetype a=qsizetype(off)+28+16*qsizetype(i);
             if(a+16>tree.size())break;
             const quint32 kind=be32(tree,a+4),v1=be32(tree,a+8),v2=be32(tree,a+12);
