@@ -15,8 +15,9 @@ permissions:
 env:
   # The text renderer (font_raster.cpp) links FreeType directly. CMake falls back to Qt's *private*
   # modules Qt6BundledFreetype/Qt6FreetypePrivate when a standalone FreeType isn't found, and those
-  # private modules only became findable CMake packages in Qt 6.10. Pin to a Qt that ships them.
-  QT_VERSION: '6.11.1'
+  # private modules only became findable CMake packages in Qt 6.10. Pin to a Qt that ships them, and
+  # keep it on the kit the tree is built and verified with locally (native-xmb/INSTALL.md: Qt 6.12.0).
+  QT_VERSION: '6.12.0'
 
 jobs:
   build:
@@ -33,6 +34,9 @@ jobs:
           version: ${{ env.QT_VERSION }}
           arch: 'win64_msvc2022_64'
           cache: true
+          # aqt picks a random mirror by default; a lagging mirror is what returned "Failed to locate
+          # XML data" for 6.11.1. Read the package metadata straight from download.qt.io instead.
+          extra: '--base https://download.qt.io/'
 
       - name: Unpack Steamworks headers (optional)
         shell: pwsh
@@ -69,7 +73,17 @@ jobs:
           & (Join-Path "$env:QT_ROOT_DIR" 'bin\windeployqt.exe') --release --no-translations --no-compiler-runtime C:\release\dist\xmb-updater\xmb-updater.exe
           Compress-Archive -Path C:\release\dist\xmb-updater\* -DestinationPath C:\release\dist\xmb-updater.zip
 
+      - name: Upload the packages as run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: |
+            C:\release\dist\re-ps3.zip
+            C:\release\dist\xmb-updater.zip
+
+      # Only a tag push publishes a GitHub release; a manual run on a branch stops at the artifacts above.
       - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
