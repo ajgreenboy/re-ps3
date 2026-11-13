@@ -1441,7 +1441,7 @@ void Shell::rebuildFriends() {
         open.detail=discordFriendsError_.isEmpty() && discordFriendList_.isEmpty()?"Your Discord friends list is empty.":discordFriendsError_;entries.push_back(std::move(open));
         entries.push_back(item("discord-friends:refresh","Refresh Discord Friends","item_tex_Players","explore_category_friend",Action::RefreshFriends));
         const QString setup="Discord Friends\n\nFriends come from Discord. Add your Discord application clientId to discord.json in the data folder next to the executable, and register the loopback redirect URI. Select Refresh Discord Friends to sign in. Discord may restrict the relationships.read scope.";
-        auto connection=item("discord-friends:setup","Discord Connection","item_tex_ChatRoom","explore_category_friend",Action::Information,setup);connection.detail=setup;entries.push_back(std::move(connection));
+        auto connection=item("discord-friends:setup","Discord Connection","item_tex_ChatRoom","explore_category_friend",Action::Information,setup);connection.detail=QStringLiteral("How to set up Discord Friends.");entries.push_back(std::move(connection));
         selections_[c]=0;
         if(hadFriends || discordFriendList_.isEmpty())for(int i=0;i<entries.size();++i)if(entries[i].id==selected){selections_[c]=i;break;}
     }
