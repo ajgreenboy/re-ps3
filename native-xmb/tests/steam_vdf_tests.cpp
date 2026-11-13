@@ -10,7 +10,9 @@
 // hash plus a short summary, then compared with tests/steam_vdf_golden.txt.
 //
 // The golden file was recorded from the ORIGINAL, unmerged parsers and must not change when the
-// parser implementation changes. Fixtures are fully synthetic. The real Steam install of the machine
+// parser implementation changes. Exception: the folders/mutate-* and folders/trunc-* entries embed the
+// temp tree's paths, so they were re-recorded (2026-11-13) once that tree got a fixed path length;
+// before that they only matched on the recording machine. Fixtures are fully synthetic. The real Steam install of the machine
 // is covered by `--real <file>`: it records or compares only counts and hashes, in a file the caller
 // keeps OUTSIDE the repository, and prints no account id, path or title.
 //

@@ -65,20 +65,6 @@ jobs:
             xmb-firmware-tests xmb-release-tests xmb-file-ops-tests xmb-manager-tests xmb-manager
           if ($LASTEXITCODE) { throw 'Test build failed.' }
 
-      - name: Re-record the steam-vdf golden file (temporary, for review)
-        shell: pwsh
-        run: |
-          & (Join-Path $env:BUILD_DIR 'xmb-steam-vdf-tests.exe') --record
-          git diff --stat -- native-xmb/tests/steam_vdf_golden.txt
-          git diff -U0 -- native-xmb/tests/steam_vdf_golden.txt | Select-String '^[-+][a-z]' | ForEach-Object { ($_ -split "`t")[0] -replace '-\d+$','' } | Group-Object | Sort-Object Count -Descending | Format-Table Count, Name -AutoSize
-
-      - name: Print the re-recorded golden file
-        shell: pwsh
-        run: |
-          Write-Host '>>>GOLDEN-BEGIN'
-          [IO.File]::ReadAllText("$env:GITHUB_WORKSPACE/native-xmb/tests/steam_vdf_golden.txt")
-          Write-Host '>>>GOLDEN-END'
-
       - name: Run the test runners
         shell: pwsh
         env:
