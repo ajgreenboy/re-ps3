@@ -89,7 +89,9 @@ bool parseModule(const QByteArray& bytes, ModuleSegments& out) {
         out.error = QStringLiteral("not an ELF64 big-endian module");
         return false;
     }
-    const int phoff = int(be64(bytes, 0x20));
+    const quint64 phoffWide = be64(bytes, 0x20);
+    // A 64-bit offset must not be truncated to 32 bits (0x1'0000'0040 would read as 0x40).
+    const int phoff = phoffWide > quint64(bytes.size()) ? -1 : int(phoffWide);
     const int phentsize = int(be16(bytes, 0x36));
     const int phnum = int(be16(bytes, 0x38));
     if (phentsize != 0x38 || phnum <= 0 || phnum > kMaxProgramHeaders) {
