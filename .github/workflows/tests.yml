@@ -29,26 +29,17 @@ jobs:
       - name: Check out the source
         uses: actions/checkout@v4
 
-      - name: Show Qt repository layout (diagnostic)
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $base = 'https://download.qt.io/online/qtsdkrepository/windows_x86/desktop/qt6_6120/'
-          (Invoke-WebRequest $base -UseBasicParsing).Links.href | Select-Object -Unique
-          foreach ($sub in (Invoke-WebRequest $base -UseBasicParsing).Links.href | Where-Object { $_ -like 'qt6_6120*/' }) {
-            Write-Host "== $sub"; (Invoke-WebRequest ($base + $sub) -UseBasicParsing).Links.href | Select-Object -Unique | Select-Object -First 40
-          }
-
       - name: Install Qt (MSVC 2022 64-bit)
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           arch: 'win64_msvc2022_64'
+          # find_package(Qt6 ... Multimedia) in CMakeLists.txt; Multimedia is an add-on module.
+          modules: 'qtmultimedia'
           cache: true
-          # aqt's default mirror selection can land on a mirror without the Qt 6.11+ Updates.xml
-          # ("Failed to locate XML data"); fetch from the official server instead.
           extra: '--base https://download.qt.io/'
-          # aqtinstall 3.3.0 cannot read the Qt 6.11+ repository metadata; use its current source.
+          # aqtinstall 3.3.0 fails with "Failed to locate XML data" on Qt 6.11+, whose repository
+          # moved to per-arch folders (qt6_6120/qt6_6120_msvc2022_64/); the current source reads them.
           aqtsource: 'git+https://github.com/miurahr/aqtinstall.git'
 
       - name: Set up the MSVC developer environment
