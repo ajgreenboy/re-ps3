@@ -578,7 +578,11 @@ void WolClient::pollWake(const QString& id) {
         return;
     }
     ++wake->attempts;
-    wake->check = startCheck(QHostAddress(wake->device.host), probePorts(wake->device), [this, id](bool online) {
+    // startCheck can finish before it returns (a synchronous connect failure): mark the check as running first, so the
+    // callback's reset is not overwritten by the returned serial, and never touch `wake` if the callback ended the wake.
+    constexpr quint64 Starting = ~quint64(0);
+    wake->check = Starting;
+    const quint64 serial = startCheck(QHostAddress(wake->device.host), probePorts(wake->device), [this, id](bool online) {
         Wake* w = wakes_.value(id);
         if (!w) return;
         w->check = 0;
@@ -595,6 +599,7 @@ void WolClient::pollWake(const QString& id) {
         }
         emit progress(id, QStringLiteral("Waiting for %1 (%2 s)...").arg(w->device.host).arg(elapsed / 1000));
     });
+    if (wakes_.value(id) == wake && wake->check == Starting) wake->check = serial;
 }
 
 void WolClient::stopWake(const QString& id) {
