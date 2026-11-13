@@ -35,6 +35,9 @@ jobs:
           version: ${{ env.QT_VERSION }}
           arch: 'win64_msvc2022_64'
           cache: true
+          # aqt's default mirror selection can land on a mirror without the Qt 6.11+ Updates.xml
+          # ("Failed to locate XML data"); fetch from the official server instead.
+          extra: '--base https://download.qt.io/'
 
       - name: Set up the MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
