@@ -1438,9 +1438,13 @@ void Shell::rebuildFriends() {
         auto open=discordFriends_.signedIn()
             ?item("discord-friends:open","Open Discord Friends","item_tex_NewFriend","explore_category_friend",Action::OpenUrl,"https://discord.com/channels/@me")
             :item("discord-friends:open","Sign In to Discord","item_tex_NewFriend","explore_category_friend",Action::RefreshFriends);
-        open.detail=discordFriendsError_.isEmpty() && discordFriendList_.isEmpty()?"Your Discord friends list is empty.":discordFriendsError_;entries.push_back(std::move(open));
+        // The row's second line keeps to the first sentence (a long one overlaps the next row); the full message
+        // is on the page a sign-in or refresh puts up, and Discord Connection has the setup steps.
+        QString detail=discordFriendsError_.isEmpty() && discordFriendList_.isEmpty()?QStringLiteral("Your Discord friends list is empty."):discordFriendsError_;
+        if(const int stop=detail.indexOf(QLatin1String(". "));stop>0)detail.truncate(stop+1);
+        open.detail=detail;entries.push_back(std::move(open));
         entries.push_back(item("discord-friends:refresh","Refresh Discord Friends","item_tex_Players","explore_category_friend",Action::RefreshFriends));
-        const QString setup="Discord Friends\n\nFriends come from Discord. Add your Discord application clientId to discord.json in the data folder next to the executable, and register the loopback redirect URI. Select Refresh Discord Friends to sign in. Discord may restrict the relationships.read scope.";
+        const QString setup=discord::setupText(discordFriends_.redirectUri());
         auto connection=item("discord-friends:setup","Discord Connection","item_tex_ChatRoom","explore_category_friend",Action::Information,setup);connection.detail=QStringLiteral("How to set up Discord Friends.");entries.push_back(std::move(connection));
         selections_[c]=0;
         if(hadFriends || discordFriendList_.isEmpty())for(int i=0;i<entries.size();++i)if(entries[i].id==selected){selections_[c]=i;break;}
@@ -1749,7 +1753,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     adoptedWatch_.setInterval(250);
     connect(&adoptedWatch_,&QTimer::timeout,this,&Shell::pollAdopted);
     connect(&steamWatch_,&QTimer::timeout,this,&Shell::pollSteamGame);
-    discordFriendsError_=discordFriends_.configured()?QStringLiteral("Select Refresh Discord Friends to sign in."):QStringLiteral("Not set up yet. Discord Connection says how.");
+    discordFriendsError_=discordFriends_.configured()?QStringLiteral("Select Refresh Discord Friends to sign in."):(discordFriends_.unset()?QStringLiteral("Not set up yet. Discord Connection says how."):discordFriends_.configurationError());
     rebuildFriends();
     for(auto& category:categories_)if(category.id=="game") {
         category.entries.push_back(item("game:download-hub",QObject::tr("Download Games"),"item_tex_plain_folder",full,Action::DownloadHub));

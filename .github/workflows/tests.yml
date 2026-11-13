@@ -1,0 +1,99 @@
+name: Tests
+
+# Builds and runs every headless test runner (the XMB_*_BUILD_TESTS targets in native-xmb/CMakeLists.txt)
+# on each push and pull request. Release packaging stays in release.yml.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Qt 6.10+ is needed for the Qt6BundledFreetype/Qt6FreetypePrivate CMake packages (see release.yml).
+  # Matches the dev machine (INSTALL.md).
+  QT_VERSION: '6.12.0'
+  BUILD_DIR: ${{ github.workspace }}\out\tests
+
+jobs:
+  unit-tests:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@v4
+
+      - name: Install Qt (MSVC 2022 64-bit)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: 'win64_msvc2022_64'
+          # find_package(Qt6 ... Multimedia) in CMakeLists.txt; Multimedia is an add-on module.
+          modules: 'qtmultimedia'
+          cache: true
+          extra: '--base https://download.qt.io/'
+          # aqtinstall 3.3.0 fails with "Failed to locate XML data" on Qt 6.11+, whose repository
+          # moved to per-arch folders (qt6_6120/qt6_6120_msvc2022_64/); the current source reads them.
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@5a49f2b391ae8ee1d3c0dd87f8b33c1d49a4deb7'
+
+      - name: Set up the MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure with every test runner enabled
+        shell: pwsh
+        run: |
+          cmake -S native-xmb -B "$env:BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
+            -DXMB_STEAM_VDF_BUILD_TESTS=ON -DXMB_SETUP_BUILD_TESTS=ON -DXMB_AUTOLOGON_BUILD_TESTS=ON `
+            -DXMB_UPDATER_BUILD_TESTS=ON -DXMB_FIRMWARE_BUILD_TESTS=ON -DXMB_RELEASE_BUILD_TESTS=ON `
+            -DXMB_MANAGER_BUILD_TESTS=ON -DXMB_FILE_OPS_BUILD_TESTS=ON -DXMB_DISCORD_BUILD_TESTS=ON
+          if ($LASTEXITCODE) { throw 'CMake configuration failed.' }
+
+      - name: Build the test runners (and xmb-manager, which the manager tests drive)
+        shell: pwsh
+        run: |
+          cmake --build "$env:BUILD_DIR" --parallel --target `
+            xmb-steam-vdf-tests xmb-setup-tests xmb-autologon-tests xmb-updater-tests `
+            xmb-firmware-tests xmb-release-tests xmb-file-ops-tests xmb-discord-tests xmb-manager-tests xmb-manager
+          if ($LASTEXITCODE) { throw 'Test build failed.' }
+
+      - name: Run the test runners
+        shell: pwsh
+        env:
+          QT_PLUGIN_PATH: ${{ env.QT_ROOT_DIR }}\plugins
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $b = $env:BUILD_DIR
+          $scratch = Join-Path $env:RUNNER_TEMP 'xmb-tests'
+          New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+          $runs = @(
+            @{ Name = 'steam-vdf'; Exe = 'xmb-steam-vdf-tests.exe'; Args = @() },
+            @{ Name = 'setup';     Exe = 'xmb-setup-tests.exe';     Args = @() },
+            @{ Name = 'autologon'; Exe = 'xmb-autologon-tests.exe'; Args = @() },
+            @{ Name = 'updater';   Exe = 'xmb-updater-tests.exe';   Args = @() },
+            @{ Name = 'firmware';  Exe = 'xmb-firmware-tests.exe';  Args = @() },
+            @{ Name = 'release';   Exe = 'xmb-release-tests.exe';   Args = @("$env:GITHUB_WORKSPACE\work\release-reader\fixtures\fitgirl-sample.json") },
+            @{ Name = 'discord';   Exe = 'xmb-discord-tests.exe';   Args = @() },
+            @{ Name = 'file-ops';  Exe = 'xmb-file-ops-tests.exe';  Args = @((Join-Path $scratch 'file-ops')) },
+            # The manager runner only deletes a scratch root whose name ends in manager-dev.
+            @{ Name = 'manager';   Exe = 'xmb-manager-tests.exe';   Args = @((Join-Path $scratch 'manager-dev'), (Join-Path $b 'xmb-manager.exe')) }
+          )
+          New-Item -ItemType Directory -Force -Path (Join-Path $scratch 'file-ops') | Out-Null
+          $failed = @()
+          foreach ($r in $runs) {
+            Write-Host "::group::$($r.Name)"
+            & (Join-Path $b $r.Exe) @($r.Args)
+            $code = $LASTEXITCODE
+            Write-Host "::endgroup::"
+            if ($code -ne 0) { Write-Host "::error::$($r.Name) tests failed (exit $code)"; $failed += $r.Name }
+            else { Write-Host "$($r.Name): passed" }
+          }
+          if ($failed.Count) { throw "Failing test runners: $($failed -join ', ')" }

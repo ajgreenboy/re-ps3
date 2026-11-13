@@ -2,30 +2,34 @@
 
 Run this on the real living-room HTPC, in order. Record each row in the Pass/Fail column and save the evidence named in the row. Rows that depend on hardware or accounts the owner must supply are repeated in section 3 with their source.
 
+The guided way to run it is [HTPC-RUN-GUIDE.md](HTPC-RUN-GUIDE.md) with `packaging/htpc-run.ps1`: the guide orders the rows into sittings by what needs to be at hand, and the script walks every row, runs the checks that can be scripted, records the result and writes the run report. The 2026-11-12 development-PC pass ([RELEASE-RUN-2026-11-12.md](RELEASE-RUN-2026-11-12.md)) already passed 19 rows without hardware; the HTPC run still repeats them on the real install.
+
 ## Conventions
 
-- `<exe>`: `out\native-xmb\re-ps3-native.exe` in the build folder.
+- `<exe>`: `re-ps3-native.exe` in the installed package folder `<package>` (for example `C:\PS3\re-ps3`). For a development build it is `out\native-xmb\re-ps3-native.exe`.
 - `<firmware>`: the firmware root that holds `dev_flash`. INSTALL.md section 11 says it is not the RPCS3 install root.
-- `<data>`: the writable data folder. Default `<exe folder>\data`. The launcher uses `out\native-xmb\data`.
+- `<data>`: the writable data folder: `dataDir` in `<package>\xmb-config.json`, default `<package>\data`.
 - `<native-data>`: the folder the README names for `spotify.json`, `dlna.json`, `wol.json`, `homeassistant.json`, `weather.json` and `playlists\`. It is the `<data>` folder: every service reads its json from the data directory (`dataDirectory_`, set by `--data-dir`).
 - `<log>`: the XMB log file, set with `XMB_LOG=<file>` (INSTALL.md section 7.2). Without it, crash stacks go to `<exe folder>\crash.log` (INSTALL.md section 6).
-- `<evidence>`: the evidence folder. The docs define none. TODO: the owner picks one and records its path in the run notes.
-- No tokens, passwords, refresh tokens or account details in screenshots or copied logs. Where a row says "file check", show only that the key is present or absent. The XMB log names the Windows account, the Tailscale host and audio devices, so scrub every copied log with `bun work/scrub-log.ts <in> <out>` first (audit/DIAGNOSE.md section 3.1).
+- `<evidence>`: the evidence folder. `htpc-run.ps1` creates `C:\xmb-evidence\<date>-htpc` (or `-Evidence <folder>`) with `photos\`, `logs\`, `raw\` and `results.csv`. Name photos and videos after the row (`B1.jpg`, `N1-pass.mp4`); the report links every file whose name starts with the row ID. `raw\` holds unscrubbed copies and never leaves the HTPC.
+- No tokens, passwords, refresh tokens or account details in screenshots or copied logs. Where a row says "file check", show only that the key is present or absent. The XMB log names the Windows account, the Tailscale host and audio devices, so scrub every copied log first: `htpc-run.ps1` scrubs everything it copies with the same rules as `bun work/scrub-log.ts` (audit/DIAGNOSE.md section 3.1). Read the scrubbed copy before sharing it; neither tool knows media paths or device names.
 - `XMB_INPUT_TRACE=1` adds remote and pad decision lines to the log (INPUT.md section 1). Set it for sections 2.3 and 2.1.
 
 ## 1. Setup on the HTPC
 
 The features documented in the README are Windows-only (XInput, DPAPI, Recycle Bin, `tailscale.exe`), so the HTPC must run Windows. (INFERRED from the README; not stated in the install docs.)
 
+The run tests the released package, not a local build: `re-ps3.zip` and `re-ps3.zip.sha256` from the GitHub release under test (v0.3.0 for this run). Path A installs the previous release and updates through the XMB, which also tests the updater end to end (rows UP1 to UP3). Path B unzips the release under test directly. Use path B if path A fails, and record the failure.
+
 | Step | Action | Source |
 |---|---|---|
-| 1. Build | Build into `out\native-xmb` with `build.ps1` (the launcher's output folder). Build details are in INSTALL.md section 2, which this file did not read. | INPUT.md section 4 (`build.ps1 -OutputDirectory`), INSTALL.md section 3 |
-| 2. Copy the build | Copy the whole `out\native-xmb` folder. Run the exe from its own folder so Qt finds `platforms\` and the image plugins. Copy method to the HTPC: TODO, not documented. | INSTALL.md section 3 |
-| 3. Firmware | Put a local `dev_flash` folder on the HTPC and pass it as `--dev-flash <firmware>`. The app only reads it. The launcher defaults to a sibling `rpcs3\bin\dev_flash`. How the firmware reaches the HTPC: TODO, not documented. | INSTALL.md sections 3 and 11 |
-| 4. Data folder | Pass `--data-dir <data>`. The first launch creates it with default preferences. | INSTALL.md section 3 |
-| 5. Log | Before launching, run `$env:XMB_LOG = '<log>'` in the same PowerShell session. The launcher also writes session logs; its location: TODO, not read for this file. | INSTALL.md sections 3 and 7.2 |
-| 6. Kiosk launch | `& <exe> --dev-flash <firmware> --data-dir <data> --kiosk --display 1`. The documented example omits `--data-dir`; adding it pins the folder. `--display 1` is the second screen, so confirm the TV is display 1 in Windows Display settings. | INSTALL.md section 3 |
-| 7. Autostart at login | `packaging/install-autostart.ps1` registers the logon task that runs the watchdog; Windows automatic sign-in is a manual step (the package never stores a password). | packaging/README.md; AUTOLOGON.md |
+| 1. Package | Path A: download `re-ps3.zip` from release v0.2.0. Path B: download `re-ps3.zip` and `re-ps3.zip.sha256` from the release under test (row V1 checks the hash). Unzip to `<package>`, for example `C:\PS3\re-ps3`. Keep the exe and the Qt plugin folders together. | packaging/README.md, "Install on the HTPC" |
+| 2. Firmware | Put a local `dev_flash` folder on the HTPC (copied from the owner's RPCS3 install or extracted with `--firmware-extract`). The app only reads it. | INSTALL.md sections 3 and 11 |
+| 3. Config | Write `<package>\xmb-config.json` with `devFlash`, `dataDir` (for example `C:\PS3\xmb-data`) and optionally `vshModules` (`xmb-config.example.json` is the template). The first launch creates `<data>` with default preferences. | packaging/README.md, step 2 |
+| 4. Service files | Before the run, put the owner's `spotify.json`, `dlna.json` (only if needed), `wol.json`, `homeassistant.json`, `weather.json` and, once Discord sign-in ships, `discord.json` in `<data>`. `htpc-run.ps1 preflight` reports which are present without printing their contents. | README.md, "Network services and media sources" |
+| 5. Log | `htpc-run.ps1 launch` and `watchdog.ps1` point the app log at `<data>\logs\xmb.log` (`XMB_LOG`). The watchdog's own log is `<package>\watchdog.log`. | packaging/README.md, "Watchdog behaviour" |
+| 6. Kiosk launch | `& <package>\run-kiosk.ps1 -Display 1` (or `htpc-run.ps1 launch`, which starts the watchdog with the same arguments and any test switches). `--display 1` is the second screen, so confirm the TV is display 1 in Windows Display settings; `preflight` lists the screens. | packaging/README.md, step 3 |
+| 7. Autostart at login | `& <package>\install-autostart.ps1 -Display 1 -Shortcuts` registers the logon task that runs the watchdog and adds the Start-menu "XMB" and "Return to XMB" shortcuts; Windows automatic sign-in is a manual step (the package never stores a password). Rows AS1 to AS3 check it. | packaging/README.md; AUTOLOGON.md |
 
 ## 2. Checklist
 
@@ -228,6 +232,72 @@ The packaged `watchdog.ps1` (see packaging/README.md) restarts the XMB after a c
 | RC1 | With the XMB started by `watchdog.ps1` and in front, End task on `re-ps3-native.exe` in Task Manager. | The watchdog restarts the XMB; after repeated crashes inside its window it starts in safe mode. Started without the watchdog, nothing restarts it, which is expected. | Photo of the TV; Task Manager screenshot. | |
 | RC2 | Start again with the kiosk command from setup step 6. | Starts; preferences and playlists from `<data>` are present. | Photo of the TV; `<data>` listing. | |
 
+### 2.20 Release package and update
+
+Added for the v0.3.0 run. Path A of setup step 1 exercises UP1 and UP2; on path B mark them NOT RUN with the reason.
+
+| ID | What to do | Correct looks like | Evidence | Pass/Fail |
+|---|---|---|---|---|
+| V1 | Hash the downloaded `re-ps3.zip` and compare it with `re-ps3.zip.sha256` from the same release. | The two SHA-256 values are equal. | `htpc-run.ps1` auto-check output. | |
+| V2 | Settings > System Settings > System Information. | The application version reads 0.3.0 (the release under test). | Photo of the TV; auto-check (`--settings-report`, `build.version`). | |
+| UP1 | Path A only, on v0.2.0 under the watchdog: Settings > System Settings > System Update. Confirm the update. | Offers v0.3.0; downloads, verifies the hash, the XMB exits, the watchdog runs `apply-update.ps1` and restarts the XMB. No keyboard needed. | Photo of the offer; `watchdog.log` lines (`applied ...`). | |
+| UP2 | After UP1, check the install. | The XMB is back on the TV at 0.3.0 (V2). `<package>.old` holds the previous install. `xmb-config.json` and the data folder carried across: preferences and playlists are unchanged. | Auto-check (folder listing, config present); photo. | |
+| UP3 | On 0.3.0: Settings > System Settings > System Update. | Says this is the latest version and offers nothing. | Photo; auto-check (`--check-update` prints `newer=no`). | |
+
+### 2.21 Sign-in, autostart and boot
+
+| ID | What to do | Correct looks like | Evidence | Pass/Fail |
+|---|---|---|---|---|
+| FR1 | First start on a fresh data folder (`htpc-run.ps1 launch -FirstRun`), controller only. | The setup sequence walks firmware check, library folders, display, pad test and Start at Sign-in; every step can be finished with the pad. | Photo of each step. | |
+| AS1 | Settings > System Settings > Start at Sign-in: On (or setup step 7). | Task `re-ps3-native-kiosk` exists and runs `watchdog.ps1` from `<package>`; the row reads On. | Auto-check (task state and action path); photo of the row. | |
+| AS2 | Turn on Windows automatic sign-in yourself (packaging/README.md), then open Settings > System Settings > Windows automatic sign-in. | The row says automatic sign-in is on for this account. | Auto-check (`AutoAdminLogon` is 1; the user name is not recorded); photo of the row. | |
+| AS3 | Users > Switch to Desktop, then Start menu > "Return to XMB". | The XMB comes back to the front, fullscreen, same selection. | Photo; log line `desktop: return via second launch`. | |
+| BT1 | Shut Windows down fully. Press the power button and touch nothing else. | Windows signs in by itself and the XMB fills the TV, with no desktop, login screen or keyboard step. Record power button to XMB in seconds (stopwatch). | Stopwatch value; auto-check (`boot: first frame after N ms`, and Windows sign-in to XMB start). | |
+| BT2 | Restart Windows from Windows Update or Start > Restart (not from the XMB). | The PC comes back to the XMB, as in BT1 (ZF5). | Photo of the TV after the restart. | |
+
+### 2.22 Desktop Mode
+
+| ID | What to do | Correct looks like | Evidence | Pass/Fail |
+|---|---|---|---|---|
+| DM1 | Users > Switch to Desktop, then press PS (DualSense) or Guide (Xbox pad) once. | The XMB hides and the desktop shows with an XMB tray icon; the press brings the XMB back fullscreen with the same selection. | Photo of each state; log `desktop: return via Guide button`. | |
+| DM2 | Switch to Desktop three more times; return once each by clicking the tray icon, by tray menu > Return to XMB, and by Ctrl+Alt+Home. | Each way returns the XMB with the same selection. | Log lines `desktop: return via tray icon`, `tray menu`, `hotkey`. | |
+| DM3 | In Desktop Mode with the pad: left stick, Cross, Square, right stick, D-pad, Start. | Pointer moves, Cross clicks, Square right-clicks, right stick scrolls, D-pad sends arrow keys, Start opens the on-screen keyboard. | Video. | |
+| DM4 | In Desktop Mode, start Notepad with "Run as administrator" (accept the UAC prompt with the mouse) and bring it to the front. Try the pad. | The XMB says the window runs as administrator and the pad cannot drive it; nothing freezes. Leaving that window lets the pad work again. | Photo of the notice. | |
+| DM5 | Tray menu > Exit XMB while running under the watchdog. | The XMB exits with code 0 and the watchdog stops. | Auto-check (`watchdog.log`: clean exit). | |
+
+### 2.23 In-game XMB and returning from apps
+
+Run IG1 to IG4 once per title type the owner has: a borderless game, an exclusive-fullscreen game, a Steam-launched game, an emulator (RPCS3 or another) and, if installed, an anti-cheat title. Nothing here injects into a game, so the anti-cheat title is a behaviour check. Record one row per title in the run notes: title type, PS tap detected, mode (log `ingame: window ... mode=`), backdrop, input leak, return time, Quit Game stage, notification seen.
+
+| ID | What to do | Correct looks like | Evidence | Pass/Fail |
+|---|---|---|---|---|
+| IG1 | Launch the title from the XMB. Once it plays, tap PS/Guide. | The in-game XMB comes up over the game: the game's frame dimmed behind it, a Quit Game row in the title's column, "PS : Back to Game Screen". | Photo; log `ingame: enter` and `mode=`. | |
+| IG2 | Move around the in-game XMB with the pad. | The game does not react to the presses. | Video or note. | |
+| IG3 | Press Circle at the column root, or tap PS again. | The game comes back in front and takes input. | Log `ingame: return ... return confirmed`. | |
+| IG4 | In-game XMB > Quit Game > No, then again > Yes. | No changes nothing. Yes closes the game (cooperative first) and the XMB comes back with the same row selected. | Log `ingame: quit ended by stage ...`; photo. | |
+| IG5 | Launch a web app (Plex or YouTube from `examples/media-apps.json`). Tap PS, choose Enter Text, type a search, press Start. | The text lands in the web app's search box (ZF2). | Photo. | |
+| IG6 | With the emulator, then the web app: close one normally, one with Alt-F4, one with End task. | The XMB comes back fullscreen with the same row selected each time (ZF6). | Photo per case. | |
+
+### 2.24 Display, TV and accessories
+
+| ID | What to do | Correct looks like | Evidence | Pass/Fail |
+|---|---|---|---|---|
+| DP1 | Settings > Display Settings > Current Display Mode. | Shows the TV's real resolution, refresh rate and HDR state. | Photo; compare with Windows Display settings. | |
+| DP2 | Give one app or game a `"display": {"width":..,"height":..,"refresh":..}` entry in `<data>\apps.json` (a mode the TV lists), launch it, then quit. | The mode switches while the title runs and is restored after. | Log `display mode` lines; photo. | |
+| CE1 | Only with a Pulse-Eight USB-CEC adapter: turn on HDMI-CEC - TV On and Input and TV Standby on Turn Off. Restart the XMB, then Turn Off the System. | The TV turns on and switches to the PC at start; it goes to standby on Turn Off. | Photo; log lines. | |
+| BL1 | Settings > Accessory Settings > Bluetooth Devices. Put a controller or headset in pairing mode and pair it from the XMB. | The device is listed, pairs and works. | Photo. | |
+| WF1 | Network > Wi-Fi Networks (only if the HTPC has Wi-Fi). | Nearby networks are listed, or a clear message that Wi-Fi is off. | Photo (no network names needed). | |
+| PR1 | Start with `XMB_PHONE_REMOTE_LAN=1` (`htpc-run.ps1 launch -Set XMB_PHONE_REMOTE_LAN=1`). Network > Phone Remote: On. Open the shown address on a phone on the same network and enter the code. | The phone's D-pad, Cross and Circle drive the XMB; text typed on the phone lands in an open on-screen keyboard. | Photo of the phone and the TV. | |
+
+### 2.25 Discord
+
+Only once Discord sign-in has shipped with an example `discord.json` and setup doc. Otherwise mark NOT RUN.
+
+| ID | What to do | Correct looks like | Evidence | Pass/Fail |
+|---|---|---|---|---|
+| DC1 | Put the owner's Discord application client id in `<data>\discord.json`. Friends > Discord Connection > sign in. | The browser opens Discord's own authorization page (not discord.com's home page), and after Authorize the row reads connected. | Photo. No token in evidence. | |
+| DC2 | Friends > Open Discord Friends, or Refresh. | Friends list, or a clear message that Discord did not grant the friends permission (`relationships.read` is restricted for unapproved apps). | Photo of the result. | |
+
 ## 3. Known gaps to expect
 
 Each gap is a row above that the docs say was not verified. Expect these to fail or stay open on this run.
@@ -249,3 +319,10 @@ Each gap is a row above that the docs say was not verified. Expect these to fail
 | G13 | Autostart registration and a kiosk autostart were not exercised. A watchdog exists (`packaging/watchdog.ps1`) and restarted the XMB after a kill (RC1 in RELEASE-RUN-2026-11-12.md). | packaging/README.md; audit/RELEASE-RUN-2026-11-12.md (G13) | RC1, PW3 |
 | G14 | Resolved: Copy offers a destination list and completed in the 2026-11-12 run. Kept for traceability. | audit/RELEASE-RUN-2026-11-12.md (G14) | CD3 |
 | G15 | The `<native-data>` folder is assumed to be `<data>`. | README.md, "Network services and media sources" (throughout) | Section 1 step 4; WE1, WOL1, SP1, DL3, HA1 |
+| G16 | The updater's live path (download, hash check, folder swap through the watchdog, restart) was only dry-run; no release had a hash until v0.3.0. | audit/PHASES-HTPC-2026-11-09.md (D7) | UP1, UP2 |
+| G17 | Desktop Mode tray icon and menu, a physical Guide press, and the controller mouse on a real pad. | audit/DESKTOP-MODE.md, "Left" | DM1-DM3 |
+| G18 | The in-game XMB has never run over a real title (only stub games); the owner validation matrix (step 10) is open. Emulators and Steam titles for ZF6, and a real web app's search box for ZF2, are device runs. | audit/INGAME-XMB-DESIGN.md, section 5; audit/PHASES-ZERO-FRICTION-2026-11-11.md (ZF2, ZF6) | IG1-IG6 |
+| G19 | Boot from a real sign-in, and a reboot landing back on the XMB (ZF5). | HANDOFF-2026-11-09.md, section 5; audit/PHASES-ZERO-FRICTION-2026-11-11.md (ZF5) | BT1, BT2 |
+| G20 | Display mode switching, HDMI-CEC, Bluetooth pairing and the phone remote were built and tested without the real hardware. | audit/PHASES-HTPC-2026-11-09.md (D9-D11) | DP1, DP2, CE1, BL1, PR1 |
+| G21 | An elevated window in front: detection and notice only; a UAC prompt cannot be driven by design. | audit/PHASES-ZERO-FRICTION-2026-11-11.md (ZF1); packaging/README.md | DM4 |
+| G22 | Discord sign-in needs the owner's own Discord application (public client); the friends list uses a restricted scope and may be refused. | project notes, 2026-11-13 | DC1, DC2 |

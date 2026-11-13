@@ -1,4 +1,7 @@
 #include "host.h"
+#ifndef XMB_APP_VERSION
+#error "XMB_APP_VERSION must come from project(VERSION ...) in CMakeLists.txt"
+#endif
 #include "pad.h"
 #include "autologon.h"
 #include "autostart.h"
@@ -763,7 +766,7 @@ Snapshot readSnapshot(bool gui=true) {
     state.osVersion=QSysInfo::productVersion();
     state.kernel=QSysInfo::kernelVersion();
     state.architecture=QSysInfo::currentCpuArchitecture();
-    state.appVersion=QCoreApplication::applicationVersion().isEmpty()?QStringLiteral("0.2.0"):QCoreApplication::applicationVersion();
+    state.appVersion=QCoreApplication::applicationVersion().isEmpty()?QStringLiteral(XMB_APP_VERSION):QCoreApplication::applicationVersion();
     state.qtVersion=QString::fromLatin1(qVersion());
     state.cpuLogical=int(QThread::idealThreadCount());
     state.clock=readClock();

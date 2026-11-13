@@ -1,0 +1,35 @@
+name: htpc-run self-test
+
+on:
+  pull_request:
+    paths:
+      - 'native-xmb/packaging/htpc-run.ps1'
+      - 'native-xmb/audit/RELEASE-CHECKLIST.md'
+      - '.github/workflows/htpc-run-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'native-xmb/packaging/htpc-run.ps1'
+      - 'native-xmb/audit/RELEASE-CHECKLIST.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse check (no syntax errors)
+        shell: pwsh
+        run: |
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile("$PWD\native-xmb\packaging\htpc-run.ps1", [ref]$null, [ref]$errors)
+          if($errors) { $errors | ForEach-Object { Write-Error "$($_.Extent.StartLineNumber): $($_.Message)" }; exit 1 }
+      - name: Self-test on Windows PowerShell 5.1 (what the HTPC has)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File native-xmb\packaging\htpc-run.ps1 selftest
+      - name: Self-test on PowerShell 7
+        shell: pwsh
+        run: pwsh -NoProfile -File native-xmb/packaging/htpc-run.ps1 selftest
