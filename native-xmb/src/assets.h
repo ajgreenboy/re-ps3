@@ -88,6 +88,13 @@ private:
     QStringList fonts_;
     QHash<QString,Container> containers_;
     // Node-based so the references image() hands out stay valid while later lookups insert (QHash may move values).
+    // Deliberately not bounded or evicted. Every entry is a firmware RCO/QGL texture, a failed lookup (a null
+    // image that failedImages() counts) or, in the "file" container, one installed title's ICON0 that
+    // View's start-up pass loads for each row. The set is therefore the asset set plus one icon per installed
+    // item, and nothing here is fed by artwork or avatars (those are QImage values on the Entry). The
+    // references and pointers handed out (26 const QImage& locals in view.cpp, `image=&bestImage(...)` at
+    // view.cpp:2742, kept across a frame) would dangle on eviction, so a cap needs image() to return QImage
+    // by value first; that is a wider change than the bound is worth until a data set shows the growth.
     std::unordered_map<QString,QImage> images_;
     QHash<QString,QHash<QString,QString>> texts_;
     QHash<QString,std::shared_ptr<QrcArchive>> qrcs_;
