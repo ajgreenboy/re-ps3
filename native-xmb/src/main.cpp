@@ -1448,16 +1448,36 @@ int main(int argc,char** argv) {
     // audit/SESSION-POWER.md), this glue is unnecessary and should be deleted.
     QObject::connect(&shell,&xmb::Shell::requestQuit,&app,[&app,&shell,kiosk]{
         if(shell.psMenuConfirmingOff()) {
-            // D9 part 2: the TV goes to standby first; cec-client gets a few seconds because Windows may power off right after.
-            if(shell.cecStandbyOnTurnOff())xmb::cec::send({xmb::cec::Action::Standby},QStringLiteral("Turn Off the System"),true,6000);
             // The console's Turn Off powers the machine off. In appliance mode (--kiosk, the HTPC) this PC shuts
             // down (not forced: apps may hold it to save); elsewhere (a desktop, development) the XMB only quits,
             // so a confirmed Turn Off never powers off a workstation by surprise. A failed shutdown quits too.
             if(kiosk) {
-                QString error;
-                if(xmb::requestShutdown(&error)){qInfo()<<"power: Turn Off the System confirmed; Windows is shutting down";return;}
-                qWarning().noquote()<<"power: shutdown failed:"<<error<<"- the XMB quits instead";
-            } else qInfo()<<"power: Turn Off the System confirmed; the XMB quits (not --kiosk, so the PC stays on)";
+                // The PC takes seconds to go (the TV is told first, which waits up to 6 s for cec-client), so a
+                // notice page says what was asked for until Windows ends this program; the lead lets it be drawn
+                // before the blocking CEC call. A dry run never shuts down and drops the page after a short hold.
+                const bool standby=shell.cecStandbyOnTurnOff();
+                shell.psMenuClose();
+                shell.holdPowerPage(QObject::tr("Turn Off System"),QObject::tr("Turning off the system")+QChar(0x2026));
+                QTimer::singleShot(250,&shell,[&app,&shell,standby]{
+                    // D9 part 2: the TV goes to standby first; cec-client gets a few seconds because Windows may power off right after.
+                    if(standby)xmb::cec::send({xmb::cec::Action::Standby},QStringLiteral("Turn Off the System"),true,6000);
+                    QString error;
+                    if(xmb::requestShutdown(&error)) {
+                        qInfo()<<"power: Turn Off the System confirmed; Windows is shutting down";
+                        const bool dry=xmb::powerDryRun();
+                        QTimer::singleShot(dry?2000:30000,&shell,[&shell,dry]{
+                            shell.releasePowerPage(dry?QStringLiteral("dry run: nothing was requested"):QStringLiteral("still running after the request; it may have been cancelled"));
+                        });
+                        return;
+                    }
+                    qWarning().noquote()<<"power: shutdown failed:"<<error<<"- the XMB quits instead";
+                    app.quit();
+                });
+                return;
+            }
+            // D9 part 2: the TV goes to standby first; cec-client gets a few seconds because Windows may power off right after.
+            if(shell.cecStandbyOnTurnOff())xmb::cec::send({xmb::cec::Action::Standby},QStringLiteral("Turn Off the System"),true,6000);
+            qInfo()<<"power: Turn Off the System confirmed; the XMB quits (not --kiosk, so the PC stays on)";
             app.quit();
             return;
         }

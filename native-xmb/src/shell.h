@@ -386,6 +386,13 @@ public:
     // proceed stage holds the page. Navigation is refused while it is true (N11: the console does not treat
     // Left/Right as a cancel), and View draws page_busy from this one flag.
     bool busy() const { return loading_ || busy_; }
+    // A confirmed Restart, Sleep or Turn Off puts up a message page (the existing surface that replaces the
+    // list) with one line saying what was asked for, until the request takes effect (the process ends, the
+    // PC resumes) or is given up on. holdPowerPage() raises it, releasePowerPage() drops it if it is still
+    // the page on screen; the real request runs after a short lead so the page is drawn first.
+    // XMB_POWER_DRY_RUN=1 never acts and releases the page after a short hold.
+    void holdPowerPage(const QString& title,const QString& text);
+    void releasePowerPage(const QString& why);
     QString status() const { return status_; }
     // The determinate form of the busy page: 0..1 while the operation publishing it knows its total, -1
     // (the default) for the indeterminate wait page the console frame shows.
@@ -1204,6 +1211,12 @@ private:
     void beginResetWrite();           // Restore Default Settings: the console's own top|proceed|finish chain
     void startSettingsWritePage();    // Ask accepted (or skipped): Proceed, then runSettingWrite()
     void runSettingWrite();           // the write itself, then the Finish stage
+    // Restart / Sleep after the confirm: hold the busy page, run act() once the page has had a frame, then
+    // release it (Sleep returns only after resume; Restart returns while Windows closes programs).
+    void runPowerAction(const QString& busyText,const QString& failTitle,bool returnsAfterEffect,std::function<bool(QString*)> act);
+    bool powerHeld_=false;
+    QString powerMessage_;
+    quint64 powerHoldToken_=0;
     void finishSettingWrite();        // the Finish page was dismissed: back to the row list
     void cancelSettingWrite(const QString& why);
     // Restore Default Settings: every key this build stores, set back to the default Preferences documents

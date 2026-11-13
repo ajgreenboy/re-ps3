@@ -2289,18 +2289,14 @@ void Shell::activate() {
     case Action::TurnOffSystem:psHeld();psConfirmOff_=true;emit changed();break;
     case Action::RestartSystem:
         showConfirm(QObject::tr("Do you want to restart the system?"),QString(),[this]{
-            QString error;
             qInfo().noquote()<<"power: Restart System confirmed";
-            if(!requestRestart(&error))showMessage(QObject::tr("Restart System"),error,MessageKind::Page);
-            emit changed();
+            runPowerAction(QObject::tr("Restarting the system")+QChar(0x2026),QObject::tr("Restart System"),false,[](QString* error){return requestRestart(error);});
         });
         emit changed();break;
     case Action::SleepSystem:
         showConfirm(QObject::tr("Do you want to put the system to sleep?"),QString(),[this]{
-            QString error;
             qInfo().noquote()<<"power: Sleep confirmed";
-            if(!requestSleep(false,&error))showMessage(QObject::tr("Sleep"),error,MessageKind::Page);
-            emit changed();
+            runPowerAction(QObject::tr("Going to sleep")+QChar(0x2026),QObject::tr("Sleep"),true,[](QString* error){return requestSleep(false,error);});
         });
         emit changed();break;
     case Action::SwitchToDesktop:
@@ -4883,6 +4879,58 @@ void Shell::startSettingsWritePage() {
         return;
     }
     runSettingWrite();
+}
+// ---- Restart / Sleep / Turn Off feedback -----------------------------------------------------------------
+// The console's own restart and sleep screens are not traced (PARITY-SWEEP-3), so this raises no new art:
+// a message page (it replaces the list, so nothing collides with it) with one plain line says what was
+// asked for, from the confirm until the request has taken effect. The lead gives the page a frame before a
+// blocking call (SetSuspendState) or the end of the process; the safety release covers a restart that was
+// cancelled by a program or by the user. The busy page was tried first: over the root list it drew its line
+// on top of the focused row's description.
+namespace {
+constexpr int kPowerLeadMs=250;
+constexpr int kPowerPendingMs=30000;   // a shutdown that has not ended this program by then was cancelled
+constexpr int kPowerDryRunHoldMs=2000; // a dry run never takes effect, so the page is shown briefly and dropped
+}
+void Shell::holdPowerPage(const QString& title,const QString& text) {
+    ++powerHoldToken_;
+    powerHeld_=true;
+    showMessage(title,text,MessageKind::Page);
+    powerMessage_=message_;
+    qInfo().noquote()<<QStringLiteral("power: notice page raised \"%1\"").arg(text);
+    emit changed();
+}
+void Shell::releasePowerPage(const QString& why) {
+    if(!powerHeld_)return;
+    ++powerHoldToken_;
+    powerHeld_=false;
+    // Only the page this raised: a person may have dismissed it, and another message may be up by now.
+    if(message_==powerMessage_ && messageKind_==MessageKind::Page)clearMessage();
+    powerMessage_.clear();
+    qInfo().noquote()<<QStringLiteral("power: notice page released (%1)").arg(why);
+    emit changed();
+}
+void Shell::runPowerAction(const QString& busyText,const QString& failTitle,bool returnsAfterEffect,std::function<bool(QString*)> act) {
+    holdPowerPage(failTitle,busyText);
+    const quint64 token=powerHoldToken_;
+    QTimer::singleShot(kPowerLeadMs,this,[this,failTitle,returnsAfterEffect,act=std::move(act),token]{
+        if(token!=powerHoldToken_)return;
+        QString error;
+        const bool dry=powerDryRun();
+        const bool ok=act(&error);   // Sleep blocks here until the PC resumes
+        if(!ok) {
+            releasePowerPage(QStringLiteral("refused"));
+            showMessage(failTitle,error,MessageKind::Page);
+            emit changed();
+            return;
+        }
+        if(returnsAfterEffect) { releasePowerPage(QStringLiteral("the request returned")); return; }
+        const int hold=dry?kPowerDryRunHoldMs:kPowerPendingMs;
+        QTimer::singleShot(hold,this,[this,token,dry]{
+            if(token==powerHoldToken_)
+                releasePowerPage(dry?QStringLiteral("dry run: nothing was requested"):QStringLiteral("still running after the request; it may have been cancelled"));
+        });
+    });
 }
 void Shell::runSettingWrite() {
     if(settingsWrite_.key.isEmpty())return;
