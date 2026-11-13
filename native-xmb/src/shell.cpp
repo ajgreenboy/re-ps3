@@ -1434,7 +1434,10 @@ void Shell::rebuildFriends() {
             auto e=item("discord-friend:"+person.id,person.name,"tex_Avatar_Default","explore_category_friend",Action::OpenUrl,"https://discord.com/channels/@me/"+person.id);
             e.friendRow=true;e.artworkUrl=person.avatarUrl;e.artwork=discordFriends_.avatar(person.avatarUrl);entries.push_back(std::move(e));
         }
-        auto open=item("discord-friends:open","Open Discord Friends","item_tex_NewFriend","explore_category_friend",Action::OpenUrl,"https://discord.com/channels/@me");
+        // Signed out, the row starts the OAuth sign-in (or says how to set it up); signed in, it opens Discord.
+        auto open=discordFriends_.signedIn()
+            ?item("discord-friends:open","Open Discord Friends","item_tex_NewFriend","explore_category_friend",Action::OpenUrl,"https://discord.com/channels/@me")
+            :item("discord-friends:open","Sign In to Discord","item_tex_NewFriend","explore_category_friend",Action::RefreshFriends);
         open.detail=discordFriendsError_.isEmpty() && discordFriendList_.isEmpty()?"Your Discord friends list is empty.":discordFriendsError_;entries.push_back(std::move(open));
         entries.push_back(item("discord-friends:refresh","Refresh Discord Friends","item_tex_Players","explore_category_friend",Action::RefreshFriends));
         const QString setup="Discord Friends\n\nFriends come from Discord. Add your Discord application clientId to discord.json in the data folder next to the executable, and register the loopback redirect URI. Select Refresh Discord Friends to sign in. Discord may restrict the relationships.read scope.";
