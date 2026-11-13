@@ -49,7 +49,8 @@ QVector<BluetoothDevice> listBluetooth(QString* error) {
         }
         const auto collect = [&](const winrt::hstring& selector, bool lowEnergy) {
             const auto results = enumeration::DeviceInformation::FindAllAsync(selector).get();
-            for(const auto& item : results) {
+            for(const auto& item : results) try {
+                // One device that cannot be opened (removed mid-scan, driver error) must not discard the whole list.
                 uint64_t address = 0;
                 if(lowEnergy) {
                     const auto device = bt::BluetoothLEDevice::FromIdAsync(item.Id()).get();
@@ -69,6 +70,10 @@ QVector<BluetoothDevice> listBluetooth(QString* error) {
                     }
                 }
                 if(!found)devices.append({QString::fromWCharArray(item.Name().c_str()), formatted, item.Pairing().IsPaired()});
+            } catch(const winrt::hresult_error& e) {
+                qWarning().noquote() << "bluetooth: skipped a device:" << message(e);
+            } catch(...) {
+                qWarning() << "bluetooth: skipped a device";
             }
         };
         collect(bt::BluetoothDevice::GetDeviceSelector(), false);

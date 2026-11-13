@@ -125,13 +125,14 @@ TailscaleClient::TailscaleClient(QObject* parent) : QObject(parent) {
 TailscaleClient::~TailscaleClient() {
     // Stop children without letting their finished() handlers run into a half-destroyed object.
     const auto procs = findChildren<QProcess*>(QString(), Qt::FindDirectChildrenOnly);
+    // Kill every child first (TerminateProcess returns at once), then give each a short, bounded reap, so several
+    // stuck children cannot stack one-second waits on the GUI thread at shutdown.
     for (QProcess* p : procs) {
         p->disconnect();
-        if (p->state() != QProcess::NotRunning) {
-            p->kill();
-            p->waitForFinished(1000);
-        }
+        if (p->state() != QProcess::NotRunning) p->kill();
     }
+    for (QProcess* p : procs)
+        if (p->state() != QProcess::NotRunning) p->waitForFinished(100);
 }
 
 QString TailscaleClient::executable() const {
