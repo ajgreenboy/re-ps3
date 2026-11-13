@@ -101,6 +101,10 @@ void DiscordClient::callback() {
         const QUrl target(QString::fromLatin1(parts.value(1)));
         if (parts.value(0) != "GET" || target.path() != QLatin1String("/callback")) { socket->write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");socket->disconnectFromHost();return; }
         const QUrlQuery query(target);const QByteArray code = query.queryItemValue(QStringLiteral("code")).toLatin1();
+        if (state_.isEmpty() || query.queryItemValue(QStringLiteral("state")).toLatin1() != state_) {
+            // A stray or forged request must not cancel the sign-in the user is completing in the browser.
+            socket->write("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");socket->disconnectFromHost();return;
+        }
         const bool ok = query.queryItemValue(QStringLiteral("error")).isEmpty() && !state_.isEmpty() && query.queryItemValue(QStringLiteral("state")).toLatin1() == state_ && !code.isEmpty() && code.size() <= 2048;
         const QByteArray body = ok ? QByteArrayLiteral("Return to XMB to finish signing in.") : QByteArrayLiteral("Discord sign-in failed. Return to XMB.");
         socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: " + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);socket->disconnectFromHost();
