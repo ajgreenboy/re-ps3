@@ -2982,7 +2982,16 @@ void View::drawScene(QPainter& p) {
                         text({1300+ahead*210+offset,y-25,440,50},shown,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
                     }
                     const auto subtitle=shell_.subtitleText(entry);
-                    if(!subtitle.isEmpty())text({labelX,y+20,1100,30},subtitle,17,QColor(230,230,230,int(235*alpha)),Qt::AlignLeft|Qt::AlignTop);
+                    if(!subtitle.isEmpty()) {
+                        // The second line sits 35 px under the title's centre, so a long one (a missing file's
+                        // reason, a download's state) reaches the clock bar while its title does not. It takes the
+                        // same fade as a title that reaches the bar, centred on its own line. INFERRED, as above.
+                        double subtitleFade=1.;
+                        QFont subtitleFont(shell_.fontFamily());subtitleFont.setPixelSize(17);
+                        if(y+35>75-60 && y+35<133+60 && labelX+QFontMetricsF(subtitleFont).horizontalAdvance(subtitle)>1329-24)
+                            subtitleFade=1.-.85*std::clamp(1.-std::max(0.,std::abs(y+35-104.)-29.)/40.,0.,1.);
+                        text({labelX,y+20,1100,30},subtitle,17,QColor(230,230,230,int(235*alpha*subtitleFade)),Qt::AlignLeft|Qt::AlignTop);
+                    }
                     // The help line belongs to the selection, not the eased position: on the real XMB it moves to the new
                     // row on the frame the move starts, fully opaque, including on every held-key repeat (RPCS3 capture).
                     // Size and box measured against the console on one shared string (Game Settings' PS - Upscaler help,
