@@ -34,9 +34,12 @@ jobs:
           version: ${{ env.QT_VERSION }}
           arch: 'win64_msvc2022_64'
           cache: true
-          # aqt picks a random mirror by default; a lagging mirror is what returned "Failed to locate
-          # XML data" for 6.11.1. Read the package metadata straight from download.qt.io instead.
-          extra: '--base https://download.qt.io/'
+          # Multimedia is an add-on module, not part of the base kit; CMakeLists.txt requires it.
+          modules: 'qtmultimedia'
+          # Qt 6.11+ moved its online repository to per-arch folders (qt6_6120/qt6_6120_msvc2022_64/),
+          # which aqtinstall 3.3.0 (the latest release) can't read: it fails with "Failed to locate XML
+          # data". Install aqt from a pinned upstream commit that understands the new layout.
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@5a49f2b391ae8ee1d3c0dd87f8b33c1d49a4deb7'
 
       - name: Unpack Steamworks headers (optional)
         shell: pwsh
