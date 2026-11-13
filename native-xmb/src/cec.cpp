@@ -91,8 +91,13 @@ bool send(const QVector<Action>& actions,const QString& why,bool wait,int timeou
         process->deleteLater();
     });
     process->start();
-    if(!process->waitForStarted(3000)){
+    // Only a caller that waits for the result may block here; the others write at once (QProcess buffers the input
+    // until the child is up) and learn of a failed start from errorOccurred, so the GUI thread is never held for 3 s.
+    if(wait ? !process->waitForStarted(3000) : process->state()==QProcess::NotRunning){
         qWarning().noquote()<<QString("cec: (%1) cec-client did not start: %2").arg(why,process->errorString());
+        // A child that is still starting must be killed, not left to run once the QProcess is gone.
+        process->disconnect();
+        if(process->state()!=QProcess::NotRunning)process->kill();
         process->deleteLater();
         return false;
     }
