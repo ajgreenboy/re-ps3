@@ -2946,6 +2946,15 @@ void View::drawScene(QPainter& p) {
                     if(elided.elided)label=elided.prefix;
                 } else label=QFontMetrics(labelFont).elidedText(entry.title,Qt::ElideRight,int(labelLimit));
                 const QRectF labelRect(labelX,y-28,value.isEmpty()?1100.:650.,56);
+                // A row scrolled up beside the info bar has its title run under the clock text and the two read as one
+                // smear (a long track title at y~92). Titles that reach the bar fade out while they are level with it and
+                // come back as the row moves off; so does a row's right-hand value, which starts at 1300. Shorter titles, and every row that is
+                // not near the bar, are untouched.
+                // INFERRED: no console frame shows a list that far up, so the ramp is this build's own choice.
+                if(y>75-60 && y<133+60 && (!value.isEmpty() || labelX+QFontMetricsF(labelFont).horizontalAdvance(label)>1329-24)) {
+                    const double outside=std::max(0.,std::abs(y-104.)-29.);
+                    p.setOpacity(p.opacity()*(1.-.85*std::clamp(1.-outside/40.,0.,1.)));
+                }
                 // The focused label carries a soft white glow that breathes (MaXMB observation, styles.css xmbLabelGlow:
                 // 3.4 s ease-in-out from a faint halo, about 0.35 of the peak, to the full bloom, starting faint when
                 // the row takes focus). The peak is the static halo measured from the reference crop.
@@ -2985,7 +2994,12 @@ void View::drawScene(QPainter& p) {
                     // tops 528 / 550), tighter than the font's own 24 px line height, so the lines are broken here and
                     // drawn one by one on that pitch.
                     else if(i==column.selection && !entry.detail.isEmpty()) {
-                        constexpr int helpSize=19,helpPitch=22;constexpr qreal helpWidth=1182;
+                        constexpr int helpSize=19,helpPitch=22;
+                        // With a choice list open the help line keeps to the left of the list's plane (its edge is 1260): the
+                        // plane is translucent, so a line running on under it collided with the choice labels (Theme's
+                        // description under 'Classic'). Wider lines wrap onto a second row instead; the console's own frame
+                        // for this is not known (INFERRED).
+                        const qreal helpWidth=panelAmount>.001?std::min<qreal>(1182.,1240.-labelX):1182.;
                         QFont helpFont(shell_.fontFamily());helpFont.setPixelSize(helpSize);
                         helpFont.setHintingPreference(QFont::PreferNoHinting);
                         QTextLayout wrap(entry.detail,helpFont);QTextOption option;
