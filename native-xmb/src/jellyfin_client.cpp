@@ -524,7 +524,13 @@ void JellyfinClient::setImageCache(QString directory) {
 QString JellyfinClient::cachedImagePath(const QString& itemId, const QString& tag, bool backdrop) const {
     if (imageCache_.isEmpty() || !validId(itemId)) return {};
     const QByteArray stamp = QCryptographicHash::hash(tag.toUtf8(), QCryptographicHash::Sha1).toHex().left(8);
-    const QString name = itemId + (backdrop ? QStringLiteral("-b-") : QStringLiteral("-p-")) +
+    // The server chooses ids; only plain id characters may reach a file name ("C:x" would be a drive-relative path and
+    // "a:b" an NTFS stream). Anything else is replaced by a hash of the id.
+    bool plain = true;
+    for (const QChar ch : itemId) if (!(ch.isLetterOrNumber() && ch.unicode() < 128) && ch != QLatin1Char('-') && ch != QLatin1Char('_')) { plain = false; break; }
+    const QString base = plain ? itemId
+        : QString::fromLatin1(QCryptographicHash::hash(itemId.toUtf8(), QCryptographicHash::Sha1).toHex().left(24));
+    const QString name = base + (backdrop ? QStringLiteral("-b-") : QStringLiteral("-p-")) +
                          QString::fromLatin1(stamp) + QStringLiteral(".img");
     return QDir(imageCache_).filePath(name);
 }
