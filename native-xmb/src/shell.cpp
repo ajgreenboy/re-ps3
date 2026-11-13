@@ -1746,7 +1746,7 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
     adoptedWatch_.setInterval(250);
     connect(&adoptedWatch_,&QTimer::timeout,this,&Shell::pollAdopted);
     connect(&steamWatch_,&QTimer::timeout,this,&Shell::pollSteamGame);
-    discordFriendsError_=discordFriends_.configured()?QStringLiteral("Select Refresh Discord Friends to sign in."):discordFriends_.configurationError();
+    discordFriendsError_=discordFriends_.configured()?QStringLiteral("Select Refresh Discord Friends to sign in."):QStringLiteral("Not set up yet. Discord Connection says how.");
     rebuildFriends();
     for(auto& category:categories_)if(category.id=="game") {
         category.entries.push_back(item("game:download-hub",QObject::tr("Download Games"),"item_tex_plain_folder",full,Action::DownloadHub));
