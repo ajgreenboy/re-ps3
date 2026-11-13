@@ -20,6 +20,9 @@ robocopy $OutputDirectory $PackageDirectory /E `
     /XD CMakeFiles re-ps3-native_autogen xmb-manager_autogen xmb-reference-frames_autogen `
     /XF build.ninja .ninja_deps .ninja_log CMakeCache.txt cmake_install.cmake *.ilk | Out-Null
 if($LASTEXITCODE -ge 8) { throw "robocopy failed (exit code $LASTEXITCODE)." }
+# 1-7 mean files were copied; clear it so a caller that exits with $LASTEXITCODE (GitHub Actions' pwsh
+# steps do) doesn't report the copy as a failure.
+$global:LASTEXITCODE = 0
 
 # The launcher, watchdog, autostart and docs.
 foreach($name in 'run-kiosk.ps1','watchdog.ps1','apply-update.ps1','install-autostart.ps1','README.md','xmb-config.example.json') {
