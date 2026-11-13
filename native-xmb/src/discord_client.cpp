@@ -1,4 +1,5 @@
 #include "discord_client.h"
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDir>
@@ -50,24 +51,121 @@ QByteArray seal(const QByteArray& plain, bool protect) {
 #endif
 }
 }
+namespace discord {
+namespace {
+QString text(const char* source) { return QCoreApplication::translate("xmb::DiscordClient", source); }
+// Discord's own wording, kept short and free of control characters before it reaches the screen.
+QString clean(const QString& raw) {
+    QString result;
+    for (const QChar c : raw.left(160)) result += c.isPrint() ? c : QChar(' ');
+    return result.simplified();
+}
+const char* NotApproved = QT_TRANSLATE_NOOP("xmb::DiscordClient",
+    "Discord has not approved this app for the friends list (relationships.read). Request it from the Social SDK page of your app in the Discord Developer Portal; sign-in works once Discord approves it.");
+QString unreachable(const QString& networkError) {
+    return networkError.isEmpty() ? text("Could not reach Discord. Check the network connection and try again.")
+                                  : text("Could not reach Discord (%1). Check the network connection and try again.").arg(clean(networkError));
+}
+QString rateLimited(const QJsonObject& object) {
+    const double wait = object.value(QStringLiteral("retry_after")).toDouble();
+    return wait > 0 ? text("Discord is limiting requests. Try again in %1 seconds.").arg(qMax(1, int(wait + 0.999)))
+                    : text("Discord is limiting requests. Try again in a minute.");
+}
+}
+QString authorizeError(const QString& error, const QString& description) {
+    if (error == QLatin1String("access_denied")) return text("Discord sign-in was cancelled. Select Sign In to Discord to try again.");
+    if (error == QLatin1String("invalid_scope")) return text(NotApproved);
+    if (error == QLatin1String("unauthorized_client"))
+        return text("Discord refused this app. Turn on Public Client in the app's OAuth2 settings in the Discord Developer Portal.");
+    const QString detail = clean(description.isEmpty() ? error : description);
+    return detail.isEmpty() ? text("Discord sign-in failed.") : text("Discord sign-in failed: %1").arg(detail);
+}
+QString tokenError(int status, const QByteArray& body, const QString& networkError, const QString& redirectUri, bool refreshing) {
+    if (status == 0) return unreachable(networkError);
+    const auto object = QJsonDocument::fromJson(body).object();
+    const QString error = object.value(QStringLiteral("error")).toString();
+    const QString description = object.value(QStringLiteral("error_description")).toString();
+    if (status == 429) return rateLimited(object);
+    if (error == QLatin1String("invalid_scope")) return text(NotApproved);
+    if (error == QLatin1String("invalid_client") || error == QLatin1String("unauthorized_client") || (status == 401 && error.isEmpty()))
+        return text("Discord refused this app's client id. Check clientId in discord.json, and turn on Public Client in the app's OAuth2 settings (no client secret is used).");
+    if (description.contains(QLatin1String("redirect"), Qt::CaseInsensitive))
+        return text("Discord did not accept the redirect URI. Add %1 to the app's OAuth2 redirects exactly as written.").arg(redirectUri);
+    if (error == QLatin1String("invalid_grant"))
+        return refreshing ? text("Your Discord sign-in has expired. Select Sign In to Discord to sign in again.")
+                          : text("Discord sign-in took too long or was already used. Select Sign In to Discord to try again.");
+    if (status >= 500) return text("Discord is having trouble right now (HTTP %1). Try again later.").arg(status);
+    const QString detail = clean(description.isEmpty() ? error : description);
+    return detail.isEmpty() ? text("Discord could not complete sign-in (HTTP %1).").arg(status)
+                            : text("Discord could not complete sign-in (HTTP %1): %2").arg(status).arg(detail);
+}
+QString friendsError(int status, const QByteArray& body, const QString& networkError) {
+    if (status == 0) return unreachable(networkError);
+    const auto object = QJsonDocument::fromJson(body).object();
+    if (status == 429) return rateLimited(object);
+    // 403, or Discord's "Missing Access" (50001) / "Missing Permissions" (50013): the token lacks the approved scope.
+    const int code = object.value(QStringLiteral("code")).toInt();
+    if (status == 403 || code == 50001 || code == 50013) return text(NotApproved);
+    if (status == 401) return text("Your Discord sign-in has expired. Select Sign In to Discord to sign in again.");
+    if (status >= 500) return text("Discord is having trouble right now (HTTP %1). Try again later.").arg(status);
+    if (status == 200) return text("Discord sent a friends list this app could not read. Try again later.");
+    const QString detail = clean(object.value(QStringLiteral("message")).toString());
+    return detail.isEmpty() ? text("Discord friends could not be loaded (HTTP %1).").arg(status)
+                            : text("Discord friends could not be loaded (HTTP %1): %2").arg(status).arg(detail);
+}
+QString parseConfig(const QByteArray& json, QString& clientId, int& port) {
+    clientId.clear();port = 0;
+    QJsonParseError parse;const auto doc = QJsonDocument::fromJson(json, &parse);
+    if (parse.error != QJsonParseError::NoError || !doc.isObject())
+        return text("discord.json is not valid JSON. Compare it with examples/discord.json.");
+    const auto object = doc.object();const auto id = object.value(QStringLiteral("clientId"));
+    // A snowflake does not fit in a double, so a bare number would arrive rounded.
+    if (id.isDouble()) return text("Put the clientId in discord.json in quotes, for example \"clientId\": \"123456789012345678\".");
+    clientId = id.toString().trimmed();
+    const auto rawPort = object.value(QStringLiteral("redirectPort"));
+    if (!rawPort.isUndefined() && !rawPort.isNull()) {
+        port = rawPort.toInt(-1);
+        if (port < 1024 || port > 65535) { port = 0;return text("redirectPort in discord.json must be a number from 1024 to 65535."); }
+    }
+    return {};
+}
+QString setupText(const QString& redirectUri) {
+    return text("Discord Friends\n\n"
+                "1. Create an application at discord.com/developers/applications.\n"
+                "2. Under OAuth2, add the redirect %1 and turn on Public Client.\n"
+                "3. Put the application id in discord.json in the data folder: {\"clientId\": \"<application id>\"}.\n"
+                "4. The friends list needs Discord to approve the relationships.read permission: request it on the app's Social SDK page.\n\n"
+                "Then select Sign In to Discord.").arg(redirectUri);
+}
+}
 DiscordClient::DiscordClient(QObject* parent) : QObject(parent), network_(new QNetworkAccessManager(this)) {}
 DiscordClient::~DiscordClient() { accessToken_.fill('\0');refreshToken_.fill('\0');verifier_.fill('\0'); }
 QString DiscordClient::redirectUri() const { return QStringLiteral("http://127.0.0.1:%1/callback").arg(port_); }
 bool DiscordClient::configure(const QString& dataDirectory) {
-    clientId_.clear();configError_.clear();
+    clientId_.clear();configError_.clear();unset_ = false;
     QString id = qEnvironmentVariable("DISCORD_CLIENT_ID").trimmed();
     int port = qEnvironmentVariableIntValue("DISCORD_REDIRECT_PORT");
+    QString fileError;
     QFile file(QDir(dataDirectory).filePath(QStringLiteral("discord.json")));
-    if (file.exists() && file.size() <= 4096 && file.open(QIODevice::ReadOnly)) {
-        const auto object = QJsonDocument::fromJson(file.readAll()).object();
-        if (id.isEmpty()) id = object.value(QStringLiteral("clientId")).toString().trimmed();
-        if (port <= 0) port = object.value(QStringLiteral("redirectPort")).toInt();
+    if (file.exists()) {
+        if (file.size() > 4096) fileError = tr("discord.json is larger than 4 KB. Compare it with examples/discord.json.");
+        else if (!file.open(QIODevice::ReadOnly)) fileError = tr("discord.json could not be read: %1").arg(file.errorString());
+        else {
+            QString fileId;int filePort = 0;fileError = discord::parseConfig(file.readAll(), fileId, filePort);
+            if (id.isEmpty()) id = fileId;
+            if (port <= 0) port = filePort;
+        }
     }
     port_ = port >= 1024 && port <= 65535 ? port : 8888;
     sessionPath_ = QDir(dataDirectory).filePath(QStringLiteral("discord/session.bin"));
-    if (id.isEmpty()) { configError_ = tr("No Discord client id is set. Put your application clientId in discord.json and register %1 as a redirect URI.").arg(redirectUri());return false; }
-    if (id.size() > 32 || std::any_of(id.cbegin(), id.cend(), [](QChar c) { return c < '0' || c > '9'; })) {
-        configError_ = tr("The Discord client id must be a numeric application id.");return false;
+    // An environment override still wins over a broken file.
+    if (!fileError.isEmpty() && qEnvironmentVariable("DISCORD_CLIENT_ID").trimmed().isEmpty()) { configError_ = fileError;return false; }
+    if (id.isEmpty()) { unset_ = true;configError_ = tr("No Discord client id is set. Put your application id in discord.json in the data folder and register %1 as a redirect. Discord Connection has the steps.").arg(redirectUri());return false; }
+    if (id.size() < 15 || id.size() > 32 || std::any_of(id.cbegin(), id.cend(), [](QChar c) { return c < '0' || c > '9'; })) {
+        configError_ = tr("The clientId in discord.json must be the application id from the Discord Developer Portal: 15 or more digits, in quotes.");return false;
+    }
+    if (std::all_of(id.cbegin(), id.cend(), [](QChar c) { return c == '0'; })) {
+        configError_ = tr("discord.json still has the example clientId. Replace it with your application id from the Discord Developer Portal.");return false;
     }
     clientId_ = id;return true;
 }
@@ -79,7 +177,7 @@ void DiscordClient::signIn() {
         const QString error = listener_->errorString();cancelSignIn();emit loaded({}, tr("Discord sign-in cannot listen on port %1: %2").arg(port_).arg(error));return;
     }
     connect(listener_, &QTcpServer::newConnection, this, &DiscordClient::callback);
-    QTimer::singleShot(5 * 60 * 1000, listener_, [this] { cancelSignIn();emit loaded({}, tr("Discord sign-in timed out.")); });
+    QTimer::singleShot(5 * 60 * 1000, listener_, [this] { cancelSignIn();emit loaded({}, tr("Discord sign-in timed out after five minutes. If Discord's page showed an error, check that %1 is registered as a redirect exactly, and that Discord has approved the app for relationships.read.").arg(redirectUri())); });
     verifier_ = randomToken(64);state_ = randomToken(24);
     const QByteArray challenge = QCryptographicHash::hash(verifier_, QCryptographicHash::Sha256).toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
     QUrl url(QStringLiteral("https://discord.com/oauth2/authorize"));QUrlQuery query;
@@ -105,10 +203,12 @@ void DiscordClient::callback() {
             // A stray or forged request must not cancel the sign-in the user is completing in the browser.
             socket->write("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");socket->disconnectFromHost();return;
         }
-        const bool ok = query.queryItemValue(QStringLiteral("error")).isEmpty() && !state_.isEmpty() && query.queryItemValue(QStringLiteral("state")).toLatin1() == state_ && !code.isEmpty() && code.size() <= 2048;
-        const QByteArray body = ok ? QByteArrayLiteral("Return to XMB to finish signing in.") : QByteArrayLiteral("Discord sign-in failed. Return to XMB.");
+        const QString error = query.queryItemValue(QStringLiteral("error"), QUrl::FullyDecoded);
+        const QString description = query.queryItemValue(QStringLiteral("error_description"), QUrl::FullyDecoded);
+        const bool ok = error.isEmpty() && !code.isEmpty() && code.size() <= 2048;
+        const QByteArray body = ok ? QByteArrayLiteral("Signed in to Discord. Return to XMB.") : QByteArrayLiteral("Discord sign-in failed. Return to XMB to see why.");
         socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: " + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);socket->disconnectFromHost();
-        cancelSignIn();state_.clear();if (ok) tokenRequest(code, false);else emit loaded({}, tr("Discord sign-in was denied or the response did not match."));
+        cancelSignIn();state_.clear();if (ok) tokenRequest(code, false);else emit loaded({}, error.isEmpty() ? tr("Discord sent back no sign-in code. Select Sign In to Discord to try again.") : discord::authorizeError(error, description));
     };
     connect(socket, &QTcpSocket::readyRead, this, read);read();
 }
@@ -126,8 +226,10 @@ void DiscordClient::tokenRequest(const QByteArray& code, bool refreshing, bool r
         refreshing_ = false;verifier_.fill('\0');verifier_.clear();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();const auto bytes = reply->read(MaxResponse + 1);
         if (status != 200 || bytes.size() > MaxResponse || !acceptToken(bytes) || !signedIn()) {
+            const QString message = status == 200 ? tr("Discord's sign-in answer could not be read. Select Sign In to Discord to try again.")
+                                                  : discord::tokenError(status, bytes, reply->error() == QNetworkReply::NoError ? QString() : reply->errorString(), redirectUri(), refreshing);
             if (refreshing && (status == 400 || status == 401)) signOut();
-            emit loaded({}, tr("Discord could not complete sign-in (HTTP %1). The relationships.read scope may require Discord approval.").arg(status));return;
+            emit loaded({}, message);return;
         }
         saveSession();if (!refreshing) emit signedInChanged();requestFriends(retry);
     });
@@ -178,7 +280,9 @@ void DiscordClient::requestFriends(bool retried) {
         if (status == 401 && !retried) { accessToken_.fill('\0');accessToken_.clear();requestFriends(true);return; }
         QJsonParseError parse;const auto doc = QJsonDocument::fromJson(bytes, &parse);
         if (status != 200 || bytes.size() > MaxResponse || parse.error != QJsonParseError::NoError || !doc.isArray()) {
-            emit loaded({}, tr("Discord friends could not be loaded (HTTP %1). The relationships.read scope may require Discord approval.").arg(status));return;
+            const QString message = discord::friendsError(status, bytes, reply->error() == QNetworkReply::NoError ? QString() : reply->errorString());
+            if (status == 401) signOut();
+            emit loaded({}, message);return;
         }
         QVector<DiscordFriend> friends;
         for (const auto& value : doc.array()) {

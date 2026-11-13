@@ -134,6 +134,7 @@ native diff.
 | [SERVICES-BREADTH.md](SERVICES-BREADTH.md) | Account switch, launch/quit, avatars, trophies and honest rows |
 | [JELLYFIN-NATIVE.md](JELLYFIN-NATIVE.md) | Native Jellyfin playback |
 | [SPOTIFY.md](SPOTIFY.md) | Spotify in the Music column |
+| [DISCORD.md](DISCORD.md) | Discord friends: setup, restricted scope, failure messages |
 | [DLNA.md](DLNA.md) | Search for Media Servers (DLNA / UPnP AV) |
 | [TAILSCALE.md](TAILSCALE.md) | Network > Tailscale |
 | [HOME-SERVICES.md](HOME-SERVICES.md) | Wake on LAN and Home Assistant |
