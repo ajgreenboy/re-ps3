@@ -66,6 +66,49 @@ named `re-ps3-native-kiosk` whose action runs the `watchdog.ps1` that sits next 
 reads its state back from the scheduler. In a dev build with no `watchdog.ps1` beside the exe the row is
 listed as unavailable and says why. The row is this build's own (the console has no sign-in).
 
+## Install with the installer (re-ps3-setup.exe)
+
+Each release also has `re-ps3-setup.exe`, built by the release workflow from `installer/re-ps3.iss` around the same folder
+the zip carries. It is the easy path for a first install on a new PC; the portable zip and the steps above still work, and the
+in-app updater keeps using the zip either way.
+
+- Installs per user, with no administrator prompt, into `%LOCALAPPDATA%\Programs\RE-PS3`. The updater swaps the whole folder
+  for the new release (`apply-update.ps1`), which needs a folder the user can write; Program Files would not work.
+- Asks for the `dev_flash` folder (and optionally a decrypted `vsh_module` folder) and writes `xmb-config.json` from them. It
+  never copies or downloads firmware. An upgrade keeps the existing `xmb-config.json` and skips that page.
+- Asks which display the TV is (saved for the next upgrade).
+- Two ticked options run `install-autostart.ps1` for you: the logon task and the Start-menu shortcuts. Unticking one on an
+  upgrade removes it.
+- Stops a running XMB from that folder (and its watchdog) before replacing files, and can start it again at the end.
+- Uninstall (Settings > Apps) removes the logon task, the shortcuts and the program files, including files a later in-app
+  update added, and keeps `xmb-config.json` and `data\` so a reinstall picks up where it left off. The uninstaller's own files
+  live in `%LOCALAPPDATA%\RE-PS3\uninstall`, outside the folder the updater swaps.
+
+Build it locally with [Inno Setup 6](https://jrsoftware.org/isinfo.php) after `build-package.ps1`:
+
+```powershell
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.3.0 native-xmb\packaging\installer\re-ps3.iss   # -> dist\re-ps3-setup.exe
+```
+
+## Code signing
+
+Unsigned executables get a Windows SmartScreen "Windows protected your PC" warning on first run. The release workflow signs
+`re-ps3-native.exe`, `xmb-manager.exe`, `xmb-updater.exe` (before they are zipped) and `re-ps3-setup.exe` with
+[Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/) (formerly Trusted Signing), and skips both
+signing steps when the secrets below are missing, so an unsigned build still works.
+
+| Repository secret | Value |
+|---|---|
+| `AZURE_TENANT_ID` | the Entra tenant ID |
+| `AZURE_CLIENT_ID` | an app registration with the "Artifact Signing Certificate Profile Signer" role on the signing account |
+| `AZURE_CLIENT_SECRET` | a client secret for that app registration |
+| `ARTIFACT_SIGNING_ENDPOINT` | the account's regional endpoint, e.g. `https://eus.codesigning.azure.net/` |
+| `ARTIFACT_SIGNING_ACCOUNT` | the signing account name |
+| `ARTIFACT_SIGNING_PROFILE` | the certificate profile name (Public Trust) |
+
+The uninstaller Inno Setup generates inside the installer is not signed; Windows doesn't show SmartScreen for it because it is
+never downloaded. Another signing provider would replace the two `azure/artifact-signing-action` steps with its own.
+
 ## Watchdog behaviour
 
 `watchdog.ps1` runs the app, waits for it to exit, and:

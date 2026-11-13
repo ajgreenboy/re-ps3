@@ -12,6 +12,9 @@ on:
 permissions:
   contents: write
 
+# Code signing is optional and off until its secrets exist; see native-xmb/packaging/README.md ("Code signing").
+# A job-level flag because `if:` can't read secrets directly.
+
 env:
   # The text renderer (font_raster.cpp) links FreeType directly. CMake falls back to Qt's *private*
   # modules Qt6BundledFreetype/Qt6FreetypePrivate when a standalone FreeType isn't found, and those
@@ -22,6 +25,8 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.ARTIFACT_SIGNING_ENDPOINT != '' }}
     steps:
       - name: Check out the full source
         uses: actions/checkout@v4
@@ -63,6 +68,24 @@ jobs:
           $env:PATH = "C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH"
           .\native-xmb\build.ps1 -OutputDirectory C:\release\out -QtRoot "$env:QT_ROOT_DIR"
 
+      # Sign our own executables before they are packaged, so the zip, the updater and the installer all carry
+      # signed binaries. (The Qt DLLs come signed by Qt.) Skipped when the signing secrets aren't set.
+      - name: Sign the executables
+        if: env.SIGNING == 'true'
+        uses: azure/artifact-signing-action@v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: C:\release\out
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - name: Package the app
         shell: pwsh
         run: |
@@ -93,6 +116,38 @@ jobs:
             if ($tag -ne $Matches[1]) { throw "Tag $env:GITHUB_REF_NAME does not match CMake project version $($Matches[1]); bump project(VERSION) first." }
           }
 
+      # The installer wraps the same folder the zip carries (native-xmb/packaging/installer/re-ps3.iss). The zip
+      # stays the in-app updater's download; the installer is for a first install on a new PC.
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $cmake = Get-Content native-xmb\CMakeLists.txt -Raw
+          if ($cmake -notmatch 'project\(\s*\S+\s+VERSION\s+([0-9.]+)') { throw 'No project(VERSION) in native-xmb/CMakeLists.txt' }
+          $version = $Matches[1]
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --version 6.7.1 -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Installing Inno Setup failed ($LASTEXITCODE)" }
+          }
+          & $iscc /Qp "/DAppVersion=$version" /DSourceDir=C:\release\dist\re-ps3 /DOutputDir=C:\release\dist native-xmb\packaging\installer\re-ps3.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+          Get-Item C:\release\dist\re-ps3-setup.exe | Format-Table Name, Length
+
+      - name: Sign the installer
+        if: env.SIGNING == 'true'
+        uses: azure/artifact-signing-action@v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+          files: C:\release\dist\re-ps3-setup.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - name: Upload the packages as run artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -101,6 +156,7 @@ jobs:
             C:\release\dist\re-ps3.zip
             C:\release\dist\re-ps3.zip.sha256
             C:\release\dist\xmb-updater.zip
+            C:\release\dist\re-ps3-setup.exe
 
       # Only a tag push publishes a GitHub release; a manual run on a branch stops at the artifacts above.
       - name: Publish the release
@@ -111,4 +167,5 @@ jobs:
             C:\release\dist\re-ps3.zip
             C:\release\dist\re-ps3.zip.sha256
             C:\release\dist\xmb-updater.zip
+            C:\release\dist\re-ps3-setup.exe
           generate_release_notes: true
