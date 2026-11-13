@@ -854,6 +854,8 @@ QImage Assets::decodeTga(const QByteArray& file) {
     const auto* d=reinterpret_cast<const uchar*>(file.constData());
     const int idLength=d[0],mapType=d[1],type=d[2],width=d[12]|(d[13]<<8),height=d[14]|(d[15]<<8),bpp=d[16],descriptor=d[17];
     if(mapType!=0 || !(type==2||type==3||type==10||type==11) || width<=0 || height<=0 || !(bpp==8||bpp==24||bpp==32))return {};
+    // The header allows 65535 x 65535; the pixel vector and the image would be many GB. 8192 covers any real texture.
+    if(width>8192 || height>8192 || qint64(width)*height>48ll*1024*1024)return {};
     const int bytes=bpp/8;qsizetype at=18+idLength;
     QImage image(width,height,QImage::Format_ARGB32);
     const auto pixel=[&](const uchar* p){return bytes==1?qRgb(p[0],p[0],p[0]):qRgba(p[2],p[1],p[0],bytes==4?p[3]:255);};
