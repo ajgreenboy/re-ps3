@@ -94,6 +94,7 @@ struct JellyfinStream::Request {
     bool playlist = false;
     bool playlistReady = false;
     bool upstreamFinished = false;
+    bool upstreamFailed = false;   // the server dropped the body part-way: end the client's connection as an error
     bool failed = false;
     bool validated = false;
 };
@@ -446,7 +447,8 @@ void JellyfinStream::pump(Request* request) {
             request->reply->deleteLater();
             request->reply = nullptr;
         }
-        socket->disconnectFromHost();
+        if (request->upstreamFailed) socket->abort();   // a truncated body must not look like a complete one
+        else socket->disconnectFromHost();
     }
 }
 
@@ -540,6 +542,8 @@ void JellyfinStream::finish(Request* request) {
             return;
         }
         onMetadata(request);
+    } else if (reply->error() != QNetworkReply::NoError) {
+        request->upstreamFailed = true;   // buffered bytes still drain first; the client then sees a reset, not a clean end
     }
     request->upstreamFinished = true;
     pump(request); // Retain unread reply bytes until downstream backpressure clears.
