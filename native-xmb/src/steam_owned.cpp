@@ -100,7 +100,6 @@ void SteamOwned::refresh(QString steamId64) {
     emit busyChanged(true);
 
     QUrlQuery query;
-    query.addQueryItem(QStringLiteral("key"), key);
     query.addQueryItem(QStringLiteral("steamid"), steamId64);
     query.addQueryItem(QStringLiteral("include_appinfo"), QStringLiteral("1"));
     query.addQueryItem(QStringLiteral("include_played_free_games"), QStringLiteral("1"));
@@ -108,7 +107,8 @@ void SteamOwned::refresh(QString steamId64) {
     QNetworkRequest request{
         QUrl(QStringLiteral("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?") +
              query.toString(QUrl::FullyEncoded))};
-    // The query string carries the key, so never follow a redirect to another host.
+    // The key travels in a header (never in the URL, so no log or proxy records it); never follow a redirect to another host.
+    request.setRawHeader("x-webapi-key", key.toUtf8());
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("xmb-native/1.0"));
     auto* reply = network_->get(request);
@@ -120,7 +120,11 @@ void SteamOwned::refresh(QString steamId64) {
     deadline->start(RequestTimeoutMs);
     connect(reply, &QNetworkReply::downloadProgress, this, [this, reply, generation](qint64 received, qint64) {
         if (generation != generation_ || received <= MaxResponseBytes) return;
+        // abort() runs the finished handler synchronously; detach first so the failure is reported exactly once.
+        reply_ = nullptr;
+        reply->disconnect(this);
         reply->abort();
+        reply->deleteLater();
         fail(generation, tr("The owned-games response was larger than expected."), false);
     });
     connect(reply, &QNetworkReply::finished, this, [this, reply, generation] {

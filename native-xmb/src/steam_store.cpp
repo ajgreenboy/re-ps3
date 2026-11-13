@@ -146,7 +146,11 @@ void SteamStore::request(const QString& url, const QString& label, bool searchRe
     deadline->start(RequestTimeoutMs);
     connect(reply, &QNetworkReply::downloadProgress, this, [this, reply, generation](qint64 received, qint64) {
         if (generation != generation_ || received <= MaxResponseBytes) return;
+        // abort() runs the finished handler synchronously; detach first so the failure is reported exactly once.
+        reply_ = nullptr;
+        reply->disconnect(this);
         reply->abort();
+        reply->deleteLater();
         fail(generation, {}, tr("The store response was larger than expected."));
     });
     connect(reply, &QNetworkReply::finished, this, [this, reply, label, searchResults, section, generation] {
