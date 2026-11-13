@@ -21,6 +21,7 @@ constexpr int maximumPgsObjects=64;                     // the BD spec allows 64
 constexpr int maximumPgsWindows=64;                     // the spec allows 2; tolerate more
 constexpr int maximumPgsCompositionObjects=64;
 constexpr int maximumIdxEntries=200000;
+constexpr qsizetype maximumResyncBytes=256*1024;        // a start-code search gives up after this much garbage
 constexpr int maximumSpuPackets=128;                    // 64 KB SPU / ~2 KB packs, with slack
 constexpr qint64 defaultDurationMs=5000;                // a last cue with no clear/stop
 constexpr qint64 maximumGapAsDurationMs=10000;          // VobSub with no stop: run to the next cue up to this
@@ -335,7 +336,10 @@ void walkProgramStream(const QByteArray& stream,qsizetype pos,int maxPackets,Vis
     while(pos>=0 && pos+4<=n) {
         if(maxPackets>=0 && packets++>=maxPackets)return;
         if(!(d[pos]==0 && d[pos+1]==0 && d[pos+2]==1)) {
-            pos=stream.indexOf(startCode,pos+1);
+            // Search a bounded window only: a start code further away means the stream is garbage here.
+            const qsizetype rel=QByteArrayView(stream).sliced(pos+1,std::min<qsizetype>(n-pos-1,maximumResyncBytes)).indexOf(QByteArrayView(startCode));
+            if(rel<0)return;
+            pos+=1+rel;
             continue;
         }
         const int code=d[pos+3];
@@ -654,6 +658,8 @@ bool parseVobSub(const QByteArray& idxBytes,const QByteArray& sub,int track,QVec
     int skipped=0;
     if(chosen && !chosen->entries.isEmpty()) {
         for(const auto& e:chosen->entries) {
+            // Bound the work for a hostile index: no more SPUs than cues can be kept, and no more misses than that either.
+            if(raws.size()>=maximumCues || skipped>=maximumCues)break;
             if(e.filepos>=sub.size()){++skipped;continue;}
             QByteArray spu=readSpuAt(sub,qsizetype(e.filepos),streamId);
             if(spu.isEmpty()){++skipped;continue;}
