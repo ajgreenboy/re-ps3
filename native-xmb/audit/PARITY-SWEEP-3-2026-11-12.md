@@ -86,3 +86,68 @@ Settings, Steam, media, gallery, in-game) scored infinity against its stored fra
 - Whether the PS3 clips or fades list rows that far up (needs a console frame): the new fade and the choice-list help
   line wrap are INFERRED.
 - Real sleep and real restart screens (dry run only here).
+
+## Leftovers pass (2026-11-12, after the sweep)
+
+Four findings left over from sweeps 2 and 3, each checked in the app before any change. Grabs are outside the repository
+(`out/left-run/g`); runs were scripted (`--script`, scratch data dir, `XMB_POWER_DRY_RUN=1` for every power row).
+
+| # | Finding | Verified | Result |
+|---|---|---|---|
+| 1 | The Friends column's `Discord Connection` row (signed out; 3x RIGHT from the start, DOWN x8) drew no icon | grab `d8.png`: the focused row shows only its title and a long description, no glyph. The log decodes `explore_category_friend/item_tex_Profile_Onlines` at 36x36: it is the firmware's small online-status badge, not a 128 px row icon | **Fixed**: the row uses `item_tex_ChatRoom` (128x128, the same RCO), grab `d8-after.png`. Which firmware icon the console would pick for a Discord row is not known (INFERRED: it is a chat service and the glyph was otherwise unused in the column). The same grab showed the row's description (the whole setup text) wrapping onto itself under the row; **fixed** as a second commit: the row says "How to set up Discord Friends." and the page keeps the full text |
+| 2 | A confirmed Restart or Sleep gave no feedback | dry run: Restart confirmed, the list simply returned | **Fixed** for Restart, Sleep and Turn Off (see below) |
+| 3 | `Assets::images_` is unbounded and hands out references | read the cache and its callers | **Not changed**, documented at the member (see below) |
+| 4 | Rows scrolled far up pass under the clock bar | Settings column scrolled so rows sit at y 90 and 170 (`f-set7.png`); the draw code | One case remained and is **fixed** (second lines); icons, artwork and values need nothing (see below) |
+
+### 2. Power feedback
+
+A confirmed Restart or Sleep (Users column) and a confirmed Turn Off (appliance mode) now put up a message page, the
+existing surface that replaces the list: the focused row's icon and title in the header, one plain line ("Restarting
+the system...", "Going to sleep...", "Turning off the system...") and the Back key. No art was invented. The wording is
+this build's own (the firmware has no such string in `explore_plugin_full`, `system_plugin`, `explore_category_user` or
+`sysconf_plugin`; the console's restart and sleep screens are still not traced).
+
+- The page is raised first and the request runs 250 ms later, so a frame is drawn before `SetSuspendState` blocks or the
+  process ends.
+- Sleep: the call returns on resume and the page is dropped. A refused request drops the page and shows the error page as
+  before.
+- Restart and Turn Off return while Windows closes programs, so the page stays until the process ends. If the process is
+  still there after 30 s (the shutdown was cancelled by a program or the user) the page is dropped. Only the page this
+  raised is dropped; a page the person dismissed, or a newer message, is left alone.
+- A busy page was tried first. Over the root list it draws its line at the same spot as the focused row's description
+  ("Restarts this PC.") and the two overlap, so the message page is used.
+- Turn Off outside `--kiosk` still just quits the XMB and never shuts the PC down (unchanged). In `--kiosk` the PS menu is
+  closed, the page is shown, the TV standby (up to 6 s of waiting for cec-client) and the shutdown run after it.
+- Dry run (`XMB_POWER_DRY_RUN=1`) never acts: the log shows `power: restart (dry run)`, `power: sleep (dry run)` and
+  `power: shutdown (dry run)` and no `requested` line. The page is shown for 2 s and dropped (Sleep: as soon as the dry
+  call returns). Grabs: `z-notice2.png` (Restart), `s-notice.png` (Sleep), `t-notice.png` (Turn Off with `--kiosk`),
+  `z-after.png` (back on the list).
+- Not exercised: a real restart, sleep or shutdown (by rule), so the 30 s release and the real-path timing are by reading.
+
+### 3. Image cache
+
+Not bounded. The cache holds firmware RCO and QGL textures, failed lookups (null images, which `failedImages()` counts)
+and, in the `"file"` container, one installed title's ICON0 per row, which the view's start-up pass loads. Artwork and
+avatars are `QImage` values on the row, not entries here, so the growth the finding feared does not come from them: the
+set is the asset set plus one icon per installed item. Eviction would invalidate what callers keep: 26 `const QImage&`
+locals in `view.cpp` and `image=&bestImage(...)` (`view.cpp:2742`) used across a frame. A cap needs `image()` to return
+`QImage` by value (implicitly shared) first, which touches every draw call. A comment at `images_` says so; revisit
+when a content set shows the growth.
+
+### 4. Rows passing under the clock bar
+
+The bar is x 1329..1920, y 75..133. Row icons are drawn at x ~565 (one level in: up to ~775 for the incoming page) and the
+widest tile is 320 px centred there, so icons, thumbnails and artwork never reach the bar; the Settings grab shows the
+icons clear of it. Right-hand values start at x 1300 and titles that reach 1305 were already faded in the sweep. What was
+left is the second line under a title (a missing file's reason, a download's state, a Steam account's last use): it starts
+at the label column and can run past 1329 under a short title. It now takes the same ramp, centred on its own line (35 px
+under the title's centre), only when its measured width reaches the bar. INFERRED, as the first fade: no console frame
+shows a list that far up. The longest existing second line (a missing playlist file's reason, about 620 px wide) ends near 1300, so no stored
+frame changes; the fade was checked in a scratch build that gave every row a 90-character second line (`h-sub.png`;
+not committed).
+
+### Gate
+
+States run per change with `--state`: `continue-watching`, `steam-download-page` and `steam-game-root` pass against their
+stored frames after the second-line change (the Friends icon and the power page are not in any stored state). Full run:
+see the hand-off report. No reference was saved and none is stale.
