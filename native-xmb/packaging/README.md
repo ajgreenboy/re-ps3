@@ -29,6 +29,9 @@ and is pointed at by `xmb-config.json`.
 
 ## Install on the HTPC
 
+For the release evidence run on the HTPC, `htpc-run.ps1` (in this folder of the repository, not in the package) checks
+the install and walks the checklist; see [audit/HTPC-RUN-GUIDE.md](../audit/HTPC-RUN-GUIDE.md).
+
 1. Copy the whole `dist\re-ps3\` folder to the HTPC (keep the exe and the Qt plugins together).
 2. Put a local `dev_flash` on the machine and write `xmb-config.json` next to the exe:
    ```json
