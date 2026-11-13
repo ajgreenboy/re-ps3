@@ -482,16 +482,28 @@ void View::drawMessageInfoPage(QPainter& p) {
     const QString title=lines.isEmpty()?QString{}:lines.takeFirst();
     if(!lines.isEmpty() && lines.first().isEmpty())lines.removeFirst();
     drawPageChrome(p,title,kInfoRuleTop,kInfoRuleAlphaTop,kInfoRuleBottom,kInfoRuleAlphaBottom);
-    double height=0;for(const auto& line:lines)height+=line.isEmpty()?20:40;
-    double y=std::max(230.,533-height/2+20);
+    // A line wider than its box wraps onto further rows (a value continues under itself, a plain line stays centred)
+    // instead of being cut off with an ellipsis: the explanations on a settings row's page are sentences, not paths.
+    // A single unbroken word (a path) cannot wrap and is still elided by drawMessageText.
+    struct InfoRow {QString label,value;bool plain=false;bool gap=false;};
+    QVector<InfoRow> rows;
     for(const auto& line:lines) {
-        if(line.isEmpty()){y+=20;continue;}
-        if(y>840)break;
+        if(line.isEmpty()){rows.push_back({{},{},false,true});continue;}
         const int split=line.indexOf(": ");
-        if(split<0)drawMessageText(p,{160,y-20,1600,40},line,kInfoRowSize,QColor(235,235,235),Qt::AlignHCenter|Qt::AlignVCenter);
+        if(split<0){for(const auto& part:wrapMessage(line,1560,kInfoRowSize))rows.push_back({{},part,true,false});continue;}
+        const auto parts=wrapMessage(line.mid(split+2),880,kInfoRowSize);
+        if(parts.isEmpty()){rows.push_back({line.left(split),{},false,false});continue;}
+        for(int k=0;k<parts.size();++k)rows.push_back({k==0?line.left(split):QString{},parts[k],false,false});
+    }
+    double height=0;for(const auto& row:rows)height+=row.gap?20:40;
+    double y=std::max(230.,533-height/2+20);
+    for(const auto& row:rows) {
+        if(row.gap){y+=20;continue;}
+        if(y>840)break;
+        if(row.plain)drawMessageText(p,{160,y-20,1600,40},row.value,kInfoRowSize,QColor(235,235,235),Qt::AlignHCenter|Qt::AlignVCenter);
         else {
-            drawMessageText(p,{125,y-20,800,40},line.left(split),kInfoRowSize,QColor(235,235,235),Qt::AlignRight|Qt::AlignVCenter);
-            drawMessageText(p,{961,y-20,900,40},line.mid(split+2),kInfoRowSize,QColor(235,235,235));
+            drawMessageText(p,{125,y-20,800,40},row.label,kInfoRowSize,QColor(235,235,235),Qt::AlignRight|Qt::AlignVCenter);
+            drawMessageText(p,{961,y-20,900,40},row.value,kInfoRowSize,QColor(235,235,235));
         }
         y+=40;
     }
