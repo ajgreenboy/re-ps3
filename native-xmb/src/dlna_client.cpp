@@ -641,7 +641,7 @@ quint64 DlnaClient::browse(const DlnaServer& server, const QString& objectId, in
     QNetworkReply* reply = track(network_->post(httpRequest, body));
     browseReplies_.push_back(reply);
     const QString host = control.host();
-    connect(reply, &QNetworkReply::finished, this, [this, reply, request, objectId, host] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, request, objectId, host, control] {
         browseReplies_.removeAll(reply);
         reply->deleteLater();
         QByteArray bytes;
@@ -663,7 +663,15 @@ quint64 DlnaClient::browse(const DlnaServer& server, const QString& objectId, in
             return;
         }
         QString error;
-        const QVector<DlnaItem> items = parseDidl(response.result, error);
+        QVector<DlnaItem> items = parseDidl(response.result, error);
+        // A server's item and art URLs must stay on the LAN: the server's own host, or a private/link-local address.
+        // Anything else would let a device that answered SSDP point the player at an internet host.
+        const auto lanOnly = [&control = control](QString& text) {
+            if (text.isEmpty()) return;
+            const QUrl url(text, QUrl::StrictMode);
+            if (!sameHost(url, control) && !validLocation(url)) text.clear();
+        };
+        for (DlnaItem& item : items) { lanOnly(item.url); lanOnly(item.albumArtUrl); }
         if (!error.isEmpty() && items.isEmpty()) {
             qInfo().noquote() << "dlna: browse" << objectId << "on" << host << "malformed DIDL:" << error;
             emit failed(request, QStringLiteral("Malformed DIDL-Lite: ") + error);
