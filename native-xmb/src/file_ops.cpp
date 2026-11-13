@@ -155,6 +155,10 @@ QString refused(const QString& path, const QString& why) {
     return QStringLiteral("Refused: %1 (%2)").arg(QDir::toNativeSeparators(path), why);
 }
 
+// "1 file", "2 files": the messages used to print "file(s)".
+QString plural(qint64 n, const char* noun) {
+    return QString::number(n) + QLatin1Char(' ') + QLatin1String(noun) + (n == 1 ? QString() : QStringLiteral("s"));
+}
 QString human(qint64 bytes) {
     if (bytes >= Q_INT64_C(1) << 30) return QStringLiteral("%1 GB").arg(double(bytes) / double(Q_INT64_C(1) << 30), 0, 'f', 2);
     if (bytes >= Q_INT64_C(1) << 20) return QStringLiteral("%1 MB").arg(double(bytes) / double(1 << 20), 0, 'f', 1);
@@ -520,12 +524,12 @@ void FileOperations::runDelete(quint64 request, QStringList paths, CancelFlag ca
             for (const QString& r : sink.recycled)
                 if (same(clean(r), p)) { done << QDir::toNativeSeparators(p); break; }
         if (done.size() == paths.size() && sink.problems.isEmpty()) {
-            const QString msg = QStringLiteral("Delete completed: %1 item(s) moved to the Recycle Bin.").arg(done.size());
+            const QString msg = QStringLiteral("Delete completed: %1 moved to the Recycle Bin.").arg(plural(done.size(),"item"));
             qInfo().noquote() << QStringLiteral("files: delete #%1 ->").arg(request) << msg;
             finishLater(request, true, msg, done);
         } else {
             QString msg = cancel->load() ? QStringLiteral("Cancelled: ") : QStringLiteral("Delete incomplete: ");
-            msg += QStringLiteral("%1 of %2 item(s) moved to the Recycle Bin.").arg(done.size()).arg(paths.size());
+            msg += QStringLiteral("%1 of %2 moved to the Recycle Bin.").arg(done.size()).arg(plural(paths.size(),"item"));
             if (!sink.problems.isEmpty()) msg += u' ' + sink.problems.join(u"; ");
             else if (FAILED(hr) && hr != E_ABORT && hr != COPYENGINE_E_USER_CANCELLED)
                 msg += QStringLiteral(" Error 0x%1.").arg(quint32(hr), 8, 16, QLatin1Char('0'));
@@ -705,8 +709,8 @@ void FileOperations::runCopy(quint64 request, QStringList paths, QString destina
     }
 
     if (result == R::Ok) {
-        QString msg = QStringLiteral("Copy completed: %1 file(s), %2.").arg(files).arg(human(copied));
-        if (skippedLinks) msg += QStringLiteral(" %1 link(s) skipped.").arg(skippedLinks);
+        QString msg = QStringLiteral("Copy completed: %1, %2.").arg(plural(files,"file")).arg(human(copied));
+        if (skippedLinks) msg += QStringLiteral(" %1 skipped.").arg(plural(skippedLinks,"link"));
         done(true, msg, created);
         return;
     }
@@ -714,9 +718,9 @@ void FileOperations::runCopy(quint64 request, QStringList paths, QString destina
     for (auto it = newDirs.crbegin(); it != newDirs.crend(); ++it)
         if (QDir().rmdir(*it)) created.removeAll(QDir::toNativeSeparators(*it));
     if (result == R::Cancelled)
-        done(false, QStringLiteral("Cancelled: %1 file(s) copied before cancel; the partial file was removed.").arg(files), created);
+        done(false, QStringLiteral("Cancelled: %1 copied before cancel; the partial file was removed.").arg(plural(files,"file")), created);
     else
-        done(false, QStringLiteral("Copy failed: %1. %2 file(s) were copied.").arg(error).arg(files), created);
+        done(false, QStringLiteral("Copy failed: %1. %2 copied.").arg(error).arg(plural(files,"file")), created);
 }
 
 } // namespace xmb

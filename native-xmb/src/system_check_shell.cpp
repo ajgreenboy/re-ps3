@@ -57,7 +57,7 @@ void Shell::openSystemCheck() {
                 }
             qInfo().noquote()<<"system check:"<<results.size()<<"check(s),"<<problems<<"problem(s)";
             for(auto& page:pages_)if(page.systemCheck){page.entries=rows;page.selection=0;}
-            notify(tr("System Check"),problems==0?tr("All checks passed"):tr("%n problem(s) found","",problems));
+            notify(tr("System Check"),problems==0?tr("All checks passed"):(problems==1?tr("1 problem found"):tr("%1 problems found").arg(problems)));
             emit changed();
         });
     }

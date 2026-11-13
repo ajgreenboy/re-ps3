@@ -62,7 +62,7 @@ QVector<Entry> Shell::wolRows(const QString& kind) const {
     rows.push_back(iconed(homeRow(QStringLiteral("wol:add"),tr("Add from This Network"),Action::WolAddPage,QString(),
         tr("Machines Windows has seen on this network")),glyphs::search()));
     if(!wolErrors_.isEmpty())rows.push_back(homeRow(QStringLiteral("wol:errors"),tr("Some Entries Were Skipped"),Action::Information,
-        wolErrors_.join(QStringLiteral("\n")),tr("%1 entr(ies) in wol.json were not valid").arg(wolErrors_.size())));
+        wolErrors_.join(QStringLiteral("\n")),(wolErrors_.size()==1?tr("1 entry in wol.json was not valid"):tr("%1 entries in wol.json were not valid").arg(wolErrors_.size()))));
     return rows;
 }
 
@@ -125,7 +125,7 @@ QVector<Entry> Shell::haRows(const QString& kind) const {
         for(int i=0;i<haGroups_.size();++i) {
             const auto& g=haGroups_[i];
             rows.push_back(iconed(homeRow(QStringLiteral("ha:group:")+g.id,g.name,Action::HaGroup,QString::number(i),
-                tr("%n item(s)","",int(g.entities.size()))),glyphs::house()));
+                (g.entities.size()==1?tr("1 item"):tr("%1 items").arg(int(g.entities.size())))),glyphs::house()));
         }
         return rows;
     }

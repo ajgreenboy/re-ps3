@@ -4428,7 +4428,7 @@ void Shell::groupPageBy(OptionCommand command) {
     for(auto it=groups.cbegin();it!=groups.cend();++it) {
         auto folder=item(QStringLiteral("group:")+it.key(),it.key(),QStringLiteral("item_tex_plain_folder"),
             QStringLiteral("explore_plugin_full"),Action::GroupFolder,it.key());
-        folder.detail=QObject::tr("%1 item(s)").arg(it.value().size());
+        folder.detail=(it.value().size()==1?QObject::tr("1 item"):QObject::tr("%1 items").arg(it.value().size()));
         folder.source=QStringLiteral("native");
         page.entries.push_back(std::move(folder));
     }
