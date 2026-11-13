@@ -165,7 +165,9 @@ void Shell::initSpotify() {
 QVector<Entry> Shell::spotifyRootRows() {
     QVector<Entry> rows;
     if(!spotify_.configured()) {
-        rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:setup"),QObject::tr("Set Up Spotify"),Action::Unavailable,{},spotify_.configurationError()),serviceIcons::spotify()));
+        rows.push_back(withIcon(spotifyRow(QStringLiteral("spotify:setup"),QObject::tr("Set Up Spotify"),Action::Information,
+            spotify_.configurationError().isEmpty()?QObject::tr("Spotify is not set up yet."):spotify_.configurationError(),
+            QObject::tr("Needs a Spotify client id")),serviceIcons::spotify()));
         return rows;
     }
     if(!spotify_.signedIn()) {

@@ -61,6 +61,21 @@
 
 namespace xmb {
 namespace {
+// What Cross says on a row this build lists but cannot act on. One sentence per row that is really different: the
+// rows that used to share one line are not unavailable for the same reason. Every other row keeps the generic line.
+QString unavailableReason(const QString& id) {
+    if(id==QLatin1String("signin"))return QObject::tr("This application does not connect to PlayStation Network, so there is no account to sign in to.");
+    if(id==QLatin1String("trophy"))return QObject::tr("Trophies come from PlayStation Network, which this application does not connect to, so there are none to show.");
+    if(id==QLatin1String("store"))return QObject::tr("The PlayStation Store is not part of this application. PC games are under Game, in the Steam folder.");
+    if(id==QLatin1String("manual"))return QObject::tr("The online instruction manuals were pages on Sony's servers and are not part of this application.");
+    if(id==QLatin1String("premo"))return QObject::tr("Remote Play links a PlayStation 3 to a PSP or PS Vita. There is no PlayStation 3 here to connect to.");
+    if(id==QLatin1String("browser"))return QObject::tr("This application has no web browser of its own. A website can be added as a web app, which opens in its own browser window.");
+    if(id==QLatin1String("services"))return QObject::tr("My Channels listed TV and video services from PlayStation Network, which this application does not connect to. Services you add yourself are listed in this column.");
+    if(id==QLatin1String("add"))return QObject::tr("Adding a friend needs PlayStation Network, which this application does not connect to. Discord friends are listed in this column instead.");
+    if(id==QLatin1String("chatroom")||id==QLatin1String("chat"))return QObject::tr("Chat needs PlayStation Network, which this application does not connect to.");
+    if(id==QLatin1String("kensaku"))return QObject::tr("Internet Search ran inside the PS3 Internet Browser, which this application does not have.");
+    return QObject::tr("This feature is not available in the native recreation yet.");
+}
 Entry item(QString id,QString title,QString texture,QString container="explore_plugin_full",Action action=Action::Unavailable,QString value={}) {
     return {std::move(id),std::move(title),{},std::move(container),std::move(texture),action,std::move(value)};
 }
@@ -425,21 +440,17 @@ void Shell::resolveMediaColumns() {
             "BD Data Management lists the bonus data a Blu-ray disc wrote to the console's hard disk. This computer has "
             "no Blu-ray drive and no PS3 BD data store, so there is nothing to manage."}},
         {"video:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_video",
-            "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
-            "This build runs it natively: SSDP discovery, then ContentDirectory browsing."}},
+            "Looks for DLNA media servers on your network and lists what they share."}},
         {"video:seg_editingvideo_mgmt",{"video-editor",Action::Unavailable,"msg_video_editor_and_upload","item_tex_upload","explore_category_video",
-            "Video Editor & Uploader is the console's own scene editor (scenefolder_plugin) for clips recorded on the "
-            "system. No capture device and no editor exist in this build, so the row lists the firmware's function "
-            "and opens this page instead."}},
+            "The PS3's video editor works on clips recorded on the console. This computer has no capture device and "
+            "no editor, so there is nothing to open."}},
         // Music (category_music.xml)
         {"music:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_music",
-            "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
-            "This build runs it natively: SSDP discovery, then ContentDirectory browsing."}},
+            "Looks for DLNA media servers on your network and lists what they share."}},
         {"music:seg_playlist_mgmt",{"playlists",Action::PlaylistFolder,"msg_playlists","tex_playlist","explore_category_music",""}},
         // Photo (category_photo.xml)
         {"photo:seg_dlna_scan",{"dlna-scan",Action::DlnaScan,"msg_scan_mediaserver","item_tex_dlna_scan","explore_category_photo",
-            "Search for Media Servers asks the DLNA/UPnP client (dlna_plugin) to discover media servers on the network. "
-            "This build runs it natively: SSDP discovery, then ContentDirectory browsing."}},
+            "Looks for DLNA media servers on your network and lists what they share."}},
         // Photo Gallery (hakoniwa, hknw_plugin): the library area is recreated in gallery_*.cpp (audit/PHOTO-GALLERY.md);
         // the Playlist and Network areas, the 15 package floors and the face groupings are not.
         {"photo:seg_hakoniwa",{"gallery",Action::PhotoGallery,"msg_photo_gallery","","file",""}},
@@ -2557,7 +2568,7 @@ void Shell::activate() {
         // false: the feature exists, the file does not.
         showMessage(entry.title,(entry.id.startsWith("continue:") || entry.id.startsWith("savedata:") || entry.id==QLatin1String("start_at_signin") || entry.id.startsWith("setup:")) && !entry.detail.isEmpty()
             ?entry.detail
-            :QObject::tr("This feature is not available in the native recreation yet."),MessageKind::Page);
+            :unavailableReason(entry.id),MessageKind::Page);
         break;
     case Action::ResetPreferences:
         // The console's own chain for this row (SETTINGS 4.2: page_console_setting_init_top -> proceed ->

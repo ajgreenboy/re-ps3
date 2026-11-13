@@ -2118,8 +2118,8 @@ QString rowDetail(const QString& pageId,const QString& rowId) {
                 QStringLiteral("Language: ")+state.clock.language,
                 QStringLiteral("Locale: ")+state.clock.localeName,
                 QStringLiteral("Region: ")+state.clock.country,
-                QStringLiteral("Date pattern: ")+state.clock.datePattern,
-                QStringLiteral("Time pattern: ")+state.clock.timePattern,
+                QStringLiteral("Date: ")+QLocale(state.clock.localeName).toString(state.clock.now.date(),QLocale::ShortFormat),
+                QStringLiteral("Time: ")+QLocale(state.clock.localeName).toString(state.clock.now.time(),QLocale::ShortFormat).replace(QChar(0x202f),QLatin1Char(' ')),
                 QString{},
                 QStringLiteral("The XMB language follows this computer's Windows display language. This build")
                 ,QStringLiteral("ships one interface language, so the row reports the host's and changes nothing.")

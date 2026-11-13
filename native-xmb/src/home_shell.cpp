@@ -104,11 +104,17 @@ bool Shell::addWolDevice(const QString& mac,const QString& host) {
 QVector<Entry> Shell::haRows(const QString& kind) const {
     QVector<Entry> rows;
     if(!ha_.configured() || !ha_.hasToken()) {
+        // The row's own description stays one plain line. The page behind it is one paragraph (a newline would make
+        // the information page take its first line as a heading); the client's own complaint leads it only when it says
+        // something the steps do not, i.e. not the plain "no url" answer, which carries a json example.
+        const QString why=ha_.configurationError();
+        const bool plainNoUrl=why.startsWith(QLatin1String("No Home Assistant url"));
         rows.push_back(iconed(homeRow(QStringLiteral("ha:setup"),tr("Set Up Home Assistant"),Action::Information,
-            tr("In Home Assistant open your profile, then Security, and create a long-lived access token. Put it in "
-               "homeassistant.json in the data folder as {\"url\": \"http://<your HA address>\", \"token\": \"<token>\"}. "
+            (why.isEmpty()||plainNoUrl?QString():why+QLatin1Char(' '))+
+            tr("In Home Assistant open your profile, then Security, and create a long-lived access token. Put the address of "
+               "your Home Assistant and that token in homeassistant.json in the data folder (the keys are url and token). "
                "On the next start the token moves into an encrypted file and the json keeps only the address."),
-            ha_.configurationError().isEmpty()?tr("Needs a long-lived access token"):ha_.configurationError()),serviceIcons::homeAssistant()));
+            why.isEmpty()?tr("Needs a long-lived access token"):tr("Not set up yet")),serviceIcons::homeAssistant()));
         return rows;
     }
     if(!haError_.isEmpty() && haGroups_.isEmpty()) {
