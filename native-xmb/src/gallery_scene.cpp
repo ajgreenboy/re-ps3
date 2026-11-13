@@ -227,7 +227,7 @@ void GalleryScene::drawQuad(const QMatrix4x4& model, int mode, const QVector4D& 
     ++stats_.quads;
 }
 
-const GalleryScene::Label* GalleryScene::labelFor(qint64 key, const QString& text, int pixelHeight) {
+const GalleryScene::Label* GalleryScene::labelFor(qint64 key, const QString& text, int pixelHeight, double maxAspect) {
     auto& cache = pixelHeight > 100 ? yearLabels_ : labels_;
     if (const auto found = cache.constFind(key); found != cache.constEnd()) return &*found;
     QFont font(font_.isEmpty() ? QStringLiteral("Segoe UI") : font_);
@@ -235,7 +235,10 @@ const GalleryScene::Label* GalleryScene::labelFor(qint64 key, const QString& tex
     font.setBold(true);
     font.setStyleStrategy(QFont::PreferAntialias);
     const QFontMetrics metrics(font);
-    const int width = metrics.horizontalAdvance(text) + pixelHeight / 2, height = pixelHeight;
+    // A label that would be wider than its caller allows (a playlist name under a jacket, with another jacket beside it)
+    // is cut with an ellipsis instead of running under the neighbour's label.
+    const QString shown = maxAspect > 0 ? metrics.elidedText(text, Qt::ElideRight, std::max(pixelHeight, int(maxAspect * pixelHeight) - pixelHeight / 2)) : text;
+    const int width = metrics.horizontalAdvance(shown) + pixelHeight / 2, height = pixelHeight;
     QImage image(width, height, QImage::Format_ARGB32);
     image.fill(Qt::transparent);
     {
@@ -243,7 +246,7 @@ const GalleryScene::Label* GalleryScene::labelFor(qint64 key, const QString& tex
         painter.setRenderHint(QPainter::TextAntialiasing);
         painter.setFont(font);
         painter.setPen(Qt::white);
-        painter.drawText(QRect(0, 0, width, height), Qt::AlignCenter, text);
+        painter.drawText(QRect(0, 0, width, height), Qt::AlignCenter, shown);
     }
     Label label;
     label.texture = upload(image, true, false);
@@ -415,6 +418,15 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
         const double labelHeight = n("BORDER_LABEL_FONT_SIZE") * 0.45 * n("PLAYLIST_TEXT_SIZE");
         const int labelPixels = int(n("GROUP_TEXT_LOD_SIZE_0"));
         const QVector3D placeholder(float(n("DEFAULT_PHOTO_COLOR_BASE_R")), float(n("DEFAULT_PHOTO_COLOR_BASE_G")), float(n("DEFAULT_PHOTO_COLOR_BASE_B")));
+        // The nearest two jackets set how wide a name may be: a longer one is elided (INFERRED: the console's own rule for a
+        // long playlist name is not known).
+        double pitch = 0;
+        for (int a = 0; a < layout.piles.size(); ++a)
+            for (int b = a + 1; b < layout.piles.size(); ++b) {
+                const double d = std::hypot(layout.piles[a].x - layout.piles[b].x, layout.piles[a].z - layout.piles[b].z);
+                if (d > 0 && (pitch == 0 || d < pitch)) pitch = d;
+            }
+        const double labelAspectLimit = pitch > 0 ? pitch * 0.92 / labelHeight : 0;
         for (int i = 0; i < layout.piles.size(); ++i) {
             const GalleryPile& jacket = layout.piles[i];
             if (i == controller.enteredPile()) continue;
@@ -424,7 +436,7 @@ void GalleryScene::render(QOpenGLFunctions_3_3_Core& gl, int pixelWidth, int pix
                 drawQuad(placeMatrix(jacket.x, 0.05, jacket.z, 0, jacket.halfWidth * 2, jacket.halfDepth * 2), Solid,
                     QVector4D(placeholder.x() * 0.9f, placeholder.y() * 0.9f, placeholder.z() * 0.92f, float(0.8 * pileAlpha)));
             }
-            if (const Label* label = labelFor(-1 - qint64(i), jacket.label, labelPixels); label && label->texture) {
+            if (const Label* label = labelFor(-1 - qint64(i) - 1000 * qint64(labelAspectLimit * 10), jacket.label, labelPixels, labelAspectLimit); label && label->texture) {
                 const double lz = jacket.z + jacket.halfDepth + labelHeight * n("PLAYLIST_TEXT_POS_Z") * 0.5;
                 drawQuad(placeMatrix(jacket.x, 0.012, lz, 0, labelHeight * label->aspect, labelHeight), Plain,
                     groupColor(jacket.colorIndex, pileAlpha), label->texture->textureId());

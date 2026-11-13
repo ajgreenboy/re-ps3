@@ -53,7 +53,7 @@ private:
                   const QVector4D& uvRect = QVector4D(0, 0, 1, 1), float abX = 1, float abY = 1);
     std::unique_ptr<QOpenGLTexture> upload(const QImage& image, bool mipmaps, bool repeat);
     QImage loadFirmwarePng(const QString& name) const;
-    const Label* labelFor(qint64 key, const QString& text, int pixelHeight);
+    const Label* labelFor(qint64 key, const QString& text, int pixelHeight, double maxAspect = 0);
     void checkGl(const char* where);
     GLuint photoTexture(const QString& path, float* aspect);
     void planThumbnails(const GalleryController& controller, const QVector<GalleryDraw>& draws, const GalleryCamera& camera);
