@@ -172,6 +172,7 @@ native diff.
 | [VERIFICATION-HARNESS.md](VERIFICATION-HARNESS.md) | Repeatable native captures, layer comparison, named states and the gate |
 | [TRANSITION-HARNESS.md](TRANSITION-HARNESS.md) | The frame-by-frame transition instrument |
 | [RELEASE-CHECKLIST.md](RELEASE-CHECKLIST.md) | The HTPC evidence run (runbook) |
+| [HTPC-RUN-GUIDE.md](HTPC-RUN-GUIDE.md) | The guided HTPC run: what to have on hand, twelve sittings, and `packaging/htpc-run.ps1` (preflight, auto-checks, soak, log scrub, report) |
 | [DIAGNOSE.md](DIAGNOSE.md) | Design for the diagnostic bundle, including the **log redaction rules** |
 
 ## 9. Run records and investigations
