@@ -2981,7 +2981,10 @@ void View::drawScene(QPainter& p) {
                         }
                         text({1300+ahead*210+offset,y-25,440,50},shown,21,QColor(255,255,255,int(230*alpha*(1.-2*panelAmount))));
                     }
-                    const auto subtitle=shell_.subtitleText(entry);
+                    // The wait page puts its status where the focused row's second line and help line sit (y 529), so a
+                    // note under the focus would print under the status text; it is not drawn while the page is up.
+                    const bool waitCoversNote=i==column.selection && busyPageUp();
+                    const auto subtitle=waitCoversNote?QString{}:shell_.subtitleText(entry);
                     if(!subtitle.isEmpty()) {
                         // The second line sits 35 px under the title's centre, so a long one (a missing file's
                         // reason, a download's state) reaches the clock bar while its title does not. It takes the
@@ -3002,7 +3005,7 @@ void View::drawScene(QPainter& p) {
                     // traced constant. The console's line pitch is 22 px (cap
                     // tops 528 / 550), tighter than the font's own 24 px line height, so the lines are broken here and
                     // drawn one by one on that pitch.
-                    else if(i==column.selection && !entry.detail.isEmpty()) {
+                    else if(i==column.selection && !entry.detail.isEmpty() && !waitCoversNote) {
                         constexpr int helpSize=19,helpPitch=22;
                         // With a choice list open the help line keeps to the left of the list's plane (its edge is 1260): the
                         // plane is translucent, so a line running on under it collided with the choice labels (Theme's
