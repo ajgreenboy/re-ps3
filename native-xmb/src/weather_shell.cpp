@@ -23,7 +23,7 @@ QString degrees(double v,const QString& unit){return std::isnan(v)?QStringLitera
 }
 
 QString Shell::weatherSummary() const {
-    if(!weather_.configured() && weather_.place().isEmpty())return tr("Set a place in weather.json");
+    if(!weather_.configured() && weather_.place().isEmpty())return tr("Not set up yet.");
     if(!weatherReport_.valid)return weatherError_.isEmpty()?tr("Reading the forecast..."):weatherError_;
     const auto& r=weatherReport_;
     QString text=degrees(r.temperature,r.temperatureUnit)+QStringLiteral(" ")+r.text+QStringLiteral(" - ")+r.place;
