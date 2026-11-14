@@ -1275,7 +1275,7 @@
     },
     {
       "name": "first-run-autologon-step",
-      "description": "The first-run wizard (--first-run on a scratch data dir) stopped on its Windows Automatic Sign-in step, with the status faked to Off (XMB_AUTOLOGON_FAKE=\"0|gate-user|gate-user\", no registry read): the row, its value Off, the guidance for that state, Continue and Skip This Step. The script only ever presses Cross on rows it names: Set Up This System (welcome), Continue (firmware, index 1; the Download from Sony row is index 3 and is never reached), Skip This Step (library, index 5; the Use the Windows Folders row at index 0 is never pressed), Skip This Step (Controllers), Skip This Step (Start at Sign-in, index 2; its toggle row at index 0 is never pressed). Nothing is fetched, no folder or setting is written outside the scratch data dir and XMB_AUTOSTART_TASK names a task that does not exist. The step order assumes one screen (a second screen adds a Choose the Screen step before the controller step and the entryId assertion then fails); recipe field appArgs passes --first-run (audit/FIRST-RUN.md, audit/AUTOLOGON.md).",
+      "description": "The first-run wizard (--first-run on a scratch data dir) stopped on its Windows Automatic Sign-in step, with the status faked to Off (XMB_AUTOLOGON_FAKE=\"0|gate-user|gate-user\", no registry read): the row, its value Off, the guidance for that state, Continue and Skip This Step. The script only ever presses Cross on rows it names: Set Up This System (welcome), Continue (firmware, index 1; the Download from Sony row is index 3 and is never reached), Skip This Step (library, index 5; the Use the Windows Folders row at index 0 is never pressed), Skip This Step (Controllers), Skip This Step (Start at Sign-in, index 2; its toggle row at index 0 is never pressed). Nothing is fetched, no folder or setting is written outside the scratch data dir and XMB_AUTOSTART_TASK names a task that does not exist. The step order assumes one screen (a second screen adds a Choose the Screen step before the controller step), so XMB_SETUP_SCREENS=1 makes the wizard behave as on one screen; recipe field appArgs passes --first-run (audit/FIRST-RUN.md, audit/AUTOLOGON.md).",
       "reference": "out/native-reference/layers/first-run-autologon-step.png",
       "dataSeed": "out/native-reference/v2/plain",
       "seedPaths": [
@@ -1290,7 +1290,8 @@
         "XMB_STEAM_ROOT": "C:/dev/out/v2/empty-steam",
         "XMB_SINGLE_INSTANCE": "0",
         "XMB_AUTOSTART_TASK": "re-ps3-native-kiosk-v2btest",
-        "XMB_AUTOLOGON_FAKE": "0|gate-user|gate-user"
+        "XMB_AUTOLOGON_FAKE": "0|gate-user|gate-user",
+        "XMB_SETUP_SCREENS": "1"
       },
       "waits": 10,
       "settleWaits": 2,

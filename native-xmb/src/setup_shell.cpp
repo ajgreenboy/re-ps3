@@ -47,7 +47,10 @@ void Shell::setSetupContext(const QString& devFlashRoot,int kioskDisplay) {
 }
 QStringList Shell::setupOrder() const {
     QStringList order{QStringLiteral("welcome"),QStringLiteral("firmware"),QStringLiteral("library")};
-    if(QGuiApplication::screens().size()>1)order<<QStringLiteral("display");
+    // XMB_SETUP_SCREENS=1 pretends there is one screen, so a scripted first run (the gate) takes the same steps on a PC
+    // with a second display attached.
+    const bool oneScreen=qEnvironmentVariable("XMB_SETUP_SCREENS")==QLatin1String("1");
+    if(!oneScreen && QGuiApplication::screens().size()>1)order<<QStringLiteral("display");
     order<<QStringLiteral("pad")<<QStringLiteral("autostart")<<QStringLiteral("autologon")<<QStringLiteral("services")<<QStringLiteral("debrid")<<QStringLiteral("finish");
     return order;
 }
