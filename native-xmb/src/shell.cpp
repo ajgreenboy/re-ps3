@@ -1094,18 +1094,15 @@ QString downloadControlNote() {
 // The information page a row opens: "Title", blank line, then the "Key: value" rows the existing
 // information layout detects (src/view.cpp, drawScene).
 QString downloadInformationText(const SteamDownload& download) {
-    const bool staging=download.state==QLatin1String("staging");
-    const qint64 done=staging?download.bytesStaged:download.bytesDownloaded;
-    const qint64 total=staging?download.bytesToStage:download.bytesToDownload;
+    // Status, how far it has got, and where to act on it. The raw Steam state word and the second byte
+    // line repeated the first two rows, so they are gone; Steam's per-title pause and resume are used in
+    // Steam itself.
+    const bool counters=(download.state==QLatin1String("staging")?download.bytesToStage:download.bytesToDownload)>0;
     QStringList rows;
-    rows<<QStringLiteral("App: ")+download.appId;
-    rows<<QStringLiteral("State: ")+steamDownloadStateText(download);
-    rows<<QStringLiteral("Progress: ")+downloadProgressText(download);
-    rows<<QStringLiteral("Bytes: ")+(staging?QStringLiteral("staged "):QStringLiteral("downloaded "))
-        +downloadSize(done)+QStringLiteral(" of ")+downloadSize(total);
-    rows<<QStringLiteral("Steam state: ")+download.state;
-    rows<<QStringLiteral("Pause/resume: not supported");
-    rows<<QStringLiteral("Note: Steam has no per-title pause or resume command");
+    rows<<QStringLiteral("Status: ")+steamDownloadStateText(download);
+    rows<<QStringLiteral("Progress: ")+(counters?downloadProgressText(download):QStringLiteral("Steam has not reported any yet"));
+    rows<<QStringLiteral("Steam App ID: ")+download.appId;
+    rows<<QStringLiteral("Pause and Resume: In Steam. This list cannot pause or resume a download");
     return download.title+QStringLiteral("\n\n")+rows.join('\n');
 }
 }
@@ -1749,6 +1746,14 @@ Shell::Shell(QString dataDirectory,Assets& assets,QObject* parent):QObject(paren
         if(categories_[category_].id=="friends" && discordFriends_.signedIn() && !diagnostics::safeMode())refreshDiscordFriends();
     });
     steamRefresh_.start(60000);
+    // The Download Management page is a snapshot of Steam's manifests. A pad has no F5, so left alone the
+    // percentages would sit still while Steam works. Every 5 s the page re-reads the queue, but only when
+    // nothing is drawn over it (an information page, the options panel, a wait page) and no media is open.
+    connect(&downloadsRefresh_,&QTimer::timeout,this,[this]{
+        if(pages_.isEmpty() || !pages_.last().downloads || !message_.isEmpty() || optionsOpen_ || mediaOpen_ || busy())return;
+        reloadSteamDownloads();
+    });
+    downloadsRefresh_.start(5000);
     steamWatch_.setInterval(1000);
     adoptedWatch_.setInterval(250);
     connect(&adoptedWatch_,&QTimer::timeout,this,&Shell::pollAdopted);

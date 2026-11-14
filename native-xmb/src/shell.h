@@ -966,6 +966,7 @@ private:
     QHash<QString,QString> rawgArtworkPaths_; // resolved cached RAWG art by row id; read without filesystem I/O while drawing
     QString artworkStatus_;
     QTimer steamRefresh_;
+    QTimer downloadsRefresh_;        // re-reads Steam's queue while the Download Management page is the top page
     QElapsedTimer friendsAge_;
     QVector<DiscordFriend> discordFriendList_;
     QVector<Entry> staticFriendEntries_;
