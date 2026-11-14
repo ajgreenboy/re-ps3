@@ -185,6 +185,7 @@ Dated evidence. Each states the tree it was taken at; none is current state.
 | [BREADTH-GATE-2026-11-11.md](BREADTH-GATE-2026-11-11.md) | Breadth gate investigation |
 | [PARITY-SWEEP-2-2026-11-12.md](PARITY-SWEEP-2-2026-11-12.md) | Second render-parity sweep: players, menus, dialogs, settings, error states, window sizes; defects fixed and left |
 | [PARITY-SWEEP-3-2026-11-12.md](PARITY-SWEEP-3-2026-11-12.md) | Third render-parity sweep (Steam, Photo Gallery Playlist, Jellyfin, Spotify, System Check, power rows, in-game overlay, busy states, missing assets) and the leftovers pass (Discord icon, power feedback, image cache, rows under the clock bar) |
+| [PARITY-SWEEP-4-2026-11-14.md](PARITY-SWEEP-4-2026-11-14.md) | Fourth render-parity sweep (live Steam download page, wait and loading states, power notice pages, rows far up the screen, every column walked at 1920 and non-16:9) |
 | [D8-HEAD.md](D8-HEAD.md) | Options-structure recheck at HEAD |
 | [CAPTURE-BATCH-2026-10-28.md](CAPTURE-BATCH-2026-10-28.md) | Console capture batch 1: 135 stills, 9 bursts |
 | [CAPTURE-BATCH-2-2026-10-28.md](CAPTURE-BATCH-2-2026-10-28.md) | Console capture batch 2: 251 stills, 19 bursts, the error-page investigation |
